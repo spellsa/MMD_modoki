@@ -62,7 +62,12 @@
 - `情報 > 対象` でモデルを選択中:
   - 材質ごとのプリセット割り当て
 - `情報 > 対象` で `Camera` 選択中:
-  - ポストエフェクト（Contrast / Gamma / Distortion / Edge）
+  - ポストエフェクト
+    - ImageProcessing系: Contrast / Gamma / Exposure / ToneMap / Dither / Vignette
+    - DefaultRenderingPipeline系: Bloom / Chroma / Grain / Sharpen
+    - その他: Distortion / Edge
+  - Bloom は複合項目として `ON/OFF + Weight + Threshold + Kernel`
+  - BloomTh は右へ動かすほど発光範囲が広がるよう、UI操作を反転
   - DoF関連コントロール
 
 ## 視点制御の優先順位

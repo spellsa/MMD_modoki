@@ -6,6 +6,7 @@ import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
@@ -386,6 +387,20 @@ export class MmdManager {
     private lightColorTemperatureKelvin = 6500;
     private postEffectContrastValue = 1;
     private postEffectGammaValue = 1;
+    private postEffectExposureValue = 1;
+    private postEffectToneMappingEnabledValue = false;
+    private postEffectToneMappingTypeValue = ImageProcessingConfiguration.TONEMAPPING_STANDARD;
+    private postEffectDitheringEnabledValue = false;
+    private postEffectDitheringIntensityValue = 1 / 255;
+    private postEffectVignetteEnabledValue = false;
+    private postEffectVignetteWeightValue = 0.3;
+    private postEffectBloomEnabledValue = false;
+    private postEffectBloomWeightValue = 0;
+    private postEffectBloomThresholdValue = 0.9;
+    private postEffectBloomKernelValue = 64;
+    private postEffectChromaticAberrationValue = 0;
+    private postEffectGrainIntensityValue = 0;
+    private postEffectSharpenEdgeValue = 0;
     private antialiasEnabledValue = true;
     private postEffectFarDofStrengthValue = 0;
     private readonly farDofEnabled = false;
@@ -3460,6 +3475,20 @@ export class MmdManager {
                 dofLensDistortionInfluence: this.dofLensDistortionInfluence,
                 modelEdgeWidth: this.modelEdgeWidth,
                 gamma: this.postEffectGamma,
+                exposure: this.postEffectExposure,
+                toneMappingEnabled: this.postEffectToneMappingEnabled,
+                toneMappingType: this.postEffectToneMappingType,
+                ditheringEnabled: this.postEffectDitheringEnabled,
+                ditheringIntensity: this.postEffectDitheringIntensity,
+                vignetteEnabled: this.postEffectVignetteEnabled,
+                vignetteWeight: this.postEffectVignetteWeight,
+                bloomEnabled: this.postEffectBloomEnabled,
+                bloomWeight: this.postEffectBloomWeight,
+                bloomThreshold: this.postEffectBloomThreshold,
+                bloomKernel: this.postEffectBloomKernel,
+                chromaticAberration: this.postEffectChromaticAberration,
+                grainIntensity: this.postEffectGrainIntensity,
+                sharpenEdge: this.postEffectSharpenEdge,
                 gammaEncodingVersion: 2,
             },
             keyframes,
@@ -3646,6 +3675,50 @@ export class MmdManager {
             ? importedGamma
             : importedGamma * 0.5;
         this.postEffectGamma = normalizedGamma;
+        this.postEffectExposure = typeof data.effects.exposure === "number" && Number.isFinite(data.effects.exposure)
+            ? data.effects.exposure
+            : 1;
+        this.postEffectToneMappingEnabled = typeof data.effects.toneMappingEnabled === "boolean"
+            ? data.effects.toneMappingEnabled
+            : false;
+        this.postEffectToneMappingType = typeof data.effects.toneMappingType === "number" && Number.isFinite(data.effects.toneMappingType)
+            ? data.effects.toneMappingType
+            : ImageProcessingConfiguration.TONEMAPPING_STANDARD;
+        this.postEffectDitheringEnabled = typeof data.effects.ditheringEnabled === "boolean"
+            ? data.effects.ditheringEnabled
+            : false;
+        this.postEffectDitheringIntensity = typeof data.effects.ditheringIntensity === "number" && Number.isFinite(data.effects.ditheringIntensity)
+            ? data.effects.ditheringIntensity
+            : (1 / 255);
+        this.postEffectVignetteEnabled = typeof data.effects.vignetteEnabled === "boolean"
+            ? data.effects.vignetteEnabled
+            : false;
+        this.postEffectVignetteWeight = typeof data.effects.vignetteWeight === "number" && Number.isFinite(data.effects.vignetteWeight)
+            ? data.effects.vignetteWeight
+            : 0.3;
+        this.postEffectBloomEnabled = typeof data.effects.bloomEnabled === "boolean"
+            ? data.effects.bloomEnabled
+            : (typeof data.effects.bloomWeight === "number" && Number.isFinite(data.effects.bloomWeight)
+                ? data.effects.bloomWeight > 0.0001
+                : false);
+        this.postEffectBloomWeight = typeof data.effects.bloomWeight === "number" && Number.isFinite(data.effects.bloomWeight)
+            ? data.effects.bloomWeight
+            : 0;
+        this.postEffectBloomThreshold = typeof data.effects.bloomThreshold === "number" && Number.isFinite(data.effects.bloomThreshold)
+            ? data.effects.bloomThreshold
+            : 0.9;
+        this.postEffectBloomKernel = typeof data.effects.bloomKernel === "number" && Number.isFinite(data.effects.bloomKernel)
+            ? data.effects.bloomKernel
+            : 64;
+        this.postEffectChromaticAberration = typeof data.effects.chromaticAberration === "number" && Number.isFinite(data.effects.chromaticAberration)
+            ? data.effects.chromaticAberration
+            : 0;
+        this.postEffectGrainIntensity = typeof data.effects.grainIntensity === "number" && Number.isFinite(data.effects.grainIntensity)
+            ? data.effects.grainIntensity
+            : 0;
+        this.postEffectSharpenEdge = typeof data.effects.sharpenEdge === "number" && Number.isFinite(data.effects.sharpenEdge)
+            ? data.effects.sharpenEdge
+            : 0;
 
         this.camera.setPosition(
             new Vector3(
@@ -3834,6 +3907,140 @@ export class MmdManager {
     }
     set postEffectGamma(v: number) {
         this.postEffectGammaValue = Math.max(0.25, Math.min(4, v));
+    }
+
+    /** Image-processing exposure scale (1.0 = neutral). */
+    get postEffectExposure(): number {
+        return this.postEffectExposureValue;
+    }
+    set postEffectExposure(v: number) {
+        this.postEffectExposureValue = Math.max(0, Math.min(8, v));
+        this.applyImageProcessingSettings();
+    }
+
+    /** Image-processing tone mapping enabled state. */
+    get postEffectToneMappingEnabled(): boolean {
+        return this.postEffectToneMappingEnabledValue;
+    }
+    set postEffectToneMappingEnabled(v: boolean) {
+        this.postEffectToneMappingEnabledValue = Boolean(v);
+        this.applyImageProcessingSettings();
+    }
+
+    /** Image-processing tone mapping operator type. */
+    get postEffectToneMappingType(): number {
+        return this.postEffectToneMappingTypeValue;
+    }
+    set postEffectToneMappingType(v: number) {
+        const normalized = Math.floor(v);
+        const allowed = new Set<number>([
+            ImageProcessingConfiguration.TONEMAPPING_STANDARD,
+            ImageProcessingConfiguration.TONEMAPPING_ACES,
+            ImageProcessingConfiguration.TONEMAPPING_KHR_PBR_NEUTRAL,
+        ]);
+        this.postEffectToneMappingTypeValue = allowed.has(normalized)
+            ? normalized
+            : ImageProcessingConfiguration.TONEMAPPING_STANDARD;
+        this.applyImageProcessingSettings();
+    }
+
+    /** Image-processing dithering enabled state. */
+    get postEffectDitheringEnabled(): boolean {
+        return this.postEffectDitheringEnabledValue;
+    }
+    set postEffectDitheringEnabled(v: boolean) {
+        this.postEffectDitheringEnabledValue = Boolean(v);
+        this.applyImageProcessingSettings();
+    }
+
+    /** Image-processing dithering intensity (0.0..1.0). */
+    get postEffectDitheringIntensity(): number {
+        return this.postEffectDitheringIntensityValue;
+    }
+    set postEffectDitheringIntensity(v: number) {
+        this.postEffectDitheringIntensityValue = Math.max(0, Math.min(1, v));
+        this.applyImageProcessingSettings();
+    }
+
+    /** Image-processing vignette enabled state. */
+    get postEffectVignetteEnabled(): boolean {
+        return this.postEffectVignetteEnabledValue;
+    }
+    set postEffectVignetteEnabled(v: boolean) {
+        this.postEffectVignetteEnabledValue = Boolean(v);
+        this.applyImageProcessingSettings();
+    }
+
+    /** Image-processing vignette weight (0.0..4.0). */
+    get postEffectVignetteWeight(): number {
+        return this.postEffectVignetteWeightValue;
+    }
+    set postEffectVignetteWeight(v: number) {
+        this.postEffectVignetteWeightValue = Math.max(0, Math.min(4, v));
+        this.applyImageProcessingSettings();
+    }
+
+    /** Default pipeline bloom enabled state for grouped bloom controls. */
+    get postEffectBloomEnabled(): boolean {
+        return this.postEffectBloomEnabledValue;
+    }
+    set postEffectBloomEnabled(v: boolean) {
+        this.postEffectBloomEnabledValue = Boolean(v);
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Default pipeline bloom weight (0.0..2.0, 0 = OFF). */
+    get postEffectBloomWeight(): number {
+        return this.postEffectBloomWeightValue;
+    }
+    set postEffectBloomWeight(v: number) {
+        this.postEffectBloomWeightValue = Math.max(0, Math.min(2, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Default pipeline bloom threshold (0.0..2.0). */
+    get postEffectBloomThreshold(): number {
+        return this.postEffectBloomThresholdValue;
+    }
+    set postEffectBloomThreshold(v: number) {
+        this.postEffectBloomThresholdValue = Math.max(0, Math.min(2, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Default pipeline bloom kernel (1..256). */
+    get postEffectBloomKernel(): number {
+        return this.postEffectBloomKernelValue;
+    }
+    set postEffectBloomKernel(v: number) {
+        this.postEffectBloomKernelValue = Math.max(1, Math.min(256, Math.round(v)));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Default pipeline chromatic aberration amount (0..200, 0 = OFF). */
+    get postEffectChromaticAberration(): number {
+        return this.postEffectChromaticAberrationValue;
+    }
+    set postEffectChromaticAberration(v: number) {
+        this.postEffectChromaticAberrationValue = Math.max(0, Math.min(200, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Default pipeline grain intensity (0..100, 0 = OFF). */
+    get postEffectGrainIntensity(): number {
+        return this.postEffectGrainIntensityValue;
+    }
+    set postEffectGrainIntensity(v: number) {
+        this.postEffectGrainIntensityValue = Math.max(0, Math.min(100, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Default pipeline sharpen edge amount (0.0..4.0, 0 = OFF). */
+    get postEffectSharpenEdge(): number {
+        return this.postEffectSharpenEdgeValue;
+    }
+    set postEffectSharpenEdge(v: number) {
+        this.postEffectSharpenEdgeValue = Math.max(0, Math.min(4, v));
+        this.applyDefaultPipelinePostProcessSettings();
     }
 
     /** Post-process anti-aliasing enabled state. */
@@ -4307,12 +4514,9 @@ export class MmdManager {
 
         this.defaultRenderingPipeline.samples = 1;
         this.defaultRenderingPipeline.fxaaEnabled = false;
-        this.defaultRenderingPipeline.imageProcessingEnabled = false;
-        this.defaultRenderingPipeline.bloomEnabled = false;
-        this.defaultRenderingPipeline.sharpenEnabled = false;
-        this.defaultRenderingPipeline.grainEnabled = false;
-        this.defaultRenderingPipeline.chromaticAberrationEnabled = false;
         this.defaultRenderingPipeline.glowLayerEnabled = false;
+        this.applyImageProcessingSettings();
+        this.applyDefaultPipelinePostProcessSettings();
 
         this.configureDofDepthRenderer();
         if (this.dofLensDistortionFollowsCameraFov) {
@@ -4323,6 +4527,68 @@ export class MmdManager {
         this.applyEditorDofSettings();
         this.setupFinalLensDistortionPostProcess();
         this.applyAntialiasSettings();
+    }
+
+    private isImageProcessingEffectsEnabled(): boolean {
+        const epsilon = 1e-4;
+        return this.postEffectToneMappingEnabledValue
+            || this.postEffectDitheringEnabledValue
+            || this.postEffectVignetteEnabledValue
+            || Math.abs(this.postEffectExposureValue - 1) > epsilon;
+    }
+
+    private applyImageProcessingSettings(): void {
+        const imageProcessing = this.scene.imageProcessingConfiguration;
+        imageProcessing.exposure = this.postEffectExposureValue;
+        imageProcessing.toneMappingEnabled = this.postEffectToneMappingEnabledValue;
+        imageProcessing.toneMappingType = this.postEffectToneMappingTypeValue;
+        imageProcessing.ditheringEnabled = this.postEffectDitheringEnabledValue;
+        imageProcessing.ditheringIntensity = this.postEffectDitheringIntensityValue;
+        imageProcessing.vignetteEnabled = this.postEffectVignetteEnabledValue;
+        imageProcessing.vignetteWeight = this.postEffectVignetteWeightValue;
+        imageProcessing.vignetteColor.set(0, 0, 0, 1);
+
+        const shouldEnable = this.isImageProcessingEffectsEnabled();
+        const pipeline = this.defaultRenderingPipeline;
+        if (pipeline) {
+            pipeline.imageProcessingEnabled = shouldEnable;
+        } else {
+            this.scene.imageProcessingConfiguration.isEnabled = shouldEnable;
+        }
+    }
+
+    private applyDefaultPipelinePostProcessSettings(): void {
+        const pipeline = this.defaultRenderingPipeline;
+        if (!pipeline) {
+            return;
+        }
+
+        pipeline.bloomEnabled = this.postEffectBloomEnabledValue;
+        pipeline.bloomWeight = this.postEffectBloomWeightValue;
+        pipeline.bloomThreshold = this.postEffectBloomThresholdValue;
+        pipeline.bloomKernel = this.postEffectBloomKernelValue;
+
+        pipeline.chromaticAberrationEnabled = this.postEffectChromaticAberrationValue > 1e-4;
+        if (pipeline.chromaticAberration) {
+            pipeline.chromaticAberration.aberrationAmount = this.postEffectChromaticAberrationValue;
+        }
+
+        pipeline.grainEnabled = this.postEffectGrainIntensityValue > 1e-4;
+        if (pipeline.grain) {
+            pipeline.grain.intensity = this.postEffectGrainIntensityValue;
+            pipeline.grain.animated = false;
+        }
+
+        pipeline.sharpenEnabled = this.postEffectSharpenEdgeValue > 1e-4;
+        if (pipeline.sharpen) {
+            pipeline.sharpen.edgeAmount = this.postEffectSharpenEdgeValue;
+            pipeline.sharpen.colorAmount = 1;
+        }
+
+        if (this.dofEnabledValue) {
+            this.configureDofDepthRenderer();
+            this.applyEditorDofSettings();
+        }
     }
 
     private setupFinalLensDistortionPostProcess(): void {

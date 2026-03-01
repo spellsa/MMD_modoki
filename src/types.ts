@@ -191,6 +191,20 @@ export interface ProjectEffectState {
     dofLensDistortionInfluence: number;
     modelEdgeWidth: number;
     gamma: number;
+    exposure?: number;
+    toneMappingEnabled?: boolean;
+    toneMappingType?: number;
+    ditheringEnabled?: boolean;
+    ditheringIntensity?: number;
+    vignetteEnabled?: boolean;
+    vignetteWeight?: number;
+    bloomEnabled?: boolean;
+    bloomWeight?: number;
+    bloomThreshold?: number;
+    bloomKernel?: number;
+    chromaticAberration?: number;
+    grainIntensity?: number;
+    sharpenEdge?: number;
     gammaEncodingVersion?: 2;
 }
 

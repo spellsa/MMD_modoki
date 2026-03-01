@@ -41,6 +41,9 @@ PMX/PMD モデル、Xアクセサリー、VMD モーション、音源（MP3/WAV
 - キーフレーム可視化タイムライン（ボーン/モーフ別）
 - モーフスライダー操作（先頭30件表示）
 - 右パネル「エフェクト」で材質プリセット / カメラ向けポストエフェクトを調整
+  - Contrast / Gamma / Exposure / ToneMap / Dither / Vignette
+  - Bloom（ON/OFF + Weight/Threshold/Kernel）/ Chroma / Grain / Sharpen
+  - Distortion / Edge
 - ライティング調整（方位角/仰角/光の強さ/環境光/影の濃さ/境界幅）
 - DoF 操作は「情報 > 対象」でカメラ選択時のエフェクト欄に集約
 - 床表示 ON/OFF（上部ツールバー）
@@ -61,6 +64,7 @@ PMX/PMD モデル、Xアクセサリー、VMD モーション、音源（MP3/WAV
 - MmdManager 解説: [`docs/mmd-manager.md`](docs/mmd-manager.md)
 - カメラVMD対応メモ: [`docs/camera-vmd.md`](docs/camera-vmd.md)
 - UI と操作フロー: [`docs/ui-flow.md`](docs/ui-flow.md)
+- ポストエフェクト拡充バックログ: [`docs/post-effects-backlog.md`](docs/post-effects-backlog.md)
 - 影仕様と実装: [`docs/shadow-spec.md`](docs/shadow-spec.md)
 - トラブルシュート: [`docs/troubleshooting.md`](docs/troubleshooting.md)
 
@@ -104,6 +108,7 @@ npm run make
 5. `ファイル読込` でモデルモーション（`.vmd` / `.vpd`）を読み込む
 6. 必要に応じてカメラモーション（`.vmd`）や音源（`.mp3` / `.wav` / `.ogg`）を読み込む
 7. `情報 > 対象` で `Camera` を選ぶと、右の `エフェクト` 欄で DoF / ポストエフェクトを調整できる
+   （Bloom は ON/OFF + Weight/Threshold/Kernel の複合項目）
 8. `出力` 欄で比率・解像度・画質を設定して `PNG出力` / `PNG連番出力` を実行する
 9. 再生コントロール・タイムライン・モーフ・照明を調整する
 

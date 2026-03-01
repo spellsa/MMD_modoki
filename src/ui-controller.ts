@@ -2872,6 +2872,65 @@ export class UIController {
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
+                    <span class="effect-label">Exposure</span>
+                    <input data-postfx="exposure" type="range" class="effect-slider" min="0" max="8" value="1" step="0.01">
+                    <span data-postfx-val="exposure" class="effect-value">x1.00</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">ToneMap</span>
+                    <select data-postfx-select="tone-mapping-type" class="effect-select">
+                        <option value="-1">OFF</option>
+                        <option value="0">Standard</option>
+                        <option value="1">ACES</option>
+                        <option value="2">Neutral</option>
+                    </select>
+                    <span data-postfx-val="tone-mapping" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">Dither</span>
+                    <input data-postfx="dithering-intensity" type="range" class="effect-slider" min="0" max="1" value="0" step="0.0001">
+                    <span data-postfx-val="dithering" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">Vignette</span>
+                    <input data-postfx="vignette-weight" type="range" class="effect-slider" min="0" max="4" value="0" step="0.01">
+                    <span data-postfx-val="vignette" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row effect-row-check">
+                    <span class="effect-label">Bloom</span>
+                    <label class="effect-check-wrap">
+                        <input data-postfx-check="bloom" type="checkbox" class="effect-check">
+                        <span>On</span>
+                    </label>
+                    <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
+                    <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">BloomTh</span>
+                    <input data-postfx="bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="90" step="1">
+                    <span data-postfx-val="bloom-threshold" class="effect-value">0.90</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">BloomK</span>
+                    <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="64" step="1">
+                    <span data-postfx-val="bloom-kernel" class="effect-value">64</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">Chroma</span>
+                    <input data-postfx="chromatic-aberration" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
+                    <span data-postfx-val="chromatic-aberration" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">Grain</span>
+                    <input data-postfx="grain-intensity" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                    <span data-postfx-val="grain-intensity" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">Sharpen</span>
+                    <input data-postfx="sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
+                    <span data-postfx-val="sharpen-edge" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
                     <span class="effect-label">Distortion</span>
                     <input data-postfx="distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
                     <span data-postfx-val="distortion-influence" class="effect-value">0%</span>
@@ -2892,6 +2951,27 @@ export class UIController {
         const contrastVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="contrast"]');
         const gammaInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="gamma"]');
         const gammaVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="gamma"]');
+        const exposureInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="exposure"]');
+        const exposureVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="exposure"]');
+        const toneMappingTypeSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="tone-mapping-type"]');
+        const toneMappingVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="tone-mapping"]');
+        const ditheringIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="dithering-intensity"]');
+        const ditheringVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="dithering"]');
+        const vignetteWeightInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="vignette-weight"]');
+        const vignetteVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="vignette"]');
+        const bloomEnabledInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx-check="bloom"]');
+        const bloomWeightInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="bloom-weight"]');
+        const bloomWeightVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="bloom-weight"]');
+        const bloomThresholdInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="bloom-threshold"]');
+        const bloomThresholdVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="bloom-threshold"]');
+        const bloomKernelInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="bloom-kernel"]');
+        const bloomKernelVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="bloom-kernel"]');
+        const chromaticAberrationInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="chromatic-aberration"]');
+        const chromaticAberrationVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="chromatic-aberration"]');
+        const grainIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="grain-intensity"]');
+        const grainIntensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="grain-intensity"]');
+        const sharpenEdgeInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="sharpen-edge"]');
+        const sharpenEdgeVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="sharpen-edge"]');
         const distortionInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="distortion-influence"]');
         const distortionVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="distortion-influence"]');
         const edgeWidthInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="edge-width"]');
@@ -2902,6 +2982,27 @@ export class UIController {
             !contrastVal ||
             !gammaInput ||
             !gammaVal ||
+            !exposureInput ||
+            !exposureVal ||
+            !toneMappingTypeSelect ||
+            !toneMappingVal ||
+            !ditheringIntensityInput ||
+            !ditheringVal ||
+            !vignetteWeightInput ||
+            !vignetteVal ||
+            !bloomEnabledInput ||
+            !bloomWeightInput ||
+            !bloomWeightVal ||
+            !bloomThresholdInput ||
+            !bloomThresholdVal ||
+            !bloomKernelInput ||
+            !bloomKernelVal ||
+            !chromaticAberrationInput ||
+            !chromaticAberrationVal ||
+            !grainIntensityInput ||
+            !grainIntensityVal ||
+            !sharpenEdgeInput ||
+            !sharpenEdgeVal ||
             !distortionInput ||
             !distortionVal ||
             !edgeWidthInput ||
@@ -2925,6 +3026,90 @@ export class UIController {
             gammaVal.textContent = `${roundedOffset}%`;
         };
 
+        const applyExposure = (): void => {
+            this.mmdManager.postEffectExposure = Number(exposureInput.value);
+            exposureVal.textContent = `x${this.mmdManager.postEffectExposure.toFixed(2)}`;
+        };
+
+        const toneMapTypeToLabel = (value: number): string => {
+            switch (value) {
+                case 1:
+                    return "ACES";
+                case 2:
+                    return "Neutral";
+                default:
+                    return "Standard";
+            }
+        };
+
+        const applyToneMapping = (): void => {
+            const selected = Number(toneMappingTypeSelect.value);
+            const enabled = selected >= 0;
+            this.mmdManager.postEffectToneMappingEnabled = enabled;
+            if (enabled) {
+                this.mmdManager.postEffectToneMappingType = selected;
+            }
+            toneMappingVal.textContent = this.mmdManager.postEffectToneMappingEnabled
+                ? toneMapTypeToLabel(this.mmdManager.postEffectToneMappingType)
+                : "OFF";
+        };
+
+        const applyDithering = (): void => {
+            this.mmdManager.postEffectDitheringIntensity = Number(ditheringIntensityInput.value);
+            this.mmdManager.postEffectDitheringEnabled = this.mmdManager.postEffectDitheringIntensity > 0.000001;
+            const effectivePercent = this.mmdManager.postEffectDitheringIntensity * 100;
+            ditheringVal.textContent = this.mmdManager.postEffectDitheringEnabled
+                ? `${effectivePercent.toFixed(2)}%`
+                : "OFF";
+        };
+
+        const applyVignette = (): void => {
+            this.mmdManager.postEffectVignetteWeight = Number(vignetteWeightInput.value);
+            this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.000001;
+            vignetteVal.textContent = this.mmdManager.postEffectVignetteEnabled
+                ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
+                : "OFF";
+        };
+
+        const applyBloom = (): void => {
+            this.mmdManager.postEffectBloomEnabled = bloomEnabledInput.checked;
+            this.mmdManager.postEffectBloomWeight = Number(bloomWeightInput.value) / 100;
+            // Invert threshold control: move right -> wider glow range (lower threshold).
+            this.mmdManager.postEffectBloomThreshold = 2 - (Number(bloomThresholdInput.value) / 100);
+            this.mmdManager.postEffectBloomKernel = Number(bloomKernelInput.value);
+
+            bloomWeightInput.disabled = !this.mmdManager.postEffectBloomEnabled;
+            bloomThresholdInput.disabled = !this.mmdManager.postEffectBloomEnabled;
+            bloomKernelInput.disabled = !this.mmdManager.postEffectBloomEnabled;
+
+            bloomWeightVal.textContent = this.mmdManager.postEffectBloomEnabled
+                ? `${Math.round(this.mmdManager.postEffectBloomWeight * 100)}%`
+                : "OFF";
+            bloomThresholdVal.textContent = this.mmdManager.postEffectBloomThreshold.toFixed(2);
+            bloomKernelVal.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
+        };
+
+        const applyChromaticAberration = (): void => {
+            this.mmdManager.postEffectChromaticAberration = Number(chromaticAberrationInput.value);
+            chromaticAberrationVal.textContent = this.mmdManager.postEffectChromaticAberration > 0.000001
+                ? this.mmdManager.postEffectChromaticAberration.toFixed(0)
+                : "OFF";
+        };
+
+        const applyGrainIntensity = (): void => {
+            this.mmdManager.postEffectGrainIntensity = Number(grainIntensityInput.value);
+            grainIntensityVal.textContent = this.mmdManager.postEffectGrainIntensity > 0.000001
+                ? this.mmdManager.postEffectGrainIntensity.toFixed(1)
+                : "OFF";
+        };
+
+        const applySharpenEdge = (): void => {
+            this.mmdManager.postEffectSharpenEdge = Number(sharpenEdgeInput.value) / 100;
+            sharpenEdgeVal.textContent = this.mmdManager.postEffectSharpenEdge > 0.000001
+                ? this.mmdManager.postEffectSharpenEdge.toFixed(2)
+                : "OFF";
+        };
+
         const applyDistortionInfluence = (): void => {
             const scale = Number(distortionInput.value) / 100;
             this.mmdManager.dofLensDistortionInfluence = scale;
@@ -2939,16 +3124,64 @@ export class UIController {
 
         contrastInput.value = String(Math.round((this.mmdManager.postEffectContrast - 1) * 100));
         gammaInput.value = String(Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100));
+        exposureInput.value = String(Math.max(0, Math.min(8, this.mmdManager.postEffectExposure)).toFixed(2));
+        toneMappingTypeSelect.value = this.mmdManager.postEffectToneMappingEnabled
+            ? String(this.mmdManager.postEffectToneMappingType)
+            : "-1";
+        ditheringIntensityInput.value = String(
+            Math.max(0, Math.min(1, this.mmdManager.postEffectDitheringEnabled ? this.mmdManager.postEffectDitheringIntensity : 0)).toFixed(4),
+        );
+        vignetteWeightInput.value = String(
+            Math.max(0, Math.min(4, this.mmdManager.postEffectVignetteEnabled ? this.mmdManager.postEffectVignetteWeight : 0)).toFixed(2),
+        );
+        bloomEnabledInput.checked = this.mmdManager.postEffectBloomEnabled;
+        bloomWeightInput.value = String(
+            Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectBloomWeight * 100))),
+        );
+        bloomThresholdInput.value = String(
+            Math.max(0, Math.min(200, Math.round((2 - this.mmdManager.postEffectBloomThreshold) * 100))),
+        );
+        bloomKernelInput.value = String(
+            Math.max(1, Math.min(256, Math.round(this.mmdManager.postEffectBloomKernel))),
+        );
+        chromaticAberrationInput.value = String(
+            Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectChromaticAberration))),
+        );
+        grainIntensityInput.value = String(
+            Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectGrainIntensity))),
+        );
+        sharpenEdgeInput.value = String(
+            Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))),
+        );
         distortionInput.value = String(Math.round(this.mmdManager.dofLensDistortionInfluence * 100));
         edgeWidthInput.value = String(Math.round(this.mmdManager.modelEdgeWidth * 100));
 
         applyContrast();
         applyGamma();
+        applyExposure();
+        applyToneMapping();
+        applyDithering();
+        applyVignette();
+        applyBloom();
+        applyChromaticAberration();
+        applyGrainIntensity();
+        applySharpenEdge();
         applyDistortionInfluence();
         applyEdgeWidth();
 
         contrastInput.addEventListener("input", applyContrast);
         gammaInput.addEventListener("input", applyGamma);
+        exposureInput.addEventListener("input", applyExposure);
+        toneMappingTypeSelect.addEventListener("change", applyToneMapping);
+        ditheringIntensityInput.addEventListener("input", applyDithering);
+        vignetteWeightInput.addEventListener("input", applyVignette);
+        bloomEnabledInput.addEventListener("input", applyBloom);
+        bloomWeightInput.addEventListener("input", applyBloom);
+        bloomThresholdInput.addEventListener("input", applyBloom);
+        bloomKernelInput.addEventListener("input", applyBloom);
+        chromaticAberrationInput.addEventListener("input", applyChromaticAberration);
+        grainIntensityInput.addEventListener("input", applyGrainIntensity);
+        sharpenEdgeInput.addEventListener("input", applySharpenEdge);
         distortionInput.addEventListener("input", applyDistortionInfluence);
         edgeWidthInput.addEventListener("input", applyEdgeWidth);
     }
@@ -4286,13 +4519,3 @@ export class UIController {
         }, 3000);
     }
 }
-
-
-
-
-
-
-
-
-
-

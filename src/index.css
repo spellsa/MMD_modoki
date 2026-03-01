@@ -717,6 +717,37 @@ body.file-drag-active #viewport-container {
   gap: 6px;
 }
 
+#shader-panel .shader-postfx-controls .effect-row.effect-row-check,
+#shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check {
+  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  grid-template-areas:
+    "label check check"
+    ". control value";
+}
+
+#shader-panel .shader-postfx-controls .effect-row.effect-row-check .effect-label,
+#shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check .effect-label {
+  grid-area: label;
+}
+
+#shader-panel .shader-postfx-controls .effect-row.effect-row-check .effect-check-wrap,
+#shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check .effect-check-wrap {
+  grid-area: check;
+  justify-self: start;
+}
+
+#shader-panel .shader-postfx-controls .effect-row.effect-row-check .effect-slider,
+#shader-panel .shader-postfx-controls .effect-row.effect-row-check .effect-select,
+#shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check .effect-slider,
+#shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check .effect-select {
+  grid-area: control;
+}
+
+#shader-panel .shader-postfx-controls .effect-row.effect-row-check .effect-value,
+#shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check .effect-value {
+  grid-area: value;
+}
+
 #shader-panel .shader-postfx-controls .effect-label {
   text-align: right;
 }
