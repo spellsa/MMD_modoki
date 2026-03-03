@@ -76,13 +76,21 @@
 | 29 | FX-409 | VRS-like Blur Mask | C | No | 可変品質制御の設計負荷が高い |
 | 30 | FX-201 | GTAO | C | No | 現行Editor直利用対象外、統合コスト高 |
 | 31 | FX-106 | White Balance | C | No | Babylonの直接ノブが薄く実装方針要検討 |
+| 32 | FX-500 | Blob Shadow（足下接地影） | A | No | WebGPUでも実装容易。まずは床受け限定で導入し、必要なら別モデル受けへ拡張 |
 
 注記: `FX-110 / FX-200 / FX-202 / FX-203 / FX-205` は実験導入済みだが、現時点では UI 非表示運用。
 
 ## 2. 次の実装バッチ（推奨）
-1. `FX-110, FX-200, FX-205, FX-202, FX-203` の再公開判定（WebGPU安定性・UI運用見直し）
-2. `FX-210, FX-309`（Color Grading Wheels / Bloom+Edgeプリセット）
-3. スタイライズ系Bランクの小粒追加（`FX-300, FX-301, FX-402, FX-403`）
+1. `FX-200A` Contact AO（WGSLスクリーンスペース実装）を追加
+  - Babylon SSAO2 依存ではなく、WebGPU前提の独自パスとして実装
+  - 深度差しきい値で大きな段差を棄却し、接触陰影寄りに調整
+  - 遠方フェード（原点から約10m目安で透明度0）を適用
+2. `FX-500` Blob Shadow（足下接地影）を追加
+  - 初期実装は床受け限定（1モデル1影、単項目フェーダー運用）
+  - 必要なら「自モデル除外の別モデル受け」へ拡張
+3. `FX-110, FX-205, FX-202, FX-203` の再公開判定（WebGPU安定性・UI運用見直し）
+4. `FX-210, FX-309`（Color Grading Wheels / Bloom+Edgeプリセット）
+5. スタイライズ系Bランクの小粒追加（`FX-300, FX-301, FX-402, FX-403`）
 
 ## 3. LUT方針メモ
 - 先行対応は `3dl` を推奨（Babylon標準のColorGradingTextureに素直に乗る）
