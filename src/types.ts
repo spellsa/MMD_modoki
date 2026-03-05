@@ -156,12 +156,23 @@ export interface ProjectCameraState {
     distance: number;
 }
 
+export interface ProjectRgbColor {
+    r: number;
+    g: number;
+    b: number;
+}
+
 export interface ProjectLightingState {
     azimuth: number;
     elevation: number;
     intensity: number;
     ambientIntensity: number;
     temperatureKelvin: number;
+    lightColor?: ProjectRgbColor;
+    lightFlatStrength?: number;
+    lightFlatColorInfluence?: number;
+    shadowColor?: ProjectRgbColor;
+    toonShadowInfluence?: number;
     shadowEnabled: boolean;
     shadowDarkness: number;
     shadowEdgeSoftness?: number;

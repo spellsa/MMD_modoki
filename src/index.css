@@ -1490,6 +1490,19 @@ body.file-drag-active #viewport-container {
   flex-direction: column;
   gap: 6px;
   padding: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.output-controls::-webkit-scrollbar {
+  width: 4px;
+}
+
+.output-controls::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: 2px;
 }
 
 .output-row {
@@ -1540,6 +1553,10 @@ body.file-drag-active #viewport-container {
   align-items: center;
 }
 
+.output-row-quality {
+  display: none;
+}
+
 .output-toggle-label {
   display: inline-flex;
   align-items: center;
@@ -1548,10 +1565,20 @@ body.file-drag-active #viewport-container {
   color: var(--text-secondary);
 }
 
+.output-export-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 2px;
+}
+
 .output-controls .playback-export-btn {
   width: 100%;
   justify-content: center;
-  margin-top: 2px;
+}
+
+.output-export-row .playback-export-btn {
+  margin-top: 0;
 }
 
 .ui-busy-overlay {
@@ -2045,6 +2072,10 @@ body.timeline-resizing {
 
 .light-row--hidden {
   display: none;
+}
+
+.light-row--always-hidden {
+  display: none !important;
 }
 
 .light-row-select .light-value {

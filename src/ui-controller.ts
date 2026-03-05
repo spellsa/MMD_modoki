@@ -614,7 +614,16 @@ export class UIController {
         const elElevation = document.getElementById("light-elevation") as HTMLInputElement;
         const elIntensity = document.getElementById("light-intensity") as HTMLInputElement;
         const elAmbient = document.getElementById("light-ambient") as HTMLInputElement;
+        const elLightColorR = document.getElementById("light-color-r") as HTMLInputElement;
+        const elLightColorG = document.getElementById("light-color-g") as HTMLInputElement;
+        const elLightColorB = document.getElementById("light-color-b") as HTMLInputElement;
+        const elLightFlatStrength = document.getElementById("light-flat-strength") as HTMLInputElement;
+        const elLightFlatColorInfluence = document.getElementById("light-flat-color-influence") as HTMLInputElement;
         const elShadow = document.getElementById("light-shadow") as HTMLInputElement;
+        const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
+        const elShadowColorG = document.getElementById("light-shadow-color-g") as HTMLInputElement;
+        const elShadowColorB = document.getElementById("light-shadow-color-b") as HTMLInputElement;
+        const elToonShadowInfluence = document.getElementById("light-toon-shadow-influence") as HTMLInputElement;
         const elSelfShadowSoftness = document.getElementById("light-self-shadow-softness") as HTMLInputElement;
         const elOcclusionShadowSoftness = document.getElementById("light-occlusion-shadow-softness") as HTMLInputElement;
         const elLightMode = document.getElementById("light-mode-select") as HTMLSelectElement | null;
@@ -622,7 +631,16 @@ export class UIController {
         const valEl = document.getElementById("light-elevation-val")!;
         const valInt = document.getElementById("light-intensity-val")!;
         const valAmb = document.getElementById("light-ambient-val")!;
+        const valLightColorR = document.getElementById("light-color-r-val")!;
+        const valLightColorG = document.getElementById("light-color-g-val")!;
+        const valLightColorB = document.getElementById("light-color-b-val")!;
+        const valLightFlatStrength = document.getElementById("light-flat-strength-val")!;
+        const valLightFlatColorInfluence = document.getElementById("light-flat-color-influence-val")!;
         const valSh = document.getElementById("light-shadow-val")!;
+        const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
+        const valShadowColorG = document.getElementById("light-shadow-color-g-val")!;
+        const valShadowColorB = document.getElementById("light-shadow-color-b-val")!;
+        const valToonShadowInfluence = document.getElementById("light-toon-shadow-influence-val")!;
         const valSelfShSoftness = document.getElementById("light-self-shadow-softness-val")!;
         const valOcclusionShSoftness = document.getElementById("light-occlusion-shadow-softness-val")!;
         const lightRows = Array.from(document.querySelectorAll(".light-row--light"));
@@ -699,18 +717,69 @@ export class UIController {
             valAmb.textContent = v.toFixed(1);
             this.mmdManager.ambientIntensity = v;
         });
+        const applyLightColor = () => {
+            const r = Number(elLightColorR.value) / 127.5;
+            const g = Number(elLightColorG.value) / 127.5;
+            const b = Number(elLightColorB.value) / 127.5;
+            this.mmdManager.setLightColor(r, g, b);
+            valLightColorR.textContent = `${Math.round(r * 100)}%`;
+            valLightColorG.textContent = `${Math.round(g * 100)}%`;
+            valLightColorB.textContent = `${Math.round(b * 100)}%`;
+        };
+        elLightColorR.addEventListener("input", applyLightColor);
+        elLightColorG.addEventListener("input", applyLightColor);
+        elLightColorB.addEventListener("input", applyLightColor);
+        const applyLightFlatStrength = () => {
+            const v = Number(elLightFlatStrength.value) / 100;
+            this.mmdManager.lightFlatStrength = v;
+            valLightFlatStrength.textContent = `${Math.round(v * 100)}%`;
+        };
+        elLightFlatStrength.addEventListener("input", applyLightFlatStrength);
+        const applyLightFlatColorInfluence = () => {
+            const v = Number(elLightFlatColorInfluence.value) / 100;
+            this.mmdManager.lightFlatColorInfluence = v;
+            valLightFlatColorInfluence.textContent = `${Math.round(v * 100)}%`;
+        };
+        elLightFlatColorInfluence.addEventListener("input", applyLightFlatColorInfluence);
 
         // Initialize lighting sliders from runtime defaults.
         elIntensity.value = String(Math.round(this.mmdManager.lightIntensity * 100));
         valInt.textContent = this.mmdManager.lightIntensity.toFixed(1);
         elAmbient.value = String(Math.round(this.mmdManager.ambientIntensity * 100));
         valAmb.textContent = this.mmdManager.ambientIntensity.toFixed(1);
+        const initialLightColor = this.mmdManager.getLightColor();
+        elLightColorR.value = String(Math.round(initialLightColor.r * 127.5));
+        elLightColorG.value = String(Math.round(initialLightColor.g * 127.5));
+        elLightColorB.value = String(Math.round(initialLightColor.b * 127.5));
+        applyLightColor();
+        elLightFlatStrength.value = String(Math.round(this.mmdManager.lightFlatStrength * 100));
+        applyLightFlatStrength();
+        elLightFlatColorInfluence.value = String(Math.round(this.mmdManager.lightFlatColorInfluence * 100));
+        applyLightFlatColorInfluence();
 
         elShadow.addEventListener("input", () => {
             const v = Number(elShadow.value) / 100;
             valSh.textContent = v.toFixed(2);
             this.mmdManager.shadowDarkness = v;
         });
+        const applyShadowColor = () => {
+            const r = Number(elShadowColorR.value) / 255;
+            const g = Number(elShadowColorG.value) / 255;
+            const b = Number(elShadowColorB.value) / 255;
+            this.mmdManager.setShadowColor(r, g, b);
+            valShadowColorR.textContent = String(Math.round(r * 255));
+            valShadowColorG.textContent = String(Math.round(g * 255));
+            valShadowColorB.textContent = String(Math.round(b * 255));
+        };
+        elShadowColorR.addEventListener("input", applyShadowColor);
+        elShadowColorG.addEventListener("input", applyShadowColor);
+        elShadowColorB.addEventListener("input", applyShadowColor);
+        const applyToonShadowInfluence = () => {
+            const influence = Number(elToonShadowInfluence.value) / 100;
+            this.mmdManager.toonShadowInfluence = influence;
+            valToonShadowInfluence.textContent = `${Math.round(influence * 100)}%`;
+        };
+        elToonShadowInfluence.addEventListener("input", applyToonShadowInfluence);
         elSelfShadowSoftness.addEventListener("input", () => {
             const v = Number(elSelfShadowSoftness.value) / 1000;
             valSelfShSoftness.textContent = v.toFixed(3);
@@ -726,6 +795,13 @@ export class UIController {
         this.mmdManager.setShadowEnabled(true);
         elShadow.value = String(Math.round(this.mmdManager.shadowDarkness * 100));
         valSh.textContent = this.mmdManager.shadowDarkness.toFixed(2);
+        const initialShadowColor = this.mmdManager.getShadowColor();
+        elShadowColorR.value = String(Math.round(initialShadowColor.r * 255));
+        elShadowColorG.value = String(Math.round(initialShadowColor.g * 255));
+        elShadowColorB.value = String(Math.round(initialShadowColor.b * 255));
+        applyShadowColor();
+        elToonShadowInfluence.value = String(Math.round(this.mmdManager.toonShadowInfluence * 100));
+        applyToonShadowInfluence();
         elSelfShadowSoftness.value = String(Math.round(this.mmdManager.selfShadowEdgeSoftness * 1000));
         valSelfShSoftness.textContent = this.mmdManager.selfShadowEdgeSoftness.toFixed(3);
         elOcclusionShadowSoftness.value = String(Math.round(this.mmdManager.occlusionShadowEdgeSoftness * 1000));
