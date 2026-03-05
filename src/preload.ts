@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         filters?: { name: string; extensions: string[] }[],
     ) =>
         ipcRenderer.invoke('file:saveText', content, defaultFileName, filters),
+    writeTextFileToPath: (filePath: string, content: string) =>
+        ipcRenderer.invoke('file:writeTextToPath', filePath, content),
     savePngFile: (dataUrl: string, defaultFileName?: string) =>
         ipcRenderer.invoke('file:savePng', dataUrl, defaultFileName),
     savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) =>

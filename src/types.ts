@@ -10,6 +10,7 @@ export interface ElectronAPI {
         defaultFileName?: string,
         filters?: { name: string; extensions: string[] }[],
     ) => Promise<string | null>;
+    writeTextFileToPath: (filePath: string, content: string) => Promise<boolean>;
     savePngFile: (dataUrl: string, defaultFileName?: string) => Promise<string | null>;
     savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) => Promise<string | null>;
     savePngRgbaFileToPath: (
@@ -230,6 +231,9 @@ export interface ProjectEffectState {
     lutEnabled?: boolean;
     lutIntensity?: number;
     lutPreset?: string;
+    lutSourceMode?: "builtin" | "external-absolute" | "project-relative";
+    lutExternalPath?: string | null;
+    wgslToonShaderPath?: string | null;
     motionBlurEnabled?: boolean;
     motionBlurStrength?: number;
     motionBlurSamples?: number;

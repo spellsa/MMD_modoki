@@ -280,6 +280,8 @@ type MaterialShaderDefaults = {
     emissiveColor: Color3 | null;
 };
 
+type PostEffectLutSourceMode = "builtin" | "external-absolute" | "project-relative";
+
 export class MmdManager {
     private static readonly RENDER_ENGINE_OPTIONS = {
         preserveDrawingBuffer: false,
@@ -323,6 +325,8 @@ export class MmdManager {
     private static toonSelfShadowBoundarySoftness = 0.035;
     private static toonOcclusionShadowBoundarySoftness = 0.035;
     private static toonFlatLightColorInfluence = 0.35;
+    private static externalWgslToonFragmentReplacement: string | null = null;
+    private static externalWgslToonSourcePath: string | null = null;
 
     private static shadowSoftnessToToonBoundaryWidth(v: number): number {
         if (!Number.isFinite(v)) return 0.09;
@@ -357,7 +361,7 @@ export class MmdManager {
                 const litMaskMin = (litThreshold - litBlendWidth).toFixed(6);
                 const litMaskMax = (litThreshold + litBlendWidth).toFixed(6);
                 const lightColorInfluence = MmdManager.toonFlatLightColorInfluence.toFixed(6);
-                const replacementLine = isWgsl
+                const defaultReplacementLine = isWgsl
                     ? `#ifdef TOON_TEXTURE_COLOR
 {
 let one=vec3f(1.0);
@@ -412,6 +416,10 @@ diffuseBase+=shadowTerm;
 #else
 diffuseBase+=mix(info.diffuse*shadow,toonNdl*info.diffuse,info.isToon);
 #endif`;
+
+                const replacementLine = isWgsl && MmdManager.externalWgslToonFragmentReplacement
+                    ? MmdManager.externalWgslToonFragmentReplacement
+                    : defaultReplacementLine;
 
                 const codeMap = codes as Record<string, unknown>;
                 for (const key of Object.keys(codeMap)) {
@@ -552,7 +560,7 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
     private postEffectContrastValue = 1;
     private postEffectGammaValue = 1;
     private postEffectExposureValue = 1;
-    private postEffectToneMappingEnabledValue = false;
+    private postEffectToneMappingEnabledValue = true;
     private postEffectToneMappingTypeValue = ImageProcessingConfiguration.TONEMAPPING_STANDARD;
     private postEffectDitheringEnabledValue = false;
     private postEffectDitheringIntensityValue = 1 / 255;
@@ -579,6 +587,10 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
     private postEffectLutEnabledValue = false;
     private postEffectLutIntensityValue = 1;
     private postEffectLutPresetValue = "none";
+    private postEffectLutSourceModeValue: PostEffectLutSourceMode = "builtin";
+    private postEffectLutExternalPathValue: string | null = null;
+    private postEffectLutExternalTextValue: string | null = null;
+    private postEffectLutExternalRevision = 0;
     private postEffectMotionBlurEnabledValue = false;
     private postEffectMotionBlurStrengthValue = 0.5;
     private postEffectMotionBlurSamplesValue = 32;
@@ -603,6 +615,7 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
     private readonly modelEdgeMaterialDefaults = new WeakMap<object, { enabled: boolean; width: number; alpha: number; colorR: number; colorG: number; colorB: number }>();
     private readonly materialShaderDefaultsByMaterial = new WeakMap<object, MaterialShaderDefaults>();
     private readonly materialShaderPresetByMaterial = new WeakMap<object, WgslMaterialShaderPresetId>();
+    private externalWgslToonShaderPathValue: string | null = null;
     private colorCorrectionPostProcess: PostProcess | null = null;
     private finalAntialiasPostProcess: FxaaPostProcess | null = null;
     private finalLensDistortionPostProcess: PostProcess | null = null;
@@ -621,6 +634,7 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
     private postEffectLutTexture: ColorGradingTexture | null = null;
     private postEffectLutTextureKey: string | null = null;
     private readonly postEffectLutPresetBlobUrlById = new Map<string, string>();
+    private postEffectLutExternalBlobUrl: string | null = null;
     private dofEnabledValue = false;
     private dofBlurLevelValue = DepthOfFieldEffectBlurLevel.Medium;
     private dofFocusDistanceMmValue = 55000;
@@ -849,6 +863,37 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
         return MmdManager.POST_EFFECT_LUT_PRESETS;
     }
 
+    public getExternalWgslToonShaderPath(): string | null {
+        return this.externalWgslToonShaderPathValue;
+    }
+
+    public hasExternalWgslToonShader(): boolean {
+        return MmdManager.externalWgslToonFragmentReplacement !== null;
+    }
+
+    public setExternalWgslToonShader(path: string | null, source: string | null): void {
+        const normalizedPath = typeof path === "string" && path.trim().length > 0
+            ? path.trim()
+            : null;
+        const normalizedSource = typeof source === "string" && source.trim().length > 0
+            ? source
+            : null;
+
+        this.externalWgslToonShaderPathValue = normalizedPath;
+        MmdManager.externalWgslToonSourcePath = normalizedPath;
+        MmdManager.externalWgslToonFragmentReplacement = normalizedSource;
+
+        this.markAllSceneMaterialsShaderDirty();
+        this.onMaterialShaderStateChanged?.();
+    }
+
+    private markAllSceneMaterialsShaderDirty(): void {
+        for (const entry of this.sceneModels) {
+            for (const material of entry.materials) {
+                this.markMaterialShaderDirty(material.material);
+            }
+        }
+    }
     public getWgslModelShaderStates(): WgslModelShaderInfo[] {
         return this.sceneModels.map((entry, modelIndex) => ({
             modelIndex,
@@ -3789,6 +3834,9 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
                 lutEnabled: this.postEffectLutEnabled,
                 lutIntensity: this.postEffectLutIntensity,
                 lutPreset: this.postEffectLutPreset,
+                lutSourceMode: this.postEffectLutSourceMode,
+                lutExternalPath: this.postEffectLutExternalPath,
+                wgslToonShaderPath: this.getExternalWgslToonShaderPath(),
                 motionBlurEnabled: this.postEffectMotionBlurEnabled,
                 motionBlurStrength: this.postEffectMotionBlurStrength,
                 motionBlurSamples: this.postEffectMotionBlurSamples,
@@ -4017,7 +4065,7 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
             : 1;
         this.postEffectToneMappingEnabled = typeof data.effects.toneMappingEnabled === "boolean"
             ? data.effects.toneMappingEnabled
-            : false;
+            : true;
         this.postEffectToneMappingType = typeof data.effects.toneMappingType === "number" && Number.isFinite(data.effects.toneMappingType)
             ? data.effects.toneMappingType
             : ImageProcessingConfiguration.TONEMAPPING_STANDARD;
@@ -4095,6 +4143,21 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
         this.postEffectLutIntensity = typeof data.effects.lutIntensity === "number" && Number.isFinite(data.effects.lutIntensity)
             ? data.effects.lutIntensity
             : 1;
+        this.postEffectLutSourceMode = typeof data.effects.lutSourceMode === "string"
+            ? data.effects.lutSourceMode as PostEffectLutSourceMode
+            : "builtin";
+        this.setPostEffectExternalLut(
+            typeof data.effects.lutExternalPath === "string" && data.effects.lutExternalPath.trim().length > 0
+                ? data.effects.lutExternalPath.trim()
+                : null,
+            null,
+        );
+        this.setExternalWgslToonShader(
+            typeof data.effects.wgslToonShaderPath === "string" && data.effects.wgslToonShaderPath.trim().length > 0
+                ? data.effects.wgslToonShaderPath.trim()
+                : null,
+            null,
+        );
         this.postEffectLutEnabled = typeof data.effects.lutEnabled === "boolean"
             ? data.effects.lutEnabled
             : false;
@@ -4609,6 +4672,39 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
         this.postEffectLutPresetValue = MmdManager.POST_EFFECT_LUT_PRESETS.some((preset) => preset.id === normalized)
             ? normalized
             : "none";
+        this.applyImageProcessingSettings();
+    }
+
+    /** LUT source mode. */
+    get postEffectLutSourceMode(): PostEffectLutSourceMode {
+        return this.postEffectLutSourceModeValue;
+    }
+    set postEffectLutSourceMode(v: PostEffectLutSourceMode) {
+        const normalized = typeof v === "string" ? v.trim().toLowerCase() : "builtin";
+        this.postEffectLutSourceModeValue = normalized === "external-absolute" || normalized === "project-relative"
+            ? normalized
+            : "builtin";
+        this.applyImageProcessingSettings();
+    }
+
+    /** External LUT source path. */
+    get postEffectLutExternalPath(): string | null {
+        return this.postEffectLutExternalPathValue;
+    }
+
+    /** Set external LUT source path/text. */
+    public setPostEffectExternalLut(path: string | null, text: string | null): void {
+        this.postEffectLutExternalPathValue = typeof path === "string" && path.trim().length > 0
+            ? path.trim()
+            : null;
+        this.postEffectLutExternalTextValue = typeof text === "string" && text.length > 0
+            ? text
+            : null;
+        this.postEffectLutExternalRevision += 1;
+        if (this.postEffectLutExternalBlobUrl) {
+            URL.revokeObjectURL(this.postEffectLutExternalBlobUrl);
+            this.postEffectLutExternalBlobUrl = null;
+        }
         this.applyImageProcessingSettings();
     }
 
@@ -5275,7 +5371,6 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
                 void main(void) {
                     vec4 color = texture2D(textureSampler, vUV);
                     vec3 contrasted = ((color.rgb - vec3(0.5)) * contrast) + vec3(0.5);
-                    contrasted = clamp(contrasted, vec3(0.0), vec3(1.0));
                     vec3 corrected = pow(max(contrasted, vec3(0.0)), vec3(gammaPower));
                     gl_FragColor = vec4(corrected, color.a);
                 }
@@ -5294,7 +5389,6 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
                 fn main(input: FragmentInputs)->FragmentOutputs {
                     let color: vec4f = textureSample(textureSampler, textureSamplerSampler, input.vUV);
                     var contrasted: vec3f = ((color.rgb - vec3f(0.5)) * uniforms.contrast) + vec3f(0.5);
-                    contrasted = clamp(contrasted, vec3f(0.0), vec3f(1.0));
                     let safeGamma: f32 = max(uniforms.gammaPower, 0.0001);
                     let corrected: vec3f = pow(max(contrasted, vec3f(0.0)), vec3f(safeGamma));
                     fragmentOutputs.color = vec4f(corrected, color.a);
@@ -5388,7 +5482,7 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
             || this.postEffectDitheringEnabledValue
             || this.postEffectVignetteEnabledValue
             || this.postEffectColorCurvesEnabledValue
-            || (this.postEffectLutEnabledValue && this.postEffectLutPresetValue !== "none")
+            || (this.postEffectLutEnabledValue && this.isLutSourceReady())
             || Math.abs(this.postEffectExposureValue - 1) > epsilon;
     }
 
@@ -5424,10 +5518,17 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
         }
     }
 
+    private isLutSourceReady(): boolean {
+        if (this.postEffectLutSourceModeValue === "builtin") {
+            return this.postEffectLutPresetValue !== "none";
+        }
+        return this.postEffectLutExternalTextValue !== null;
+    }
+
     private applyLutSettings(): void {
         const imageProcessing = this.scene.imageProcessingConfiguration;
-        const key = this.postEffectLutPresetValue;
-        const enabled = this.postEffectLutEnabledValue && key !== "none";
+        const mode = this.postEffectLutSourceModeValue;
+        const enabled = this.postEffectLutEnabledValue && this.isLutSourceReady();
         if (!enabled) {
             imageProcessing.colorGradingEnabled = false;
             imageProcessing.colorGradingTexture = null;
@@ -5439,18 +5540,27 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
             return;
         }
 
+        const key = mode === "builtin"
+            ? `builtin:${this.postEffectLutPresetValue}`
+            : `external:${mode}:${this.postEffectLutExternalPathValue ?? ""}:${this.postEffectLutExternalRevision}`;
+
         if (!this.postEffectLutTexture || this.postEffectLutTextureKey !== key) {
             if (this.postEffectLutTexture) {
                 this.postEffectLutTexture.dispose();
                 this.postEffectLutTexture = null;
             }
             try {
-                const lutUrl = this.getOrCreateLutPresetBlobUrl(key);
+                const lutUrl = mode === "builtin"
+                    ? this.getOrCreateLutPresetBlobUrl(this.postEffectLutPresetValue)
+                    : this.getOrCreateExternalLutBlobUrl();
                 this.postEffectLutTexture = new ColorGradingTexture(lutUrl, this.scene);
                 this.postEffectLutTextureKey = key;
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
-                console.warn(`Failed to create LUT preset '${key}': ${message}`);
+                const sourceLabel = mode === "builtin"
+                    ? this.postEffectLutPresetValue
+                    : (this.postEffectLutExternalPathValue ?? "external");
+                console.warn(`Failed to create LUT '${sourceLabel}': ${message}`);
                 imageProcessing.colorGradingEnabled = false;
                 imageProcessing.colorGradingTexture = null;
                 this.postEffectLutTexture = null;
@@ -5480,6 +5590,20 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
         const blob = new Blob([lutText], { type: "text/plain" });
         const blobUrl = URL.createObjectURL(blob);
         this.postEffectLutPresetBlobUrlById.set(presetId, blobUrl);
+        return blobUrl;
+    }
+
+    private getOrCreateExternalLutBlobUrl(): string {
+        if (!this.postEffectLutExternalTextValue) {
+            throw new Error("External LUT text is empty");
+        }
+        if (this.postEffectLutExternalBlobUrl) {
+            return this.postEffectLutExternalBlobUrl;
+        }
+
+        const blob = new Blob([this.postEffectLutExternalTextValue], { type: "text/plain" });
+        const blobUrl = URL.createObjectURL(blob);
+        this.postEffectLutExternalBlobUrl = blobUrl;
         return blobUrl;
     }
 
@@ -7819,6 +7943,10 @@ color.rgb+=toonFlatLightColor*toonFlatMix;
             URL.revokeObjectURL(blobUrl);
         }
         this.postEffectLutPresetBlobUrlById.clear();
+        if (this.postEffectLutExternalBlobUrl) {
+            URL.revokeObjectURL(this.postEffectLutExternalBlobUrl);
+            this.postEffectLutExternalBlobUrl = null;
+        }
         if (this.colorCorrectionPostProcess) {
             this.colorCorrectionPostProcess.dispose(this.camera);
             this.colorCorrectionPostProcess = null;

@@ -708,6 +708,17 @@ body.file-drag-active #viewport-container {
   gap: 6px;
 }
 
+.shader-external-wgsl-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 #shader-panel .shader-postfx-dof-controls {
   margin-top: 2px;
 }
@@ -2621,6 +2632,24 @@ body.timeline-resizing {
   outline: none;
   border-color: var(--accent-pink);
   box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.15);
+}
+
+.effect-button {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.effect-button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .effect-value {

@@ -279,6 +279,19 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle('file:writeTextToPath', async (_event, filePath: string, content: string): Promise<boolean> => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return false;
+    const targetDir = path.dirname(filePath);
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    await fs.promises.writeFile(filePath, content, 'utf-8');
+    return true;
+  } catch (err) {
+    console.error('Failed to write text file to path:', err);
+    return false;
+  }
+});
+
 ipcMain.handle('file:savePng', async (_event, dataUrl: string, defaultFileName?: string) => {
   try {
     const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))

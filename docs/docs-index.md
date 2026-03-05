@@ -19,6 +19,7 @@
 - [LensRenderingPipeline 実装ガイド](./lens-rendering-pipeline-guide.md)
 - [Babylon Editor DoF 調査](./babylon-editor-dof-research.md)
 - [WebGPU / WGSL 実現可能性メモ](./webgpu-wgsl-feasibility.md)
+- [LUT / WGSL 外部ファイル運用仕様](./lut-wgsl-file-handling.md)
 
 ## カメラ / タイムライン / キーフレーム
 

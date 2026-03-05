@@ -232,6 +232,10 @@ export class UIController {
     private isPngSequenceExportActive = false;
     private latestPngSequenceExportProgress: PngSequenceExportProgress | null = null;
     private isUiFullscreenActive = false;
+    private postFxLutExternalPath: string | null = null;
+    private postFxLutExternalText: string | null = null;
+    private postFxWgslToonPath: string | null = null;
+    private postFxWgslToonText: string | null = null;
     private refreshAaToggleUi: (() => void) | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
@@ -1688,6 +1692,29 @@ export class UIController {
         this.setStatus("Saving project...", true);
         try {
             const project = this.mmdManager.exportProjectState();
+            const lutMode = this.mmdManager.postEffectLutSourceMode;
+            let relativeLutFileName: string | null = null;
+            let relativeWgslFileName: string | null = null;
+            project.effects.lutSourceMode = lutMode;
+            if (!this.postFxWgslToonPath || !this.postFxWgslToonText) {
+                project.effects.wgslToonShaderPath = null;
+            } else {
+                relativeWgslFileName = this.getBaseNameForRenderer(this.postFxWgslToonPath) || "external_toon.wgsl";
+                project.effects.wgslToonShaderPath = `wgsl/${relativeWgslFileName}`;
+            }
+            if (lutMode === "builtin") {
+                project.effects.lutExternalPath = null;
+            } else if (!this.postFxLutExternalPath || !this.postFxLutExternalText) {
+                project.effects.lutEnabled = false;
+                project.effects.lutExternalPath = null;
+                this.showToast("External LUT is missing, saving with LUT disabled", "info");
+            } else if (lutMode === "project-relative") {
+                relativeLutFileName = this.getBaseNameForRenderer(this.postFxLutExternalPath) || "external_lut.cube";
+                project.effects.lutExternalPath = `luts/${relativeLutFileName}`;
+            } else {
+                project.effects.lutExternalPath = this.postFxLutExternalPath;
+            }
+
             const json = JSON.stringify(project, null, 2);
 
             const now = new Date();
@@ -1702,6 +1729,25 @@ export class UIController {
                 this.setStatus("Ready", false);
                 this.showToast("Project save canceled", "info");
                 return;
+            }
+
+            if (relativeLutFileName && this.postFxLutExternalText) {
+                const projectDir = this.getDirectoryPathForRenderer(savedPath);
+                const lutDir = this.joinPathForRenderer(projectDir, "luts");
+                const lutPath = this.joinPathForRenderer(lutDir, relativeLutFileName);
+                const wrote = await window.electronAPI.writeTextFileToPath(lutPath, this.postFxLutExternalText);
+                if (!wrote) {
+                    this.showToast("Failed to save project-relative LUT file", "error");
+                }
+            }
+            if (relativeWgslFileName && this.postFxWgslToonText) {
+                const projectDir = this.getDirectoryPathForRenderer(savedPath);
+                const wgslDir = this.joinPathForRenderer(projectDir, "wgsl");
+                const wgslPath = this.joinPathForRenderer(wgslDir, relativeWgslFileName);
+                const wrote = await window.electronAPI.writeTextFileToPath(wgslPath, this.postFxWgslToonText);
+                if (!wrote) {
+                    this.showToast("Failed to save project-relative WGSL file", "error");
+                }
             }
 
             const basename = savedPath.replace(/^.*[\\/]/, "");
@@ -1739,7 +1785,73 @@ export class UIController {
                 return;
             }
 
+            const parsedProject = parsed as {
+                effects?: {
+                    lutSourceMode?: string;
+                    lutExternalPath?: string | null;
+                    wgslToonShaderPath?: string | null;
+                };
+            };
+            const requestedLutMode = parsedProject.effects?.lutSourceMode;
+            const requestedLutPath = parsedProject.effects?.lutExternalPath;
+            const requestedWgslToonPath = parsedProject.effects?.wgslToonShaderPath;
+            const isExternalLutMode = requestedLutMode === "external-absolute" || requestedLutMode === "project-relative";
+
+            let resolvedExternalLutPath: string | null = null;
+            let resolvedExternalLutText: string | null = null;
+            let externalLutWarning: string | null = null;
+            let resolvedWgslToonPath: string | null = null;
+            let resolvedWgslToonText: string | null = null;
+            let wgslToonWarning: string | null = null;
+
+            if (isExternalLutMode) {
+                if (typeof requestedLutPath === "string" && requestedLutPath.trim().length > 0) {
+                    const normalizedPath = requestedLutPath.trim();
+                    resolvedExternalLutPath = requestedLutMode === "project-relative" && !this.isAbsolutePathForRenderer(normalizedPath)
+                        ? this.resolveProjectRelativePath(filePath, normalizedPath)
+                        : normalizedPath;
+                    const lutText = await window.electronAPI.readTextFile(resolvedExternalLutPath);
+                    if (lutText) {
+                        resolvedExternalLutText = lutText;
+                    } else {
+                        externalLutWarning = `External LUT load failed: ${requestedLutPath}`;
+                    }
+                } else {
+                    externalLutWarning = "External LUT path is missing";
+                }
+            }
+
+            if (typeof requestedWgslToonPath === "string" && requestedWgslToonPath.trim().length > 0) {
+                const normalizedPath = requestedWgslToonPath.trim();
+                resolvedWgslToonPath = this.isAbsolutePathForRenderer(normalizedPath)
+                    ? normalizedPath
+                    : this.resolveProjectRelativePath(filePath, normalizedPath);
+                const wgslText = await window.electronAPI.readTextFile(resolvedWgslToonPath);
+                if (wgslText) {
+                    resolvedWgslToonText = wgslText;
+                } else {
+                    wgslToonWarning = `WGSL shader load failed: ${requestedWgslToonPath}`;
+                }
+            }
+
             const result = await this.mmdManager.importProjectState(parsed);
+
+            this.postFxWgslToonPath = resolvedWgslToonPath;
+            this.postFxWgslToonText = resolvedWgslToonText;
+            this.mmdManager.setExternalWgslToonShader(resolvedWgslToonPath, resolvedWgslToonText);
+            this.postFxLutExternalPath = resolvedExternalLutPath;
+            this.postFxLutExternalText = resolvedExternalLutText;
+            this.mmdManager.setPostEffectExternalLut(resolvedExternalLutPath, resolvedExternalLutText);
+            if (isExternalLutMode && !resolvedExternalLutText) {
+                this.mmdManager.postEffectLutEnabled = false;
+            }
+            if (externalLutWarning) {
+                result.warnings.push(externalLutWarning);
+            }
+            if (wgslToonWarning) {
+                result.warnings.push(wgslToonWarning);
+            }
+
             this.refreshModelSelector();
             this.refreshShaderPanel();
             if (this.mmdManager.getTimelineTarget() === "camera") {
@@ -2142,6 +2254,36 @@ export class UIController {
         const separator = basePath.includes("\\") ? "\\" : "/";
         const normalizedBase = basePath.replace(/[\\/]+$/, "");
         return `${normalizedBase}${separator}${childName}`;
+    }
+
+    private getDirectoryPathForRenderer(filePath: string): string {
+        const normalized = filePath.replace(/[\\/]+$/, "");
+        const index = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+        if (index < 0) return normalized;
+        return normalized.slice(0, index);
+    }
+
+    private getBaseNameForRenderer(filePath: string): string {
+        const normalized = filePath.replace(/[\\/]+$/, "");
+        const index = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+        if (index < 0) return normalized;
+        return normalized.slice(index + 1);
+    }
+
+    private isAbsolutePathForRenderer(filePath: string): boolean {
+        return /^[A-Za-z]:[\\/]/.test(filePath)
+            || /^\\\\/.test(filePath)
+            || filePath.startsWith("/");
+    }
+
+    private normalizeRelativePathForRenderer(filePath: string): string {
+        return filePath.replace(/^[.][\\/]/, "").replace(/[\\]+/g, "/");
+    }
+
+    private resolveProjectRelativePath(projectFilePath: string, relativePath: string): string {
+        const projectDir = this.getDirectoryPathForRenderer(projectFilePath);
+        const normalizedRelative = this.normalizeRelativePathForRenderer(relativePath);
+        return this.joinPathForRenderer(projectDir, normalizedRelative.replace(/\//g, "\\"));
     }
 
     private getCameraPanelInfo(): ModelInfo {
@@ -2862,6 +3004,68 @@ export class UIController {
 
         const presetLabelById = new Map(presets.map((preset) => [preset.id, preset.label]));
         this.shaderMaterialList.innerHTML = "";
+
+        const externalWgslPath = this.mmdManager.getExternalWgslToonShaderPath();
+        const externalWgslFileName = externalWgslPath
+            ? this.getBaseNameForRenderer(externalWgslPath)
+            : "None";
+        const externalWgslStateLabel = this.mmdManager.hasExternalWgslToonShader()
+            ? "ON"
+            : "OFF";
+
+        const externalWgslControls = document.createElement("div");
+        externalWgslControls.className = "shader-external-wgsl-controls";
+        externalWgslControls.innerHTML = `
+            <div class="effect-row">
+                <span class="effect-label">WGSL</span>
+                <button data-ext-wgsl-btn="load" type="button" class="effect-button">Load...</button>
+                <span data-ext-wgsl-val="state" class="effect-value">${externalWgslStateLabel}</span>
+            </div>
+            <div class="effect-row">
+                <span class="effect-label">WGSLFile</span>
+                <button data-ext-wgsl-btn="clear" type="button" class="effect-button">Clear</button>
+                <span data-ext-wgsl-val="path" class="effect-value">${externalWgslFileName}</span>
+            </div>
+        `;
+
+        const externalWgslLoadButton = externalWgslControls.querySelector<HTMLButtonElement>('button[data-ext-wgsl-btn="load"]');
+        const externalWgslClearButton = externalWgslControls.querySelector<HTMLButtonElement>('button[data-ext-wgsl-btn="clear"]');
+        if (externalWgslLoadButton && externalWgslClearButton) {
+            externalWgslClearButton.disabled = !externalWgslPath;
+
+            externalWgslLoadButton.addEventListener("click", () => {
+                void (async () => {
+                    const shaderPath = await window.electronAPI.openFileDialog([
+                        { name: "WGSL Shader", extensions: ["wgsl"] },
+                        { name: "All files", extensions: ["*"] },
+                    ]);
+                    if (!shaderPath) return;
+
+                    const shaderText = await window.electronAPI.readTextFile(shaderPath);
+                    if (!shaderText) {
+                        this.showToast("Failed to read WGSL shader file", "error");
+                        return;
+                    }
+
+                    this.postFxWgslToonPath = shaderPath;
+                    this.postFxWgslToonText = shaderText;
+                    this.mmdManager.setExternalWgslToonShader(shaderPath, shaderText);
+                    this.showToast(`Loaded WGSL shader: ${this.getBaseNameForRenderer(shaderPath)}`, "success");
+                    this.refreshShaderPanel();
+                })();
+            });
+
+            externalWgslClearButton.addEventListener("click", () => {
+                this.postFxWgslToonPath = null;
+                this.postFxWgslToonText = null;
+                this.mmdManager.setExternalWgslToonShader(null, null);
+                this.showToast("Cleared external WGSL shader", "info");
+                this.refreshShaderPanel();
+            });
+        }
+
+        this.shaderMaterialList.appendChild(externalWgslControls);
+
         for (const material of selectedModel.materials) {
             const item = document.createElement("div");
             item.className = "shader-material-item";
@@ -3025,6 +3229,20 @@ export class UIController {
                     <span data-postfx-val="glow-intensity" class="effect-value">OFF</span>
                 </div>
                 <div class="effect-row">
+                    <span class="effect-label">LUTSrc</span>
+                    <select data-postfx-select="lut-source" class="effect-select">
+                        <option value="builtin">Builtin</option>
+                        <option value="external-absolute">External Abs</option>
+                        <option value="project-relative">Project LUT</option>
+                    </select>
+                    <span data-postfx-val="lut-source" class="effect-value">Builtin</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">LUTFile</span>
+                    <button data-postfx-btn="lut-file" type="button" class="effect-button">Load...</button>
+                    <span data-postfx-val="lut-file" class="effect-value">None</span>
+                </div>
+                <div class="effect-row">
                     <span class="effect-label">LUT</span>
                     <select data-postfx-select="lut-preset" class="effect-select">
                         ${lutPresetOptionsHtml}
@@ -3104,6 +3322,10 @@ export class UIController {
         const colorCurvesSaturationVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="color-curves-saturation"]');
         const glowIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="glow-intensity"]');
         const glowIntensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="glow-intensity"]');
+        const lutSourceSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="lut-source"]');
+        const lutSourceVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-source"]');
+        const lutFileButton = this.shaderMaterialList.querySelector<HTMLButtonElement>('button[data-postfx-btn="lut-file"]');
+        const lutFileVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-file"]');
         const lutPresetSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="lut-preset"]');
         const lutVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut"]');
         const lutIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="lut-intensity"]');
@@ -3153,6 +3375,10 @@ export class UIController {
             !colorCurvesSaturationVal ||
             !glowIntensityInput ||
             !glowIntensityVal ||
+            !lutSourceSelect ||
+            !lutSourceVal ||
+            !lutFileButton ||
+            !lutFileVal ||
             !lutPresetSelect ||
             !lutVal ||
             !lutIntensityInput ||
@@ -3306,16 +3532,64 @@ export class UIController {
                 : "OFF";
         };
 
+        const lutModeToLabel = (mode: string): string => {
+            switch (mode) {
+                case "external-absolute":
+                    return "External";
+                case "project-relative":
+                    return "Project";
+                default:
+                    return "Builtin";
+            }
+        };
+
+        const chooseExternalLut = async (): Promise<void> => {
+            const lutPath = await window.electronAPI.openFileDialog([
+                { name: "LUT Files", extensions: ["3dl"] },
+                { name: "All files", extensions: ["*"] },
+            ]);
+            if (!lutPath) return;
+
+            const lutText = await window.electronAPI.readTextFile(lutPath);
+            if (!lutText) {
+                this.showToast("Failed to load LUT file", "error");
+                return;
+            }
+
+            this.postFxLutExternalPath = lutPath;
+            this.postFxLutExternalText = lutText;
+            this.mmdManager.setPostEffectExternalLut(lutPath, lutText);
+            applyLut();
+            this.showToast(`Loaded LUT: ${this.getBaseNameForRenderer(lutPath)}`, "success");
+        };
+
         const applyLut = (): void => {
+            const selectedMode = lutSourceSelect.value === "external-absolute" || lutSourceSelect.value === "project-relative"
+                ? lutSourceSelect.value
+                : "builtin";
+            const isBuiltinMode = selectedMode === "builtin";
+            const hasExternalLut = Boolean(this.postFxLutExternalText);
+
+            this.mmdManager.postEffectLutSourceMode = selectedMode;
             this.mmdManager.postEffectLutPreset = lutPresetSelect.value;
             this.mmdManager.postEffectLutIntensity = Number(lutIntensityInput.value) / 100;
-            this.mmdManager.postEffectLutEnabled = this.mmdManager.postEffectLutPreset !== "none"
-                && this.mmdManager.postEffectLutIntensity > 0.000001;
 
-            lutIntensityInput.disabled = this.mmdManager.postEffectLutPreset === "none";
+            lutPresetSelect.disabled = !isBuiltinMode;
+            lutFileButton.disabled = isBuiltinMode;
+            lutIntensityInput.disabled = isBuiltinMode
+                ? this.mmdManager.postEffectLutPreset === "none"
+                : !hasExternalLut;
 
+            this.mmdManager.postEffectLutEnabled = isBuiltinMode
+                ? this.mmdManager.postEffectLutPreset !== "none" && this.mmdManager.postEffectLutIntensity > 0.000001
+                : hasExternalLut && this.mmdManager.postEffectLutIntensity > 0.000001;
+
+            lutSourceVal.textContent = lutModeToLabel(selectedMode);
+            lutFileVal.textContent = this.postFxLutExternalPath
+                ? this.getBaseNameForRenderer(this.postFxLutExternalPath)
+                : "None";
             lutVal.textContent = this.mmdManager.postEffectLutEnabled
-                ? this.mmdManager.postEffectLutPreset
+                ? (isBuiltinMode ? this.mmdManager.postEffectLutPreset : "external")
                 : "OFF";
             lutIntensityVal.textContent = this.mmdManager.postEffectLutEnabled
                 ? this.mmdManager.postEffectLutIntensity.toFixed(2)
@@ -3417,15 +3691,17 @@ export class UIController {
         glowIntensityInput.value = String(
             Math.max(0, Math.min(400, Math.round((this.mmdManager.postEffectGlowEnabled ? this.mmdManager.postEffectGlowIntensity : 0) * 100))),
         );
+        if (!this.postFxLutExternalPath && this.mmdManager.postEffectLutExternalPath) {
+            this.postFxLutExternalPath = this.mmdManager.postEffectLutExternalPath;
+        }
+        lutSourceSelect.value = lutSourceSelect.querySelector(`option[value="${this.mmdManager.postEffectLutSourceMode}"]`)
+            ? this.mmdManager.postEffectLutSourceMode
+            : "builtin";
         lutPresetSelect.value = Array.from(lutPresetSelect.options).some((option) => option.value === this.mmdManager.postEffectLutPreset)
             ? this.mmdManager.postEffectLutPreset
             : "none";
         lutIntensityInput.value = String(
-            Math.round(
-                (this.mmdManager.postEffectLutEnabled && lutPresetSelect.value !== "none"
-                    ? this.mmdManager.postEffectLutIntensity
-                    : 0) * 100,
-            ),
+            Math.round((this.mmdManager.postEffectLutEnabled ? this.mmdManager.postEffectLutIntensity : 0) * 100),
         );
         motionBlurStrengthInput.value = String(
             Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectMotionBlurEnabled ? this.mmdManager.postEffectMotionBlurStrength : 0) * 100))),
@@ -3479,6 +3755,10 @@ export class UIController {
         ssaoStrengthInput.addEventListener("input", applySsao);
         colorCurvesSaturationInput.addEventListener("input", applyColorCurves);
         glowIntensityInput.addEventListener("input", applyGlow);
+        lutSourceSelect.addEventListener("change", applyLut);
+        lutFileButton.addEventListener("click", () => {
+            void chooseExternalLut();
+        });
         lutPresetSelect.addEventListener("change", applyLut);
         lutIntensityInput.addEventListener("input", applyLut);
         motionBlurStrengthInput.addEventListener("input", applyMotionBlur);
