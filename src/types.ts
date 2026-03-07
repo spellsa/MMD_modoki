@@ -10,6 +10,7 @@ export interface ElectronAPI {
         defaultFileName?: string,
         filters?: { name: string; extensions: string[] }[],
     ) => Promise<string | null>;
+    listBundledWgslFiles: () => Promise<{ name: string; path: string }[]>;
     writeTextFileToPath: (filePath: string, content: string) => Promise<boolean>;
     savePngFile: (dataUrl: string, defaultFileName?: string) => Promise<string | null>;
     savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) => Promise<string | null>;
@@ -176,6 +177,7 @@ export interface ProjectLightingState {
     toonShadowInfluence?: number;
     shadowEnabled: boolean;
     shadowDarkness: number;
+    shadowFrustumSize?: number;
     shadowEdgeSoftness?: number;
     selfShadowEdgeSoftness?: number;
     occlusionShadowEdgeSoftness?: number;
@@ -220,6 +222,8 @@ export interface ProjectEffectState {
     ssaoEnabled?: boolean;
     ssaoStrength?: number;
     ssaoRadius?: number;
+    ssaoFadeEnd?: number;
+    ssaoDebugView?: boolean;
     colorCurvesEnabled?: boolean;
     colorCurvesHue?: number;
     colorCurvesDensity?: number;

@@ -1,6 +1,6 @@
 ﻿# SSAO 調査メモ（WebGPU）
 
-最終更新: 2026-03-03
+最終更新: 2026-03-07
 
 ## 目的
 
@@ -58,11 +58,21 @@ WebGPU モードで SSAO を扱う際の制約と、`MMD_modoki` での試行結
 
 ## いまの運用判断
 
-- UI は安定性優先で SSAO を一時非表示。
-- Backlog では `FX-200A Contact AO（WGSL）` として再設計する。
+- 現在は一時非表示運用を終了し、単一 `SSAO` フェーダーとして再公開済み。
+- 実装は `FX-200A Contact AO（WGSL / fullscreen postprocess ベース）` として再設計済み。
   - 「閉所/接触寄り」に寄せる
   - 大段差は棄却
-  - 遠方は透明度で強く減衰（10m目安で 0）
+  - 遠方は透明度で強く減衰
+  - 詳細は [SSAO 現行仕様（2026-03-07）](./ssao-current-spec.md) を参照
+
+## 2026-03-07 再実装メモ
+
+- WebGPU では postprocess fallback を使わず、`MmdStandard` の WGSL 側へ contact AO を直接注入する方針へ変更。
+- 実装位置:
+  - `CUSTOM_FRAGMENT_BEFORE_LIGHTS` で screen-space depth 差から AO を算出
+  - `CUSTOM_FRAGMENT_BEFORE_FOG` で最終色へ乗算
+- これにより `MMD Standard` と `toon_debug_white_shadow.wgsl` の両方で同じ AO を共有できる。
+- UI は既存の単一 `SSAO` フェーダーを再利用し、内部では contact AO の `strength / radius / fade` に変換する。
 
 ## 再挑戦時チェックリスト
 

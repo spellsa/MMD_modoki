@@ -11,13 +11,15 @@
 - `候補`: 実装前（優先度付き）
 - `実験`: 検証用。品質/負荷次第で採用
 
-## 運用メモ（2026-03-03）
+## 運用メモ（2026-03-07）
 - WebGPU安定性優先のため、次の項目は UI から一時的に非表示:
-  - `FX-200` SSAO
   - `FX-110` Glow Layer
   - `FX-205` Motion Blur
   - `FX-202` SSR
   - `FX-203` Volumetric Light
+- `FX-200` SSAO は再公開済み。
+  - 現在は Babylon SSAO2 ではなく、独自 fullscreen SSAO を単一フェーダー UI で運用
+  - `Radius=2.0`, `FadeEnd=200m` は内部固定
 - `FX-202` SSR は UI 経由では常時 OFF（`strength=0` / `enabled=false`）を適用。
 - 実装コード自体は保持し、再検証時に再公開できる状態を維持する。
 
@@ -47,7 +49,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | FX-110 | Glow Layer | S | Yes | 実装済みだが現状はUI非表示運用 |
 | 2 | FX-104 | Saturation | A | Yes(代替) | Color CurvesのSaturationで代替済み。専用ノブ化のみ未実施 |
-| 3 | FX-200 | SSAO | A | Yes | 実装済みだが現状はUI非表示運用 |
+| 3 | FX-200 | SSAO | A | Yes | 再公開済み。独自fullscreen SSAOを単一フェーダーで運用 |
 | 4 | FX-205 | Motion Blur | A | Yes | 実装済みだが現状はUI非表示運用 |
 | 5 | FX-202 | SSR | A | Yes | 実装済みだが現状はUI非表示・常時OFF運用 |
 | 6 | FX-203 | Volumetric Light | A | Yes | 実装済みだが現状はUI非表示運用 |
@@ -78,19 +80,15 @@
 | 31 | FX-106 | White Balance | C | No | Babylonの直接ノブが薄く実装方針要検討 |
 | 32 | FX-500 | Blob Shadow（足下接地影） | A | No | WebGPUでも実装容易。まずは床受け限定で導入し、必要なら別モデル受けへ拡張 |
 
-注記: `FX-110 / FX-200 / FX-202 / FX-203 / FX-205` は実験導入済みだが、現時点では UI 非表示運用。
+注記: `FX-110 / FX-202 / FX-203 / FX-205` は実験導入済みだが、現時点では UI 非表示運用。
 
 ## 2. 次の実装バッチ（推奨）
-1. `FX-200A` Contact AO（WGSLスクリーンスペース実装）を追加
-  - Babylon SSAO2 依存ではなく、WebGPU前提の独自パスとして実装
-  - 深度差しきい値で大きな段差を棄却し、接触陰影寄りに調整
-  - 遠方フェード（原点から約10m目安で透明度0）を適用
-2. `FX-500` Blob Shadow（足下接地影）を追加
+1. `FX-500` Blob Shadow（足下接地影）を追加
   - 初期実装は床受け限定（1モデル1影、単項目フェーダー運用）
   - 必要なら「自モデル除外の別モデル受け」へ拡張
-3. `FX-110, FX-205, FX-202, FX-203` の再公開判定（WebGPU安定性・UI運用見直し）
-4. `FX-210, FX-309`（Color Grading Wheels / Bloom+Edgeプリセット）
-5. スタイライズ系Bランクの小粒追加（`FX-300, FX-301, FX-402, FX-403`）
+2. `FX-110, FX-205, FX-202, FX-203` の再公開判定（WebGPU安定性・UI運用見直し）
+3. `FX-210, FX-309`（Color Grading Wheels / Bloom+Edgeプリセット）
+4. スタイライズ系Bランクの小粒追加（`FX-300, FX-301, FX-402, FX-403`）
 
 ## 3. LUT方針メモ
 - 先行対応は `3dl` を推奨（Babylon標準のColorGradingTextureに素直に乗る）

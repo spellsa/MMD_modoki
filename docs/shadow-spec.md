@@ -63,26 +63,28 @@ PMX の材質フラグには、影に関するビットがあります。
   - `enableSoftTransparentShadow = true`
   - `useOpacityTextureForTransparentShadow = true`
 - 影の投影範囲（地面全体カバー）
-  - `dirLight.shadowFrustumSize = 140`
+  - `dirLight.shadowFrustumSize = 220`
   - `dirLight.shadowMinZ = 1`
-  - `dirLight.shadowMaxZ = 300`
+  - `dirLight.shadowMaxZ = max(500, shadowFrustumSize * 6)`
   - `dirLight.autoUpdateExtends = true`
   - `dirLight.autoCalcShadowZBounds = true`
-  - 光源位置距離: `setLightDirection` 内 `dist = 60`
+  - 光源位置距離: `setLightDirection` 内 `dist = max(90, shadowFrustumSize * 0.35)`
 
 ## UI との関係
 
 影設定は、材質フラグとは別に照明 UI で制御します。
 
 - `index.html`
-  - `#light-shadow`（影の濃さ）
+  - `#light-shadow`（影の濃さ、現状は非表示）
+  - `#light-shadow-frustum-size`（影範囲）
   - `#light-shadow-softness`（境界幅 / contact hardening）
 - `src/ui-controller.ts`
   - 起動時に `setShadowEnabled(true)` を適用（UI上は常時ON）
-  - `shadowDarkness` の更新
+  - `shadowFrustumSize` の更新
   - `shadowEdgeSoftness` の更新
 
-現在は UI 上では常時 ON で運用し、影の濃さと境界幅のみ調整します。
+現在は UI 上では常時 ON で運用し、主に影範囲と境界幅を調整します。
+`shadowDarkness` は内部値としては保持しますが、既定値 `0.0` で UI からは隠しています。
 
 照明欄の初期値:
 
@@ -90,6 +92,13 @@ PMX の材質フラグには、影に関するビットがあります。
 - 仰角: `-50`
 - 光の強さ: `0.8`
 - 環境光: `0.2`
+- 影の濃さ: `0.0`（UI非表示）
+- 影範囲: `220`
+
+照明欄の制約:
+
+- `shadowFrustumSize` の UI 上限は `6000`
+- 範囲を広げるほど影密度は下がるため、必要以上に大きくしない方が見た目は安定しやすい
 
 ## 既知の制限
 

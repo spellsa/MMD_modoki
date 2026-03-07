@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         filters?: { name: string; extensions: string[] }[],
     ) =>
         ipcRenderer.invoke('file:saveText', content, defaultFileName, filters),
+    listBundledWgslFiles: () =>
+        ipcRenderer.invoke('file:listBundledWgslFiles'),
     writeTextFileToPath: (filePath: string, content: string) =>
         ipcRenderer.invoke('file:writeTextToPath', filePath, content),
     savePngFile: (dataUrl: string, defaultFileName?: string) =>

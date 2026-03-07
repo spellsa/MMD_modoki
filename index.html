@@ -235,6 +235,8 @@
         </div>
       </main>
 
+      <div id="shader-resizer" role="separator" aria-orientation="vertical" aria-label="Effect panel width resize"></div>
+
       <!-- Right Panel: Effect -->
       <aside id="shader-panel">
         <div class="panel-header">
@@ -247,7 +249,9 @@
         <div class="shader-panel-body">
           <div class="shader-panel-row">
             <span class="info-label">対象</span>
-            <span id="shader-model-name" class="shader-model-name">-</span>
+            <select id="shader-model-select" class="panel-select" disabled>
+              <option value="">-</option>
+            </select>
           </div>
           <div class="shader-panel-row">
             <span class="info-label">種類</span>
@@ -523,10 +527,15 @@
               <input type="range" id="light-flat-color-influence" class="light-slider" min="0" max="100" value="35" step="1">
               <span id="light-flat-color-influence-val" class="light-value">35%</span>
             </div>
-            <div class="light-row light-row--shadow">
+            <div class="light-row light-row--shadow" style="display:none;">
               <span class="light-label">影の濃さ</span>
-              <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="45" step="1">
-              <span id="light-shadow-val" class="light-value">0.45</span>
+              <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="0" step="1">
+              <span id="light-shadow-val" class="light-value">0.00</span>
+            </div>
+            <div class="light-row light-row--shadow">
+              <span class="light-label">影範囲</span>
+              <input type="range" id="light-shadow-frustum-size" class="light-slider" min="120" max="6000" value="220" step="20">
+              <span id="light-shadow-frustum-size-val" class="light-value">220</span>
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label">影色R</span>

@@ -42,6 +42,7 @@
   --toolbar-height: 44px;
   --timeline-width: 270px;
   --timeline-resizer-width: 6px;
+  --shader-resizer-width: 6px;
   --shader-panel-width: 280px;
   --bottom-panel-height: 180px;
 
@@ -110,6 +111,7 @@ body.exporter-mode #app {
 body.exporter-mode #toolbar,
 body.exporter-mode #timeline-panel,
 body.exporter-mode #timeline-resizer,
+body.exporter-mode #shader-resizer,
 body.exporter-mode #shader-panel,
 body.exporter-mode #bottom-panel,
 body.exporter-mode #viewport-overlay {
@@ -136,6 +138,7 @@ body.exporter-mode #bone-overlay-canvas {
 #app.ui-presentation-mode #toolbar,
 #app.ui-presentation-mode #timeline-panel,
 #app.ui-presentation-mode #timeline-resizer,
+#app.ui-presentation-mode #shader-resizer,
 #app.ui-presentation-mode #shader-panel,
 #app.ui-presentation-mode #bottom-panel,
 #app.ui-presentation-mode #viewport-overlay {
@@ -355,7 +358,12 @@ body.exporter-mode #bone-overlay-canvas {
    ============================================ */
 #main-content {
   display: grid;
-  grid-template-columns: var(--timeline-width) var(--timeline-resizer-width) 1fr var(--shader-panel-width);
+  grid-template-columns:
+    var(--timeline-width)
+    var(--timeline-resizer-width)
+    1fr
+    var(--shader-resizer-width)
+    var(--shader-panel-width);
   overflow: hidden;
 }
 
@@ -363,6 +371,7 @@ body.exporter-mode #bone-overlay-canvas {
   grid-template-columns: var(--timeline-width) var(--timeline-resizer-width) 1fr;
 }
 
+#main-content.shader-panel-collapsed #shader-resizer,
 #main-content.shader-panel-collapsed #shader-panel {
   display: none;
 }
@@ -410,7 +419,8 @@ body.exporter-mode #bone-overlay-canvas {
   background: transparent;
 }
 
-#timeline-resizer::before {
+#timeline-resizer::before,
+#shader-resizer::before {
   content: '';
   position: absolute;
   top: 0;
@@ -424,9 +434,18 @@ body.exporter-mode #bone-overlay-canvas {
 }
 
 #timeline-resizer:hover::before,
-body.timeline-resizing #timeline-resizer::before {
+#shader-resizer:hover::before,
+body.timeline-resizing #timeline-resizer::before,
+body.shader-resizing #shader-resizer::before {
   background: var(--accent-primary);
   opacity: 0.7;
+}
+
+#shader-resizer {
+  position: relative;
+  width: var(--shader-resizer-width);
+  cursor: col-resize;
+  background: transparent;
 }
 
 .panel-header {
@@ -1629,6 +1648,7 @@ body.file-drag-active #viewport-container {
 #app.ui-export-lock #toolbar,
 #app.ui-export-lock #timeline-panel,
 #app.ui-export-lock #timeline-resizer,
+#app.ui-export-lock #shader-resizer,
 #app.ui-export-lock #shader-panel,
 #app.ui-export-lock #bottom-panel,
 #app.ui-export-lock #viewport-container {
@@ -2674,6 +2694,7 @@ body.timeline-resizing {
     grid-template-columns: var(--timeline-width) var(--timeline-resizer-width) 1fr;
   }
 
+  #shader-resizer,
   #shader-panel {
     display: none;
   }

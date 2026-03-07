@@ -122,7 +122,9 @@ type MmdManagerInternalView = {
 export class UIController {
     private static readonly CAMERA_SELECT_VALUE = "__camera__";
     private static readonly MIN_TIMELINE_WIDTH = 160;
+    private static readonly MIN_SHADER_PANEL_WIDTH = 220;
     private static readonly MIN_VIEWPORT_WIDTH = 360;
+    private static readonly EXTERNAL_WGSL_PRESET_PREFIX = "external-wgsl::";
 
     private mmdManager: MmdManager;
     private timeline: Timeline;
@@ -178,7 +180,7 @@ export class UIController {
     private modelSelect: HTMLSelectElement;
     private btnModelVisibility: HTMLButtonElement;
     private btnModelDelete: HTMLButtonElement;
-    private shaderModelNameEl: HTMLElement | null = null;
+    private shaderModelSelect: HTMLSelectElement | null = null;
     private shaderPresetSelect: HTMLSelectElement | null = null;
     private shaderApplyButton: HTMLButtonElement | null = null;
     private shaderResetButton: HTMLButtonElement | null = null;
@@ -188,8 +190,10 @@ export class UIController {
     private mainContentEl: HTMLElement;
     private timelinePanelEl: HTMLElement | null = null;
     private timelineResizerEl: HTMLElement | null = null;
+    private shaderResizerEl: HTMLElement | null = null;
     private shaderPanelEl: HTMLElement | null = null;
     private isTimelineResizing = false;
+    private isShaderResizing = false;
     private camFovSlider: HTMLInputElement | null = null;
     private camFovValueEl: HTMLElement | null = null;
     private camDistanceSlider: HTMLInputElement | null = null;
@@ -236,6 +240,9 @@ export class UIController {
     private postFxLutExternalText: string | null = null;
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
+    private bundledWgslShaderFiles: { name: string; path: string }[] = [];
+    private bundledWgslScanInFlight = false;
+    private bundledWgslLastScanMs = 0;
     private refreshAaToggleUi: (() => void) | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
@@ -294,7 +301,7 @@ export class UIController {
         this.modelSelect = document.getElementById("info-model-select") as HTMLSelectElement;
         this.btnModelVisibility = document.getElementById("btn-model-visibility") as HTMLButtonElement;
         this.btnModelDelete = document.getElementById("btn-model-delete") as HTMLButtonElement;
-        this.shaderModelNameEl = document.getElementById("shader-model-name");
+        this.shaderModelSelect = document.getElementById("shader-model-select") as HTMLSelectElement | null;
         this.shaderPresetSelect = document.getElementById("shader-preset-select") as HTMLSelectElement | null;
         this.shaderApplyButton = document.getElementById("btn-shader-apply") as HTMLButtonElement | null;
         this.shaderResetButton = document.getElementById("btn-shader-reset") as HTMLButtonElement | null;
@@ -312,6 +319,7 @@ export class UIController {
         this.mainContentEl = document.getElementById("main-content") as HTMLElement;
         this.timelinePanelEl = document.getElementById("timeline-panel");
         this.timelineResizerEl = document.getElementById("timeline-resizer");
+        this.shaderResizerEl = document.getElementById("shader-resizer");
         this.shaderPanelEl = document.getElementById("shader-panel");
         this.cameraControlsEl = document.getElementById("camera-controls");
         this.cameraDofControlsEl = document.getElementById("camera-dof-controls");
@@ -335,7 +343,9 @@ export class UIController {
         this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
         this.updateFullscreenUiToggleButton(false);
         this.setupTimelineResizer();
+        this.setupShaderResizer();
         this.refreshShaderPanel();
+        void this.reloadBundledWgslShaderFiles();
         this.updateTimelineEditState();
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
         document.addEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
@@ -483,28 +493,10 @@ export class UIController {
 
         // Active model selector
         this.modelSelect.addEventListener("change", () => {
-            const value = this.modelSelect.value;
-            if (value === UIController.CAMERA_SELECT_VALUE) {
-                this.mmdManager.setTimelineTarget("camera");
-                this.applyCameraSelectionUI();
-                this.refreshModelSelector();
-                this.refreshShaderPanel();
-                this.showToast("Timeline target: Camera", "success");
-                return;
-            }
-
-            const index = Number.parseInt(value, 10);
-            if (Number.isNaN(index)) return;
-            const ok = this.mmdManager.setActiveModelByIndex(index);
-            if (!ok) {
-                this.showToast("Failed to switch active model", "error");
-                return;
-            }
-
-            this.mmdManager.setTimelineTarget("model");
-            this.refreshModelSelector();
-            this.refreshShaderPanel();
-            this.showToast("Active model switched", "success");
+            this.handleModelTargetSelection(this.modelSelect.value, true);
+        });
+        this.shaderModelSelect?.addEventListener("change", () => {
+            this.handleModelTargetSelection(this.shaderModelSelect?.value ?? "", true);
         });
 
         this.btnModelVisibility.addEventListener("click", () => {
@@ -538,10 +530,10 @@ export class UIController {
         this.setupAccessoryControls();
 
         this.shaderApplyButton?.addEventListener("click", () => {
-            this.applyShaderPresetFromPanel(false);
+            void this.applyShaderPresetFromPanel(false);
         });
         this.shaderResetButton?.addEventListener("click", () => {
-            this.applyShaderPresetFromPanel(true);
+            void this.applyShaderPresetFromPanel(true);
         });
 
         // Camera controls
@@ -624,6 +616,7 @@ export class UIController {
         const elLightFlatStrength = document.getElementById("light-flat-strength") as HTMLInputElement;
         const elLightFlatColorInfluence = document.getElementById("light-flat-color-influence") as HTMLInputElement;
         const elShadow = document.getElementById("light-shadow") as HTMLInputElement;
+        const elShadowFrustumSize = document.getElementById("light-shadow-frustum-size") as HTMLInputElement;
         const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
         const elShadowColorG = document.getElementById("light-shadow-color-g") as HTMLInputElement;
         const elShadowColorB = document.getElementById("light-shadow-color-b") as HTMLInputElement;
@@ -641,6 +634,7 @@ export class UIController {
         const valLightFlatStrength = document.getElementById("light-flat-strength-val")!;
         const valLightFlatColorInfluence = document.getElementById("light-flat-color-influence-val")!;
         const valSh = document.getElementById("light-shadow-val")!;
+        const valShadowFrustumSize = document.getElementById("light-shadow-frustum-size-val")!;
         const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
         const valShadowColorG = document.getElementById("light-shadow-color-g-val")!;
         const valShadowColorB = document.getElementById("light-shadow-color-b-val")!;
@@ -766,6 +760,11 @@ export class UIController {
             valSh.textContent = v.toFixed(2);
             this.mmdManager.shadowDarkness = v;
         });
+        elShadowFrustumSize.addEventListener("input", () => {
+            const v = Number(elShadowFrustumSize.value);
+            valShadowFrustumSize.textContent = String(Math.round(v));
+            this.mmdManager.shadowFrustumSize = v;
+        });
         const applyShadowColor = () => {
             const r = Number(elShadowColorR.value) / 255;
             const g = Number(elShadowColorG.value) / 255;
@@ -799,6 +798,8 @@ export class UIController {
         this.mmdManager.setShadowEnabled(true);
         elShadow.value = String(Math.round(this.mmdManager.shadowDarkness * 100));
         valSh.textContent = this.mmdManager.shadowDarkness.toFixed(2);
+        elShadowFrustumSize.value = String(Math.round(this.mmdManager.shadowFrustumSize));
+        valShadowFrustumSize.textContent = String(Math.round(this.mmdManager.shadowFrustumSize));
         const initialShadowColor = this.mmdManager.getShadowColor();
         elShadowColorR.value = String(Math.round(initialShadowColor.r * 255));
         elShadowColorG.value = String(Math.round(initialShadowColor.g * 255));
@@ -1828,7 +1829,14 @@ export class UIController {
                     : this.resolveProjectRelativePath(filePath, normalizedPath);
                 const wgslText = await window.electronAPI.readTextFile(resolvedWgslToonPath);
                 if (wgslText) {
-                    resolvedWgslToonText = wgslText;
+                    const validationError = this.validateExternalWgslToonSnippet(wgslText);
+                    if (validationError) {
+                        wgslToonWarning = `WGSL shader invalid (${requestedWgslToonPath}): ${validationError}`;
+                        resolvedWgslToonPath = null;
+                        resolvedWgslToonText = null;
+                    } else {
+                        resolvedWgslToonText = wgslText;
+                    }
                 } else {
                     wgslToonWarning = `WGSL shader load failed: ${requestedWgslToonPath}`;
                 }
@@ -2286,6 +2294,59 @@ export class UIController {
         return this.joinPathForRenderer(projectDir, normalizedRelative.replace(/\//g, "\\"));
     }
 
+    private makeExternalWgslPresetValue(filePath: string): string {
+        return `${UIController.EXTERNAL_WGSL_PRESET_PREFIX}${filePath}`;
+    }
+
+    private parseExternalWgslPresetPath(value: string): string | null {
+        if (!value.startsWith(UIController.EXTERNAL_WGSL_PRESET_PREFIX)) {
+            return null;
+        }
+        const path = value.slice(UIController.EXTERNAL_WGSL_PRESET_PREFIX.length).trim();
+        return path.length > 0 ? path : null;
+    }
+
+    private validateExternalWgslToonSnippet(source: string): string | null {
+        const text = source.trim();
+        if (text.length === 0) {
+            return "WGSL shader file is empty";
+        }
+        if (/\bfragmentOutputs\b/.test(text)) {
+            return "WGSL snippet must not include fragmentOutputs";
+        }
+        if (/\breturn\b/.test(text)) {
+            return "WGSL snippet must not contain return statements";
+        }
+        if (/@fragment\b|@vertex\b/.test(text) || /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(text)) {
+            return "Use a toon snippet, not a full WGSL module";
+        }
+        if (!/diffuseBase\s*\+=/.test(text)) {
+            return "WGSL snippet must write to diffuseBase";
+        }
+        return null;
+    }
+
+    private isSamePathForRenderer(a: string, b: string): boolean {
+        const norm = (v: string): string => v.replace(/[\\/]+/g, "\\").toLowerCase();
+        return norm(a) === norm(b);
+    }
+    private async reloadBundledWgslShaderFiles(triggerRefresh = true): Promise<void> {
+        if (this.bundledWgslScanInFlight) {
+            return;
+        }
+        this.bundledWgslScanInFlight = true;
+        try {
+            this.bundledWgslShaderFiles = await window.electronAPI.listBundledWgslFiles();
+        } catch {
+            this.bundledWgslShaderFiles = [];
+        } finally {
+            this.bundledWgslScanInFlight = false;
+            this.bundledWgslLastScanMs = Date.now();
+        }
+        if (triggerRefresh) {
+            this.refreshShaderPanel();
+        }
+    }
     private getCameraPanelInfo(): ModelInfo {
         return {
             name: "Camera",
@@ -2359,8 +2420,46 @@ export class UIController {
         }
 
         this.modelSelect.disabled = models.length === 0;
+        this.syncShaderModelSelectorFromInfo();
         this.updateInfoActionButtons();
         this.refreshAccessoryPanel();
+    }
+
+    private syncShaderModelSelectorFromInfo(): void {
+        if (!this.shaderModelSelect) return;
+        this.shaderModelSelect.innerHTML = this.modelSelect.innerHTML;
+        this.shaderModelSelect.value = this.modelSelect.value;
+        this.shaderModelSelect.disabled = this.modelSelect.disabled;
+    }
+
+    private handleModelTargetSelection(value: string, showToast: boolean): void {
+        if (value === UIController.CAMERA_SELECT_VALUE) {
+            this.mmdManager.setTimelineTarget("camera");
+            this.applyCameraSelectionUI();
+            this.refreshModelSelector();
+            this.refreshShaderPanel();
+            if (showToast) {
+                this.showToast("Timeline target: Camera", "success");
+            }
+            return;
+        }
+
+        const index = Number.parseInt(value, 10);
+        if (Number.isNaN(index)) return;
+        const ok = this.mmdManager.setActiveModelByIndex(index);
+        if (!ok) {
+            if (showToast) {
+                this.showToast("Failed to switch active model", "error");
+            }
+            return;
+        }
+
+        this.mmdManager.setTimelineTarget("model");
+        this.refreshModelSelector();
+        this.refreshShaderPanel();
+        if (showToast) {
+            this.showToast("Active model switched", "success");
+        }
     }
 
     private setupAccessoryControls(): void {
@@ -2593,7 +2692,7 @@ export class UIController {
 
         const modelOption = document.createElement("option");
         modelOption.value = "";
-        modelOption.textContent = "(繝｢繝・Ν荳ｭ蠢・";
+        modelOption.textContent = "(ﾃ｣ﾆ陳｢ﾃ｣ﾆ陳・ﾆ陳ｫﾃ､ﾂｸﾂｭﾃ･ﾂｿﾂ・";
         select.appendChild(modelOption);
 
         const boneNames = this.mmdManager.getModelBoneNames(modelIndex);
@@ -2750,6 +2849,7 @@ export class UIController {
     private setShaderPanelVisible(visible: boolean): void {
         this.mainContentEl.classList.toggle("shader-panel-collapsed", !visible);
         this.clampTimelineWidthToLayout();
+        this.clampShaderWidthToLayout();
         this.applyViewportAspectPresentation();
         this.updateShaderPanelToggleButton(visible);
     }
@@ -2848,7 +2948,54 @@ export class UIController {
 
         window.addEventListener("resize", () => {
             this.clampTimelineWidthToLayout();
+            this.clampShaderWidthToLayout();
             this.applyViewportAspectPresentation();
+        });
+    }
+
+    private setupShaderResizer(): void {
+        if (!this.shaderResizerEl || !this.shaderPanelEl) return;
+
+        let startX = 0;
+        let startWidth = 0;
+
+        const stopResize = (): void => {
+            if (!this.isShaderResizing) return;
+            this.isShaderResizing = false;
+            document.body.classList.remove("shader-resizing");
+            window.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerup", onPointerUp);
+            window.removeEventListener("pointercancel", onPointerUp);
+        };
+
+        const onPointerMove = (event: PointerEvent): void => {
+            if (!this.isShaderResizing || !this.isShaderPanelExpanded()) return;
+
+            const delta = startX - event.clientX;
+            const maxWidth = this.computeShaderMaxWidth();
+            const nextWidth = Math.max(
+                UIController.MIN_SHADER_PANEL_WIDTH,
+                Math.min(maxWidth, startWidth + delta)
+            );
+
+            document.documentElement.style.setProperty("--shader-panel-width", `${Math.round(nextWidth)}px`);
+            this.applyViewportAspectPresentation();
+        };
+
+        const onPointerUp = (): void => {
+            stopResize();
+        };
+
+        this.shaderResizerEl.addEventListener("pointerdown", (event: PointerEvent) => {
+            if (event.button !== 0 || !this.isShaderPanelExpanded()) return;
+            event.preventDefault();
+            startX = event.clientX;
+            startWidth = this.shaderPanelEl?.getBoundingClientRect().width ?? UIController.MIN_SHADER_PANEL_WIDTH;
+            this.isShaderResizing = true;
+            document.body.classList.add("shader-resizing");
+            window.addEventListener("pointermove", onPointerMove);
+            window.addEventListener("pointerup", onPointerUp);
+            window.addEventListener("pointercancel", onPointerUp);
         });
     }
 
@@ -2890,12 +3037,15 @@ export class UIController {
     private computeTimelineMaxWidth(): number {
         const panelWidth = this.mainContentEl.clientWidth;
         const resizerWidth = this.timelineResizerEl?.getBoundingClientRect().width ?? 6;
+        const shaderResizerWidth = this.isShaderPanelExpanded()
+            ? (this.shaderResizerEl?.getBoundingClientRect().width ?? 6)
+            : 0;
         const shaderWidth = this.isShaderPanelExpanded()
             ? (this.shaderPanelEl?.getBoundingClientRect().width ?? 0)
             : 0;
         return Math.max(
             UIController.MIN_TIMELINE_WIDTH,
-            panelWidth - resizerWidth - shaderWidth - UIController.MIN_VIEWPORT_WIDTH
+            panelWidth - resizerWidth - shaderResizerWidth - shaderWidth - UIController.MIN_VIEWPORT_WIDTH
         );
     }
 
@@ -2910,9 +3060,34 @@ export class UIController {
         document.documentElement.style.setProperty("--timeline-width", `${Math.round(nextWidth)}px`);
     }
 
+    private computeShaderMaxWidth(): number {
+        if (!this.isShaderPanelExpanded()) {
+            return UIController.MIN_SHADER_PANEL_WIDTH;
+        }
+        const panelWidth = this.mainContentEl.clientWidth;
+        const timelineWidth = this.timelinePanelEl?.getBoundingClientRect().width ?? UIController.MIN_TIMELINE_WIDTH;
+        const timelineResizerWidth = this.timelineResizerEl?.getBoundingClientRect().width ?? 6;
+        const shaderResizerWidth = this.shaderResizerEl?.getBoundingClientRect().width ?? 6;
+        return Math.max(
+            UIController.MIN_SHADER_PANEL_WIDTH,
+            panelWidth - timelineWidth - timelineResizerWidth - shaderResizerWidth - UIController.MIN_VIEWPORT_WIDTH
+        );
+    }
+
+    private clampShaderWidthToLayout(): void {
+        if (!this.shaderPanelEl || !this.isShaderPanelExpanded()) return;
+        const currentWidth = this.shaderPanelEl.getBoundingClientRect().width;
+        const maxWidth = this.computeShaderMaxWidth();
+        const nextWidth = Math.max(
+            UIController.MIN_SHADER_PANEL_WIDTH,
+            Math.min(maxWidth, currentWidth)
+        );
+        document.documentElement.style.setProperty("--shader-panel-width", `${Math.round(nextWidth)}px`);
+    }
+
     private refreshShaderPanel(): void {
         if (
-            !this.shaderModelNameEl ||
+            !this.shaderModelSelect ||
             !this.shaderPresetSelect ||
             !this.shaderApplyButton ||
             !this.shaderResetButton ||
@@ -2922,15 +3097,23 @@ export class UIController {
             return;
         }
 
+        this.syncShaderModelSelectorFromInfo();
+
         if (this.modelSelect.value === UIController.CAMERA_SELECT_VALUE) {
             this.renderShaderCameraPostEffectsPanel();
             return;
         }
         this.restoreCameraDofControlsToCameraPanel();
 
+        const now = Date.now();
+        if (!this.bundledWgslScanInFlight && now - this.bundledWgslLastScanMs > 2000) {
+            void this.reloadBundledWgslShaderFiles(false);
+        }
+
         const isAvailable = this.mmdManager.isWgslMaterialShaderAssignmentAvailable();
         const presets = this.mmdManager.getWgslMaterialShaderPresets();
         const models = this.mmdManager.getWgslModelShaderStates();
+        const activeExternalWgslPath = this.mmdManager.getExternalWgslToonShaderPath();
 
         this.shaderPresetSelect.innerHTML = "";
         for (const preset of presets) {
@@ -2940,8 +3123,28 @@ export class UIController {
             this.shaderPresetSelect.appendChild(option);
         }
 
+        if (this.bundledWgslShaderFiles.length > 0) {
+            const separator = document.createElement("option");
+            separator.value = "";
+            separator.textContent = "--- WGSL Files ---";
+            separator.disabled = true;
+            this.shaderPresetSelect.appendChild(separator);
+            for (const shaderFile of this.bundledWgslShaderFiles) {
+                const option = document.createElement("option");
+                option.value = this.makeExternalWgslPresetValue(shaderFile.path);
+                option.textContent = `WGSL: ${shaderFile.name}`;
+                this.shaderPresetSelect.appendChild(option);
+            }
+        }
+        if (activeExternalWgslPath && !this.bundledWgslShaderFiles.some((file) => this.isSamePathForRenderer(file.path, activeExternalWgslPath))) {
+            const option = document.createElement("option");
+            option.value = this.makeExternalWgslPresetValue(activeExternalWgslPath);
+            option.textContent = `WGSL: ${this.getBaseNameForRenderer(activeExternalWgslPath)}`;
+            this.shaderPresetSelect.appendChild(option);
+        }
         if (!isAvailable) {
-            this.shaderModelNameEl.textContent = "-";
+            this.shaderModelSelect.innerHTML = '<option value="">-</option>';
+            this.shaderModelSelect.disabled = true;
             this.shaderPresetSelect.disabled = true;
             this.shaderApplyButton.disabled = true;
             this.shaderResetButton.disabled = true;
@@ -2951,7 +3154,8 @@ export class UIController {
         }
 
         if (models.length === 0) {
-            this.shaderModelNameEl.textContent = "-";
+            this.shaderModelSelect.innerHTML = '<option value="">-</option>';
+            this.shaderModelSelect.disabled = true;
             this.shaderPresetSelect.disabled = true;
             this.shaderApplyButton.disabled = true;
             this.shaderResetButton.disabled = true;
@@ -2966,7 +3170,8 @@ export class UIController {
         }
 
         const selectedModel = models.find((model) => model.modelIndex === selectedModelIndex) ?? models[0];
-        this.shaderModelNameEl.textContent = `${selectedModel.modelIndex + 1}: ${selectedModel.modelName}`;
+        this.shaderModelSelect.value = String(selectedModel.modelIndex);
+        this.shaderModelSelect.disabled = false;
 
         if (selectedModel.materials.length === 0) {
             this.shaderPresetSelect.disabled = true;
@@ -3000,18 +3205,42 @@ export class UIController {
         if (!presets.some((preset) => preset.id === selectedPresetId)) {
             selectedPresetId = presets[0]?.id ?? "wgsl-mmd-standard";
         }
-        this.shaderPresetSelect.value = selectedPresetId;
+
+        const selectedExternalWgslPath = selectedMaterial
+            ? selectedMaterial.externalWgslPath
+            : (() => {
+                const paths = new Set(
+                    selectedModel.materials
+                        .map((material) => material.externalWgslPath)
+                        .filter((value): value is string => typeof value === "string" && value.length > 0),
+                );
+                return paths.size === 1 ? Array.from(paths)[0] : null;
+            })();
+
+        if (selectedExternalWgslPath && !Array.from(this.shaderPresetSelect.options).some((option) => option.value === this.makeExternalWgslPresetValue(selectedExternalWgslPath))) {
+            const option = document.createElement("option");
+            option.value = this.makeExternalWgslPresetValue(selectedExternalWgslPath);
+            option.textContent = `WGSL: ${this.getBaseNameForRenderer(selectedExternalWgslPath)}`;
+            this.shaderPresetSelect.appendChild(option);
+        }
+
+        let selectedShaderValue: string = selectedPresetId;
+        if (selectedExternalWgslPath) {
+            selectedShaderValue = this.makeExternalWgslPresetValue(selectedExternalWgslPath);
+        }
+        if (!Array.from(this.shaderPresetSelect.options).some((option) => option.value === selectedShaderValue)) {
+            selectedShaderValue = presets[0]?.id ?? "wgsl-mmd-standard";
+        }
+        this.shaderPresetSelect.value = selectedShaderValue;
 
         const presetLabelById = new Map(presets.map((preset) => [preset.id, preset.label]));
         this.shaderMaterialList.innerHTML = "";
 
-        const externalWgslPath = this.mmdManager.getExternalWgslToonShaderPath();
+        const externalWgslPath = selectedExternalWgslPath;
         const externalWgslFileName = externalWgslPath
             ? this.getBaseNameForRenderer(externalWgslPath)
             : "None";
-        const externalWgslStateLabel = this.mmdManager.hasExternalWgslToonShader()
-            ? "ON"
-            : "OFF";
+        const externalWgslStateLabel = externalWgslPath ? "ON" : "OFF";
 
         const externalWgslControls = document.createElement("div");
         externalWgslControls.className = "shader-external-wgsl-controls";
@@ -3046,19 +3275,46 @@ export class UIController {
                         this.showToast("Failed to read WGSL shader file", "error");
                         return;
                     }
+                    const validationError = this.validateExternalWgslToonSnippet(shaderText);
+                    if (validationError) {
+                        this.showToast(`WGSL invalid: ${validationError}`, "error");
+                        return;
+                    }
+
+                    const targetMaterialKey = selectedMaterial?.key ?? null;
+                    const ok = this.mmdManager.setExternalWgslToonShaderForModel(
+                        selectedModel.modelIndex,
+                        targetMaterialKey,
+                        shaderPath,
+                        shaderText,
+                    );
+                    if (!ok) {
+                        this.showToast("WGSL shader assignment failed", "error");
+                        return;
+                    }
 
                     this.postFxWgslToonPath = shaderPath;
                     this.postFxWgslToonText = shaderText;
-                    this.mmdManager.setExternalWgslToonShader(shaderPath, shaderText);
                     this.showToast(`Loaded WGSL shader: ${this.getBaseNameForRenderer(shaderPath)}`, "success");
                     this.refreshShaderPanel();
                 })();
             });
 
             externalWgslClearButton.addEventListener("click", () => {
+                const targetMaterialKey = selectedMaterial?.key ?? null;
+                const ok = this.mmdManager.setExternalWgslToonShaderForModel(
+                    selectedModel.modelIndex,
+                    targetMaterialKey,
+                    null,
+                    null,
+                );
+                if (!ok) {
+                    this.showToast("WGSL shader clear failed", "error");
+                    return;
+                }
+
                 this.postFxWgslToonPath = null;
                 this.postFxWgslToonText = null;
-                this.mmdManager.setExternalWgslToonShader(null, null);
                 this.showToast("Cleared external WGSL shader", "info");
                 this.refreshShaderPanel();
             });
@@ -3090,7 +3346,9 @@ export class UIController {
 
             const presetEl = document.createElement("span");
             presetEl.className = "shader-material-preset";
-            presetEl.textContent = presetLabelById.get(material.presetId) ?? material.presetId;
+            presetEl.textContent = material.externalWgslPath
+                ? `WGSL: ${this.getBaseNameForRenderer(material.externalWgslPath)}`
+                : (presetLabelById.get(material.presetId) ?? material.presetId);
             item.appendChild(presetEl);
 
             this.shaderMaterialList.appendChild(item);
@@ -3103,7 +3361,9 @@ export class UIController {
             ? t("shader.reset.selected")
             : t("shader.reset.all");
 
-        if (selectedMaterial) {
+        if (externalWgslPath) {
+            this.shaderPanelNote.textContent = `External WGSL active: ${this.getBaseNameForRenderer(externalWgslPath)}`;
+        } else if (selectedMaterial) {
             this.shaderPanelNote.textContent = t("shader.note.selectedMaterial", {
                 name: selectedMaterial.name,
             });
@@ -3114,14 +3374,15 @@ export class UIController {
             this.shaderPanelNote.textContent = selectedPreset?.description ?? t("shader.note.applyAll");
         }
 
-        this.shaderPresetSelect.disabled = presets.length === 0;
-        this.shaderApplyButton.disabled = presets.length === 0;
+        const hasSelectableOption = Array.from(this.shaderPresetSelect.options).some((option) => !option.disabled && option.value.length > 0);
+        this.shaderPresetSelect.disabled = !hasSelectableOption;
+        this.shaderApplyButton.disabled = !hasSelectableOption;
         this.shaderResetButton.disabled = false;
     }
 
     private renderShaderCameraPostEffectsPanel(): void {
         if (
-            !this.shaderModelNameEl ||
+            !this.shaderModelSelect ||
             !this.shaderPresetSelect ||
             !this.shaderApplyButton ||
             !this.shaderResetButton ||
@@ -3131,7 +3392,9 @@ export class UIController {
             return;
         }
 
-        this.shaderModelNameEl.textContent = "Camera";
+        this.syncShaderModelSelectorFromInfo();
+        this.shaderModelSelect.value = UIController.CAMERA_SELECT_VALUE;
+        this.shaderModelSelect.disabled = this.modelSelect.disabled;
         this.shaderPresetSelect.innerHTML = `<option value="postfx">${t("shader.camera.postfx")}</option>`;
         this.shaderPresetSelect.value = "postfx";
         this.shaderPresetSelect.disabled = true;
@@ -3213,9 +3476,9 @@ export class UIController {
                     <input data-postfx="sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
                     <span data-postfx-val="sharpen-edge" class="effect-value">OFF</span>
                 </div>
-                <div class="effect-row" style="display:none;">
+                <div class="effect-row">
                     <span class="effect-label">SSAO</span>
-                    <input data-postfx="ssao-strength" type="range" class="effect-slider" min="0" max="400" value="100" step="1">
+                    <input data-postfx="ssao-strength" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
                     <span data-postfx-val="ssao-strength" class="effect-value">OFF</span>
                 </div>
                 <div class="effect-row">
@@ -3500,9 +3763,8 @@ export class UIController {
 
         const applySsao = (): void => {
             this.mmdManager.postEffectSsaoStrength = Number(ssaoStrengthInput.value) / 100;
-            const normalized = Math.max(0, Math.min(1, this.mmdManager.postEffectSsaoStrength / 4));
-            // Keep single-slider UX: bias toward enclosed-space darkening with a wider sampling radius.
-            this.mmdManager.postEffectSsaoRadius = 0.3 + normalized * 1.9;
+            this.mmdManager.postEffectSsaoRadius = 2;
+            this.mmdManager.postEffectSsaoFadeEnd = 200;
             this.mmdManager.postEffectSsaoEnabled = this.mmdManager.postEffectSsaoStrength > 0.000001;
 
             ssaoStrengthVal.textContent = this.mmdManager.postEffectSsaoEnabled
@@ -3680,7 +3942,7 @@ export class UIController {
             Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))),
         );
         ssaoStrengthInput.value = String(
-            Math.max(0, Math.min(400, Math.round((this.mmdManager.postEffectSsaoEnabled ? this.mmdManager.postEffectSsaoStrength : 0) * 100))),
+            Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectSsaoEnabled ? this.mmdManager.postEffectSsaoStrength : 0) * 100))),
         );
         colorCurvesSaturationInput.value = String(
             Math.max(
@@ -3789,7 +4051,7 @@ export class UIController {
         }
     }
 
-    private applyShaderPresetFromPanel(resetToDefault: boolean): void {
+    private async applyShaderPresetFromPanel(resetToDefault: boolean): Promise<void> {
         if (!this.shaderPresetSelect) {
             return;
         }
@@ -3813,16 +4075,48 @@ export class UIController {
         }
 
         const materialKey = this.shaderSelectedMaterialKeys.get(modelIndex) ?? null;
-        const presetId = resetToDefault ? "wgsl-mmd-standard" : this.shaderPresetSelect.value;
-        if (!presetId) {
+        const selectedValue = resetToDefault ? "wgsl-mmd-standard" : this.shaderPresetSelect.value;
+        if (!selectedValue) {
             this.showToast("Effect preset is not selected", "error");
+            return;
+        }
+
+        if (resetToDefault || !this.parseExternalWgslPresetPath(selectedValue)) {
+            this.postFxWgslToonPath = null;
+            this.postFxWgslToonText = null;
+            this.mmdManager.setExternalWgslToonShaderForModel(modelIndex, materialKey, null, null);
+        }
+
+        const externalWgslPath = this.parseExternalWgslPresetPath(selectedValue);
+        if (externalWgslPath) {
+            const shaderText = await window.electronAPI.readTextFile(externalWgslPath);
+            if (!shaderText) {
+                this.showToast(`WGSL shader load failed: ${this.getBaseNameForRenderer(externalWgslPath)}`, "error");
+                return;
+            }
+            const validationError = this.validateExternalWgslToonSnippet(shaderText);
+            if (validationError) {
+                this.showToast(`WGSL invalid: ${validationError}`, "error");
+                return;
+            }
+
+            const ok = this.mmdManager.setExternalWgslToonShaderForModel(modelIndex, materialKey, externalWgslPath, shaderText);
+            if (!ok) {
+                this.showToast("WGSL shader assignment failed", "error");
+                return;
+            }
+
+            this.postFxWgslToonPath = externalWgslPath;
+            this.postFxWgslToonText = shaderText;
+            this.refreshShaderPanel();
+            this.showToast(`WGSL shader selected: ${this.getBaseNameForRenderer(externalWgslPath)}`, "success");
             return;
         }
 
         const ok = this.mmdManager.setWgslMaterialShaderPreset(
             modelIndex,
             materialKey,
-            presetId as WgslMaterialShaderPresetId,
+            selectedValue as WgslMaterialShaderPresetId,
         );
         if (!ok) {
             this.showToast("Effect assignment failed", "error");

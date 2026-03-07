@@ -245,6 +245,47 @@ ipcMain.handle('file:readText', async (_event, filePath: string) => {
   }
 });
 
+ipcMain.handle('file:listBundledWgslFiles', async (): Promise<{ name: string; path: string }[]> => {
+  try {
+    const candidateDirs: string[] = [];
+    const seenDirs = new Set<string>();
+    const baseDirs = [process.cwd(), app.getAppPath(), __dirname];
+
+    for (const base of baseDirs) {
+      let current = path.resolve(base);
+      for (let depth = 0; depth < 8; depth += 1) {
+        const wgslDir = path.join(current, 'wgsl');
+        if (!seenDirs.has(wgslDir)) {
+          seenDirs.add(wgslDir);
+          candidateDirs.push(wgslDir);
+        }
+        const parent = path.dirname(current);
+        if (parent === current) break;
+        current = parent;
+      }
+    }
+
+    const uniqueByPath = new Map<string, { name: string; path: string }>();
+
+    for (const dir of candidateDirs) {
+      if (!fs.existsSync(dir)) continue;
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        if (path.extname(entry.name).toLowerCase() !== '.wgsl') continue;
+        const filePath = path.join(dir, entry.name);
+        if (uniqueByPath.has(filePath)) continue;
+        uniqueByPath.set(filePath, { name: entry.name, path: filePath });
+      }
+    }
+
+    return Array.from(uniqueByPath.values()).sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    console.error('Failed to list bundled WGSL files:', err);
+    return [];
+  }
+});
+
 ipcMain.handle(
   'file:saveText',
   async (

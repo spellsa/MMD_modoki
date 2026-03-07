@@ -8,6 +8,12 @@
 - 右: エフェクト欄
 - 下部: 情報 / 補間 / ボーン / モーフ / カメラ / 照明 / アクセサリー / 出力
 
+左右パネルの補足:
+
+- 左パネルは横幅変更可能
+- 右のエフェクト欄も横幅変更可能
+- `情報 > 対象` と `エフェクト欄 > 対象` のモデル選択は相互同期する
+
 レイアウト本体は `index.html`、見た目は `src/index.css` で管理します。
 
 ## UI 制御クラス
@@ -42,8 +48,9 @@
 - `照明`:
   - 方位角 / 仰角
   - 光の強さ / 環境光
-  - 影の濃さ / 境界幅
+  - 影範囲 / 境界幅
   - 影は UI 上は常時 ON 運用
+  - 影の濃さは既定値 `0.0`、通常 UI では非表示
 - `カメラ`:
   - 視点（左面/正面/右面）
   - FOV（距離は内部制御用）
@@ -66,9 +73,10 @@
     - ImageProcessing系: Contrast / Gamma / Exposure / ToneMap / Dither / Vignette
     - DefaultRenderingPipeline系: Bloom / Chroma / Grain / Sharpen
     - Color補正系: Curves（Color Curves Saturation）/ LUT（3dlプリセット + 強度）
+    - AO系: SSAO（単一フェーダー。内部では半径 / 距離を固定値で運用）
     - Scene系: Fog（密度フェーダー中心）
     - その他: Distortion / Edge
-  - 安定性優先の暫定運用として、`SSAO / Glow / Motion Blur / SSR / VLight` は UI 非表示
+  - 安定性優先の暫定運用として、`Glow / Motion Blur / SSR / VLight` は UI 非表示
   - SSR は UI 経由では常時 OFF（強度 0 / enabled false）
   - Bloom は複合項目として `ON/OFF + Weight + Threshold + Kernel`
   - BloomTh は右へ動かすほど発光範囲が広がるよう、UI操作を反転

@@ -16,6 +16,7 @@
 - [光・影実装メモ（Toon分離 + フラット光）](./light-shadow-implementation.md)
 - [ポストエフェクト拡充バックログ](./post-effects-backlog.md)
 - [SSAO 調査メモ（WebGPU）](./ssao-webgpu-investigation.md)
+- [SSAO 現行仕様（2026-03-07）](./ssao-current-spec.md)
 - [LensRenderingPipeline 実装ガイド](./lens-rendering-pipeline-guide.md)
 - [Babylon Editor DoF 調査](./babylon-editor-dof-research.md)
 - [WebGPU / WGSL 実現可能性メモ](./webgpu-wgsl-feasibility.md)
