@@ -1,7 +1,7 @@
 {
   "name": "mmd-modoki",
   "productName": "MMD modoki",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Electron desktop app for previewing and editing MMD assets",
   "main": ".vite/build/main.js",
   "private": true,
@@ -9,6 +9,7 @@
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
+    "make:zip": "electron-forge make --targets @electron-forge/maker-zip",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx ."
   },
