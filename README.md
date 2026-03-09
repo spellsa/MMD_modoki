@@ -1,4 +1,4 @@
-﻿# MMD Motion Editor (MMD_modoki)
+# MMD modoki
 
 Babylon.js + [babylon-mmd](https://github.com/noname0310/babylon-mmd) をベースに、MMDライクな操作感へ寄せた Electron デスクトップアプリです。  
 PMX/PMD モデル、Xアクセサリー、VMD モーション、音源（MP3/WAV/OGG）を読み込み、タイムライン付きで再生・確認できます。
@@ -46,6 +46,7 @@ PMX/PMD モデル、Xアクセサリー、VMD モーション、音源（MP3/WAV
   - Curves（Color Curves Saturation）/ LUT（3dl）/ Fog
   - Distortion / Edge
 - 実験系ポストエフェクト（SSAO / Glow / Motion Blur / SSR / VLight）は現在 UI 非表示運用
+- SSAO は負荷対策のため現行ビルドでは常時 OFF
   - SSR は UI 経由では常時 OFF（強度 0）を適用
 - ライティング調整（方位角/仰角/光の強さ/環境光/影の濃さ/境界幅）
 - DoF 操作は「情報 > 対象」でカメラ選択時のエフェクト欄に集約

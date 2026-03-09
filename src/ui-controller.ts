@@ -124,6 +124,8 @@ export class UIController {
     private static readonly MIN_TIMELINE_WIDTH = 160;
     private static readonly MIN_SHADER_PANEL_WIDTH = 220;
     private static readonly MIN_VIEWPORT_WIDTH = 360;
+    private static readonly MIN_BOTTOM_PANEL_HEIGHT = 132;
+    private static readonly MIN_MAIN_CONTENT_HEIGHT = 220;
     private static readonly EXTERNAL_WGSL_PRESET_PREFIX = "external-wgsl::";
 
     private mmdManager: MmdManager;
@@ -192,8 +194,11 @@ export class UIController {
     private timelineResizerEl: HTMLElement | null = null;
     private shaderResizerEl: HTMLElement | null = null;
     private shaderPanelEl: HTMLElement | null = null;
+    private bottomPanelEl: HTMLElement | null = null;
+    private bottomPanelResizerEl: HTMLElement | null = null;
     private isTimelineResizing = false;
     private isShaderResizing = false;
+    private isBottomPanelResizing = false;
     private camFovSlider: HTMLInputElement | null = null;
     private camFovValueEl: HTMLElement | null = null;
     private camDistanceSlider: HTMLInputElement | null = null;
@@ -240,6 +245,7 @@ export class UIController {
     private postFxLutExternalText: string | null = null;
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
+    private currentProjectFilePath: string | null = null;
     private bundledWgslShaderFiles: { name: string; path: string }[] = [];
     private bundledWgslScanInFlight = false;
     private bundledWgslLastScanMs = 0;
@@ -321,6 +327,8 @@ export class UIController {
         this.timelineResizerEl = document.getElementById("timeline-resizer");
         this.shaderResizerEl = document.getElementById("shader-resizer");
         this.shaderPanelEl = document.getElementById("shader-panel");
+        this.bottomPanelEl = document.getElementById("bottom-panel");
+        this.bottomPanelResizerEl = document.getElementById("bottom-panel-resizer");
         this.cameraControlsEl = document.getElementById("camera-controls");
         this.cameraDofControlsEl = document.getElementById("camera-dof-controls");
 
@@ -344,6 +352,8 @@ export class UIController {
         this.updateFullscreenUiToggleButton(false);
         this.setupTimelineResizer();
         this.setupShaderResizer();
+        this.setupBottomPanelResizer();
+        this.clampBottomPanelHeightToLayout();
         this.refreshShaderPanel();
         void this.reloadBundledWgslShaderFiles();
         this.updateTimelineEditState();
@@ -914,8 +924,6 @@ export class UIController {
             valEffectDofNearSuppression &&
             elEffectDofFocalInvert &&
             valEffectDofFocalInvert &&
-            elEffectDofLensBlur &&
-            valEffectDofLensBlur &&
             elEffectDofLensSize &&
             valEffectDofLensSize &&
             elEffectDofFocalLength &&
@@ -932,6 +940,7 @@ export class UIController {
 
             const applyDofEnabled = () => {
                 this.mmdManager.dofEnabled = elEffectDofEnabled.checked;
+                elEffectDofEnabled.checked = this.mmdManager.dofEnabled;
                 valEffectDofEnabled.textContent = this.mmdManager.dofEnabled ? "ON" : "OFF";
             };
             const applyDofQuality = () => {
@@ -983,11 +992,6 @@ export class UIController {
                     this.refreshDofAutoFocusReadout();
                 }
             };
-            const applyDofLensBlur = () => {
-                const strength = Number(elEffectDofLensBlur.value) / 100;
-                this.mmdManager.dofLensBlurStrength = strength;
-                valEffectDofLensBlur.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
-            };
             const applyDofLensSize = () => {
                 const lensSize = Number(elEffectDofLensSize.value);
                 this.mmdManager.dofLensSize = lensSize;
@@ -1016,9 +1020,12 @@ export class UIController {
             elEffectDofFStop.value = String(Math.round(this.mmdManager.dofFStop * 100));
             elEffectDofNearSuppression.value = String(Math.round(this.mmdManager.dofNearSuppressionScale * 100));
             elEffectDofFocalInvert.checked = this.mmdManager.dofFocalLengthDistanceInverted;
-            elEffectDofLensBlur.value = String(Math.round(this.mmdManager.dofLensBlurStrength * 100));
             elEffectDofLensSize.value = String(Math.round(this.mmdManager.dofLensSize));
             elEffectDofFocalLength.value = String(Math.round(this.mmdManager.dofFocalLength));
+            if (elEffectDofLensBlur && valEffectDofLensBlur) {
+                elEffectDofLensBlur.value = String(Math.round(this.mmdManager.dofLensBlurStrength * 100));
+                valEffectDofLensBlur.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
+            }
             if (autoFocusEnabled) {
                 elEffectDofFocus.disabled = true;
                 elEffectDofFocus.title = `Auto focus (camera target, ${this.mmdManager.dofAutoFocusRangeMeters.toFixed(1)}m radius in focus)`;
@@ -1035,7 +1042,6 @@ export class UIController {
             applyDofFStop();
             applyDofNearSuppression();
             applyDofFocalInvert();
-            applyDofLensBlur();
             applyDofLensSize();
             applyDofFocalLength();
             this.refreshDofAutoFocusReadout();
@@ -1049,10 +1055,18 @@ export class UIController {
             elEffectDofFStop.addEventListener("input", applyDofFStop);
             elEffectDofNearSuppression.addEventListener("input", applyDofNearSuppression);
             elEffectDofFocalInvert.addEventListener("change", applyDofFocalInvert);
-            elEffectDofLensBlur.addEventListener("input", applyDofLensBlur);
             elEffectDofLensSize.addEventListener("input", applyDofLensSize);
             if (!focalLengthLinkedToFov) {
                 elEffectDofFocalLength.addEventListener("input", applyDofFocalLength);
+            }
+            if (elEffectDofLensBlur && valEffectDofLensBlur) {
+                const applyDofLensBlur = () => {
+                    const strength = Number(elEffectDofLensBlur.value) / 100;
+                    this.mmdManager.dofLensBlurStrength = strength;
+                    valEffectDofLensBlur.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
+                };
+                applyDofLensBlur();
+                elEffectDofLensBlur.addEventListener("input", applyDofLensBlur);
             }
         }
 
@@ -1370,10 +1384,10 @@ export class UIController {
                 return;
             }
 
-            // Ctrl+S: save project
+            // Ctrl+S: save project (overwrite current project when possible)
             if (!e.metaKey && !e.altKey && e.ctrlKey && !e.shiftKey && lowerKey === "s") {
                 e.preventDefault();
-                this.saveProject();
+                void this.saveProject();
                 return;
             }
 
@@ -1497,10 +1511,10 @@ export class UIController {
                 this.loadProject();
             }
 
-            // Ctrl+Alt+S = save project file
+            // Ctrl+Alt+S = save project as
             if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === "S" || e.key === "s")) {
                 e.preventDefault();
-                this.saveProject();
+                void this.saveProject(true);
             }
 
             // Ctrl+O = open PMX/PMD
@@ -1689,7 +1703,13 @@ export class UIController {
         });
     }
 
-    private async saveProject(): Promise<void> {
+    private buildProjectDefaultFileName(): string {
+        const now = new Date();
+        const pad = (v: number) => String(v).padStart(2, "0");
+        return `project_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.modoki.json`;
+    }
+
+    private async saveProject(forceChoosePath = false): Promise<void> {
         this.setStatus("Saving project...", true);
         try {
             const project = this.mmdManager.exportProjectState();
@@ -1717,19 +1737,27 @@ export class UIController {
             }
 
             const json = JSON.stringify(project, null, 2);
-
-            const now = new Date();
-            const pad = (v: number) => String(v).padStart(2, "0");
-            const fileName = `mmd_project_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.mmdproj.json`;
-
-            const savedPath = await window.electronAPI.saveTextFile(json, fileName, [
-                { name: "MMD Modoki Project", extensions: ["mmdproj", "json"] },
-                { name: "All files", extensions: ["*"] },
-            ]);
-            if (!savedPath) {
-                this.setStatus("Ready", false);
-                this.showToast("Project save canceled", "info");
-                return;
+            let savedPath = this.currentProjectFilePath;
+            if (forceChoosePath || !savedPath) {
+                const defaultFileName = savedPath
+                    ? this.getBaseNameForRenderer(savedPath) || this.buildProjectDefaultFileName()
+                    : this.buildProjectDefaultFileName();
+                savedPath = await window.electronAPI.saveTextFile(json, defaultFileName, [
+                    { name: "MMD Modoki Project", extensions: ["mmdproj", "json"] },
+                    { name: "All files", extensions: ["*"] },
+                ]);
+                if (!savedPath) {
+                    this.setStatus("Ready", false);
+                    this.showToast("Project save canceled", "info");
+                    return;
+                }
+            } else {
+                const wrote = await window.electronAPI.writeTextFileToPath(savedPath, json);
+                if (!wrote) {
+                    this.setStatus("Project save failed", false);
+                    this.showToast("Failed to overwrite project file", "error");
+                    return;
+                }
             }
 
             if (relativeLutFileName && this.postFxLutExternalText) {
@@ -1751,6 +1779,7 @@ export class UIController {
                 }
             }
 
+            this.currentProjectFilePath = savedPath;
             const basename = savedPath.replace(/^.*[\\/]/, "");
             this.setStatus("Project saved", false);
             this.showToast(`Saved project: ${basename}`, "success");
@@ -1843,6 +1872,7 @@ export class UIController {
             }
 
             const result = await this.mmdManager.importProjectState(parsed);
+            this.currentProjectFilePath = filePath;
 
             this.postFxWgslToonPath = resolvedWgslToonPath;
             this.postFxWgslToonText = resolvedWgslToonText;
@@ -2949,6 +2979,7 @@ export class UIController {
         window.addEventListener("resize", () => {
             this.clampTimelineWidthToLayout();
             this.clampShaderWidthToLayout();
+            this.clampBottomPanelHeightToLayout();
             this.applyViewportAspectPresentation();
         });
     }
@@ -2993,6 +3024,52 @@ export class UIController {
             startWidth = this.shaderPanelEl?.getBoundingClientRect().width ?? UIController.MIN_SHADER_PANEL_WIDTH;
             this.isShaderResizing = true;
             document.body.classList.add("shader-resizing");
+            window.addEventListener("pointermove", onPointerMove);
+            window.addEventListener("pointerup", onPointerUp);
+            window.addEventListener("pointercancel", onPointerUp);
+        });
+    }
+
+    private setupBottomPanelResizer(): void {
+        if (!this.bottomPanelResizerEl || !this.bottomPanelEl) return;
+
+        let startY = 0;
+        let startHeight = 0;
+
+        const stopResize = (): void => {
+            if (!this.isBottomPanelResizing) return;
+            this.isBottomPanelResizing = false;
+            document.body.classList.remove("bottom-panel-resizing");
+            window.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerup", onPointerUp);
+            window.removeEventListener("pointercancel", onPointerUp);
+        };
+
+        const onPointerMove = (event: PointerEvent): void => {
+            if (!this.isBottomPanelResizing) return;
+
+            const delta = event.clientY - startY;
+            const maxHeight = this.computeBottomPanelMaxHeight();
+            const nextHeight = Math.max(
+                UIController.MIN_BOTTOM_PANEL_HEIGHT,
+                Math.min(maxHeight, startHeight - delta)
+            );
+
+            document.documentElement.style.setProperty("--bottom-panel-height", `${Math.round(nextHeight)}px`);
+            this.applyViewportAspectPresentation();
+        };
+
+        const onPointerUp = (): void => {
+            stopResize();
+        };
+
+        this.bottomPanelResizerEl.addEventListener("pointerdown", (event: PointerEvent) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            startY = event.clientY;
+            startHeight = this.bottomPanelEl?.getBoundingClientRect().height ?? UIController.MIN_BOTTOM_PANEL_HEIGHT;
+            this.isBottomPanelResizing = true;
+            document.body.classList.add("bottom-panel-resizing");
             window.addEventListener("pointermove", onPointerMove);
             window.addEventListener("pointerup", onPointerUp);
             window.addEventListener("pointercancel", onPointerUp);
@@ -3083,6 +3160,27 @@ export class UIController {
             Math.min(maxWidth, currentWidth)
         );
         document.documentElement.style.setProperty("--shader-panel-width", `${Math.round(nextWidth)}px`);
+    }
+
+    private computeBottomPanelMaxHeight(): number {
+        const appHeight = this.appRootEl.clientHeight;
+        const toolbarHeight = document.getElementById("toolbar")?.getBoundingClientRect().height ?? 0;
+        const resizerHeight = this.bottomPanelResizerEl?.getBoundingClientRect().height ?? 6;
+        return Math.max(
+            UIController.MIN_BOTTOM_PANEL_HEIGHT,
+            appHeight - toolbarHeight - resizerHeight - UIController.MIN_MAIN_CONTENT_HEIGHT
+        );
+    }
+
+    private clampBottomPanelHeightToLayout(): void {
+        if (!this.bottomPanelEl) return;
+        const currentHeight = this.bottomPanelEl.getBoundingClientRect().height;
+        const maxHeight = this.computeBottomPanelMaxHeight();
+        const nextHeight = Math.max(
+            UIController.MIN_BOTTOM_PANEL_HEIGHT,
+            Math.min(maxHeight, currentHeight)
+        );
+        document.documentElement.style.setProperty("--bottom-panel-height", `${Math.round(nextHeight)}px`);
     }
 
     private refreshShaderPanel(): void {
@@ -3423,16 +3521,6 @@ export class UIController {
                     <span data-postfx-val="exposure" class="effect-value">x1.00</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">ToneMap</span>
-                    <select data-postfx-select="tone-mapping-type" class="effect-select">
-                        <option value="-1">OFF</option>
-                        <option value="0">Standard</option>
-                        <option value="1">ACES</option>
-                        <option value="2">Neutral</option>
-                    </select>
-                    <span data-postfx-val="tone-mapping" class="effect-value">OFF</span>
-                </div>
-                <div class="effect-row">
                     <span class="effect-label">Dither</span>
                     <input data-postfx="dithering-intensity" type="range" class="effect-slider" min="0" max="1" value="0" step="0.0001">
                     <span data-postfx-val="dithering" class="effect-value">OFF</span>
@@ -3441,25 +3529,6 @@ export class UIController {
                     <span class="effect-label">Vignette</span>
                     <input data-postfx="vignette-weight" type="range" class="effect-slider" min="0" max="4" value="0" step="0.01">
                     <span data-postfx-val="vignette" class="effect-value">OFF</span>
-                </div>
-                <div class="effect-row effect-row-check">
-                    <span class="effect-label">Bloom</span>
-                    <label class="effect-check-wrap">
-                        <input data-postfx-check="bloom" type="checkbox" class="effect-check">
-                        <span>On</span>
-                    </label>
-                    <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
-                    <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label">BloomTh</span>
-                    <input data-postfx="bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="90" step="1">
-                    <span data-postfx-val="bloom-threshold" class="effect-value">0.90</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label">BloomK</span>
-                    <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="64" step="1">
-                    <span data-postfx-val="bloom-kernel" class="effect-value">64</span>
                 </div>
                 <div class="effect-row">
                     <span class="effect-label">Chroma</span>
@@ -3477,11 +3546,6 @@ export class UIController {
                     <span data-postfx-val="sharpen-edge" class="effect-value">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">SSAO</span>
-                    <input data-postfx="ssao-strength" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
-                    <span data-postfx-val="ssao-strength" class="effect-value">OFF</span>
-                </div>
-                <div class="effect-row">
                     <span class="effect-label">Curves</span>
                     <input data-postfx="color-curves-saturation" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="color-curves-saturation" class="effect-value">OFF</span>
@@ -3491,7 +3555,7 @@ export class UIController {
                     <input data-postfx="glow-intensity" type="range" class="effect-slider" min="0" max="400" value="50" step="1">
                     <span data-postfx-val="glow-intensity" class="effect-value">OFF</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" style="display:none;">
                     <span class="effect-label">LUTSrc</span>
                     <select data-postfx-select="lut-source" class="effect-select">
                         <option value="builtin">Builtin</option>
@@ -3500,22 +3564,10 @@ export class UIController {
                     </select>
                     <span data-postfx-val="lut-source" class="effect-value">Builtin</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" style="display:none;">
                     <span class="effect-label">LUTFile</span>
                     <button data-postfx-btn="lut-file" type="button" class="effect-button">Load...</button>
                     <span data-postfx-val="lut-file" class="effect-value">None</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label">LUT</span>
-                    <select data-postfx-select="lut-preset" class="effect-select">
-                        ${lutPresetOptionsHtml}
-                    </select>
-                    <span data-postfx-val="lut" class="effect-value">OFF</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label">LUTInt</span>
-                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
-                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
                 </div>
                 <div class="effect-row" style="display:none;">
                     <span class="effect-label">MBlur</span>
@@ -3546,6 +3598,51 @@ export class UIController {
                     <span class="effect-label">Edge</span>
                     <input data-postfx="edge-width" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="edge-width" class="effect-value">0%</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">ToneMap</span>
+                    <select data-postfx-select="tone-mapping-type" class="effect-select">
+                        <option value="-1">OFF</option>
+                        <option value="0">Standard</option>
+                        <option value="1">ACES</option>
+                        <option value="2">Neutral</option>
+                    </select>
+                    <span data-postfx-val="tone-mapping" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row effect-row-check">
+                    <span class="effect-label">LUT</span>
+                    <label class="effect-check-wrap">
+                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
+                        <span>On</span>
+                    </label>
+                    <select data-postfx-select="lut-preset" class="effect-select">
+                        ${lutPresetOptionsHtml}
+                    </select>
+                    <span data-postfx-val="lut" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">LUTInt</span>
+                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
+                </div>
+                <div class="effect-row effect-row-check">
+                    <span class="effect-label">Bloom</span>
+                    <label class="effect-check-wrap">
+                        <input data-postfx-check="bloom" type="checkbox" class="effect-check">
+                        <span>On</span>
+                    </label>
+                    <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
+                    <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">BloomTh</span>
+                    <input data-postfx="bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="90" step="1">
+                    <span data-postfx-val="bloom-threshold" class="effect-value">0.90</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">BloomK</span>
+                    <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="64" step="1">
+                    <span data-postfx-val="bloom-kernel" class="effect-value">64</span>
                 </div>
             </div>
         `;
@@ -3579,8 +3676,6 @@ export class UIController {
         const grainIntensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="grain-intensity"]');
         const sharpenEdgeInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="sharpen-edge"]');
         const sharpenEdgeVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="sharpen-edge"]');
-        const ssaoStrengthInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="ssao-strength"]');
-        const ssaoStrengthVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="ssao-strength"]');
         const colorCurvesSaturationInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="color-curves-saturation"]');
         const colorCurvesSaturationVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="color-curves-saturation"]');
         const glowIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="glow-intensity"]');
@@ -3589,6 +3684,7 @@ export class UIController {
         const lutSourceVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-source"]');
         const lutFileButton = this.shaderMaterialList.querySelector<HTMLButtonElement>('button[data-postfx-btn="lut-file"]');
         const lutFileVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-file"]');
+        const lutEnabledInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx-check="lut"]');
         const lutPresetSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="lut-preset"]');
         const lutVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut"]');
         const lutIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="lut-intensity"]');
@@ -3632,8 +3728,6 @@ export class UIController {
             !grainIntensityVal ||
             !sharpenEdgeInput ||
             !sharpenEdgeVal ||
-            !ssaoStrengthInput ||
-            !ssaoStrengthVal ||
             !colorCurvesSaturationInput ||
             !colorCurvesSaturationVal ||
             !glowIntensityInput ||
@@ -3642,6 +3736,7 @@ export class UIController {
             !lutSourceVal ||
             !lutFileButton ||
             !lutFileVal ||
+            !lutEnabledInput ||
             !lutPresetSelect ||
             !lutVal ||
             !lutIntensityInput ||
@@ -3761,15 +3856,11 @@ export class UIController {
                 : "OFF";
         };
 
-        const applySsao = (): void => {
-            this.mmdManager.postEffectSsaoStrength = Number(ssaoStrengthInput.value) / 100;
+        const disableSsao = (): void => {
+            this.mmdManager.postEffectSsaoStrength = 0;
             this.mmdManager.postEffectSsaoRadius = 2;
             this.mmdManager.postEffectSsaoFadeEnd = 200;
-            this.mmdManager.postEffectSsaoEnabled = this.mmdManager.postEffectSsaoStrength > 0.000001;
-
-            ssaoStrengthVal.textContent = this.mmdManager.postEffectSsaoEnabled
-                ? this.mmdManager.postEffectSsaoStrength.toFixed(2)
-                : "OFF";
+            this.mmdManager.postEffectSsaoEnabled = false;
         };
 
         const applyColorCurves = (): void => {
@@ -3838,13 +3929,12 @@ export class UIController {
 
             lutPresetSelect.disabled = !isBuiltinMode;
             lutFileButton.disabled = isBuiltinMode;
-            lutIntensityInput.disabled = isBuiltinMode
-                ? this.mmdManager.postEffectLutPreset === "none"
-                : !hasExternalLut;
+            const hasSource = isBuiltinMode || hasExternalLut;
+            lutIntensityInput.disabled = !lutEnabledInput.checked || !hasSource;
 
-            this.mmdManager.postEffectLutEnabled = isBuiltinMode
-                ? this.mmdManager.postEffectLutPreset !== "none" && this.mmdManager.postEffectLutIntensity > 0.000001
-                : hasExternalLut && this.mmdManager.postEffectLutIntensity > 0.000001;
+            this.mmdManager.postEffectLutEnabled = lutEnabledInput.checked
+                && hasSource
+                && this.mmdManager.postEffectLutIntensity > 0.000001;
 
             lutSourceVal.textContent = lutModeToLabel(selectedMode);
             lutFileVal.textContent = this.postFxLutExternalPath
@@ -3941,9 +4031,6 @@ export class UIController {
         sharpenEdgeInput.value = String(
             Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))),
         );
-        ssaoStrengthInput.value = String(
-            Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectSsaoEnabled ? this.mmdManager.postEffectSsaoStrength : 0) * 100))),
-        );
         colorCurvesSaturationInput.value = String(
             Math.max(
                 -100,
@@ -3959,11 +4046,12 @@ export class UIController {
         lutSourceSelect.value = lutSourceSelect.querySelector(`option[value="${this.mmdManager.postEffectLutSourceMode}"]`)
             ? this.mmdManager.postEffectLutSourceMode
             : "builtin";
+        lutEnabledInput.checked = this.mmdManager.postEffectLutEnabled;
         lutPresetSelect.value = Array.from(lutPresetSelect.options).some((option) => option.value === this.mmdManager.postEffectLutPreset)
             ? this.mmdManager.postEffectLutPreset
-            : "none";
+            : "anime-soft";
         lutIntensityInput.value = String(
-            Math.round((this.mmdManager.postEffectLutEnabled ? this.mmdManager.postEffectLutIntensity : 0) * 100),
+            Math.round(this.mmdManager.postEffectLutIntensity * 100),
         );
         motionBlurStrengthInput.value = String(
             Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectMotionBlurEnabled ? this.mmdManager.postEffectMotionBlurStrength : 0) * 100))),
@@ -3990,7 +4078,7 @@ export class UIController {
         applyChromaticAberration();
         applyGrainIntensity();
         applySharpenEdge();
-        applySsao();
+        disableSsao();
         applyColorCurves();
         applyGlow();
         applyLut();
@@ -4014,13 +4102,13 @@ export class UIController {
         chromaticAberrationInput.addEventListener("input", applyChromaticAberration);
         grainIntensityInput.addEventListener("input", applyGrainIntensity);
         sharpenEdgeInput.addEventListener("input", applySharpenEdge);
-        ssaoStrengthInput.addEventListener("input", applySsao);
         colorCurvesSaturationInput.addEventListener("input", applyColorCurves);
         glowIntensityInput.addEventListener("input", applyGlow);
         lutSourceSelect.addEventListener("change", applyLut);
         lutFileButton.addEventListener("click", () => {
             void chooseExternalLut();
         });
+        lutEnabledInput.addEventListener("input", applyLut);
         lutPresetSelect.addEventListener("change", applyLut);
         lutIntensityInput.addEventListener("input", applyLut);
         motionBlurStrengthInput.addEventListener("input", applyMotionBlur);

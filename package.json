@@ -1,8 +1,8 @@
 {
-  "name": "exo-granule",
-  "productName": "exo-granule",
+  "name": "mmd-modoki",
+  "productName": "MMD modoki",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "Electron desktop app for previewing and editing MMD assets",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {

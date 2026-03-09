@@ -4,12 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MMD Motion Editor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-    rel="stylesheet">
+  <title>MMD modoki</title>
 </head>
 
 <body>
@@ -34,7 +29,7 @@
               </linearGradient>
             </defs>
           </svg>
-          <span class="app-title">MMD Motion Editor</span>
+          <span class="app-title">MMD modoki</span>
         </div>
         <div class="toolbar-divider"></div>
         <button id="btn-load-file" class="toolbar-btn" title="PMX / VMD / VPD / 音源を読み込む" data-i18n-title="toolbar.loadFile.title">
@@ -271,6 +266,8 @@
       </aside>
 
     </div>
+
+    <div id="bottom-panel-resizer" role="separator" aria-orientation="horizontal" aria-label="Bottom panel height resize"></div>
 
     <!-- Bottom Panel: Morph + Camera + Controls -->
     <footer id="bottom-panel">
@@ -656,6 +653,14 @@
             <span>出力</span>
           </div>
           <div class="output-controls">
+            <div class="output-export-row">
+              <button id="btn-export-png" class="playback-export-btn" title="現在の描画をPNGで保存">
+                <span>PNG保存</span>
+              </button>
+              <button id="btn-export-png-seq" class="playback-export-btn" title="連番PNGを書き出し">
+                <span>PNG Seq</span>
+              </button>
+            </div>
             <div class="output-row">
               <span class="output-label">比率</span>
               <select id="output-aspect" class="output-select">
@@ -698,14 +703,6 @@
                 <option value="1.5">高画質 x1.5</option>
                 <option value="2">超高画質 x2.0</option>
               </select>
-            </div>
-            <div class="output-export-row">
-              <button id="btn-export-png" class="playback-export-btn" title="現在の描画をPNGで保存">
-                <span>PNG保存</span>
-              </button>
-              <button id="btn-export-png-seq" class="playback-export-btn" title="連番PNGを書き出し">
-                <span>PNG Seq</span>
-              </button>
             </div>
           </div>
         </section>

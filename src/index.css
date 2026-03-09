@@ -1,5 +1,5 @@
 /* ============================================
-   MMD Motion Editor - Design System
+   MMD modoki - Design System
    ============================================ */
 
 :root {
@@ -43,12 +43,13 @@
   --timeline-width: 270px;
   --timeline-resizer-width: 6px;
   --shader-resizer-width: 6px;
+  --bottom-panel-resizer-height: 6px;
   --shader-panel-width: 280px;
   --bottom-panel-height: 180px;
 
   /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --font-sans: 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Meiryo UI', monospace;
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -97,7 +98,7 @@ body {
    ============================================ */
 #app {
   display: grid;
-  grid-template-rows: var(--toolbar-height) 1fr var(--bottom-panel-height);
+  grid-template-rows: var(--toolbar-height) 1fr var(--bottom-panel-resizer-height) var(--bottom-panel-height);
   grid-template-columns: 1fr;
   width: 100%;
   height: 100vh;
@@ -113,6 +114,7 @@ body.exporter-mode #timeline-panel,
 body.exporter-mode #timeline-resizer,
 body.exporter-mode #shader-resizer,
 body.exporter-mode #shader-panel,
+body.exporter-mode #bottom-panel-resizer,
 body.exporter-mode #bottom-panel,
 body.exporter-mode #viewport-overlay {
   display: none !important;
@@ -140,6 +142,7 @@ body.exporter-mode #bone-overlay-canvas {
 #app.ui-presentation-mode #timeline-resizer,
 #app.ui-presentation-mode #shader-resizer,
 #app.ui-presentation-mode #shader-panel,
+#app.ui-presentation-mode #bottom-panel-resizer,
 #app.ui-presentation-mode #bottom-panel,
 #app.ui-presentation-mode #viewport-overlay {
   display: none !important;
@@ -844,6 +847,32 @@ body.file-drag-active #viewport-container {
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   overflow: hidden;
+}
+
+#bottom-panel-resizer {
+  position: relative;
+  height: var(--bottom-panel-resizer-height);
+  cursor: row-resize;
+  background: transparent;
+}
+
+#bottom-panel-resizer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--border-color);
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+  opacity: 0.25;
+}
+
+#bottom-panel-resizer:hover::before,
+body.bottom-panel-resizing #bottom-panel-resizer::before {
+  background: var(--accent-primary);
+  opacity: 0.7;
 }
 
 .bottom-panel-inner {
@@ -1599,7 +1628,7 @@ body.file-drag-active #viewport-container {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  margin-top: 2px;
+  margin-bottom: 2px;
 }
 
 .output-controls .playback-export-btn {
@@ -1650,6 +1679,7 @@ body.file-drag-active #viewport-container {
 #app.ui-export-lock #timeline-resizer,
 #app.ui-export-lock #shader-resizer,
 #app.ui-export-lock #shader-panel,
+#app.ui-export-lock #bottom-panel-resizer,
 #app.ui-export-lock #bottom-panel,
 #app.ui-export-lock #viewport-container {
   pointer-events: none;
@@ -1962,6 +1992,10 @@ body.file-drag-active #viewport-container {
 
 body.timeline-resizing {
   cursor: col-resize;
+}
+
+body.bottom-panel-resizing {
+  cursor: row-resize;
 }
 
 /* Smooth loading animation */

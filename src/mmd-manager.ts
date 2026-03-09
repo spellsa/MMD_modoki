@@ -335,7 +335,6 @@ export class MmdManager {
         },
     ];
     private static readonly POST_EFFECT_LUT_PRESETS = [
-        { id: "none", label: "None" },
         { id: "anime-soft", label: "Anime Soft" },
         { id: "anime-cool", label: "Anime Cool" },
         { id: "anime-dramatic", label: "Anime Dramatic" },
@@ -907,7 +906,7 @@ color.rgb*=(1.0-toonContactAoApplied);
     private postEffectGlowKernelValue = 32;
     private postEffectLutEnabledValue = false;
     private postEffectLutIntensityValue = 1;
-    private postEffectLutPresetValue = "none";
+    private postEffectLutPresetValue = "anime-soft";
     private postEffectLutSourceModeValue: PostEffectLutSourceMode = "builtin";
     private postEffectLutExternalPathValue: string | null = null;
     private postEffectLutExternalTextValue: string | null = null;
@@ -1067,6 +1066,17 @@ color.rgb*=(1.0-toonContactAoApplied);
         // Keep RMB drag available for camera control (MMD-like).
         event.preventDefault();
     };
+    private readonly onCanvasMouseDown = (event: MouseEvent) => {
+        // Suppress Chromium autoscroll so MMB drag behaves like MMD viewport pan.
+        if (event.button === 1) {
+            event.preventDefault();
+        }
+    };
+    private readonly onCanvasAuxClick = (event: MouseEvent) => {
+        if (event.button === 1) {
+            event.preventDefault();
+        }
+    };
 
     private resolveCameraMouseDragMode(event: PointerEvent): "rotate" | "pan" | "zoom" | null {
         if (this.hasCameraMotion && this._isPlaying) {
@@ -1123,7 +1133,7 @@ color.rgb*=(1.0-toonContactAoApplied);
                 }
                 const trueUp = Vector3.Cross(right, forward).normalize();
                 const panScale = Math.max(0.001, this.camera.radius * 0.0014);
-                const move = right.scale(deltaX * panScale).add(trueUp.scale(-deltaY * panScale));
+                const move = right.scale(deltaX * panScale).add(trueUp.scale(deltaY * panScale));
                 this.camera.target.addInPlace(move);
                 this.camera.position.addInPlace(move);
             }
@@ -2765,6 +2775,8 @@ color.rgb*=(1.0-toonContactAoApplied);
         canvas.addEventListener("pointerup", this.onCanvasPointerUp);
         canvas.addEventListener("pointercancel", this.onCanvasPointerCancel);
         canvas.addEventListener("pointerleave", this.onCanvasPointerCancel);
+        canvas.addEventListener("mousedown", this.onCanvasMouseDown);
+        canvas.addEventListener("auxclick", this.onCanvasAuxClick);
         canvas.addEventListener("contextmenu", this.onCanvasContextMenu);
         this.syncCameraRotationFromCurrentView();
         this.updateDofFocalLengthFromCameraFov();
@@ -4572,21 +4584,12 @@ color.rgb*=(1.0-toonContactAoApplied);
         this.postEffectSharpenEdge = typeof data.effects.sharpenEdge === "number" && Number.isFinite(data.effects.sharpenEdge)
             ? data.effects.sharpenEdge
             : 0;
-        this.postEffectSsaoStrength = typeof data.effects.ssaoStrength === "number" && Number.isFinite(data.effects.ssaoStrength)
-            ? data.effects.ssaoStrength
-            : 1;
-        this.postEffectSsaoRadius = typeof data.effects.ssaoRadius === "number" && Number.isFinite(data.effects.ssaoRadius)
-            ? data.effects.ssaoRadius
-            : 2;
-        this.postEffectSsaoFadeEnd = typeof data.effects.ssaoFadeEnd === "number" && Number.isFinite(data.effects.ssaoFadeEnd)
-            ? data.effects.ssaoFadeEnd
-            : 18;
-        this.postEffectSsaoDebugView = typeof data.effects.ssaoDebugView === "boolean"
-            ? data.effects.ssaoDebugView
-            : false;
-        this.postEffectSsaoEnabled = typeof data.effects.ssaoEnabled === "boolean"
-            ? data.effects.ssaoEnabled
-            : false;
+        // SSAO is currently kept out of the shipped UI and forced off for predictable performance.
+        this.postEffectSsaoStrength = 0;
+        this.postEffectSsaoRadius = 2;
+        this.postEffectSsaoFadeEnd = 200;
+        this.postEffectSsaoDebugView = false;
+        this.postEffectSsaoEnabled = false;
         this.postEffectColorCurvesEnabled = typeof data.effects.colorCurvesEnabled === "boolean"
             ? data.effects.colorCurvesEnabled
             : false;
@@ -4613,7 +4616,7 @@ color.rgb*=(1.0-toonContactAoApplied);
             : 32;
         this.postEffectLutPreset = typeof data.effects.lutPreset === "string"
             ? data.effects.lutPreset
-            : "none";
+            : "anime-soft";
         this.postEffectLutIntensity = typeof data.effects.lutIntensity === "number" && Number.isFinite(data.effects.lutIntensity)
             ? data.effects.lutIntensity
             : 1;
@@ -5160,10 +5163,10 @@ color.rgb*=(1.0-toonContactAoApplied);
         return this.postEffectLutPresetValue;
     }
     set postEffectLutPreset(v: string) {
-        const normalized = typeof v === "string" ? v.trim().toLowerCase() : "none";
+        const normalized = typeof v === "string" ? v.trim().toLowerCase() : "anime-soft";
         this.postEffectLutPresetValue = MmdManager.POST_EFFECT_LUT_PRESETS.some((preset) => preset.id === normalized)
             ? normalized
-            : "none";
+            : "anime-soft";
         this.applyImageProcessingSettings();
     }
 
@@ -5973,7 +5976,7 @@ color.rgb*=(1.0-toonContactAoApplied);
             [this.camera]
         );
 
-        this.defaultRenderingPipeline.samples = 1;
+        this.defaultRenderingPipeline.samples = 4;
         this.defaultRenderingPipeline.fxaaEnabled = false;
         this.defaultRenderingPipeline.glowLayerEnabled = false;
         this.applyImageProcessingSettings();
@@ -6040,7 +6043,7 @@ color.rgb*=(1.0-toonContactAoApplied);
 
     private isLutSourceReady(): boolean {
         if (this.postEffectLutSourceModeValue === "builtin") {
-            return this.postEffectLutPresetValue !== "none";
+            return MmdManager.POST_EFFECT_LUT_PRESETS.some((preset) => preset.id === this.postEffectLutPresetValue);
         }
         return this.postEffectLutExternalTextValue !== null;
     }
@@ -8743,6 +8746,8 @@ color.rgb*=(1.0-toonContactAoApplied);
         this.renderingCanvas.removeEventListener("pointerup", this.onCanvasPointerUp);
         this.renderingCanvas.removeEventListener("pointercancel", this.onCanvasPointerCancel);
         this.renderingCanvas.removeEventListener("pointerleave", this.onCanvasPointerCancel);
+        this.renderingCanvas.removeEventListener("mousedown", this.onCanvasMouseDown);
+        this.renderingCanvas.removeEventListener("auxclick", this.onCanvasAuxClick);
         this.renderingCanvas.removeEventListener("contextmenu", this.onCanvasContextMenu);
         if (this.boneGizmoManager) {
             this.boneGizmoManager.dispose();

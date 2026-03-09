@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, session } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -15,6 +15,13 @@ if (isDev) {
   // Keep local file loading behavior while hiding noisy Electron dev warnings.
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 }
+
+const MAIN_WINDOW_ASPECT_RATIO = 16 / 9;
+const MAIN_WINDOW_DEFAULT_WIDTH = 1440;
+const MAIN_WINDOW_DEFAULT_HEIGHT = Math.round(MAIN_WINDOW_DEFAULT_WIDTH / MAIN_WINDOW_ASPECT_RATIO);
+const MAIN_WINDOW_MIN_WIDTH = 1120;
+const MAIN_WINDOW_MIN_HEIGHT = Math.round(MAIN_WINDOW_MIN_WIDTH / MAIN_WINDOW_ASPECT_RATIO);
+const ALLOWED_PRODUCTION_PROTOCOLS = new Set(['file:', 'data:', 'blob:', 'devtools:']);
 
 type PngSequenceExportLaunchResult = {
   jobId: string;
@@ -144,14 +151,52 @@ const fitContentSizeToAspect = (
   };
 };
 
+const isAllowedAppUrl = (targetUrl: string): boolean => {
+  try {
+    const parsed = new URL(targetUrl);
+    if (isDev && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+      const devOrigin = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin;
+      if (parsed.origin === devOrigin) return true;
+    }
+    return ALLOWED_PRODUCTION_PROTOCOLS.has(parsed.protocol);
+  } catch {
+    return false;
+  }
+};
+
+const configureSessionSecurity = (): void => {
+  if (isDev) return;
+
+  const requestFilter = {
+    urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'],
+  };
+
+  session.defaultSession.webRequest.onBeforeRequest(requestFilter, (details, callback) => {
+    callback({ cancel: true });
+  });
+
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
+
+  app.on('web-contents-created', (_event, contents) => {
+    contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+    contents.on('will-navigate', (event, navigationUrl) => {
+      if (isAllowedAppUrl(navigationUrl)) return;
+      event.preventDefault();
+    });
+  });
+};
+
 const createWindow = () => {
   const mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1000,
-    minHeight: 700,
+    width: MAIN_WINDOW_DEFAULT_WIDTH,
+    height: MAIN_WINDOW_DEFAULT_HEIGHT,
+    minWidth: MAIN_WINDOW_MIN_WIDTH,
+    minHeight: MAIN_WINDOW_MIN_HEIGHT,
     autoHideMenuBar: true,
-    title: 'MMD Motion Editor',
+    title: 'MMD modoki',
     backgroundColor: '#0a0a0f',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -161,6 +206,7 @@ const createWindow = () => {
     },
   });
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.setAspectRatio(MAIN_WINDOW_ASPECT_RATIO);
 
   // Load the app
   void loadEditorWindow(mainWindow);
@@ -188,6 +234,11 @@ const createWindow = () => {
     });
   });
 };
+
+app.on('ready', () => {
+  configureSessionSecurity();
+  createWindow();
+});
 
 // IPC Handlers
 ipcMain.handle('dialog:openFile', async (_event, filters: { name: string; extensions: string[] }[]) => {
@@ -295,7 +346,7 @@ ipcMain.handle(
     filters?: { name: string; extensions: string[] }[],
   ) => {
     try {
-      const safeName = defaultFileName?.trim() ? defaultFileName : 'mmd_project.mmdproj.json';
+      const safeName = defaultFileName?.trim() ? defaultFileName : 'project.modoki.json';
       const result = await dialog.showSaveDialog({
         title: 'Save Project',
         defaultPath: path.join(app.getPath('documents'), safeName),
@@ -520,8 +571,6 @@ ipcMain.on('export:pngSequenceProgress', (_event, progress: PngSequenceExportPro
   if (!pngSequenceExportOwnerByJobId.has(progress.jobId)) return;
   sendPngSequenceExportProgressToOwner(progress.jobId, progress);
 });
-
-app.on('ready', createWindow);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

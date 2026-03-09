@@ -1,5 +1,5 @@
 /**
- * MMD Motion Editor - Renderer Entry Point
+ * MMD modoki - Renderer Entry Point
  * Initializes Babylon.js, babylon-mmd, and all UI components.
  */
 
@@ -12,7 +12,6 @@ import { UIController } from "./ui-controller";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale } from "./i18n";
 
-// Wait for DOM
 document.addEventListener("DOMContentLoaded", () => {
   initializeI18n(document);
   window.mmdI18n = {
@@ -42,7 +41,6 @@ async function initializeApp(): Promise<void> {
   }
 
   try {
-    // Initialize components
     const mmdManager = await MmdManager.create(canvas);
     const timeline = new Timeline(
       "timeline-canvas",
@@ -53,17 +51,16 @@ async function initializeApp(): Promise<void> {
     const bottomPanel = new BottomPanel();
     bottomPanel.setMmdManager(mmdManager);
 
-    // Initialize UI controller (connects everything)
     new UIController(mmdManager, timeline, bottomPanel);
 
-    console.log("🎬 MMD Motion Editor initialized");
+    console.log("MMD modoki initialized");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("Failed to initialize MMD Motion Editor:", message);
+    console.error("Failed to initialize MMD modoki:", message);
 
     const statusText = document.getElementById("status-text");
     if (statusText) {
-      statusText.textContent = "初期化失敗";
+      statusText.textContent = "初期化に失敗しました";
     }
 
     const overlay = document.getElementById("viewport-overlay");
