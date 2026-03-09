@@ -1,186 +1,116 @@
 # MMD modoki
 
-Babylon.js + [babylon-mmd](https://github.com/noname0310/babylon-mmd) をベースに、MMDライクな操作感へ寄せた Electron デスクトップアプリです。  
-PMX/PMD モデル、Xアクセサリー、VMD モーション、音源（MP3/WAV/OGG）を読み込み、タイムライン付きで再生・確認できます。
+Babylon.js と `babylon-mmd` をベースにした、MMD もどきのローカル編集ツールです。  
+PMX/PMD モデル、アクセサリー、VMD、カメラ VMD、音声を読み込み、タイムライン編集とプレビュー、PNG 出力を行えます。
 
-## アプリ概要
+## ダウンロード
 
-- 目的: MMD資産（モデル/モーション/音源）をデスクトップ上で読み込み、編集前の確認と再生検証を行う
-- 中心機能: モデル表示、Xアクセサリー配置、VMD/カメラVMD再生、タイムライン操作、PNG書き出し
-- 想定利用: 制作中モーションのチェック、カメラ確認、ライティング確認、ステージ小物配置
+- Release 一覧: https://github.com/togechiyo/MMD_modoki/releases
+- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.0
 
-## 主要依存ライブラリ
+配布物は OS ごとの zip です。
 
-| ライブラリ | 用途 | リンク |
-| --- | --- | --- |
-| Electron | デスクトップアプリ実行基盤 | https://www.electronjs.org/ |
-| Electron Forge | 開発/パッケージング | https://www.electronforge.io/ |
-| Vite | レンダラ開発ビルド | https://vitejs.dev/ |
-| TypeScript | 型付き実装 | https://www.typescriptlang.org/ |
-| Babylon.js | 3D描画・シーン制御 | https://www.babylonjs.com/ |
-| babylon-mmd | MMDローダー/アニメーション連携 | https://github.com/noname0310/babylon-mmd |
+- `mmd-modoki-windows-x64-zip.zip`
+- `mmd-modoki-macos-x64-zip.zip`
+- `mmd-modoki-linux-x64-zip.zip`
 
-## 借用・参考リンク
+## 起動方法
 
-- Babylon.js ドキュメント: https://doc.babylonjs.com/
-- babylon-mmd ドキュメント: https://noname0310.github.io/babylon-mmd/docs/
-- Electron ドキュメント: https://www.electronjs.org/docs/latest
-- MMD関連アセット（モデル/モーション/音源）は本リポジトリに同梱していません。利用時は各配布元の利用規約を確認してください。
+1. `Releases` から自分の OS 向け zip をダウンロードします。
+2. zip を展開します。
+3. 展開したフォルダ内のアプリ本体を起動します。
 
-## 特徴
+Windows:
+- `MMD modoki.exe`
 
-- PMX/PMD モデル読み込み（複数同時読込）
-- X アクセサリー読み込み（`.x`）
-- アクティブモデル切替（下パネル「情報 > 対象」）
-- アクセサリー操作（下パネル「アクセサリー > 対象 / 表示 / 削除 / 親 / 位置 / 回転 / 拡大率」）
-- VMD モーション読み込み
-- カメラVMD読み込み（カメラモーション）
-- MP3/WAV/OGG 音源読み込み・同期再生
-- ワンクリック PNG 出力（現在の描画を保存）
-- 出力欄でアスペクト比・解像度・画質を指定して PNG / PNG連番 出力
-- キーフレーム可視化タイムライン（ボーン/モーフ別）
-- モーフスライダー操作（先頭30件表示）
-- 右パネル「エフェクト」で材質プリセット / カメラ向けポストエフェクトを調整
-  - Contrast / Gamma / Exposure / ToneMap / Dither / Vignette
-  - Bloom（ON/OFF + Weight/Threshold/Kernel）/ Chroma / Grain / Sharpen
-  - Curves（Color Curves Saturation）/ LUT（3dl）/ Fog
-  - Distortion / Edge
-- 実験系ポストエフェクト（SSAO / Glow / Motion Blur / SSR / VLight）は現在 UI 非表示運用
-- SSAO は負荷対策のため現行ビルドでは常時 OFF
-  - SSR は UI 経由では常時 OFF（強度 0）を適用
-- ライティング調整（方位角/仰角/光の強さ/環境光/影の濃さ/境界幅）
-- DoF 操作は「情報 > 対象」でカメラ選択時のエフェクト欄に集約
-- 床表示 ON/OFF（上部ツールバー）
-- 再生速度変更、シーク、フレーム表示
-- UI多言語化の下準備（`ja/en` 辞書・`data-i18n`・ランタイム切替フック）
+macOS:
+- `MMD modoki.app`
 
-## 技術スタック
+Linux:
+- 展開先の実行ファイルを直接起動します。
 
-- Electron + Electron Forge + Vite
-- TypeScript
-- Babylon.js (`@babylonjs/core`, `@babylonjs/loaders`, `@babylonjs/gui`)
-- babylon-mmd
+## 初回起動時の注意
 
-## ドキュメント
+- macOS 版は未署名のため、Gatekeeper の警告が出る場合があります。
+- Linux 版は環境によって追加ライブラリが必要になる場合があります。
+- 初期版のため、今後保存形式や UI を調整する可能性があります。
 
-- ドキュメント入口: [`docs/README.md`](docs/README.md)
-- アーキテクチャ概要: [`docs/architecture.md`](docs/architecture.md)
-- MmdManager 解説: [`docs/mmd-manager.md`](docs/mmd-manager.md)
-- カメラVMD対応メモ: [`docs/camera-vmd.md`](docs/camera-vmd.md)
-- UI と操作フロー: [`docs/ui-flow.md`](docs/ui-flow.md)
-- ポストエフェクト拡充バックログ: [`docs/post-effects-backlog.md`](docs/post-effects-backlog.md)
-- 影仕様と実装: [`docs/shadow-spec.md`](docs/shadow-spec.md)
-- トラブルシュート: [`docs/troubleshooting.md`](docs/troubleshooting.md)
+## できること
 
-## 動作要件
+- PMX/PMD モデルの読み込み
+- `.x` アクセサリーの読み込み
+- VMD モーション、カメラ VMD の読み込み
+- MP3/WAV/OGG 音声の読み込み
+- タイムライン編集
+- ボーン、モーフ、カメラ、照明の調整
+- PNG 保存、PNG 連番保存
+- DoF、Bloom、LUT などのポストエフェクト調整
 
-- Node.js 18 以上推奨
+補足:
+- SSAO は負荷対策のため現行ビルドでは常時 OFF です。
+- アンチエイリアスは `MSAA x4 + FXAA` を使用しています。
+
+## 基本操作
+
+- `Ctrl + O`: PMX/PMD を開く
+- `Ctrl + M`: VMD を開く
+- `Ctrl + Shift + M`: カメラ VMD を開く
+- `Ctrl + Shift + A`: 音声を開く
+- `Ctrl + S`: プロジェクト保存 / 上書き保存
+- `Ctrl + Alt + S`: 名前を付けて保存
+- `Ctrl + Shift + S`: PNG 保存
+- `Space` または `P`: 再生 / 停止
+- `Delete`: 選択キーフレーム削除
+
+マウス:
+- 中ボタンドラッグ: 視点移動
+- 右ドラッグ: 回転
+- ホイール: ズーム
+
+## 開発
+
+必要環境:
+- Node.js 18 以上
 - npm
-- Windows/macOS/Linux（Forge の maker 設定あり）
 
-## セットアップ
+セットアップ:
 
 ```bash
 npm install
 ```
 
-## 開発起動
+開発起動:
 
 ```bash
 npm start
 ```
 
-## Lint
+Lint:
 
 ```bash
 npm run lint
 ```
 
-## 配布用ビルド
+配布ビルド:
 
 ```bash
 npm run package
 npm run make
 ```
 
-## 使い方
+zip 配布物作成:
 
-1. `ファイル読込` でモデル（`.pmx` / `.pmd`）を読み込む
-2. 必要なら追加で PMX を読み込み、`情報 > 対象` でアクティブモデルを切り替える
-3. 必要に応じて `ファイル読込` でアクセサリー（`.x`）を読み込む
-4. `アクセサリー` パネルで親（World/モデル/ボーン）と位置・回転・拡大率を調整する
-5. `ファイル読込` でモデルモーション（`.vmd` / `.vpd`）を読み込む
-6. 必要に応じてカメラモーション（`.vmd`）や音源（`.mp3` / `.wav` / `.ogg`）を読み込む
-7. `情報 > 対象` で `Camera` を選ぶと、右の `エフェクト` 欄で DoF / ポストエフェクトを調整できる
-   （Bloom は ON/OFF + Weight/Threshold/Kernel の複合項目。LUT はプリセット選択 + 強度）
-8. `出力` 欄で比率・解像度・画質を設定して `PNG出力` / `PNG連番出力` を実行する
-9. 再生コントロール・タイムライン・モーフ・照明を調整する
-
-## キーボードショートカット
-
-- `P` / `Space`: 再生 / 一時停止
-- `Enter` / `I` / `K` / `+`: 現在フレームにキーフレーム追加
-- `Delete`: 選択キーフレーム削除
-- `←` / `→`: 1フレーム移動
-- `Shift + ←` / `Shift + →`: 10フレーム移動
-- `Ctrl + ←` / `Ctrl + ↑`: 前のキーフレームポイントへ移動
-- `Ctrl + →` / `Ctrl + ↓`: 次のキーフレームポイントへ移動
-- `Tab` / `ろ`: 次のモデルへ切替
-- `Shift + Tab`: 前のモデルへ切替
-- `Alt + ←` / `Alt + →`: 選択キーフレームを1フレーム移動
-- `Home`: 先頭フレームへ
-- `End`: 最終フレームへ
-- `Alt + Enter`: UIフルスクリーン切替
-- `Esc`: UIフルスクリーン解除
-- `G`: Ground表示 ON/OFF
-- `E`: エッジ表示 ON/OFF
-- `B`: 背景色（標準/黒）切替
-- `Ctrl + S`: プロジェクト保存
-- `Ctrl + O`: PMX/PMD を開く
-- `Ctrl + M`: VMD を開く
-- `Ctrl + Shift + M`: カメラVMD を開く
-- `Ctrl + Shift + A`: 音源を開く
-- `Ctrl + Shift + S`: PNG 出力
-
-## マウス操作
-
-- `右ドラッグ`: 視点回転
-- `Shift + 右ドラッグ`: 視点平行移動
-- `Ctrl + 右ドラッグ`: 視点ズーム
-- `中ボタンドラッグ`: 視点平行移動
-- `マウスホイール`: 視点ズーム
-
-## 視点操作とカメラVMDの優先順位
-
-- 再生中: カメラVMDが視点を優先して更新（マウスドラッグでは上書きしない）
-- 停止中 + `情報 > 対象 = Camera`: カメラVMDの視点を反映
-- 停止中 + `情報 > 対象 != Camera`: マウス視点操作を優先（モデル調整用の自由視点）
-
-## プロジェクト構成
-
-```text
-.
-├─ src/
-│  ├─ main.ts          # Electron main process
-│  ├─ preload.ts       # contextBridge / IPC API
-│  ├─ renderer.ts      # Renderer entry
-│  ├─ mmd-manager.ts   # Babylon + babylon-mmd の中核
-│  ├─ x-file-loader.ts # .x (text) ローダープラグイン
-│  ├─ mmd-manager-x-extension.ts # Xアクセサリー連携拡張
-│  ├─ ui-controller.ts # UIイベント統合
-│  ├─ timeline.ts      # タイムライン描画
-│  └─ bottom-panel.ts  # 下パネル補助（情報/補間/ボーン/モーフ）
-├─ index.html
-├─ forge.config.ts
-└─ package.json
+```bash
+npm run make:zip
 ```
 
-## 既知の制限
+## ドキュメント
 
-- 物理演算は現時点で未有効（初期実装）
-- カメラは ArcRotate ベースのため、回転フェーダーは内部的に視線ベクトルへ変換して適用
-- ローカルファイル読み込みのため `webSecurity: false` を利用（`src/main.ts`）
-- X は text 形式（`xof .... txt ....`）を対象。`bin`/`tzip`/`bzip` は未対応
+- ドキュメント入口: [docs/README.md](./docs/README.md)
+- アーキテクチャ: [docs/architecture.md](./docs/architecture.md)
+- MmdManager 解説: [docs/mmd-manager.md](./docs/mmd-manager.md)
+- UI フロー: [docs/ui-flow.md](./docs/ui-flow.md)
+- トラブルシュート: [docs/troubleshooting.md](./docs/troubleshooting.md)
 
 ## ライセンス
 

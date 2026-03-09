@@ -1,19 +1,20 @@
 # Docs
 
-`MMD_modoki` の設計メモ・仕様書・調査ノートをまとめたドキュメントハブです。
+`MMD modoki` の設計メモ、仕様メモ、補助ドキュメントの入口です。
 
-## ドキュメント一覧
+## 配布関連
 
-- フル目次: [ドキュメント目次](./docs-index.md)
+- Release 一覧: https://github.com/togechiyo/MMD_modoki/releases
+- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.0
 
-## まず読む
+## 主要ドキュメント
 
-- 全体像: [architecture.md](./architecture.md)
-- 実装中の既知課題: [known-issues.md](./known-issues.md)
-- 回帰確認: [manual-test-checklist.md](./manual-test-checklist.md)
-- トラブル時: [troubleshooting.md](./troubleshooting.md)
+- 目次: [docs-index.md](./docs-index.md)
+- 全体構成: [architecture.md](./architecture.md)
+- 既知の問題: [known-issues.md](./known-issues.md)
+- 手動テスト: [manual-test-checklist.md](./manual-test-checklist.md)
+- トラブルシュート: [troubleshooting.md](./troubleshooting.md)
 
-## 運用メモ
+## 補足
 
-- 文字コードと改行の扱いは [dev-notes-encoding.md](./dev-notes-encoding.md) を参照。
-- 新規ドキュメントを追加したら [docs-index.md](./docs-index.md) を更新。
+- 文字コードまわりのメモ: [dev-notes-encoding.md](./dev-notes-encoding.md)
