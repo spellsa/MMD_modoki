@@ -12,6 +12,7 @@
 - 目次: [docs-index.md](./docs-index.md)
 - 全体構成: [architecture.md](./architecture.md)
 - 既知の問題: [known-issues.md](./known-issues.md)
+- v0.1.0 フィードバック整理: [v0.1.0-feedback.md](./v0.1.0-feedback.md)
 - 手動テスト: [manual-test-checklist.md](./manual-test-checklist.md)
 - トラブルシュート: [troubleshooting.md](./troubleshooting.md)
 
