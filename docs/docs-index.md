@@ -59,4 +59,5 @@
 - [手動テストチェックリスト](./manual-test-checklist.md)
 - [既知の問題](./known-issues.md)
 - [v0.1.0 フィードバック台帳](./v0.1.0-feedback.md)
+- [リリース手順メモ](./release-process.md)
 - [文字コード運用メモ](./dev-notes-encoding.md)

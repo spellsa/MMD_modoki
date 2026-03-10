@@ -55,3 +55,28 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: out/make/**/*.zip
           if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release Assets
+    needs: build-zips
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download built zip artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mmd-modoki-*-zip
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MMD modoki ${{ github.ref_name }}
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: release-assets/*.zip

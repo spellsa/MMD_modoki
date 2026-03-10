@@ -13,6 +13,7 @@
 - 全体構成: [architecture.md](./architecture.md)
 - 既知の問題: [known-issues.md](./known-issues.md)
 - v0.1.0 フィードバック台帳: [v0.1.0-feedback.md](./v0.1.0-feedback.md)
+- リリース手順メモ: [release-process.md](./release-process.md)
 - Undo / Redo 検討メモ: [undo-redo-investigation.md](./undo-redo-investigation.md)
 - PMX 顔描画崩れの原因仮説: [face-render-corruption-investigation.md](./face-render-corruption-investigation.md)
 - WebGPU 不発 / 平坦化の調査メモ: [webgpu-not-working-investigation.md](./webgpu-not-working-investigation.md)
