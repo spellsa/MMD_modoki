@@ -21,6 +21,23 @@ npm start
 
 `npm ci` で lockfile どおりに依存を再構築してください。
 
+## Linux 版 zip が起動しない
+
+### 症状
+
+- Ubuntu 24.04 などで起動直後に abort する
+- コンソールに `chrome-sandbox` や `setuid sandbox` 関連のエラーが出る
+
+### 原因
+
+Linux の zip 配布では `chrome-sandbox` の所有者や `4755` 属性をそのまま維持しづらく、Electron/Chromium のサンドボックス要件を満たせないことがあります。
+
+### 対処
+
+- 現在の packaged build は Linux 限定で `--no-sandbox` と `--disable-setuid-sandbox` を付けて起動する暫定対応を入れています。
+- それでも起動しない場合は、ターミナルから起動して追加のエラーログを確認してください。
+- 恒久対応としては AppImage / Flatpak など、Linux 向け配布形式の見直しを検討しています。
+
 ## 起動はするがモデルが読めない
 
 確認ポイント:

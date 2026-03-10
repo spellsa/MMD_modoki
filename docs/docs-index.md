@@ -14,6 +14,8 @@
 
 - [影仕様と実装](./shadow-spec.md)
 - [光・影実装メモ（Toon分離 + フラット光）](./light-shadow-implementation.md)
+- [PMX 顔描画崩れの原因仮説メモ](./face-render-corruption-investigation.md)
+- [WebGPU 不発 / 平坦化の調査メモ](./webgpu-not-working-investigation.md)
 - [ポストエフェクト拡充バックログ](./post-effects-backlog.md)
 - [SSAO 調査メモ（WebGPU）](./ssao-webgpu-investigation.md)
 - [SSAO 現行仕様（2026-03-07）](./ssao-current-spec.md)
@@ -27,6 +29,7 @@
 - [カメラ実装仕様](./camera-implementation-spec.md)
 - [カメラVMD対応メモ](./camera-vmd.md)
 - [タイムライン仕様](./timeline-spec.md)
+- [Undo / Redo 検討メモ](./undo-redo-investigation.md)
 - [タイムライン データフロー](./data-flow-timeline.md)
 - [編集状態遷移メモ](./edit-state-machine.md)
 - [キーフレーム保存仕様](./keyframe-storage-spec.md)
@@ -55,5 +58,5 @@
 
 - [手動テストチェックリスト](./manual-test-checklist.md)
 - [既知の問題](./known-issues.md)
-- [v0.1.0 フィードバック整理](./v0.1.0-feedback.md)
+- [v0.1.0 フィードバック台帳](./v0.1.0-feedback.md)
 - [文字コード運用メモ](./dev-notes-encoding.md)

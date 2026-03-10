@@ -27,6 +27,7 @@ macOS:
 - `MMD modoki.app`
 
 Linux:
+- packaged build では `--no-sandbox` / `--disable-setuid-sandbox` を付けて起動します。`chrome-sandbox` 起因の起動失敗を避けるための暫定対応です。
 - 展開先の実行ファイルを直接起動します。
 
 ## 初回起動時の注意

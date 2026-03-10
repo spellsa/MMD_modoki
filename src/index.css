@@ -332,6 +332,12 @@ body.exporter-mode #bone-overlay-canvas {
   border: 1px solid rgba(6, 182, 212, 0.3);
 }
 
+.engine-badge--secondary {
+  background: rgba(56, 189, 248, 0.12);
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.24);
+}
+
 .status-dot {
   width: 6px;
   height: 6px;

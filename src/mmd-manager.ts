@@ -210,6 +210,7 @@ import { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import { MmdBoneAnimationTrack, MmdCameraAnimationTrack, MmdMorphAnimationTrack, MmdMovableBoneAnimationTrack, MmdPropertyAnimationTrack } from "babylon-mmd/esm/Loader/Animation/mmdAnimationTrack";
 import { MmdStandardMaterialProxy } from "babylon-mmd/esm/Runtime/mmdStandardMaterialProxy";
 import { MmdStandardMaterialBuilder } from "babylon-mmd/esm/Loader/mmdStandardMaterialBuilder";
+import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderBase";
 import { MmdPluginMaterial as MmdStandardShaderPluginGLSL } from "babylon-mmd/esm/Loader/Shaders/mmdStandard";
 import { MmdPluginMaterial as MmdStandardShaderPluginWGSL } from "babylon-mmd/esm/Loader/ShadersWGSL/mmdStandard";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
@@ -285,6 +286,11 @@ type MaterialShaderDefaults = {
 };
 
 type PostEffectLutSourceMode = "builtin" | "external-absolute" | "project-relative";
+
+interface PreferredEngineResult {
+    engine: Engine | WebGPUEngine;
+    startupDiagnostics: string[];
+}
 
 export class MmdManager {
     private static readonly RENDER_ENGINE_OPTIONS = {
@@ -784,6 +790,7 @@ color.rgb*=(1.0-toonContactAoApplied);
     }
     private readonly renderingCanvas: HTMLCanvasElement;
     private engine: Engine | WebGPUEngine;
+    private readonly runtimeDiagnostics = new Set<string>();
     private scene: Scene;
     private camera: ArcRotateCamera;
     private mmdCamera: MmdCamera;
@@ -878,7 +885,7 @@ color.rgb*=(1.0-toonContactAoApplied);
     private postEffectContrastValue = 1;
     private postEffectGammaValue = 1;
     private postEffectExposureValue = 1;
-    private postEffectToneMappingEnabledValue = true;
+    private postEffectToneMappingEnabledValue = false;
     private postEffectToneMappingTypeValue = ImageProcessingConfiguration.TONEMAPPING_STANDARD;
     private postEffectDitheringEnabledValue = false;
     private postEffectDitheringIntensityValue = 1 / 255;
@@ -2681,20 +2688,22 @@ color.rgb*=(1.0-toonContactAoApplied);
     }
 
     static async create(canvas: HTMLCanvasElement): Promise<MmdManager> {
-        const engine = await MmdManager.createPreferredEngine(canvas);
-        return new MmdManager(canvas, engine);
+        const { engine, startupDiagnostics } = await MmdManager.createPreferredEngine(canvas);
+        return new MmdManager(canvas, engine, startupDiagnostics);
     }
 
     private static createWebGlEngine(canvas: HTMLCanvasElement): Engine {
         return new Engine(canvas, false, MmdManager.RENDER_ENGINE_OPTIONS);
     }
 
-    private static async createPreferredEngine(canvas: HTMLCanvasElement): Promise<Engine | WebGPUEngine> {
+    private static async createPreferredEngine(canvas: HTMLCanvasElement): Promise<PreferredEngineResult> {
+        const startupDiagnostics: string[] = [];
         try {
             const isWebGpuSupported = await WebGPUEngine.IsSupportedAsync;
             if (!isWebGpuSupported) {
                 console.info("WebGPU unavailable. Falling back to WebGL2.");
-                return MmdManager.createWebGlEngine(canvas);
+                startupDiagnostics.push("WebGPU unavailable. Using WebGL2.");
+                return { engine: MmdManager.createWebGlEngine(canvas), startupDiagnostics };
             }
 
             WebGPUTintWASM.DisableUniformityAnalysis = true;
@@ -2712,22 +2721,30 @@ color.rgb*=(1.0-toonContactAoApplied);
             engine.compatibilityMode = MmdManager.WEBGPU_COMPATIBILITY_MODE;
             const webGpuMode = engine.compatibilityMode ? "compatibility" : "native";
             console.info(`Using WebGPU renderer (${webGpuMode}, WGSL-first).`);
-            return engine;
+            return { engine, startupDiagnostics };
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             console.warn(`WebGPU initialization failed. Falling back to WebGL2. Reason: ${message}`);
-            return MmdManager.createWebGlEngine(canvas);
+            startupDiagnostics.push("WebGPU initialization failed. Using WebGL2.");
+            return { engine: MmdManager.createWebGlEngine(canvas), startupDiagnostics };
         }
     }
 
-    constructor(canvas: HTMLCanvasElement, engine?: Engine | WebGPUEngine) {
+    constructor(canvas: HTMLCanvasElement, engine?: Engine | WebGPUEngine, startupDiagnostics: readonly string[] = []) {
         this.renderingCanvas = canvas;
+        for (const diagnostic of startupDiagnostics) {
+            this.runtimeDiagnostics.add(diagnostic);
+        }
 
         MmdManager.patchMmdToonLightSeparationShader();
 
         // Register default material builder explicitly (avoids Vite tree-shaking side-effect imports)
         if (MmdModelLoader.SharedMaterialBuilder === null) {
             MmdModelLoader.SharedMaterialBuilder = new MmdStandardMaterialBuilder();
+        }
+        if (MmdModelLoader.SharedMaterialBuilder instanceof MmdStandardMaterialBuilder) {
+            // Favor compatibility over strict MMD-style depth writing to reduce face-layer conflicts.
+            MmdModelLoader.SharedMaterialBuilder.renderMethod = MmdMaterialRenderMethod.AlphaEvaluation;
         }
 
         // Create engine (WebGPU preferred path is handled by MmdManager.create)
@@ -3066,6 +3083,41 @@ color.rgb*=(1.0-toonContactAoApplied);
         physicsEngine.setGravity(gravity);
     }
 
+    private applyMmdMaterialCompatibilityFixes(material: any): boolean {
+        if (!material || typeof material !== "object") {
+            return false;
+        }
+
+        // Some loaders leave opaque materials at alpha=0, but restoring alpha on
+        // texture-driven transparent materials can break face/eyelash draw order.
+        const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
+        const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+        const hasOpacityTexture = Boolean(material.opacityTexture);
+        const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
+        const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
+        const hasTransparentTexturePath = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled;
+
+        if (material.alpha === 0) {
+            if (!hasTransparentTexturePath && (material.diffuseTexture || material.albedoTexture)) {
+                material.alpha = 1;
+            }
+        }
+
+        if (hasTransparentTexturePath) {
+            // Give layered transparent face materials a slight depth bias so they do not
+            // fight with the skin surface when the model relies on PMX material order.
+            material.zOffset = -1;
+            material.zOffsetUnits = -2;
+        } else {
+            material.zOffset = 0;
+            material.zOffsetUnits = 0;
+        }
+
+        // Preserve the loader's culling decision. Forcing double-sided rendering on
+        // every PMX material tends to reveal inner mouth/face polygons on some models.
+        return hasTransparentTexturePath;
+    }
+
     async loadPMX(filePath: string): Promise<ModelInfo | null> {
         try {
             await this.physicsInitializationPromise;
@@ -3110,6 +3162,7 @@ color.rgb*=(1.0-toonContactAoApplied);
             // Enable root mesh and all children
             mmdMesh.setEnabled(true);
             mmdMesh.isVisible = true;
+            let materialOrder = 0;
             for (const mesh of result.meshes) {
                 mesh.setEnabled(true);
                 mesh.isVisible = true;
@@ -3121,18 +3174,12 @@ color.rgb*=(1.0-toonContactAoApplied);
                 // Fix MmdStandardMaterial: the builder sets alpha=diffuse[3] from PMX data,
                 // but MmdStandardMaterialProxy manages alpha at runtime, so reset to visible here.
                 if (mesh.material) {
-                    const mat = mesh.material as any;
-                    // Only fix alpha if it was set to 0 (invisible) by the loader
-                    if (mat.alpha === 0) {
-                        // Some MMD materials are rendered by the proxy even when alpha is 0.
-                        // For shadow pass, alpha=0 can fully suppress casting; restore to opaque
-                        // only when a texture is present to avoid revealing helper geometry.
-                        if (mat.diffuseTexture || mat.opacityTexture) {
-                            mat.alpha = 1;
-                        }
+                    const isTransparentLike = this.applyMmdMaterialCompatibilityFixes(mesh.material as any);
+                    mesh.alphaIndex = materialOrder;
+                    if (isTransparentLike) {
+                        mesh.alphaIndex = materialOrder;
                     }
-                    // Ensure backFaceCulling is properly set for MMD models
-                    mat.backFaceCulling = false;
+                    materialOrder += 1;
                 }
             }
 
@@ -4545,7 +4592,7 @@ color.rgb*=(1.0-toonContactAoApplied);
             : 1;
         this.postEffectToneMappingEnabled = typeof data.effects.toneMappingEnabled === "boolean"
             ? data.effects.toneMappingEnabled
-            : true;
+            : false;
         this.postEffectToneMappingType = typeof data.effects.toneMappingType === "number" && Number.isFinite(data.effects.toneMappingType)
             ? data.effects.toneMappingType
             : ImageProcessingConfiguration.TONEMAPPING_STANDARD;
@@ -4815,6 +4862,44 @@ color.rgb*=(1.0-toonContactAoApplied);
     getEngineType(): string {
         if (this.isWebGpuEngine()) return "WebGPU";
         return (this.engine as Engine).webGLVersion >= 2 ? "WebGL2" : "WebGL1";
+    }
+
+    consumeRuntimeDiagnosticSummary(): string | null {
+        const diagnostics = [...this.runtimeDiagnostics];
+        this.runtimeDiagnostics.clear();
+        if (diagnostics.length === 0) {
+            return null;
+        }
+        if (diagnostics.length === 1) {
+            return diagnostics[0];
+        }
+        const preview = diagnostics.slice(0, 2).join(" / ");
+        const suffix = diagnostics.length > 2 ? ` (+${diagnostics.length - 2} more)` : "";
+        return `Rendering warnings: ${preview}${suffix}`;
+    }
+
+    /** High-level shader/runtime label shown beside the engine badge. */
+    getShaderRuntimeLabel(): "WGSL-first" | "GLSL" | "Mixed" {
+        if (!this.isWebGpuEngine()) {
+            return "GLSL";
+        }
+
+        for (const entry of this.sceneModels) {
+            for (const materialEntry of entry.materials) {
+                if (this.getExternalWgslToonShaderPathForMaterial(materialEntry.material)) {
+                    return "Mixed";
+                }
+                if (this.getWgslMaterialShaderPresetForMaterial(materialEntry.material) !== MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
+                    return "Mixed";
+                }
+            }
+        }
+
+        return "WGSL-first";
+    }
+
+    private addRuntimeDiagnostic(message: string): void {
+        this.runtimeDiagnostics.add(message);
     }
 
     /** Capture current viewport as PNG data URL */
@@ -5821,6 +5906,7 @@ color.rgb*=(1.0-toonContactAoApplied);
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             console.warn(`DoF pipeline initialization failed on ${this.getEngineType()}. DoF features were disabled. Reason: ${message}`);
+            this.addRuntimeDiagnostic(`DoF disabled on ${this.getEngineType()}.`);
 
             this.dofEnabledValue = false;
             this.postEffectFarDofStrengthValue = 0;
@@ -6293,6 +6379,7 @@ color.rgb*=(1.0-toonContactAoApplied);
 
             this.syncShaderContactAoState();
             if (this.postEffectSsaoEnabledValue && this.postEffectSsaoStrengthValue > 0.00001) {
+                this.addRuntimeDiagnostic("WebGPU SSAO is using fallback mode.");
                 this.ensureSsaoFallbackPostProcess();
             } else if (this.ssaoPostProcess) {
                 this.ssaoPostProcess.dispose(this.camera);
@@ -6353,6 +6440,7 @@ color.rgb*=(1.0-toonContactAoApplied);
                 } catch (err: unknown) {
                     const message = err instanceof Error ? err.message : String(err);
                     console.warn(`SSAO2 pipeline initialization failed on ${this.getEngineType()}. Switching to screen-space SSAO fallback. Reason: ${message}`);
+                    this.addRuntimeDiagnostic(`SSAO fallback is active on ${this.getEngineType()}.`);
                     this.ssaoRenderingPipeline = null;
                 }
             }
@@ -6380,6 +6468,7 @@ color.rgb*=(1.0-toonContactAoApplied);
         const initialDepthMap = this.ssaoDepthRenderer?.getDepthMap();
         if (!initialDepthMap) {
             this.postEffectSsaoEnabledValue = false;
+            this.addRuntimeDiagnostic(`SSAO was disabled on ${this.getEngineType()}.`);
             if (this.ssaoPostProcess) {
                 this.ssaoPostProcess.dispose(this.camera);
                 this.ssaoPostProcess = null;
@@ -6500,6 +6589,7 @@ color.rgb*=(1.0-toonContactAoApplied);
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
                 console.warn(`SSR pipeline initialization failed on ${this.getEngineType()}. SSR was disabled. Reason: ${message}`);
+                this.addRuntimeDiagnostic(`SSR disabled on ${this.getEngineType()}.`);
                 this.postEffectSsrEnabledValue = false;
                 this.ssrRenderingPipeline = null;
                 this.enforceFinalPostProcessOrder();
@@ -6620,6 +6710,7 @@ color.rgb*=(1.0-toonContactAoApplied);
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
                 console.warn(`Volumetric light initialization failed on ${this.getEngineType()}. Volumetric light was disabled. Reason: ${message}`);
+                this.addRuntimeDiagnostic(`Volumetric light disabled on ${this.getEngineType()}.`);
                 this.postEffectVlsEnabledValue = false;
                 this.volumetricLightPostProcess = null;
                 this.enforceFinalPostProcessOrder();

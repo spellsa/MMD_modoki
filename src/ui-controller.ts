@@ -127,6 +127,15 @@ export class UIController {
     private static readonly MIN_BOTTOM_PANEL_HEIGHT = 132;
     private static readonly MIN_MAIN_CONTENT_HEIGHT = 220;
     private static readonly EXTERNAL_WGSL_PRESET_PREFIX = "external-wgsl::";
+    private static readonly VISIBLE_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
+        "wgsl-mmd-standard",
+        "wgsl-unlit",
+        "wgsl-soft-lit",
+    ]);
+    private static readonly VISIBLE_BUNDLED_WGSL_FILE_NAMES = new Set<string>([
+        "ToonTemplate.wgsl",
+        "toon_debug_white_shadow.wgsl",
+    ]);
 
     private mmdManager: MmdManager;
     private timeline: Timeline;
@@ -338,6 +347,7 @@ export class UIController {
         this.setupFileDrop();
         this.setupPngSequenceExportStateBridge();
         this.setupPerfDisplay();
+        this.showStartupRenderingDiagnostics();
         this.setupViewportAspectSync();
         this.refreshModelSelector();
         this.refreshAccessoryPanel();
@@ -1652,20 +1662,44 @@ export class UIController {
     private setupPerfDisplay(): void {
         const fpsEl = document.getElementById("fps-value")!;
         const engineEl = document.getElementById("engine-type-badge")!;
+        const shaderEl = document.getElementById("shader-type-badge")!;
 
-        // Engine type - detect once on startup
-        const engineType = this.mmdManager.getEngineType();
-        engineEl.textContent = engineType === "WebGPU" ? "WebGPU (WGSL)" : engineType;
-        // Color-code by type
-        if (engineType === "WebGPU") {
-            engineEl.style.background = "rgba(139,92,246,0.15)";
-            engineEl.style.color = "#a78bfa";
-            engineEl.style.borderColor = "rgba(139,92,246,0.3)";
-        } else if (engineType === "WebGL1") {
-            engineEl.style.background = "rgba(245,158,11,0.15)";
-            engineEl.style.color = "#fbbf24";
-            engineEl.style.borderColor = "rgba(245,158,11,0.3)";
-        }
+        const updatePerfBadges = (): void => {
+            const engineType = this.mmdManager.getEngineType();
+            const shaderType = this.mmdManager.getShaderRuntimeLabel();
+            engineEl.textContent = engineType;
+            shaderEl.textContent = shaderType;
+
+            if (engineType === "WebGPU") {
+                engineEl.style.background = "rgba(139,92,246,0.15)";
+                engineEl.style.color = "#a78bfa";
+                engineEl.style.borderColor = "rgba(139,92,246,0.3)";
+            } else if (engineType === "WebGL1") {
+                engineEl.style.background = "rgba(245,158,11,0.15)";
+                engineEl.style.color = "#fbbf24";
+                engineEl.style.borderColor = "rgba(245,158,11,0.3)";
+            } else {
+                engineEl.style.background = "";
+                engineEl.style.color = "";
+                engineEl.style.borderColor = "";
+            }
+
+            if (shaderType === "WGSL-first") {
+                shaderEl.style.background = "rgba(34,197,94,0.15)";
+                shaderEl.style.color = "#86efac";
+                shaderEl.style.borderColor = "rgba(34,197,94,0.3)";
+            } else if (shaderType === "Mixed") {
+                shaderEl.style.background = "rgba(245,158,11,0.15)";
+                shaderEl.style.color = "#fbbf24";
+                shaderEl.style.borderColor = "rgba(245,158,11,0.3)";
+            } else {
+                shaderEl.style.background = "rgba(56,189,248,0.12)";
+                shaderEl.style.color = "#7dd3fc";
+                shaderEl.style.borderColor = "rgba(56,189,248,0.24)";
+            }
+        };
+
+        updatePerfBadges();
 
         // FPS - update every second
         setInterval(() => {
@@ -1674,6 +1708,7 @@ export class UIController {
             fpsEl.style.color = fps >= 55 ? "var(--accent-green)"
                 : fps >= 30 ? "var(--accent-amber)"
                     : "var(--accent-red)";
+            updatePerfBadges();
             this.refreshDofAutoFocusReadout();
         }, 1000);
 
@@ -1701,6 +1736,14 @@ export class UIController {
             await this.mmdManager.toggleMute();
             updateVolumeUI(this.mmdManager.muted);
         });
+    }
+
+    private showStartupRenderingDiagnostics(): void {
+        const summary = this.mmdManager.consumeRuntimeDiagnosticSummary();
+        if (!summary) {
+            return;
+        }
+        this.showToast(summary, "info");
     }
 
     private buildProjectDefaultFileName(): string {
@@ -3209,9 +3252,12 @@ export class UIController {
         }
 
         const isAvailable = this.mmdManager.isWgslMaterialShaderAssignmentAvailable();
-        const presets = this.mmdManager.getWgslMaterialShaderPresets();
+        const presets = this.mmdManager.getWgslMaterialShaderPresets()
+            .filter((preset) => UIController.VISIBLE_SHADER_PRESET_IDS.has(preset.id));
         const models = this.mmdManager.getWgslModelShaderStates();
         const activeExternalWgslPath = this.mmdManager.getExternalWgslToonShaderPath();
+        const bundledWgslShaderFiles = this.bundledWgslShaderFiles
+            .filter((shaderFile) => UIController.VISIBLE_BUNDLED_WGSL_FILE_NAMES.has(shaderFile.name));
 
         this.shaderPresetSelect.innerHTML = "";
         for (const preset of presets) {
@@ -3221,20 +3267,20 @@ export class UIController {
             this.shaderPresetSelect.appendChild(option);
         }
 
-        if (this.bundledWgslShaderFiles.length > 0) {
+        if (bundledWgslShaderFiles.length > 0) {
             const separator = document.createElement("option");
             separator.value = "";
             separator.textContent = "--- WGSL Files ---";
             separator.disabled = true;
             this.shaderPresetSelect.appendChild(separator);
-            for (const shaderFile of this.bundledWgslShaderFiles) {
+            for (const shaderFile of bundledWgslShaderFiles) {
                 const option = document.createElement("option");
                 option.value = this.makeExternalWgslPresetValue(shaderFile.path);
                 option.textContent = `WGSL: ${shaderFile.name}`;
                 this.shaderPresetSelect.appendChild(option);
             }
         }
-        if (activeExternalWgslPath && !this.bundledWgslShaderFiles.some((file) => this.isSamePathForRenderer(file.path, activeExternalWgslPath))) {
+        if (activeExternalWgslPath && !bundledWgslShaderFiles.some((file) => this.isSamePathForRenderer(file.path, activeExternalWgslPath))) {
             const option = document.createElement("option");
             option.value = this.makeExternalWgslPresetValue(activeExternalWgslPath);
             option.textContent = `WGSL: ${this.getBaseNameForRenderer(activeExternalWgslPath)}`;
@@ -3602,12 +3648,12 @@ export class UIController {
                 <div class="effect-row">
                     <span class="effect-label">ToneMap</span>
                     <select data-postfx-select="tone-mapping-type" class="effect-select">
-                        <option value="-1">OFF</option>
+                        <option value="-1">None</option>
                         <option value="0">Standard</option>
                         <option value="1">ACES</option>
                         <option value="2">Neutral</option>
                     </select>
-                    <span data-postfx-val="tone-mapping" class="effect-value">OFF</span>
+                    <span data-postfx-val="tone-mapping" class="effect-value">None</span>
                 </div>
                 <div class="effect-row effect-row-check">
                     <span class="effect-label">LUT</span>
@@ -3797,7 +3843,7 @@ export class UIController {
             }
             toneMappingVal.textContent = this.mmdManager.postEffectToneMappingEnabled
                 ? toneMapTypeToLabel(this.mmdManager.postEffectToneMappingType)
-                : "OFF";
+                : "None";
         };
 
         const applyDithering = (): void => {

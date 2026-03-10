@@ -16,6 +16,20 @@ if (isDev) {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 }
 
+const configureChromiumGpuFlags = (): void => {
+  // Apply before app ready so Chromium picks them up for all packaged builds.
+  app.commandLine.appendSwitch('enable-unsafe-webgpu');
+  app.commandLine.appendSwitch('ignore-gpu-blocklist');
+  app.commandLine.appendSwitch('force_high_performance_gpu');
+  if (process.platform === 'linux' && !isDev) {
+    // Temporary workaround for packaged Linux zip builds lacking a working chrome-sandbox setup.
+    app.commandLine.appendSwitch('no-sandbox');
+    app.commandLine.appendSwitch('disable-setuid-sandbox');
+  }
+};
+
+configureChromiumGpuFlags();
+
 const MAIN_WINDOW_ASPECT_RATIO = 16 / 9;
 const MAIN_WINDOW_DEFAULT_WIDTH = 1440;
 const MAIN_WINDOW_DEFAULT_HEIGHT = Math.round(MAIN_WINDOW_DEFAULT_WIDTH / MAIN_WINDOW_ASPECT_RATIO);
