@@ -79,4 +79,4 @@ jobs:
           name: MMD modoki ${{ github.ref_name }}
           prerelease: true
           fail_on_unmatched_files: true
-          files: release-assets/*.zip
+          files: release-assets/**/*.zip
