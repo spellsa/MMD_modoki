@@ -1,12 +1,11 @@
 # MMD modoki
 
-Babylon.js と `babylon-mmd` をベースにした、MMD もどきのローカル編集ツールです。  
+Babylon.js Editor と `babylon-mmd` をベースにした、MMD もどきのローカル編集ツールです。  
 PMX/PMD モデル、アクセサリー、VMD、カメラ VMD、音声を読み込み、タイムライン編集とプレビュー、PNG 出力を行えます。
 
 ## ダウンロード
 
 - Release 一覧: https://github.com/togechiyo/MMD_modoki/releases
-- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.0
 
 配布物は OS ごとの zip です。
 
@@ -27,7 +26,7 @@ macOS:
 - `MMD modoki.app`
 
 Linux:
-- packaged build では `--no-sandbox` / `--disable-setuid-sandbox` を付けて起動します。`chrome-sandbox` 起因の起動失敗を避けるための暫定対応です。
+- Linux 版は環境によって `--no-sandbox` / `--disable-setuid-sandbox` を付けて起動する必要がある場合があります。`chrome-sandbox` 起因の起動失敗を避けるための暫定対応です。
 - 展開先の実行ファイルを直接起動します。
 
 ## 初回起動時の注意
