@@ -189,15 +189,13 @@ body.exporter-mode #bone-overlay-canvas {
   display: flex;
   align-items: center;
   gap: 8px;
+  color: #86efac;
 }
 
 .app-title {
   font-weight: 600;
   font-size: 14px;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: currentColor;
   letter-spacing: -0.02em;
 }
 
@@ -1165,6 +1163,35 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .cam-slider {
   flex: 1;
   min-width: 0;
+}
+
+.range-number-input {
+  width: 64px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  text-align: right;
+  outline: none;
+}
+
+.range-number-input:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+.range-number-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.control-row.range-has-number .range-number-input {
+  flex: 0 0 64px;
 }
 
 .camera-view-buttons {
@@ -2141,6 +2168,10 @@ body.bottom-panel-resizing {
   min-width: 0;
 }
 
+.light-row.range-has-number {
+  grid-template-columns: 26% minmax(0, 1fr) 64px minmax(44px, 20%);
+}
+
 .light-row--hidden {
   display: none;
 }
@@ -2531,6 +2562,10 @@ body.bottom-panel-resizing {
   min-width: 0;
 }
 
+.accessory-row.range-has-number {
+  grid-template-columns: 28px minmax(0, 1fr) 64px 52px;
+}
+
 .accessory-label {
   font-size: 10px;
   color: var(--text-tertiary);
@@ -2616,6 +2651,10 @@ body.bottom-panel-resizing {
   gap: 6px;
   width: 100%;
   min-width: 0;
+}
+
+.effect-row.range-has-number {
+  grid-template-columns: 34% minmax(0, 1fr) 64px minmax(44px, 20%);
 }
 
 .dof-row-hidden {

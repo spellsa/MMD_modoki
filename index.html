@@ -15,19 +15,9 @@
       <div class="toolbar-left">
         <div class="app-logo">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="url(#grad1)" />
-            <path d="M2 17L12 22L22 17" stroke="url(#grad2)" stroke-width="2" fill="none" />
-            <path d="M2 12L12 17L22 12" stroke="url(#grad2)" stroke-width="2" fill="none" />
-            <defs>
-              <linearGradient id="grad1" x1="2" y1="2" x2="22" y2="12">
-                <stop offset="0%" stop-color="#6366f1" />
-                <stop offset="100%" stop-color="#ec4899" />
-              </linearGradient>
-              <linearGradient id="grad2" x1="2" y1="12" x2="22" y2="22">
-                <stop offset="0%" stop-color="#6366f1" />
-                <stop offset="100%" stop-color="#ec4899" />
-              </linearGradient>
-            </defs>
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor" />
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" fill="none" />
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" fill="none" />
           </svg>
           <span class="app-title">MMD modoki</span>
         </div>
@@ -101,6 +91,8 @@
           <span id="engine-type-badge" class="engine-badge">WebGL2</span>
           <span class="perf-sep">|</span>
           <span id="shader-type-badge" class="engine-badge engine-badge--secondary">GLSL</span>
+          <span class="perf-sep">|</span>
+          <span id="physics-type-badge" class="engine-badge engine-badge--secondary">Off</span>
         </div>
         <div id="status-indicator" class="status-badge">
           <span class="status-dot"></span>
@@ -461,7 +453,49 @@
           </div>
         </section>
 
-        <!-- 5: Lighting Controls -->
+        <!-- 6: Physics Controls -->
+        <section id="physics-section" class="bottom-section" hidden>
+          <div class="section-header">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2">
+              <path d="M3 2.5h3.5v3.5H3zM7.5 8h3.5v3.5H7.5z" />
+              <path d="M6.5 4.25h1.2M8.6 4.25h2.2M5.4 9.75H4.2M7.5 9.75H6.3M6.5 5.1v1.8M7.5 7.1v1.8" />
+            </svg>
+            <span>物理</span>
+          </div>
+          <div class="physics-controls">
+            <div class="physics-row">
+              <span class="physics-label">演算Hz</span>
+              <select id="physics-step-rate" class="panel-select">
+                <option value="30">30Hz</option>
+                <option value="60" selected>60Hz</option>
+                <option value="120">120Hz</option>
+              </select>
+              <span id="physics-step-rate-val" class="physics-value">60Hz</span>
+            </div>
+            <div class="physics-row">
+              <span class="physics-label">重力</span>
+              <input type="range" id="physics-gravity-accel" class="physics-slider" min="0" max="200" value="98" step="1">
+              <span id="physics-gravity-accel-val" class="physics-value">98</span>
+            </div>
+            <div class="physics-row">
+              <span class="physics-label">重力X</span>
+              <input type="range" id="physics-gravity-dir-x" class="physics-slider" min="-100" max="100" value="0" step="1">
+              <span id="physics-gravity-dir-x-val" class="physics-value">0</span>
+            </div>
+            <div class="physics-row">
+              <span class="physics-label">重力Y</span>
+              <input type="range" id="physics-gravity-dir-y" class="physics-slider" min="-100" max="100" value="-100" step="1">
+              <span id="physics-gravity-dir-y-val" class="physics-value">-100</span>
+            </div>
+            <div class="physics-row">
+              <span class="physics-label">重力Z</span>
+              <input type="range" id="physics-gravity-dir-z" class="physics-slider" min="-100" max="100" value="0" step="1">
+              <span id="physics-gravity-dir-z-val" class="physics-value">0</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7: Lighting Controls -->
         <section id="lighting-section" class="bottom-section">
           <div class="section-header">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">

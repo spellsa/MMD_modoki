@@ -5,13 +5,15 @@
 ## 配布関連
 
 - Release 一覧: https://github.com/togechiyo/MMD_modoki/releases
-- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.0
+- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.1
 
 ## 主要ドキュメント
 
 - 目次: [docs-index.md](./docs-index.md)
 - 全体構成: [architecture.md](./architecture.md)
 - 既知の問題: [known-issues.md](./known-issues.md)
+- v0.1.1 フィードバック台帳: [v0.1.1-feedback.md](./v0.1.1-feedback.md)
+- v0.1.1 物理 backend 変更メモ: [physics-backend-migration-v0.1.1.md](./physics-backend-migration-v0.1.1.md)
 - v0.1.0 フィードバック台帳: [v0.1.0-feedback.md](./v0.1.0-feedback.md)
 - リリース手順メモ: [release-process.md](./release-process.md)
 - Undo / Redo 検討メモ: [undo-redo-investigation.md](./undo-redo-investigation.md)

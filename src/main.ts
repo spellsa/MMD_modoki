@@ -18,6 +18,8 @@ if (isDev) {
 
 const configureChromiumGpuFlags = (): void => {
   // Apply before app ready so Chromium picks them up for all packaged builds.
+  // Raise V8 old-space for heavier model loading and multi-character scenes.
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=4096');
   app.commandLine.appendSwitch('enable-unsafe-webgpu');
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
   app.commandLine.appendSwitch('force_high_performance_gpu');

@@ -44,6 +44,7 @@
 ## 物理
 
 - [物理ランタイム仕様](./physics-runtime-spec.md)
+- [v0.1.1 物理 backend 変更メモ](./physics-backend-migration-v0.1.1.md)
 - [物理演算タスクリスト](./physics-task-list.md)
 - [MMD基本タスクチェックリスト](./mmd-basic-task-checklist.md)
 - [babylon-mmd 物理調査](./babylon-mmd-physics-research.md)
@@ -58,6 +59,7 @@
 
 - [手動テストチェックリスト](./manual-test-checklist.md)
 - [既知の問題](./known-issues.md)
+- [v0.1.1 フィードバック台帳](./v0.1.1-feedback.md)
 - [v0.1.0 フィードバック台帳](./v0.1.0-feedback.md)
 - [リリース手順メモ](./release-process.md)
 - [文字コード運用メモ](./dev-notes-encoding.md)

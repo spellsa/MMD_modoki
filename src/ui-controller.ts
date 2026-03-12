@@ -221,6 +221,8 @@ export class UIController {
     private physicsGravityDirXSlider: HTMLInputElement | null = null;
     private physicsGravityDirYSlider: HTMLInputElement | null = null;
     private physicsGravityDirZSlider: HTMLInputElement | null = null;
+    private physicsSimulationRateSelect: HTMLSelectElement | null = null;
+    private physicsSimulationRateValueEl: HTMLElement | null = null;
     private dofFocusSlider: HTMLInputElement | null = null;
     private dofFocusValueEl: HTMLElement | null = null;
     private dofFStopValueEl: HTMLElement | null = null;
@@ -237,6 +239,7 @@ export class UIController {
     private accessoryEmptyStateEl: HTMLElement | null = null;
     private readonly accessoryTransformSliders = new Map<AccessoryTransformSliderKey, HTMLInputElement>();
     private readonly accessoryTransformValueEls = new Map<AccessoryTransformSliderKey, HTMLElement>();
+    private readonly rangeNumberInputs = new WeakMap<HTMLInputElement, HTMLInputElement>();
     private isSyncingAccessoryUi = false;
     private isSyncingAccessoryParentUi = false;
     private syncingBoneSelection = false;
@@ -365,6 +368,7 @@ export class UIController {
         this.setupBottomPanelResizer();
         this.clampBottomPanelHeightToLayout();
         this.refreshShaderPanel();
+        this.installRangeNumberInputs();
         void this.reloadBundledWgslShaderFiles();
         this.updateTimelineEditState();
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
@@ -456,10 +460,24 @@ export class UIController {
         const physicsGravityDirYVal = document.getElementById("physics-gravity-dir-y-val");
         const physicsGravityDirZ = document.getElementById("physics-gravity-dir-z") as HTMLInputElement | null;
         const physicsGravityDirZVal = document.getElementById("physics-gravity-dir-z-val");
+        const physicsSimulationRate = document.getElementById("physics-step-rate") as HTMLSelectElement | null;
+        const physicsSimulationRateVal = document.getElementById("physics-step-rate-val");
         this.physicsGravityAccelSlider = physicsGravityAccel;
         this.physicsGravityDirXSlider = physicsGravityDirX;
         this.physicsGravityDirYSlider = physicsGravityDirY;
         this.physicsGravityDirZSlider = physicsGravityDirZ;
+        this.physicsSimulationRateSelect = physicsSimulationRate;
+        this.physicsSimulationRateValueEl = physicsSimulationRateVal;
+
+        if (physicsSimulationRate) {
+            physicsSimulationRate.value = String(this.mmdManager.getPhysicsSimulationRateHz());
+            this.refreshPhysicsSimulationRateUi();
+            physicsSimulationRate.addEventListener("change", () => {
+                const next = this.mmdManager.setPhysicsSimulationRateHz(Number(physicsSimulationRate.value));
+                physicsSimulationRate.value = String(next);
+                this.refreshPhysicsSimulationRateUi();
+            });
+        }
 
         if (physicsGravityAccel && physicsGravityAccelVal) {
             const initialAccel = Math.round(this.mmdManager.getPhysicsGravityAcceleration());
@@ -1107,17 +1125,19 @@ export class UIController {
             this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
 
             // Reflect runtime camera FOV (e.g. camera VMD playback) in the camera panel.
-            if (this.camFovSlider && this.camFovValueEl && document.activeElement !== this.camFovSlider) {
+            if (this.camFovSlider && this.camFovValueEl && !this.isRangeInputEditing(this.camFovSlider)) {
                 const fovDeg = this.mmdManager.getCameraFov();
                 const clamped = Math.max(Number(this.camFovSlider.min), Math.min(Number(this.camFovSlider.max), fovDeg));
                 this.camFovSlider.value = String(Math.round(clamped));
                 this.camFovValueEl.textContent = `${Math.round(fovDeg)} deg`;
+                this.syncRangeNumberInput(this.camFovSlider);
             }
-            if (this.camDistanceSlider && this.camDistanceValueEl && document.activeElement !== this.camDistanceSlider) {
+            if (this.camDistanceSlider && this.camDistanceValueEl && !this.isRangeInputEditing(this.camDistanceSlider)) {
                 const distance = this.mmdManager.getCameraDistance();
                 const clamped = Math.max(Number(this.camDistanceSlider.min), Math.min(Number(this.camDistanceSlider.max), distance));
                 this.camDistanceSlider.value = String(Math.round(clamped));
                 this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
+                this.syncRangeNumberInput(this.camDistanceSlider);
             }
             this.refreshDofAutoFocusReadout();
             this.refreshLensDistortionAutoReadout();
@@ -1644,6 +1664,7 @@ export class UIController {
         const staticValue = document.getElementById("effect-edge-width-val");
         if (staticInput) {
             staticInput.value = String(edgePercent);
+            this.syncRangeNumberInput(staticInput);
         }
         if (staticValue) {
             staticValue.textContent = `${edgePercent}%`;
@@ -1653,6 +1674,7 @@ export class UIController {
         const panelValue = this.shaderMaterialList?.querySelector<HTMLElement>('span[data-postfx-val="edge-width"]');
         if (panelInput) {
             panelInput.value = String(edgePercent);
+            this.syncRangeNumberInput(panelInput);
         }
         if (panelValue) {
             panelValue.textContent = `${edgePercent}%`;
@@ -1663,12 +1685,16 @@ export class UIController {
         const fpsEl = document.getElementById("fps-value")!;
         const engineEl = document.getElementById("engine-type-badge")!;
         const shaderEl = document.getElementById("shader-type-badge")!;
+        const physicsEl = document.getElementById("physics-type-badge")!;
 
         const updatePerfBadges = (): void => {
             const engineType = this.mmdManager.getEngineType();
             const shaderType = this.mmdManager.getShaderRuntimeLabel();
+            const physicsType = this.mmdManager.getPhysicsBackendLabel();
+            const shaderBadgeLabel = shaderType === "WGSL-first" ? "WGSL" : shaderType;
             engineEl.textContent = engineType;
-            shaderEl.textContent = shaderType;
+            shaderEl.textContent = shaderBadgeLabel;
+            physicsEl.textContent = physicsType;
 
             if (engineType === "WebGPU") {
                 engineEl.style.background = "rgba(139,92,246,0.15)";
@@ -1696,6 +1722,20 @@ export class UIController {
                 shaderEl.style.background = "rgba(56,189,248,0.12)";
                 shaderEl.style.color = "#7dd3fc";
                 shaderEl.style.borderColor = "rgba(56,189,248,0.24)";
+            }
+
+            if (physicsType === "Bullet") {
+                physicsEl.style.background = "rgba(34,197,94,0.15)";
+                physicsEl.style.color = "#86efac";
+                physicsEl.style.borderColor = "rgba(34,197,94,0.3)";
+            } else if (physicsType === "Ammo") {
+                physicsEl.style.background = "rgba(245,158,11,0.15)";
+                physicsEl.style.color = "#fbbf24";
+                physicsEl.style.borderColor = "rgba(245,158,11,0.3)";
+            } else {
+                physicsEl.style.background = "rgba(148,163,184,0.14)";
+                physicsEl.style.color = "#cbd5e1";
+                physicsEl.style.borderColor = "rgba(148,163,184,0.24)";
             }
         };
 
@@ -1935,6 +1975,7 @@ export class UIController {
 
             this.refreshModelSelector();
             this.refreshShaderPanel();
+            this.refreshPhysicsSimulationRateUi();
             if (this.mmdManager.getTimelineTarget() === "camera") {
                 this.applyCameraSelectionUI();
             } else {
@@ -2700,6 +2741,7 @@ export class UIController {
     private setAccessoryTransformControlsEnabled(enabled: boolean): void {
         for (const slider of this.accessoryTransformSliders.values()) {
             slider.disabled = !enabled;
+            this.syncRangeNumberInput(slider);
         }
     }
 
@@ -2866,6 +2908,129 @@ export class UIController {
         const max = Number(slider.max);
         const clamped = Math.max(min, Math.min(max, value));
         slider.value = String(clamped);
+        this.syncRangeNumberInput(slider);
+    }
+
+    private installRangeNumberInputs(root: ParentNode = document): void {
+        const sliders = root.querySelectorAll<HTMLInputElement>(
+            'input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].accessory-slider, input[type="range"].effect-slider',
+        );
+
+        for (const slider of sliders) {
+            if (this.rangeNumberInputs.has(slider)) continue;
+
+            const parent = slider.parentElement;
+            if (!parent) continue;
+
+            const numberInput = document.createElement("input");
+            numberInput.type = "number";
+            numberInput.className = "range-number-input";
+            numberInput.min = slider.min;
+            numberInput.max = slider.max;
+            numberInput.step = slider.step || "1";
+            numberInput.disabled = slider.disabled;
+
+            const labelText = parent.querySelector("label, .light-label, .effect-label, .accessory-label")?.textContent?.trim();
+            if (labelText) {
+                numberInput.setAttribute("aria-label", `${labelText} value`);
+            }
+
+            parent.classList.add("range-has-number");
+            parent.insertBefore(numberInput, slider.nextSibling);
+            this.rangeNumberInputs.set(slider, numberInput);
+
+            const commit = (): void => {
+                const parsed = Number(numberInput.value);
+                if (!Number.isFinite(parsed)) {
+                    this.syncRangeNumberInput(slider);
+                    return;
+                }
+
+                const nextValue = this.formatRangeInputValue(
+                    slider,
+                    this.normalizeRangeInputValue(slider, parsed),
+                );
+
+                if (slider.value !== nextValue) {
+                    slider.value = nextValue;
+                }
+
+                slider.dispatchEvent(new Event("input", { bubbles: true }));
+                this.syncRangeNumberInput(slider);
+            };
+
+            slider.addEventListener("input", () => this.syncRangeNumberInput(slider));
+            slider.addEventListener("change", () => this.syncRangeNumberInput(slider));
+            numberInput.addEventListener("change", commit);
+            numberInput.addEventListener("blur", commit);
+            numberInput.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                numberInput.blur();
+            });
+
+            this.syncRangeNumberInput(slider);
+        }
+    }
+
+    private syncRangeNumberInput(slider: HTMLInputElement): void {
+        const numberInput = this.rangeNumberInputs.get(slider);
+        if (!numberInput) return;
+
+        numberInput.disabled = slider.disabled;
+        const parsed = Number(slider.value);
+        if (!Number.isFinite(parsed)) return;
+
+        const nextValue = this.formatRangeInputValue(slider, parsed);
+        if (numberInput.value !== nextValue) {
+            numberInput.value = nextValue;
+        }
+    }
+
+    private isRangeInputEditing(slider: HTMLInputElement): boolean {
+        const activeElement = document.activeElement;
+        return activeElement === slider || activeElement === this.rangeNumberInputs.get(slider);
+    }
+
+    private normalizeRangeInputValue(slider: HTMLInputElement, value: number): number {
+        let next = value;
+        const min = slider.min === "" ? -Infinity : Number(slider.min);
+        const max = slider.max === "" ? Infinity : Number(slider.max);
+
+        if (Number.isFinite(min)) next = Math.max(min, next);
+        if (Number.isFinite(max)) next = Math.min(max, next);
+
+        if (slider.step && slider.step !== "any") {
+            const step = Number(slider.step);
+            if (Number.isFinite(step) && step > 0) {
+                const base = Number.isFinite(min) ? min : 0;
+                next = base + Math.round((next - base) / step) * step;
+                if (Number.isFinite(min)) next = Math.max(min, next);
+                if (Number.isFinite(max)) next = Math.min(max, next);
+            }
+        }
+
+        return next;
+    }
+
+    private formatRangeInputValue(slider: HTMLInputElement, value: number): string {
+        const decimals = this.getRangeStepDecimals(slider.step);
+        return decimals > 0
+            ? String(Number(value.toFixed(decimals)))
+            : String(Math.round(value));
+    }
+
+    private getRangeStepDecimals(stepValue: string): number {
+        if (!stepValue || stepValue === "any") return 0;
+
+        const normalized = stepValue.toLowerCase();
+        if (normalized.includes("e-")) {
+            const exponent = Number.parseInt(normalized.split("e-")[1] ?? "0", 10);
+            return Number.isFinite(exponent) ? exponent : 0;
+        }
+
+        const decimalIndex = normalized.indexOf(".");
+        return decimalIndex >= 0 ? normalized.length - decimalIndex - 1 : 0;
     }
 
     private updateAccessoryValueLabelsFromSliders(): void {
@@ -3141,10 +3306,16 @@ export class UIController {
         const ratio = this.resolveSelectedOutputAspectRatio();
         const containerWidth = Math.max(1, Math.floor(this.viewportContainerEl.clientWidth));
         const containerHeight = Math.max(1, Math.floor(this.viewportContainerEl.clientHeight));
+        const shouldCoverViewport = this.isUiFullscreenActive;
 
         let renderWidth = containerWidth;
         let renderHeight = Math.max(1, Math.round(renderWidth / Math.max(0.1, ratio)));
-        if (renderHeight > containerHeight) {
+        if (shouldCoverViewport) {
+            if (renderHeight < containerHeight) {
+                renderHeight = containerHeight;
+                renderWidth = Math.max(1, Math.round(renderHeight * ratio));
+            }
+        } else if (renderHeight > containerHeight) {
             renderHeight = containerHeight;
             renderWidth = Math.max(1, Math.round(renderHeight * ratio));
         }
@@ -4134,6 +4305,9 @@ export class UIController {
         applyFog();
         applyDistortionInfluence();
         applyEdgeWidth();
+        if (postFxControls) {
+            this.installRangeNumberInputs(postFxControls);
+        }
 
         contrastInput.addEventListener("input", applyContrast);
         gammaInput.addEventListener("input", applyGamma);
@@ -4309,6 +4483,18 @@ export class UIController {
         if (this.physicsGravityDirXSlider) this.physicsGravityDirXSlider.disabled = !available;
         if (this.physicsGravityDirYSlider) this.physicsGravityDirYSlider.disabled = !available;
         if (this.physicsGravityDirZSlider) this.physicsGravityDirZSlider.disabled = !available;
+        if (this.physicsSimulationRateSelect) this.physicsSimulationRateSelect.disabled = !available;
+        this.refreshPhysicsSimulationRateUi();
+    }
+
+    private refreshPhysicsSimulationRateUi(): void {
+        const rate = this.mmdManager.getPhysicsSimulationRateHz();
+        if (this.physicsSimulationRateSelect) {
+            this.physicsSimulationRateSelect.value = String(rate);
+        }
+        if (this.physicsSimulationRateValueEl) {
+            this.physicsSimulationRateValueEl.textContent = `${rate}Hz`;
+        }
     }
 
     private updateCameraViewButtons(active: CameraViewPreset): void {
@@ -4326,13 +4512,14 @@ export class UIController {
     private refreshDofAutoFocusReadout(): void {
         if (!this.mmdManager.dofAutoFocusEnabled) return;
 
-        if (this.dofFocusSlider && this.dofFocusValueEl) {
+        if (this.dofFocusSlider && this.dofFocusValueEl && !this.isRangeInputEditing(this.dofFocusSlider)) {
             const focusMm = this.mmdManager.dofFocusDistanceMm;
             const sliderMin = Number(this.dofFocusSlider.min);
             const sliderMax = Number(this.dofFocusSlider.max);
             const clamped = Math.max(sliderMin, Math.min(sliderMax, focusMm));
             this.dofFocusSlider.value = String(Math.round(clamped));
             this.dofFocusValueEl.textContent = `${(focusMm / 1000).toFixed(1)}m (auto)`;
+            this.syncRangeNumberInput(this.dofFocusSlider);
         }
 
         if (this.dofFStopValueEl) {
@@ -4347,7 +4534,8 @@ export class UIController {
         if (
             this.mmdManager.dofFocalLengthLinkedToCameraFov &&
             this.dofFocalLengthSlider &&
-            this.dofFocalLengthValueEl
+            this.dofFocalLengthValueEl &&
+            !this.isRangeInputEditing(this.dofFocalLengthSlider)
         ) {
             const focalLength = this.mmdManager.dofFocalLength;
             const sliderMin = Number(this.dofFocalLengthSlider.min);
@@ -4357,18 +4545,21 @@ export class UIController {
             this.dofFocalLengthValueEl.textContent = this.mmdManager.dofFocalLengthDistanceInverted
                 ? `${Math.round(focalLength)} (auto, inv)`
                 : `${Math.round(focalLength)} (auto)`;
+            this.syncRangeNumberInput(this.dofFocalLengthSlider);
         }
     }
 
     private refreshLensDistortionAutoReadout(): void {
         if (!this.mmdManager.dofLensDistortionLinkedToCameraFov) return;
         if (!this.lensDistortionSlider || !this.lensDistortionValueEl) return;
+        if (this.isRangeInputEditing(this.lensDistortionSlider)) return;
         const distortionPercent = this.mmdManager.dofLensDistortion * 100;
         const sliderMin = Number(this.lensDistortionSlider.min);
         const sliderMax = Number(this.lensDistortionSlider.max);
         const clamped = Math.max(sliderMin, Math.min(sliderMax, distortionPercent));
         this.lensDistortionSlider.value = String(Math.round(clamped));
         this.lensDistortionValueEl.textContent = `${Math.round(distortionPercent)}% (auto)`;
+        this.syncRangeNumberInput(this.lensDistortionSlider);
     }
 
     private getSelectedTimelineTrack(): KeyframeTrack | null {
@@ -5027,6 +5218,11 @@ export class UIController {
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
+            return;
+        }
+
+        if (track.category === "camera" && !this.mmdManager.ensureCameraAnimationForEditing()) {
+            this.showToast("Failed to prepare camera keyframe track", "error");
             return;
         }
 

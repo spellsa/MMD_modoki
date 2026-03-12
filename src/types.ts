@@ -191,6 +191,7 @@ export interface ProjectViewportState {
 
 export interface ProjectPhysicsState {
     enabled: boolean;
+    simulationRateHz?: number;
     gravityAcceleration: number;
     gravityDirection: { x: number; y: number; z: number };
 }

@@ -83,13 +83,32 @@ npm run lint
 
 ### 代表的な原因
 
-- `ammo.wasm.wasm` 取得時に wasm ではなく HTML が返っている
+- Bullet 用 `spr/index_bg.wasm` と Ammo 用 `ammo.wasm.wasm` の両方が初期化失敗している
 - Dev サーバーのキャッシュで古いバンドルを参照している
+- wasm URL 解決先に wasm ではなく HTML が返っている
 
 ### 対処
 
 1. 開発サーバーを再起動する（`electron-forge start` を再起動）
 2. それでも直らない場合は `node_modules/.vite` を消して再起動する
-3. コンソールに `Physics initialization failed` が出ていないか確認する
+3. コンソールに `Bullet physics initialization failed` や `Physics initialization failed` が出ていないか確認する
 
-現実装では `ammo.wasm.wasm` を URL 明示で `fetch` し、`Ammo({ wasmBinary })` へ渡して初期化する仕様です。
+現実装では Bullet backend を先に初期化し、失敗時のみ Ammo backend へ fallback します。
+
+## 上パネルが `Ammo` になる
+
+### 症状
+
+- アプリは動くが、上パネルの backend バッジが `Ammo`
+- 期待していた `Bullet` にならない
+
+### 意味
+
+Bullet backend の初期化に失敗し、Ammo fallback で起動しています。
+
+### 対処
+
+1. コンソールに `Bullet physics initialization failed` が出ていないか確認する
+2. Electron アプリを完全終了して再起動する
+3. それでも直らない場合は `node_modules/.vite` を消して再起動する
+4. `spr/index_bg.wasm` の解決失敗や `object is not extensible` など、Bullet 初期化例外の内容を確認する
