@@ -1,3 +1,5 @@
+import { createInstance, type Resource } from "i18next";
+
 export type UiLocale = "ja" | "en";
 
 type TranslationTable = Record<string, string>;
@@ -144,19 +146,17 @@ const translations: Record<UiLocale, TranslationTable> = {
     },
 };
 
+const resources: Resource = {
+    ja: { translation: translations.ja },
+    en: { translation: translations.en },
+};
+const i18nInstance = createInstance();
+
 let currentLocale: UiLocale = DEFAULT_LOCALE;
+let i18nInitialized = false;
 
 const isLocale = (value: string | null | undefined): value is UiLocale => {
     return value === "ja" || value === "en";
-};
-
-const replaceParams = (template: string, params?: Record<string, string | number>): string => {
-    if (!params) return template;
-    let result = template;
-    for (const [name, value] of Object.entries(params)) {
-        result = result.replaceAll(`{${name}}`, String(value));
-    }
-    return result;
 };
 
 const resolveLocaleFromEnvironment = (): UiLocale => {
@@ -164,6 +164,22 @@ const resolveLocaleFromEnvironment = (): UiLocale => {
     if (isLocale(stored)) return stored;
     const nav = typeof navigator !== "undefined" ? navigator.language.toLowerCase() : "";
     return nav.startsWith("ja") ? "ja" : DEFAULT_LOCALE;
+};
+
+const ensureI18nInitialized = (locale: UiLocale): void => {
+    if (i18nInitialized) return;
+    void i18nInstance.init({
+        resources,
+        lng: locale,
+        fallbackLng: DEFAULT_LOCALE,
+        initImmediate: false,
+        interpolation: {
+            escapeValue: false,
+            prefix: "{",
+            suffix: "}",
+        },
+    });
+    i18nInitialized = true;
 };
 
 const applyKeyToAttribute = (
@@ -180,10 +196,12 @@ const applyKeyToAttribute = (
 };
 
 export const t = (key: string, params?: Record<string, string | number>): string => {
-    const table = translations[currentLocale];
-    const fallback = translations[DEFAULT_LOCALE];
-    const template = table[key] ?? fallback[key] ?? key;
-    return replaceParams(template, params);
+    ensureI18nInitialized(currentLocale);
+    return i18nInstance.t(key, {
+        ...params,
+        defaultValue: key,
+        lng: currentLocale,
+    });
 };
 
 export const getLocale = (): UiLocale => currentLocale;
@@ -214,6 +232,10 @@ export const setLocale = (
     const emitEvent = options?.emitEvent ?? true;
 
     currentLocale = locale;
+    ensureI18nInitialized(locale);
+    if (i18nInstance.language !== locale) {
+        void i18nInstance.changeLanguage(locale);
+    }
     if (persist && typeof localStorage !== "undefined") {
         localStorage.setItem(STORAGE_KEY, locale);
     }
@@ -231,6 +253,7 @@ export const setLocale = (
 
 export const initializeI18n = (root: ParentNode = document): UiLocale => {
     const initialLocale = resolveLocaleFromEnvironment();
+    ensureI18nInitialized(initialLocale);
     setLocale(initialLocale, {
         persist: false,
         applyToDom: true,
