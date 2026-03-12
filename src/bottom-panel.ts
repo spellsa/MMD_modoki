@@ -17,6 +17,8 @@ export class BottomPanel {
     private currentBoneName: string | null = null;
     private mmdManager: MmdManager | null = null;
     public onBoneSelectionChanged: ((boneName: string | null) => void) | null = null;
+    public onRangeInputsRendered: ((root: ParentNode) => void) | null = null;
+    public onRangeSliderSynced: ((slider: HTMLInputElement) => void) | null = null;
 
     constructor() {
         this.boneSelect = document.getElementById("bone-select") as HTMLSelectElement;
@@ -251,6 +253,8 @@ export class BottomPanel {
             row.appendChild(valueDisplay);
             this.boneContainer.appendChild(row);
         }
+
+        this.onRangeInputsRendered?.(this.boneContainer);
     }
 
     syncSelectedBoneSlidersFromRuntime(): void {
@@ -266,7 +270,7 @@ export class BottomPanel {
             const updateSlider = (key: BoneSliderKey, rawValue: number): void => {
                 const slider = this.boneSliders.get(key);
                 if (!slider) return;
-                if (document.activeElement === slider) return;
+                if (this.isSliderEditing(slider)) return;
 
                 const min = Number.parseFloat(slider.min);
                 const max = Number.parseFloat(slider.max);
@@ -286,6 +290,7 @@ export class BottomPanel {
                 if (valueEl) {
                     valueEl.textContent = this.formatSliderValue(Number(nextValue), step);
                 }
+                this.onRangeSliderSynced?.(slider);
             };
 
             updateSlider("tx", position.x);
@@ -306,7 +311,7 @@ export class BottomPanel {
             const slider = this.boneSliders.get(key);
             if (!slider) return;
             // While dragging/focusing this slider, don't override user's input.
-            if (document.activeElement === slider) return;
+            if (this.isSliderEditing(slider)) return;
 
             const min = Number.parseFloat(slider.min);
             const max = Number.parseFloat(slider.max);
@@ -326,6 +331,7 @@ export class BottomPanel {
             if (valueEl) {
                 valueEl.textContent = this.formatSliderValue(Number(nextValue), step);
             }
+            this.onRangeSliderSynced?.(slider);
         };
 
         updateSlider("tx", transform.position.x);
@@ -412,6 +418,7 @@ export class BottomPanel {
             slider.min = "0";
             slider.max = "1";
             slider.step = "0.01";
+            slider.className = "morph-slider";
             slider.value = this.mmdManager
                 ? (morphIndex >= 0
                     ? this.mmdManager.getMorphWeightByIndex(morphIndex).toFixed(2)
@@ -440,6 +447,18 @@ export class BottomPanel {
             row.appendChild(valueDisplay);
             this.morphContainer.appendChild(row);
         }
+
+        this.onRangeInputsRendered?.(this.morphContainer);
+    }
+
+    private isSliderEditing(slider: HTMLInputElement): boolean {
+        const activeElement = document.activeElement;
+        return activeElement === slider || activeElement === this.getAttachedNumberInput(slider);
+    }
+
+    private getAttachedNumberInput(slider: HTMLInputElement): HTMLInputElement | null {
+        const candidate = slider.parentElement?.querySelector('input.range-number-input[type="number"]');
+        return candidate instanceof HTMLInputElement ? candidate : null;
     }
 
     private clamp(value: number, min: number, max: number): number {

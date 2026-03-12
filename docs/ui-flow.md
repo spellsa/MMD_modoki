@@ -70,17 +70,18 @@
   - 材質ごとのプリセット割り当て
 - `情報 > 対象` で `Camera` 選択中:
   - ポストエフェクト
-    - ImageProcessing系: Contrast / Gamma / Exposure / ToneMap / Dither / Vignette
-    - DefaultRenderingPipeline系: Bloom / Chroma / Grain / Sharpen
-    - Color補正系: Curves（Color Curves Saturation）/ LUT（3dlプリセット + 強度）
-    - AO系: SSAO（単一フェーダー。内部では半径 / 距離を固定値で運用）
-    - Scene系: Fog（密度フェーダー中心）
-    - その他: Distortion / Edge
-  - 安定性優先の暫定運用として、`Glow / Motion Blur / SSR / VLight` は UI 非表示
+    - ImageProcessing系: Gamma / Vignette
+    - DefaultRenderingPipeline系: Bloom / Chroma / Grain / Sharpen / DoF
+    - Color補正系: LUT（3dlプリセット + 強度）
+    - Scene系: Fog（ON/OFF、密度、透明度、色R/G/B）
+    - その他: Distortion / EdgeBlur / Edge
+  - `ToneMap` はエフェクト欄の最下段に配置
+  - 安定性優先の暫定運用として、`Contrast / Exposure / Dither / Curves / Glow / Motion Blur / SSR / VLight` は UI 非表示
   - SSR は UI 経由では常時 OFF（強度 0 / enabled false）
   - Bloom は複合項目として `ON/OFF + Weight + Threshold + Kernel`
   - BloomTh は右へ動かすほど発光範囲が広がるよう、UI操作を反転
-  - DoF関連コントロール
+  - DoF関連コントロールは `前後補正` を含めてエフェクト欄へ集約
+  - Fog は `Exp2` 固定で、開始/終了は内部固定値 `100 / 300`
 
 ## 視点制御の優先順位
 

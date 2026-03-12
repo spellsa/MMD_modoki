@@ -7,10 +7,12 @@ import type {
     InterpolationChannelPreview,
     InterpolationCurve,
     KeyframeTrack,
+    MmdModokiProjectFileV1,
     ModelInfo,
     MotionInfo,
     PngSequenceExportProgress,
     PngSequenceExportState,
+    ProjectOutputState,
     TimelineInterpolationPreview,
 } from "./types";
 
@@ -126,6 +128,8 @@ export class UIController {
     private static readonly MIN_VIEWPORT_WIDTH = 360;
     private static readonly MIN_BOTTOM_PANEL_HEIGHT = 132;
     private static readonly MIN_MAIN_CONTENT_HEIGHT = 220;
+    private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
+    private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 90;
     private static readonly EXTERNAL_WGSL_PRESET_PREFIX = "external-wgsl::";
     private static readonly VISIBLE_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
         "wgsl-mmd-standard",
@@ -271,6 +275,8 @@ export class UIController {
         this.mmdManager = mmdManager;
         this.timeline = timeline;
         this.bottomPanel = bottomPanel;
+        this.bottomPanel.onRangeInputsRendered = (root) => this.installRangeNumberInputs(root);
+        this.bottomPanel.onRangeSliderSynced = (slider) => this.syncRangeNumberInput(slider);
 
         // Get DOM elements
         this.btnLoadFile = document.getElementById("btn-load-file")!;
@@ -713,6 +719,24 @@ export class UIController {
         const valEffectDofLensSize = document.getElementById("effect-dof-lens-size-val");
         const elEffectDofFocalLength = document.getElementById("effect-dof-focal-length") as HTMLInputElement | null;
         const valEffectDofFocalLength = document.getElementById("effect-dof-focal-length-val");
+        const elEffectFogEnabled = document.getElementById("effect-fog-enabled") as HTMLInputElement | null;
+        const valEffectFogEnabled = document.getElementById("effect-fog-enabled-val");
+        const elEffectFogMode = document.getElementById("effect-fog-mode") as HTMLSelectElement | null;
+        const valEffectFogMode = document.getElementById("effect-fog-mode-val");
+        const elEffectFogStart = document.getElementById("effect-fog-start") as HTMLInputElement | null;
+        const valEffectFogStart = document.getElementById("effect-fog-start-val");
+        const elEffectFogEnd = document.getElementById("effect-fog-end") as HTMLInputElement | null;
+        const valEffectFogEnd = document.getElementById("effect-fog-end-val");
+        const elEffectFogDensity = document.getElementById("effect-fog-density") as HTMLInputElement | null;
+        const valEffectFogDensity = document.getElementById("effect-fog-density-val");
+        const elEffectFogOpacity = document.getElementById("effect-fog-opacity") as HTMLInputElement | null;
+        const valEffectFogOpacity = document.getElementById("effect-fog-opacity-val");
+        const elEffectFogColorR = document.getElementById("effect-fog-color-r") as HTMLInputElement | null;
+        const valEffectFogColorR = document.getElementById("effect-fog-color-r-val");
+        const elEffectFogColorG = document.getElementById("effect-fog-color-g") as HTMLInputElement | null;
+        const valEffectFogColorG = document.getElementById("effect-fog-color-g-val");
+        const elEffectFogColorB = document.getElementById("effect-fog-color-b") as HTMLInputElement | null;
+        const valEffectFogColorB = document.getElementById("effect-fog-color-b-val");
         const elEffectEdgeWidth = document.getElementById("effect-edge-width") as HTMLInputElement | null;
         const valEffectEdgeWidth = document.getElementById("effect-edge-width-val");
 
@@ -1096,6 +1120,109 @@ export class UIController {
                 applyDofLensBlur();
                 elEffectDofLensBlur.addEventListener("input", applyDofLensBlur);
             }
+        }
+
+        if (
+            elEffectFogEnabled &&
+            valEffectFogEnabled &&
+            elEffectFogStart &&
+            valEffectFogStart &&
+            elEffectFogEnd &&
+            valEffectFogEnd &&
+            elEffectFogDensity &&
+            valEffectFogDensity &&
+            elEffectFogOpacity &&
+            valEffectFogOpacity &&
+            elEffectFogColorR &&
+            valEffectFogColorR &&
+            elEffectFogColorG &&
+            valEffectFogColorG &&
+            elEffectFogColorB &&
+            valEffectFogColorB
+        ) {
+            const syncFogModeAvailability = () => {
+                const mode = this.mmdManager.postEffectFogMode;
+                const isLinear = mode === 0;
+                elEffectFogStart.disabled = !isLinear;
+                elEffectFogEnd.disabled = !isLinear;
+                elEffectFogDensity.disabled = isLinear;
+            };
+
+            const applyFogEnabled = () => {
+                this.mmdManager.postEffectFogEnabled = elEffectFogEnabled.checked;
+                elEffectFogEnabled.checked = this.mmdManager.postEffectFogEnabled;
+                valEffectFogEnabled.textContent = this.mmdManager.postEffectFogEnabled ? "ON" : "OFF";
+            };
+
+            const applyFogStart = () => {
+                this.mmdManager.postEffectFogStart = Number(elEffectFogStart.value);
+                valEffectFogStart.textContent = `${Math.round(this.mmdManager.postEffectFogStart)}`;
+                if (Number(elEffectFogEnd.value) < this.mmdManager.postEffectFogStart) {
+                    elEffectFogEnd.value = String(Math.round(this.mmdManager.postEffectFogStart));
+                    applyFogEnd();
+                }
+            };
+
+            const applyFogEnd = () => {
+                this.mmdManager.postEffectFogEnd = Number(elEffectFogEnd.value);
+                valEffectFogEnd.textContent = `${Math.round(this.mmdManager.postEffectFogEnd)}`;
+            };
+
+            const applyFogDensity = () => {
+                this.mmdManager.postEffectFogDensity = Number(elEffectFogDensity.value);
+                valEffectFogDensity.textContent = `${Math.round(this.mmdManager.postEffectFogDensity * 10000)}`;
+            };
+
+            const applyFogOpacity = () => {
+                this.mmdManager.postEffectFogOpacity = Number(elEffectFogOpacity.value);
+                valEffectFogOpacity.textContent = `${Math.round(this.mmdManager.postEffectFogOpacity * 100)}`;
+            };
+
+            const applyFogColor = () => {
+                this.mmdManager.setPostEffectFogColor(
+                    Number(elEffectFogColorR.value) / 255,
+                    Number(elEffectFogColorG.value) / 255,
+                    Number(elEffectFogColorB.value) / 255,
+                );
+                const fogColor = this.mmdManager.getPostEffectFogColor();
+                valEffectFogColorR.textContent = `${Math.round(fogColor.r * 255)}`;
+                valEffectFogColorG.textContent = `${Math.round(fogColor.g * 255)}`;
+                valEffectFogColorB.textContent = `${Math.round(fogColor.b * 255)}`;
+            };
+
+            const fogColor = this.mmdManager.getPostEffectFogColor();
+            this.mmdManager.postEffectFogMode = 2;
+            elEffectFogEnabled.checked = this.mmdManager.postEffectFogEnabled;
+            if (elEffectFogMode) {
+                elEffectFogMode.value = "2";
+            }
+            if (valEffectFogMode) {
+                valEffectFogMode.textContent = "Exp2";
+            }
+            elEffectFogStart.value = String(Math.round(this.mmdManager.postEffectFogStart));
+            elEffectFogEnd.value = String(Math.round(this.mmdManager.postEffectFogEnd));
+            elEffectFogDensity.value = this.mmdManager.postEffectFogDensity.toFixed(4);
+            elEffectFogOpacity.value = this.mmdManager.postEffectFogOpacity.toFixed(2);
+            elEffectFogColorR.value = String(Math.round(fogColor.r * 255));
+            elEffectFogColorG.value = String(Math.round(fogColor.g * 255));
+            elEffectFogColorB.value = String(Math.round(fogColor.b * 255));
+
+            applyFogEnabled();
+            syncFogModeAvailability();
+            applyFogStart();
+            applyFogEnd();
+            applyFogDensity();
+            applyFogOpacity();
+            applyFogColor();
+
+            elEffectFogEnabled.addEventListener("change", applyFogEnabled);
+            elEffectFogStart.addEventListener("input", applyFogStart);
+            elEffectFogEnd.addEventListener("input", applyFogEnd);
+            elEffectFogDensity.addEventListener("input", applyFogDensity);
+            elEffectFogOpacity.addEventListener("input", applyFogOpacity);
+            elEffectFogColorR.addEventListener("input", applyFogColor);
+            elEffectFogColorG.addEventListener("input", applyFogColor);
+            elEffectFogColorB.addEventListener("input", applyFogColor);
         }
 
         if (elEffectEdgeWidth && valEffectEdgeWidth) {
@@ -1792,10 +1919,68 @@ export class UIController {
         return `project_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.modoki.json`;
     }
 
+    private buildProjectStateForPersistence(): MmdModokiProjectFileV1 {
+        const project = this.mmdManager.exportProjectState();
+        project.output = this.exportOutputProjectState();
+        return project;
+    }
+
+    private exportOutputProjectState(): ProjectOutputState {
+        const outputSettings = this.getOutputSettings();
+        const qualityRaw = Number.parseFloat(this.outputQualitySelect?.value ?? "1");
+
+        return {
+            aspectPreset: this.outputAspectSelect?.value ?? "16:9",
+            sizePreset: this.outputSizePresetSelect?.value ?? "1920",
+            width: outputSettings.width,
+            height: outputSettings.height,
+            lockAspect: Boolean(this.outputLockAspectInput?.checked),
+            qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
+        };
+    }
+
+    private applyOutputProjectState(state: ProjectOutputState | null | undefined): void {
+        if (!state) return;
+
+        const hasOption = (select: HTMLSelectElement, value: string): boolean =>
+            Array.from(select.options).some((option) => option.value === value);
+
+        if (this.outputAspectSelect && typeof state.aspectPreset === "string" && hasOption(this.outputAspectSelect, state.aspectPreset)) {
+            this.outputAspectSelect.value = state.aspectPreset;
+        }
+        if (this.outputSizePresetSelect && typeof state.sizePreset === "string" && hasOption(this.outputSizePresetSelect, state.sizePreset)) {
+            this.outputSizePresetSelect.value = state.sizePreset;
+        }
+        if (this.outputWidthInput && Number.isFinite(state.width)) {
+            this.outputWidthInput.value = String(this.clampOutputWidth(state.width));
+        }
+        if (this.outputHeightInput && Number.isFinite(state.height)) {
+            this.outputHeightInput.value = String(this.clampOutputHeight(state.height));
+        }
+        if (this.outputLockAspectInput) {
+            this.outputLockAspectInput.checked = Boolean(state.lockAspect);
+        }
+        if (
+            this.outputQualitySelect &&
+            Number.isFinite(state.qualityScale) &&
+            hasOption(this.outputQualitySelect, String(state.qualityScale))
+        ) {
+            this.outputQualitySelect.value = String(state.qualityScale);
+        }
+
+        const width = this.clampOutputWidth(Number.parseInt(this.outputWidthInput?.value ?? "1920", 10));
+        const height = this.clampOutputHeight(Number.parseInt(this.outputHeightInput?.value ?? "1080", 10));
+        this.outputAspectRatio = height > 0
+            ? Math.max(0.1, width / height)
+            : this.resolveSelectedOutputAspectRatio();
+        this.applyViewportAspectPresentation();
+        this.syncMainWindowPresentationAspect();
+    }
+
     private async saveProject(forceChoosePath = false): Promise<void> {
         this.setStatus("Saving project...", true);
         try {
-            const project = this.mmdManager.exportProjectState();
+            const project = this.buildProjectStateForPersistence();
             const lutMode = this.mmdManager.postEffectLutSourceMode;
             let relativeLutFileName: string | null = null;
             let relativeWgslFileName: string | null = null;
@@ -1898,13 +2083,7 @@ export class UIController {
                 return;
             }
 
-            const parsedProject = parsed as {
-                effects?: {
-                    lutSourceMode?: string;
-                    lutExternalPath?: string | null;
-                    wgslToonShaderPath?: string | null;
-                };
-            };
+            const parsedProject = parsed as Partial<MmdModokiProjectFileV1>;
             const requestedLutMode = parsedProject.effects?.lutSourceMode;
             const requestedLutPath = parsedProject.effects?.lutExternalPath;
             const requestedWgslToonPath = parsedProject.effects?.wgslToonShaderPath;
@@ -1966,6 +2145,7 @@ export class UIController {
             if (isExternalLutMode && !resolvedExternalLutText) {
                 this.mmdManager.postEffectLutEnabled = false;
             }
+            this.applyOutputProjectState(parsedProject.output);
             if (externalLutWarning) {
                 result.warnings.push(externalLutWarning);
             }
@@ -1975,7 +2155,11 @@ export class UIController {
 
             this.refreshModelSelector();
             this.refreshShaderPanel();
+            this.applyLocalizedUiState();
+            this.refreshCameraUiFromRuntime();
+            this.refreshLightingUiFromRuntime();
             this.refreshPhysicsSimulationRateUi();
+            this.refreshAccessoryPanel();
             if (this.mmdManager.getTimelineTarget() === "camera") {
                 this.applyCameraSelectionUI();
             } else {
@@ -2325,7 +2509,7 @@ export class UIController {
         );
         const outputDirectoryPath = this.joinPathForRenderer(directoryPath, outputFolderName);
 
-        const project = this.mmdManager.exportProjectState();
+        const project = this.buildProjectStateForPersistence();
         project.assets.audioPath = null;
 
         this.setStatus("Launching PNG sequence export window...", true);
@@ -2914,7 +3098,7 @@ export class UIController {
 
     private installRangeNumberInputs(root: ParentNode = document): void {
         const sliders = root.querySelectorAll<HTMLInputElement>(
-            'input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].accessory-slider, input[type="range"].effect-slider',
+            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].accessory-slider, input[type="range"].effect-slider',
         );
 
         for (const slider of sliders) {
@@ -2926,9 +3110,15 @@ export class UIController {
             const numberInput = document.createElement("input");
             numberInput.type = "number";
             numberInput.className = "range-number-input";
-            numberInput.min = slider.min;
-            numberInput.max = slider.max;
-            numberInput.step = slider.step || "1";
+            numberInput.min = this.formatRangeDisplayValue(
+                slider,
+                slider.min === "" ? Number.NEGATIVE_INFINITY : Number(slider.min),
+            );
+            numberInput.max = this.formatRangeDisplayValue(
+                slider,
+                slider.max === "" ? Number.POSITIVE_INFINITY : Number(slider.max),
+            );
+            numberInput.step = this.formatRangeDisplayValue(slider, slider.step && slider.step !== "any" ? Number(slider.step) : 1);
             numberInput.disabled = slider.disabled;
 
             const labelText = parent.querySelector("label, .light-label, .effect-label, .accessory-label")?.textContent?.trim();
@@ -2949,7 +3139,7 @@ export class UIController {
 
                 const nextValue = this.formatRangeInputValue(
                     slider,
-                    this.normalizeRangeInputValue(slider, parsed),
+                    this.normalizeRangeInputValue(slider, this.parseRangeDisplayValue(slider, parsed)),
                 );
 
                 if (slider.value !== nextValue) {
@@ -2982,10 +3172,33 @@ export class UIController {
         const parsed = Number(slider.value);
         if (!Number.isFinite(parsed)) return;
 
-        const nextValue = this.formatRangeInputValue(slider, parsed);
+        const nextValue = this.formatRangeDisplayValue(slider, parsed);
         if (numberInput.value !== nextValue) {
             numberInput.value = nextValue;
         }
+    }
+
+    private getRangeDisplayScale(slider: HTMLInputElement): number {
+        const parsed = Number(slider.dataset.displayScale ?? "1");
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+    }
+
+    private getRangeDisplayDecimals(slider: HTMLInputElement): number {
+        const parsed = Number.parseInt(slider.dataset.displayDecimals ?? "", 10);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : this.getRangeStepDecimals(slider.step);
+    }
+
+    private parseRangeDisplayValue(slider: HTMLInputElement, displayValue: number): number {
+        return displayValue / this.getRangeDisplayScale(slider);
+    }
+
+    private formatRangeDisplayValue(slider: HTMLInputElement, internalValue: number): string {
+        if (!Number.isFinite(internalValue)) return "";
+        const displayValue = internalValue * this.getRangeDisplayScale(slider);
+        const decimals = this.getRangeDisplayDecimals(slider);
+        return decimals > 0
+            ? String(Number(displayValue.toFixed(decimals)))
+            : String(Math.round(displayValue));
     }
 
     private isRangeInputEditing(slider: HTMLInputElement): boolean {
@@ -3731,7 +3944,7 @@ export class UIController {
 
         this.shaderMaterialList.innerHTML = `
             <div class="shader-postfx-controls">
-                <div class="effect-row">
+                <div class="effect-row" style="display:none;">
                     <span class="effect-label">Contrast</span>
                     <input data-postfx="contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
                     <span data-postfx-val="contrast" class="effect-value">0%</span>
@@ -3741,12 +3954,12 @@ export class UIController {
                     <input data-postfx="gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" style="display:none;">
                     <span class="effect-label">Exposure</span>
                     <input data-postfx="exposure" type="range" class="effect-slider" min="0" max="8" value="1" step="0.01">
                     <span data-postfx-val="exposure" class="effect-value">x1.00</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" style="display:none;">
                     <span class="effect-label">Dither</span>
                     <input data-postfx="dithering-intensity" type="range" class="effect-slider" min="0" max="1" value="0" step="0.0001">
                     <span data-postfx-val="dithering" class="effect-value">OFF</span>
@@ -3771,7 +3984,7 @@ export class UIController {
                     <input data-postfx="sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
                     <span data-postfx-val="sharpen-edge" class="effect-value">OFF</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" style="display:none;">
                     <span class="effect-label">Curves</span>
                     <input data-postfx="color-curves-saturation" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="color-curves-saturation" class="effect-value">OFF</span>
@@ -3811,29 +4024,19 @@ export class UIController {
                     <span data-postfx-val="vls-exposure" class="effect-value">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Fog</span>
-                    <input data-postfx="fog-density" type="range" class="effect-slider" min="0" max="200" value="2" step="1">
-                    <span data-postfx-val="fog-density" class="effect-value">OFF</span>
-                </div>
-                <div class="effect-row">
                     <span class="effect-label">Distortion</span>
                     <input data-postfx="distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
                     <span data-postfx-val="distortion-influence" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
+                    <span class="effect-label">EdgeBlur</span>
+                    <input data-postfx="lens-edge-blur" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                    <span data-postfx-val="lens-edge-blur" class="effect-value">0%</span>
+                </div>
+                <div class="effect-row">
                     <span class="effect-label">Edge</span>
                     <input data-postfx="edge-width" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="edge-width" class="effect-value">0%</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label">ToneMap</span>
-                    <select data-postfx-select="tone-mapping-type" class="effect-select">
-                        <option value="-1">None</option>
-                        <option value="0">Standard</option>
-                        <option value="1">ACES</option>
-                        <option value="2">Neutral</option>
-                    </select>
-                    <span data-postfx-val="tone-mapping" class="effect-value">None</span>
                 </div>
                 <div class="effect-row effect-row-check">
                     <span class="effect-label">LUT</span>
@@ -3851,12 +4054,16 @@ export class UIController {
                     <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
                     <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
                 </div>
-                <div class="effect-row effect-row-check">
+                <div class="effect-row effect-row-toggle">
                     <span class="effect-label">Bloom</span>
                     <label class="effect-check-wrap">
                         <input data-postfx-check="bloom" type="checkbox" class="effect-check">
                         <span>On</span>
                     </label>
+                    <span data-postfx-val="bloom-enabled" class="effect-value">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">Bloom強度</span>
                     <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
                 </div>
@@ -3869,6 +4076,16 @@ export class UIController {
                     <span class="effect-label">BloomK</span>
                     <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="64" step="1">
                     <span data-postfx-val="bloom-kernel" class="effect-value">64</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label">ToneMap</span>
+                    <select data-postfx-select="tone-mapping-type" class="effect-select">
+                        <option value="-1">None</option>
+                        <option value="0">Standard</option>
+                        <option value="1">ACES</option>
+                        <option value="2">Neutral</option>
+                    </select>
+                    <span data-postfx-val="tone-mapping" class="effect-value">None</span>
                 </div>
             </div>
         `;
@@ -3921,10 +4138,10 @@ export class UIController {
         const ssrStrengthVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="ssr-strength"]');
         const vlsExposureInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="vls-exposure"]');
         const vlsExposureVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="vls-exposure"]');
-        const fogDensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="fog-density"]');
-        const fogDensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="fog-density"]');
         const distortionInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="distortion-influence"]');
         const distortionVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="distortion-influence"]');
+        const lensEdgeBlurInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="lens-edge-blur"]');
+        const lensEdgeBlurVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lens-edge-blur"]');
         const edgeWidthInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="edge-width"]');
         const edgeWidthVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="edge-width"]');
 
@@ -3973,10 +4190,10 @@ export class UIController {
             !ssrStrengthVal ||
             !vlsExposureInput ||
             !vlsExposureVal ||
-            !fogDensityInput ||
-            !fogDensityVal ||
             !distortionInput ||
             !distortionVal ||
+            !lensEdgeBlurInput ||
+            !lensEdgeBlurVal ||
             !edgeWidthInput ||
             !edgeWidthVal
         ) {
@@ -4203,21 +4420,16 @@ export class UIController {
                 : "OFF";
         };
 
-        const applyFog = (): void => {
-            this.mmdManager.postEffectFogDensity = Number(fogDensityInput.value) / 100;
-            this.mmdManager.postEffectFogMode = 0;
-            this.mmdManager.postEffectFogStart = 20;
-            this.mmdManager.postEffectFogEnd = 100;
-            this.mmdManager.postEffectFogEnabled = this.mmdManager.postEffectFogDensity > 0.000001;
-            fogDensityVal.textContent = this.mmdManager.postEffectFogEnabled
-                ? this.mmdManager.postEffectFogDensity.toFixed(2)
-                : "OFF";
-        };
-
         const applyDistortionInfluence = (): void => {
             const scale = Number(distortionInput.value) / 100;
             this.mmdManager.dofLensDistortionInfluence = scale;
             distortionVal.textContent = `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`;
+        };
+
+        const applyLensEdgeBlur = (): void => {
+            const scale = Number(lensEdgeBlurInput.value) / 100;
+            this.mmdManager.dofLensEdgeBlur = scale;
+            lensEdgeBlurVal.textContent = `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`;
         };
 
         const applyEdgeWidth = (): void => {
@@ -4288,10 +4500,8 @@ export class UIController {
         vlsExposureInput.value = String(
             Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectVlsEnabled ? this.mmdManager.postEffectVlsExposure : 0) * 100))),
         );
-        fogDensityInput.value = String(
-            Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectFogEnabled ? this.mmdManager.postEffectFogDensity : 0) * 100))),
-        );
         distortionInput.value = String(Math.round(this.mmdManager.dofLensDistortionInfluence * 100));
+        lensEdgeBlurInput.value = String(Math.round(this.mmdManager.dofLensEdgeBlur * 100));
         edgeWidthInput.value = String(Math.round(this.mmdManager.modelEdgeWidth * 100));
 
         applyContrast();
@@ -4311,8 +4521,8 @@ export class UIController {
         applyMotionBlur();
         applySsr();
         applyVls();
-        applyFog();
         applyDistortionInfluence();
+        applyLensEdgeBlur();
         applyEdgeWidth();
         if (postFxControls) {
             this.installRangeNumberInputs(postFxControls);
@@ -4343,8 +4553,8 @@ export class UIController {
         motionBlurStrengthInput.addEventListener("input", applyMotionBlur);
         ssrStrengthInput.addEventListener("input", applySsr);
         vlsExposureInput.addEventListener("input", applyVls);
-        fogDensityInput.addEventListener("input", applyFog);
         distortionInput.addEventListener("input", applyDistortionInfluence);
+        lensEdgeBlurInput.addEventListener("input", applyLensEdgeBlur);
         edgeWidthInput.addEventListener("input", applyEdgeWidth);
     }
 
@@ -4503,6 +4713,151 @@ export class UIController {
         }
         if (this.physicsSimulationRateValueEl) {
             this.physicsSimulationRateValueEl.textContent = `${rate}Hz`;
+        }
+    }
+
+    private refreshLightingUiFromRuntime(): void {
+        const setSliderValue = (
+            sliderId: string,
+            valueId: string,
+            rawValue: number,
+            formatter: (value: number) => string,
+        ): void => {
+            const slider = document.getElementById(sliderId) as HTMLInputElement | null;
+            const valueEl = document.getElementById(valueId);
+            if (!slider || !valueEl) return;
+
+            const normalized = this.normalizeRangeInputValue(slider, rawValue);
+            slider.value = this.formatRangeInputValue(slider, normalized);
+            valueEl.textContent = formatter(rawValue);
+            this.syncRangeNumberInput(slider);
+        };
+
+        setSliderValue("light-azimuth", "light-azimuth-value", this.mmdManager.getLightAzimuth(), (value) => `${Math.round(value)} deg`);
+        setSliderValue("light-elevation", "light-elevation-value", this.mmdManager.getLightElevation(), (value) => `${Math.round(value)} deg`);
+        setSliderValue("light-intensity", "light-intensity-value", this.mmdManager.lightIntensity * 100, (value) => (value / 100).toFixed(1));
+        setSliderValue("light-ambient", "light-ambient-value", this.mmdManager.ambientIntensity * 100, (value) => (value / 100).toFixed(1));
+
+        const lightColor = this.mmdManager.getLightColor();
+        setSliderValue("light-color-r", "light-color-r-value", lightColor.r * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
+        setSliderValue("light-color-g", "light-color-g-value", lightColor.g * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
+        setSliderValue("light-color-b", "light-color-b-value", lightColor.b * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
+        setSliderValue("light-flat-strength", "light-flat-strength-value", this.mmdManager.lightFlatStrength * 100, (value) => `${Math.round(value)}%`);
+        setSliderValue(
+            "light-flat-color-influence",
+            "light-flat-color-influence-value",
+            this.mmdManager.lightFlatColorInfluence * 100,
+            (value) => `${Math.round(value)}%`,
+        );
+
+        const shadowColor = this.mmdManager.getShadowColor();
+        setSliderValue("shadow-darkness", "shadow-darkness-value", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
+        setSliderValue("shadow-frustum-size", "shadow-frustum-size-value", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
+        setSliderValue("shadow-color-r", "shadow-color-r-value", shadowColor.r * 255, (value) => String(Math.round(value)));
+        setSliderValue("shadow-color-g", "shadow-color-g-value", shadowColor.g * 255, (value) => String(Math.round(value)));
+        setSliderValue("shadow-color-b", "shadow-color-b-value", shadowColor.b * 255, (value) => String(Math.round(value)));
+        setSliderValue(
+            "toon-shadow-influence",
+            "toon-shadow-influence-value",
+            this.mmdManager.toonShadowInfluence * 100,
+            (value) => `${Math.round(value)}%`,
+        );
+        setSliderValue(
+            "self-shadow-softness",
+            "self-shadow-softness-value",
+            this.mmdManager.selfShadowEdgeSoftness * 1000,
+            (value) => (value / 1000).toFixed(3),
+        );
+        setSliderValue(
+            "occlusion-shadow-softness",
+            "occlusion-shadow-softness-value",
+            this.mmdManager.occlusionShadowEdgeSoftness * 1000,
+            (value) => (value / 1000).toFixed(3),
+        );
+    }
+
+    private refreshCameraUiFromRuntime(): void {
+        if (this.camFovSlider && this.camFovValueEl) {
+            const fovDeg = this.mmdManager.getCameraFov();
+            const clamped = this.normalizeRangeInputValue(this.camFovSlider, fovDeg);
+            this.camFovSlider.value = this.formatRangeInputValue(this.camFovSlider, clamped);
+            this.camFovValueEl.textContent = `${Math.round(fovDeg)} deg`;
+            this.syncRangeNumberInput(this.camFovSlider);
+        }
+
+        if (this.camDistanceSlider && this.camDistanceValueEl) {
+            const distance = this.mmdManager.getCameraDistance();
+            const clamped = this.normalizeRangeInputValue(this.camDistanceSlider, distance);
+            this.camDistanceSlider.value = this.formatRangeInputValue(this.camDistanceSlider, clamped);
+            this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
+            this.syncRangeNumberInput(this.camDistanceSlider);
+        }
+
+        const fogEnabledInput = document.getElementById("effect-fog-enabled") as HTMLInputElement | null;
+        const fogEnabledValue = document.getElementById("effect-fog-enabled-val");
+        if (fogEnabledInput && fogEnabledValue) {
+            fogEnabledInput.checked = this.mmdManager.postEffectFogEnabled;
+            fogEnabledValue.textContent = this.mmdManager.postEffectFogEnabled ? "ON" : "OFF";
+        }
+
+        const fogModeSelect = document.getElementById("effect-fog-mode") as HTMLSelectElement | null;
+        const fogModeValue = document.getElementById("effect-fog-mode-val");
+        if (fogModeSelect && fogModeValue) {
+            fogModeSelect.value = String(this.mmdManager.postEffectFogMode);
+            fogModeValue.textContent = this.mmdManager.postEffectFogMode === 1
+                ? "Exp"
+                : this.mmdManager.postEffectFogMode === 2
+                    ? "Exp2"
+                    : "Linear";
+        }
+
+        const setFogSliderValue = (sliderId: string, valueId: string, rawValue: number, formatter?: (value: number) => string): void => {
+            const slider = document.getElementById(sliderId) as HTMLInputElement | null;
+            const valueEl = document.getElementById(valueId);
+            if (!slider || !valueEl) return;
+
+            const normalized = this.normalizeRangeInputValue(slider, rawValue);
+            slider.value = this.formatRangeInputValue(slider, normalized);
+            valueEl.textContent = formatter ? formatter(rawValue) : `${Math.round(rawValue)}`;
+            this.syncRangeNumberInput(slider);
+        };
+
+        setFogSliderValue("effect-fog-start", "effect-fog-start-val", this.mmdManager.postEffectFogStart);
+        setFogSliderValue("effect-fog-end", "effect-fog-end-val", this.mmdManager.postEffectFogEnd);
+        setFogSliderValue(
+            "effect-fog-density",
+            "effect-fog-density-val",
+            this.mmdManager.postEffectFogDensity,
+            (value) => `${Math.round(value * 10000)}`,
+        );
+        setFogSliderValue(
+            "effect-fog-opacity",
+            "effect-fog-opacity-val",
+            this.mmdManager.postEffectFogOpacity,
+            (value) => `${Math.round(value * 100)}`,
+        );
+
+        const fogColor = this.mmdManager.getPostEffectFogColor();
+        setFogSliderValue("effect-fog-color-r", "effect-fog-color-r-val", fogColor.r * 255);
+        setFogSliderValue("effect-fog-color-g", "effect-fog-color-g-val", fogColor.g * 255);
+        setFogSliderValue("effect-fog-color-b", "effect-fog-color-b-val", fogColor.b * 255);
+
+        const fogStartInput = document.getElementById("effect-fog-start") as HTMLInputElement | null;
+        const fogEndInput = document.getElementById("effect-fog-end") as HTMLInputElement | null;
+        const fogDensityInput = document.getElementById("effect-fog-density") as HTMLInputElement | null;
+        const fogOpacityInput = document.getElementById("effect-fog-opacity") as HTMLInputElement | null;
+        const isLinearFog = this.mmdManager.postEffectFogMode === 0;
+        if (fogStartInput) {
+            fogStartInput.disabled = !isLinearFog;
+        }
+        if (fogEndInput) {
+            fogEndInput.disabled = !isLinearFog;
+        }
+        if (fogDensityInput) {
+            fogDensityInput.disabled = isLinearFog;
+        }
+        if (fogOpacityInput) {
+            fogOpacityInput.disabled = false;
         }
     }
 
@@ -4909,14 +5264,8 @@ export class UIController {
         if (rect.width <= 0 || rect.height <= 0) return;
 
         // Matches createInterpolationCurveSvg() viewBox geometry.
-        const width = 132;
-        const height = 52;
-        const left = 8;
-        const right = width - 8;
-        const top = 6;
-        const bottom = height - 6;
-        const innerWidth = right - left;
-        const innerHeight = bottom - top;
+        const { width, height, left, bottom, innerWidth, innerHeight } =
+            this.getInterpolationCurveGeometry();
 
         const viewX = ((event.clientX - rect.left) / rect.width) * width;
         const viewY = ((event.clientY - rect.top) / rect.height) * height;
@@ -5144,20 +5493,14 @@ export class UIController {
     }
 
     private createInterpolationCurveSvg(channels: InterpolationChannelPreview[]): SVGSVGElement {
-        const width = 132;
-        const height = 52;
-        const left = 8;
-        const right = width - 8;
-        const top = 6;
-        const bottom = height - 6;
-        const innerWidth = right - left;
-        const innerHeight = bottom - top;
+        const { width, height, left, right, top, bottom, innerWidth, innerHeight } =
+            this.getInterpolationCurveGeometry();
 
         const svgNs = "http://www.w3.org/2000/svg";
         const svg = document.createElementNS(svgNs, "svg");
         svg.classList.add("interp-curve-svg");
         svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-        svg.setAttribute("preserveAspectRatio", "none");
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
 
         const guide = document.createElementNS(svgNs, "line");
         guide.classList.add("interp-curve-guide");
@@ -5221,6 +5564,36 @@ export class UIController {
             svg.appendChild(p2);
         }
         return svg;
+    }
+
+    private getInterpolationCurveGeometry(): {
+        width: number;
+        height: number;
+        left: number;
+        right: number;
+        top: number;
+        bottom: number;
+        innerWidth: number;
+        innerHeight: number;
+    } {
+        const padding = 8;
+        const width = UIController.INTERP_CURVE_VIEWBOX_WIDTH;
+        const height = UIController.INTERP_CURVE_VIEWBOX_HEIGHT;
+        const left = padding;
+        const right = width - padding;
+        const top = padding;
+        const bottom = height - padding;
+
+        return {
+            width,
+            height,
+            left,
+            right,
+            top,
+            bottom,
+            innerWidth: right - left,
+            innerHeight: bottom - top,
+        };
     }
 
     private addKeyframeAtCurrentFrame(): void {

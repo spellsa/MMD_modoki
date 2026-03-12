@@ -38,6 +38,7 @@ import type {
     MmdModokiProjectFileV1,
     ModelInfo,
     MotionInfo,
+    ProjectAccessoryState,
     ProjectMotionImport,
     ProjectKeyframeBundle,
     ProjectNumberArray,
@@ -76,6 +77,8 @@ const PMX_MORPH_CATEGORY_EYEBROW = 1;
 const PMX_MORPH_CATEGORY_EYE = 2;
 const PMX_MORPH_CATEGORY_LIP = 3;
 const PMX_MORPH_CATEGORY_OTHER = 4;
+const PMX_MATERIAL_FLAG_ENABLED_DRAW_SHADOW = 0x0004;
+const PMX_MATERIAL_FLAG_ENABLED_RECEIVE_SHADOW = 0x0008;
 
 function classifyBone(name: string): TrackCategory {
     if (name === "\u5168\u3066\u306e\u89aa" || name.toLowerCase() === "root") return "root";
@@ -981,10 +984,12 @@ ${beforeFogAppendBlock}
     private postEffectVlsWeightValue = 0.4;
     private postEffectVlsDensityValue = 0.9;
     private postEffectFogEnabledValue = false;
-    private postEffectFogModeValue = 0;
-    private postEffectFogStartValue = 20;
-    private postEffectFogEndValue = 100;
-    private postEffectFogDensityValue = 0.02;
+    private postEffectFogModeValue = 2;
+    private postEffectFogStartValue = 100;
+    private postEffectFogEndValue = 300;
+    private postEffectFogDensityValue = 0.002;
+    private postEffectFogOpacityValue = 0.2;
+    private postEffectFogColorValue = new Color3(0.04, 0.04, 0.06);
     private antialiasEnabledValue = true;
     private postEffectFarDofStrengthValue = 0;
     private readonly farDofEnabled = false;
@@ -996,6 +1001,7 @@ ${beforeFogAppendBlock}
     private readonly externalWgslToonShaderPathByMaterial = new WeakMap<object, string>();
     private externalWgslToonShaderPathValue: string | null = null;
     private colorCorrectionPostProcess: PostProcess | null = null;
+    private originFogPostProcess: PostProcess | null = null;
     private finalAntialiasPostProcess: FxaaPostProcess | null = null;
     private finalLensDistortionPostProcess: PostProcess | null = null;
     private dofPostProcess: PostProcess | null = null;
@@ -2857,6 +2863,7 @@ ${beforeFogAppendBlock}
             new Vector3(0, 10, 0),
             this.scene
         );
+        this.camera.fov = (30 * Math.PI) / 180;
         this.camera.lowerRadiusLimit = 2;
         this.camera.upperRadiusLimit = 100;
         this.camera.wheelDeltaPercentage = 0.01;
@@ -3239,6 +3246,63 @@ ${beforeFogAppendBlock}
         return hasTransparentTexturePath;
     }
 
+    private buildPmxMaterialFlagMap(metadata: {
+        materials?: readonly unknown[];
+        materialsMetadata?: readonly { flag: number }[];
+    }): WeakMap<object, number> {
+        const materialFlagMap = new WeakMap<object, number>();
+        const materials = Array.isArray(metadata.materials) ? metadata.materials : [];
+        const materialsMetadata = Array.isArray(metadata.materialsMetadata) ? metadata.materialsMetadata : [];
+        const count = Math.min(materials.length, materialsMetadata.length);
+
+        for (let index = 0; index < count; index += 1) {
+            const material = materials[index];
+            const materialMetadata = materialsMetadata[index];
+            if (!material || typeof material !== "object" || !materialMetadata) continue;
+            materialFlagMap.set(material as object, Number(materialMetadata.flag) || 0);
+        }
+
+        return materialFlagMap;
+    }
+
+    private resolvePmxShadowFlagsForMaterial(
+        material: unknown,
+        materialFlagMap: WeakMap<object, number>,
+    ): { castsShadow: boolean; receivesShadow: boolean } {
+        if (!material || typeof material !== "object") {
+            return { castsShadow: true, receivesShadow: true };
+        }
+
+        const subMaterials = Array.isArray((material as { subMaterials?: unknown[] }).subMaterials)
+            ? (material as { subMaterials: unknown[] }).subMaterials
+            : [material];
+
+        let castsShadow = false;
+        let receivesShadow = false;
+        let sawMappedMaterial = false;
+
+        for (const subMaterial of subMaterials) {
+            if (!subMaterial || typeof subMaterial !== "object") continue;
+
+            const materialFlag = materialFlagMap.get(subMaterial as object);
+            if (materialFlag === undefined) {
+                castsShadow = true;
+                receivesShadow = true;
+                continue;
+            }
+
+            sawMappedMaterial = true;
+            castsShadow ||= (materialFlag & PMX_MATERIAL_FLAG_ENABLED_DRAW_SHADOW) !== 0;
+            receivesShadow ||= (materialFlag & PMX_MATERIAL_FLAG_ENABLED_RECEIVE_SHADOW) !== 0;
+        }
+
+        if (!sawMappedMaterial) {
+            return { castsShadow: true, receivesShadow: true };
+        }
+
+        return { castsShadow, receivesShadow };
+    }
+
     async loadPMX(filePath: string): Promise<ModelInfo | null> {
         try {
             await this.physicsInitializationPromise;
@@ -3283,12 +3347,22 @@ ${beforeFogAppendBlock}
             // Enable root mesh and all children
             mmdMesh.setEnabled(true);
             mmdMesh.isVisible = true;
+            const mmdMetadata = mmdMesh.metadata as typeof mmdMesh.metadata & {
+                containsSerializationData?: boolean;
+                materialsMetadata?: readonly { flag: number }[];
+                displayFrames?: readonly {
+                    name: string;
+                    frames: readonly { type: number; index: number }[];
+                }[];
+            };
+            const materialFlagMap = this.buildPmxMaterialFlagMap(mmdMetadata);
             let materialOrder = 0;
             for (const mesh of result.meshes) {
                 mesh.setEnabled(true);
                 mesh.isVisible = true;
-                mesh.receiveShadows = true;
-                if ((mesh.getTotalVertices?.() ?? 0) > 0) {
+                const shadowFlags = this.resolvePmxShadowFlagsForMaterial(mesh.material, materialFlagMap);
+                mesh.receiveShadows = shadowFlags.receivesShadow;
+                if ((mesh.getTotalVertices?.() ?? 0) > 0 && shadowFlags.castsShadow) {
                     this.shadowGenerator.addShadowCaster(mesh, true);
                 }
 
@@ -3307,14 +3381,6 @@ ${beforeFogAppendBlock}
             this.applyModelEdgeToMeshes(result.meshes as Mesh[]);
             this.applyCelShadingToMeshes(result.meshes as Mesh[]);
             const sceneMaterials = this.collectSceneModelMaterials(result.meshes as Mesh[]);
-
-            // Capture metadata before runtime model creation (metadata may be trimmed).
-            const mmdMetadata = mmdMesh.metadata as typeof mmdMesh.metadata & {
-                displayFrames?: readonly {
-                    name: string;
-                    frames: readonly { type: number; index: number }[];
-                }[];
-            };
 
             // Create MMD model
             const mmdModel = this.mmdRuntime.createMmdModel(mmdMesh, {
@@ -4367,12 +4433,36 @@ ${beforeFogAppendBlock}
     }
 
     public exportProjectState(): MmdModokiProjectFileV1 {
+        const accessoryExtension = this as unknown as {
+            getLoadedAccessories?: () => Array<{ index: number; path: string; visible: boolean }>;
+            getAccessoryTransform?: (index: number) => {
+                position: { x: number; y: number; z: number };
+                rotationDeg: { x: number; y: number; z: number };
+                scale: number;
+            } | null;
+            getAccessoryParent?: (index: number) => { modelIndex: number | null; boneName: string | null } | null;
+        };
         const models = this.sceneModels.map((entry) => ({
             path: entry.info.path,
             visible: this.getModelVisibility(entry.mesh),
             motionImports: (this.modelMotionImportsByModel.get(entry.model) ?? []).map((item) => ({ ...item })),
             materialShaders: this.getSerializedMaterialShaderStates(entry),
         }));
+        const accessories: ProjectAccessoryState[] = (accessoryExtension.getLoadedAccessories?.() ?? []).map((entry) => {
+            const transform = accessoryExtension.getAccessoryTransform?.(entry.index) ?? null;
+            const parent = accessoryExtension.getAccessoryParent?.(entry.index) ?? null;
+            const parentModelPath = typeof parent?.modelIndex === "number" && parent.modelIndex >= 0
+                ? this.sceneModels[parent.modelIndex]?.info.path ?? null
+                : null;
+
+            return {
+                path: entry.path,
+                visible: entry.visible,
+                transform: transform ?? undefined,
+                parentModelPath,
+                parentBoneName: parent?.boneName ?? null,
+            };
+        });
 
         const keyframes: ProjectKeyframeBundle = {
             modelAnimations: this.sceneModels.map((entry) => ({
@@ -4452,6 +4542,7 @@ ${beforeFogAppendBlock}
             effects: {
                 dofEnabled: this.dofEnabled,
                 dofFocusDistanceMm: this.dofFocusDistanceMm,
+                dofFocusOffsetMm: this.dofAutoFocusNearOffsetMm,
                 dofFStop: this.dofFStop,
                 dofLensSize: this.dofLensSize,
                 dofLensBlurStrength: this.dofLensBlurStrength,
@@ -4508,8 +4599,11 @@ ${beforeFogAppendBlock}
                 fogStart: this.postEffectFogStart,
                 fogEnd: this.postEffectFogEnd,
                 fogDensity: this.postEffectFogDensity,
+                fogOpacity: this.postEffectFogOpacity,
+                fogColor: this.getPostEffectFogColor(),
                 gammaEncodingVersion: 2,
             },
+            accessories,
             keyframes,
         };
     }
@@ -4643,6 +4737,83 @@ ${beforeFogAppendBlock}
             }
         }
 
+        const accessoryExtension = this as unknown as {
+            loadX?: (filePath: string) => Promise<boolean>;
+            getLoadedAccessories?: () => Array<{ index: number }>;
+            setAccessoryVisibility?: (index: number, visible: boolean) => boolean;
+            setAccessoryTransform?: (
+                index: number,
+                transform: Partial<NonNullable<ProjectAccessoryState["transform"]>>,
+            ) => boolean;
+            setAccessoryParent?: (index: number, modelIndex: number | null, boneName: string | null) => boolean;
+        };
+        const accessories = Array.isArray(data.accessories) ? data.accessories : [];
+        if (accessories.length > 0) {
+            if (typeof accessoryExtension.loadX !== "function") {
+                warnings.push("Accessory restore skipped: accessory loader is unavailable");
+            } else {
+                for (let accessoryIndex = 0; accessoryIndex < accessories.length; accessoryIndex += 1) {
+                    const accessoryState = accessories[accessoryIndex];
+                    if (!accessoryState || typeof accessoryState.path !== "string" || accessoryState.path.trim().length === 0) {
+                        warnings.push(`Accessory restore skipped at index ${accessoryIndex}: invalid path`);
+                        continue;
+                    }
+
+                    const beforeCount = accessoryExtension.getLoadedAccessories?.().length ?? 0;
+                    const loaded = await accessoryExtension.loadX(accessoryState.path);
+                    if (!loaded) {
+                        warnings.push(`Accessory load failed: ${accessoryState.path}`);
+                        continue;
+                    }
+                    const restoredAccessoryIndex = Math.max(
+                        0,
+                        (accessoryExtension.getLoadedAccessories?.().length ?? (beforeCount + 1)) - 1,
+                    );
+
+                    accessoryExtension.setAccessoryVisibility?.(restoredAccessoryIndex, Boolean(accessoryState.visible));
+
+                    const transform = accessoryState.transform;
+                    if (transform) {
+                        accessoryExtension.setAccessoryTransform?.(restoredAccessoryIndex, {
+                            position: {
+                                x: Number.isFinite(transform.position?.x) ? transform.position.x : 0,
+                                y: Number.isFinite(transform.position?.y) ? transform.position.y : 0,
+                                z: Number.isFinite(transform.position?.z) ? transform.position.z : 0,
+                            },
+                            rotationDeg: {
+                                x: Number.isFinite(transform.rotationDeg?.x) ? transform.rotationDeg.x : 0,
+                                y: Number.isFinite(transform.rotationDeg?.y) ? transform.rotationDeg.y : 0,
+                                z: Number.isFinite(transform.rotationDeg?.z) ? transform.rotationDeg.z : 0,
+                            },
+                            scale: Number.isFinite(transform.scale) ? transform.scale : 1,
+                        });
+                    }
+
+                    let parentModelIndex: number | null = null;
+                    if (typeof accessoryState.parentModelPath === "string" && accessoryState.parentModelPath.trim().length > 0) {
+                        const normalizedParentPath = this.normalizePathForCompare(accessoryState.parentModelPath);
+                        parentModelIndex = this.sceneModels.findIndex(
+                            (entry) => this.normalizePathForCompare(entry.info.path) === normalizedParentPath,
+                        );
+                        if (parentModelIndex < 0) {
+                            warnings.push(
+                                `Accessory parent model not found: ${accessoryState.parentModelPath} (${accessoryState.path})`,
+                            );
+                            parentModelIndex = null;
+                        }
+                    }
+
+                    accessoryExtension.setAccessoryParent?.(
+                        restoredAccessoryIndex,
+                        parentModelIndex,
+                        typeof accessoryState.parentBoneName === "string" && accessoryState.parentBoneName.length > 0
+                            ? accessoryState.parentBoneName
+                            : null,
+                    );
+                }
+            }
+        }
+
         this.setGroundVisible(Boolean(data.viewport.groundVisible));
         this.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
         this.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
@@ -4708,6 +4879,9 @@ ${beforeFogAppendBlock}
 
         this.dofEnabled = Boolean(data.effects.dofEnabled);
         this.dofFocusDistanceMm = data.effects.dofFocusDistanceMm;
+        this.dofAutoFocusNearOffsetMm = typeof data.effects.dofFocusOffsetMm === "number" && Number.isFinite(data.effects.dofFocusOffsetMm)
+            ? data.effects.dofFocusOffsetMm
+            : 0;
         this.dofFStop = data.effects.dofFStop;
         this.dofLensSize = data.effects.dofLensSize;
         this.dofLensBlurStrength = data.effects.dofLensBlurStrength;
@@ -4851,18 +5025,25 @@ ${beforeFogAppendBlock}
         this.postEffectVlsEnabled = typeof data.effects.vlsEnabled === "boolean"
             ? data.effects.vlsEnabled
             : false;
-        this.postEffectFogMode = typeof data.effects.fogMode === "number" && Number.isFinite(data.effects.fogMode)
-            ? data.effects.fogMode
-            : 0;
+        this.postEffectFogMode = 2;
         this.postEffectFogStart = typeof data.effects.fogStart === "number" && Number.isFinite(data.effects.fogStart)
             ? data.effects.fogStart
-            : 20;
+            : 100;
         this.postEffectFogEnd = typeof data.effects.fogEnd === "number" && Number.isFinite(data.effects.fogEnd)
             ? data.effects.fogEnd
-            : 100;
+            : 300;
         this.postEffectFogDensity = typeof data.effects.fogDensity === "number" && Number.isFinite(data.effects.fogDensity)
             ? data.effects.fogDensity
-            : 0.02;
+            : 0.002;
+        this.postEffectFogOpacity = typeof data.effects.fogOpacity === "number" && Number.isFinite(data.effects.fogOpacity)
+            ? data.effects.fogOpacity
+            : 0.2;
+        if (data.effects.fogColor &&
+            Number.isFinite(data.effects.fogColor.r) &&
+            Number.isFinite(data.effects.fogColor.g) &&
+            Number.isFinite(data.effects.fogColor.b)) {
+            this.setPostEffectFogColor(data.effects.fogColor.r, data.effects.fogColor.g, data.effects.fogColor.b);
+        }
         this.postEffectFogEnabled = typeof data.effects.fogEnabled === "boolean"
             ? data.effects.fogEnabled
             : false;
@@ -4903,6 +5084,7 @@ ${beforeFogAppendBlock}
 
     private clearProjectForImport(): void {
         this.pause();
+        (this as unknown as { clearAccessories?: () => void }).clearAccessories?.();
 
         if (this.cameraAnimationHandle !== null) {
             this.mmdCamera.destroyRuntimeAnimation(this.cameraAnimationHandle);
@@ -5542,12 +5724,12 @@ ${beforeFogAppendBlock}
         this.applyFogSettings();
     }
 
-    /** Fog mode (0=Linear, 1=Exp, 2=Exp2). */
+    /** Fog mode is fixed to Exp2. */
     get postEffectFogMode(): number {
         return this.postEffectFogModeValue;
     }
-    set postEffectFogMode(v: number) {
-        this.postEffectFogModeValue = Math.max(0, Math.min(2, Math.round(v)));
+    set postEffectFogMode(_v: number) {
+        this.postEffectFogModeValue = 2;
         this.applyFogSettings();
     }
 
@@ -5577,7 +5759,32 @@ ${beforeFogAppendBlock}
         return this.postEffectFogDensityValue;
     }
     set postEffectFogDensity(v: number) {
-        this.postEffectFogDensityValue = Math.max(0, Math.min(2, v));
+        this.postEffectFogDensityValue = Math.max(0, Math.min(0.01, v));
+        this.applyFogSettings();
+    }
+
+    get postEffectFogOpacity(): number {
+        return this.postEffectFogOpacityValue;
+    }
+    set postEffectFogOpacity(v: number) {
+        this.postEffectFogOpacityValue = Math.max(0, Math.min(1, v));
+        this.applyFogSettings();
+    }
+
+    getPostEffectFogColor(): { r: number; g: number; b: number } {
+        return {
+            r: this.postEffectFogColorValue.r,
+            g: this.postEffectFogColorValue.g,
+            b: this.postEffectFogColorValue.b,
+        };
+    }
+
+    setPostEffectFogColor(r: number, g: number, b: number): void {
+        this.postEffectFogColorValue.set(
+            Math.max(0, Math.min(1, r)),
+            Math.max(0, Math.min(1, g)),
+            Math.max(0, Math.min(1, b)),
+        );
         this.applyFogSettings();
     }
     /** Post-process anti-aliasing enabled state. */
@@ -5648,13 +5855,13 @@ ${beforeFogAppendBlock}
     get dofAutoFocusRangeMeters(): number {
         return this.dofAutoFocusInFocusRadiusMm / 1000;
     }
-    /** Auto-focus offset toward camera in mm. */
+    /** Signed auto-focus offset from camera target in mm. Positive moves nearer, negative moves farther. */
     get dofAutoFocusNearOffsetMm(): number {
         return this.dofAutoFocusNearOffsetMmValue;
     }
     set dofAutoFocusNearOffsetMm(v: number) {
-        this.dofAutoFocusNearOffsetMmValue = Math.max(0, Math.min(1000000000, v));
-            this.updateEditorDofFocusAndFStop();
+        this.dofAutoFocusNearOffsetMmValue = Math.max(-1000000000, Math.min(1000000000, v));
+        this.updateEditorDofFocusAndFStop();
     }
     /** Foreground blur suppression scale for auto-focus near side. */
     get dofNearSuppressionScale(): number {
@@ -6094,6 +6301,10 @@ ${beforeFogAppendBlock}
                 this.volumetricLightPostProcess.dispose(this.camera);
                 this.volumetricLightPostProcess = null;
             }
+            if (this.originFogPostProcess) {
+                this.originFogPostProcess.dispose(this.camera);
+                this.originFogPostProcess = null;
+            }
             if (this.defaultRenderingPipeline) {
                 this.defaultRenderingPipeline.dispose();
                 this.defaultRenderingPipeline = null;
@@ -6200,6 +6411,10 @@ ${beforeFogAppendBlock}
             this.volumetricLightPostProcess.dispose(this.camera);
             this.volumetricLightPostProcess = null;
         }
+        if (this.originFogPostProcess) {
+            this.originFogPostProcess.dispose(this.camera);
+            this.originFogPostProcess = null;
+        }
 
         this.defaultRenderingPipeline = new DefaultRenderingPipeline(
             "DefaultRenderingPipeline",
@@ -6218,6 +6433,7 @@ ${beforeFogAppendBlock}
         this.applyFogSettings();
 
         this.configureDofDepthRenderer();
+        this.setupOriginFogPostProcess();
         if (this.dofLensDistortionFollowsCameraFov) {
             this.updateDofLensDistortionFromCameraFov();
         }
@@ -7616,20 +7832,188 @@ ${beforeFogAppendBlock}
         this.motionBlurScreenAmount = this.motionBlurScreenAmount * (1 - smooth) + targetAmount * smooth;
     }
     private applyFogSettings(): void {
-        if (!this.postEffectFogEnabledValue) {
-            this.scene.fogMode = Scene.FOGMODE_NONE;
+        this.scene.fogMode = Scene.FOGMODE_NONE;
+        this.scene.fogColor.set(
+            this.postEffectFogColorValue.r,
+            this.postEffectFogColorValue.g,
+            this.postEffectFogColorValue.b,
+        );
+        if (!this.originFogPostProcess && this.depthRenderer) {
+            this.setupOriginFogPostProcess();
+        }
+    }
+
+    private setupOriginFogPostProcess(): void {
+        if (this.originFogPostProcess || !this.depthRenderer) {
             return;
         }
 
-        this.scene.fogMode = this.postEffectFogModeValue === 1
-            ? Scene.FOGMODE_EXP
-            : this.postEffectFogModeValue === 2
-                ? Scene.FOGMODE_EXP2
-                : Scene.FOGMODE_LINEAR;
-        this.scene.fogStart = this.postEffectFogStartValue;
-        this.scene.fogEnd = Math.max(this.postEffectFogStartValue + 0.01, this.postEffectFogEndValue);
-        this.scene.fogDensity = this.postEffectFogDensityValue;
-        this.scene.fogColor.set(this.scene.clearColor.r, this.scene.clearColor.g, this.scene.clearColor.b);
+        const shaderKey = "mmdOriginFogFragmentShader";
+        if (!Effect.ShadersStore[shaderKey]) {
+            Effect.ShadersStore[shaderKey] = `
+                precision highp float;
+                varying vec2 vUV;
+                uniform sampler2D textureSampler;
+                uniform sampler2D depthSampler;
+                uniform float fogEnabled;
+                uniform float fogMode;
+                uniform float fogStart;
+                uniform float fogEnd;
+                uniform float fogDensity;
+                uniform float fogOpacity;
+                uniform vec3 fogColor;
+                uniform vec2 cameraNearFar;
+                uniform vec3 cameraPosition;
+                uniform mat4 inverseViewProjection;
+
+                float computeFogAmount(float originDistance) {
+                    if (fogEnabled <= 0.5) {
+                        return 0.0;
+                    }
+                    if (fogMode < 0.5) {
+                        float fogSpan = max(fogEnd - fogStart, 0.0001);
+                        return clamp((originDistance - fogStart) / fogSpan, 0.0, 1.0);
+                    }
+                    if (fogMode < 1.5) {
+                        float density = max(fogDensity, 0.0);
+                        return clamp(1.0 - exp(-density * originDistance), 0.0, 1.0);
+                    }
+                    float density = max(fogDensity, 0.0);
+                    float squared = density * originDistance;
+                    return clamp(1.0 - exp(-(squared * squared)), 0.0, 1.0);
+                }
+
+                vec3 reconstructWorldPosition(vec2 uv, float depthMetric) {
+                    float cameraDistance = mix(cameraNearFar.x, cameraNearFar.y, clamp(depthMetric, 0.0, 1.0));
+                    vec4 clipFar = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+                    vec4 worldFarH = inverseViewProjection * clipFar;
+                    vec3 worldFar = worldFarH.xyz / max(worldFarH.w, 0.0001);
+                    vec3 rayDirection = normalize(worldFar - cameraPosition);
+                    return cameraPosition + rayDirection * cameraDistance;
+                }
+
+                void main(void) {
+                    vec4 color = texture2D(textureSampler, vUV);
+                    if (fogEnabled <= 0.5) {
+                        gl_FragColor = color;
+                        return;
+                    }
+
+                    float depthMetric = clamp(abs(texture2D(depthSampler, clamp(vUV, vec2(0.001), vec2(0.999))).r), 0.0, 1.0);
+                    if (depthMetric <= 0.00001) {
+                        gl_FragColor = color;
+                        return;
+                    }
+
+                    vec3 worldPosition = reconstructWorldPosition(vUV, depthMetric);
+                    float fogAmount = computeFogAmount(length(worldPosition));
+                    float fogBlend = clamp(fogAmount * fogOpacity, 0.0, 1.0);
+                    gl_FragColor = vec4(mix(color.rgb, fogColor, fogBlend), color.a);
+                }
+            `;
+        }
+        if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+            ShaderStore.ShadersStoreWGSL[shaderKey] = `
+                varying vUV: vec2f;
+                var textureSamplerSampler: sampler;
+                var textureSampler: texture_2d<f32>;
+                var depthSamplerSampler: sampler;
+                var depthSampler: texture_2d<f32>;
+                uniform fogEnabled: f32;
+                uniform fogMode: f32;
+                uniform fogStart: f32;
+                uniform fogEnd: f32;
+                uniform fogDensity: f32;
+                uniform fogOpacity: f32;
+                uniform fogColor: vec3f;
+                uniform cameraNearFar: vec2f;
+                uniform cameraPosition: vec3f;
+                uniform inverseViewProjection: mat4x4f;
+
+                fn computeFogAmount(originDistance: f32) -> f32 {
+                    if (uniforms.fogEnabled <= 0.5) {
+                        return 0.0;
+                    }
+                    if (uniforms.fogMode < 0.5) {
+                        let fogSpan = max(uniforms.fogEnd - uniforms.fogStart, 0.0001);
+                        return clamp((originDistance - uniforms.fogStart) / fogSpan, 0.0, 1.0);
+                    }
+                    if (uniforms.fogMode < 1.5) {
+                        let density = max(uniforms.fogDensity, 0.0);
+                        return clamp(1.0 - exp(-density * originDistance), 0.0, 1.0);
+                    }
+                    let density = max(uniforms.fogDensity, 0.0);
+                    let squared = density * originDistance;
+                    return clamp(1.0 - exp(-(squared * squared)), 0.0, 1.0);
+                }
+
+                fn reconstructWorldPosition(uv: vec2f, depthMetric: f32) -> vec3f {
+                    let cameraDistance = mix(uniforms.cameraNearFar.x, uniforms.cameraNearFar.y, clamp(depthMetric, 0.0, 1.0));
+                    let clipFar = vec4f(uv * 2.0 - 1.0, 1.0, 1.0);
+                    let worldFarH = uniforms.inverseViewProjection * clipFar;
+                    let worldFar = worldFarH.xyz / max(worldFarH.w, 0.0001);
+                    let rayDirection = normalize(worldFar - uniforms.cameraPosition);
+                    return uniforms.cameraPosition + rayDirection * cameraDistance;
+                }
+
+                @fragment
+                fn main(input: FragmentInputs) -> FragmentOutputs {
+                    let color = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+                    if (uniforms.fogEnabled <= 0.5) {
+                        fragmentOutputs.color = color;
+                        return fragmentOutputs;
+                    }
+
+                    let depthMetric = clamp(abs(textureSampleLevel(depthSampler, depthSamplerSampler, clamp(input.vUV, vec2f(0.001), vec2f(0.999)), 0.0).r), 0.0, 1.0);
+                    if (depthMetric <= 0.00001) {
+                        fragmentOutputs.color = color;
+                        return fragmentOutputs;
+                    }
+
+                    let worldPosition = reconstructWorldPosition(input.vUV, depthMetric);
+                    let fogAmount = computeFogAmount(length(worldPosition));
+                    let fogBlend = clamp(fogAmount * uniforms.fogOpacity, 0.0, 1.0);
+                    fragmentOutputs.color = vec4f(mix(color.rgb, uniforms.fogColor, fogBlend), color.a);
+                    return fragmentOutputs;
+                }
+            `;
+        }
+
+        this.originFogPostProcess = new PostProcess(
+            "originFog",
+            "mmdOriginFog",
+            {
+                uniforms: ["fogEnabled", "fogMode", "fogStart", "fogEnd", "fogDensity", "fogOpacity", "fogColor", "cameraNearFar", "cameraPosition", "inverseViewProjection"],
+                samplers: ["depthSampler"],
+                size: 1.0,
+                camera: this.camera,
+                samplingMode: Texture.BILINEAR_SAMPLINGMODE,
+                engine: this.engine,
+                reusable: false,
+                shaderLanguage: this.getPostProcessShaderLanguage(),
+            },
+        );
+        this.originFogPostProcess.onApplyObservable.add((effect) => {
+            const depthMap = this.depthRenderer?.getDepthMap();
+            if (!depthMap) {
+                return;
+            }
+
+            effect.setTexture("depthSampler", depthMap);
+            effect.setFloat("fogEnabled", this.postEffectFogEnabledValue ? 1 : 0);
+            effect.setFloat("fogMode", this.postEffectFogModeValue);
+            effect.setFloat("fogStart", this.postEffectFogStartValue);
+            effect.setFloat("fogEnd", Math.max(this.postEffectFogStartValue + 0.01, this.postEffectFogEndValue));
+            effect.setFloat("fogDensity", this.postEffectFogDensityValue);
+            effect.setFloat("fogOpacity", this.postEffectFogOpacityValue);
+            effect.setColor3("fogColor", this.postEffectFogColorValue);
+            effect.setFloat2("cameraNearFar", this.camera.minZ, this.camera.maxZ);
+            effect.setVector3("cameraPosition", this.camera.globalPosition);
+            const inverseViewProjection = this.camera.getTransformationMatrix().clone();
+            inverseViewProjection.invert();
+            effect.setMatrix("inverseViewProjection", inverseViewProjection);
+        });
+        this.enforceFinalPostProcessOrder();
     }
 
     private setupFinalLensDistortionPostProcess(): void {
@@ -7753,6 +8137,9 @@ ${beforeFogAppendBlock}
         const tail: PostProcess[] = [];
         if (this.volumetricLightPostProcess) {
             tail.push(this.volumetricLightPostProcess);
+        }
+        if (this.originFogPostProcess) {
+            tail.push(this.originFogPostProcess);
         }
         if (this.motionBlurPostProcess) {
             tail.push(this.motionBlurPostProcess);
@@ -9127,6 +9514,10 @@ ${beforeFogAppendBlock}
         if (this.volumetricLightPostProcess) {
             this.volumetricLightPostProcess.dispose(this.camera);
             this.volumetricLightPostProcess = null;
+        }
+        if (this.originFogPostProcess) {
+            this.originFogPostProcess.dispose(this.camera);
+            this.originFogPostProcess = null;
         }
         if (this.postEffectLutTexture) {
             this.postEffectLutTexture.dispose();

@@ -200,6 +200,7 @@ export interface ProjectPhysicsState {
 export interface ProjectEffectState {
     dofEnabled: boolean;
     dofFocusDistanceMm: number;
+    dofFocusOffsetMm?: number;
     dofFStop: number;
     dofLensSize: number;
     dofLensBlurStrength: number;
@@ -256,7 +257,30 @@ export interface ProjectEffectState {
     fogStart?: number;
     fogEnd?: number;
     fogDensity?: number;
+    fogOpacity?: number;
+    fogColor?: ProjectRgbColor;
     gammaEncodingVersion?: 2;
+}
+
+export interface ProjectOutputState {
+    aspectPreset: string;
+    sizePreset: string;
+    width: number;
+    height: number;
+    lockAspect: boolean;
+    qualityScale: number;
+}
+
+export interface ProjectAccessoryState {
+    path: string;
+    visible: boolean;
+    transform?: {
+        position: { x: number; y: number; z: number };
+        rotationDeg: { x: number; y: number; z: number };
+        scale: number;
+    };
+    parentModelPath?: string | null;
+    parentBoneName?: string | null;
 }
 
 export interface ProjectSerializedBoneTrack {
@@ -349,6 +373,8 @@ export interface MmdModokiProjectFileV1 {
     viewport: ProjectViewportState;
     physics: ProjectPhysicsState;
     effects: ProjectEffectState;
+    output?: ProjectOutputState;
+    accessories?: ProjectAccessoryState[];
     keyframes?: ProjectKeyframeBundle;
 }
 

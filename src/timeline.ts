@@ -26,9 +26,9 @@ const PLAYHEAD_X = 24;
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
     root: { bg: "rgba(236,72,153,0.12)", kf: "#ec4899", text: "#f472b6", bar: "#ec4899" },
-    camera: { bg: "rgba(34,211,238,0.10)", kf: "#22d3ee", text: "#67e8f9", bar: "#22d3ee" },
+    camera: { bg: "rgba(96,165,250,0.10)", kf: "#60a5fa", text: "#93c5fd", bar: "#60a5fa" },
     "semi-standard": { bg: "rgba(99,102,241,0.08)", kf: "#818cf8", text: "#a5b4fc", bar: "" },
-    bone: { bg: "rgba(255,255,255,0.02)", kf: "#4ade80", text: "#86efac", bar: "" },
+    bone: { bg: "rgba(57,197,187,0.08)", kf: "#39c5bb", text: "#7ddfd8", bar: "" },
     morph: { bg: "rgba(251,191,36,0.07)", kf: "#fbbf24", text: "#fcd34d", bar: "" },
 } as const;
 

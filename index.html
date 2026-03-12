@@ -394,7 +394,7 @@
               <span id="cam-distance-value" class="value-display">45.0m</span>
             </div>
             <div id="camera-dof-controls" class="camera-dof-controls">
-              <div class="effect-row effect-row-check">
+              <div class="effect-row effect-row-toggle">
                 <span class="effect-label">DoF</span>
                 <label class="effect-check-wrap">
                   <input type="checkbox" id="effect-dof-enabled" class="effect-check">
@@ -417,8 +417,8 @@
                 <span id="effect-dof-focus-val" class="effect-value">55.0m</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">前方補正</span>
-                <input type="range" id="effect-dof-focus-offset" class="effect-slider" min="0" max="20000" value="0" step="100">
+                <span class="effect-label">前後補正</span>
+                <input type="range" id="effect-dof-focus-offset" class="effect-slider" min="-20000" max="20000" value="0" step="100">
                 <span id="effect-dof-focus-offset-val" class="effect-value">0.0m</span>
               </div>
               <div class="effect-row dof-row-hidden">
@@ -431,7 +431,7 @@
                 <input type="range" id="effect-dof-near-suppression" class="effect-slider" min="0" max="1000" value="400" step="1">
                 <span id="effect-dof-near-suppression-val" class="effect-value">400%</span>
               </div>
-              <div class="effect-row effect-row-check dof-row-hidden">
+              <div class="effect-row effect-row-toggle dof-row-hidden">
                 <span class="effect-label">焦点距離反転</span>
                 <label class="effect-check-wrap">
                   <input type="checkbox" id="effect-dof-focal-invert" class="effect-check">
@@ -443,6 +443,63 @@
                 <span class="effect-label">DoFレンズ</span>
                 <input type="range" id="effect-dof-lens-size" class="effect-slider" min="1" max="4096" value="30" step="1">
                 <span id="effect-dof-lens-size-val" class="effect-value">30</span>
+              </div>
+              <div class="effect-row">
+                <span class="effect-label">レンズブラー</span>
+                <input type="range" id="effect-dof-lens-blur" class="effect-slider" min="0" max="100" value="0" step="1">
+                <span id="effect-dof-lens-blur-val" class="effect-value">0%</span>
+              </div>
+              <div class="effect-row effect-row-toggle">
+                <span class="effect-label">Fog</span>
+                <label class="effect-check-wrap">
+                  <input type="checkbox" id="effect-fog-enabled" class="effect-check">
+                  <span>有効</span>
+                </label>
+                <span id="effect-fog-enabled-val" class="effect-value">OFF</span>
+              </div>
+              <div class="effect-row" hidden>
+                <span class="effect-label">Fog方式</span>
+                <select id="effect-fog-mode" class="effect-select">
+                  <option value="0">Linear</option>
+                  <option value="1">Exp</option>
+                  <option value="2" selected>Exp2</option>
+                </select>
+                <span id="effect-fog-mode-val" class="effect-value">Exp2</span>
+              </div>
+              <div class="effect-row" hidden>
+                <span class="effect-label">Fog開始</span>
+                <input type="range" id="effect-fog-start" class="effect-slider" min="0" max="1000" value="100" step="1">
+                <span id="effect-fog-start-val" class="effect-value">100</span>
+              </div>
+              <div class="effect-row" hidden>
+                <span class="effect-label">Fog終了</span>
+                <input type="range" id="effect-fog-end" class="effect-slider" min="1" max="2000" value="300" step="1">
+                <span id="effect-fog-end-val" class="effect-value">300</span>
+              </div>
+              <div class="effect-row">
+                <span class="effect-label">Fog濃度</span>
+                <input type="range" id="effect-fog-density" class="effect-slider" min="0" max="0.01" value="0.002" step="0.0001" data-display-scale="10000" data-display-decimals="0">
+                <span id="effect-fog-density-val" class="effect-value">20</span>
+              </div>
+              <div class="effect-row">
+                <span class="effect-label">Fog透明度</span>
+                <input type="range" id="effect-fog-opacity" class="effect-slider" min="0" max="1" value="0.2" step="0.01" data-display-scale="100" data-display-decimals="0">
+                <span id="effect-fog-opacity-val" class="effect-value">20</span>
+              </div>
+              <div class="effect-row">
+                <span class="effect-label">Fog色R</span>
+                <input type="range" id="effect-fog-color-r" class="effect-slider" min="0" max="255" value="10" step="1">
+                <span id="effect-fog-color-r-val" class="effect-value">10</span>
+              </div>
+              <div class="effect-row">
+                <span class="effect-label">Fog色G</span>
+                <input type="range" id="effect-fog-color-g" class="effect-slider" min="0" max="255" value="10" step="1">
+                <span id="effect-fog-color-g-val" class="effect-value">10</span>
+              </div>
+              <div class="effect-row">
+                <span class="effect-label">Fog色B</span>
+                <input type="range" id="effect-fog-color-b" class="effect-slider" min="0" max="255" value="15" step="1">
+                <span id="effect-fog-color-b-val" class="effect-value">15</span>
               </div>
               <div class="effect-row dof-row-hidden">
                 <span class="effect-label">DoF焦点距離</span>

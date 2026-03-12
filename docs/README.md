@@ -14,6 +14,7 @@
 - 既知の問題: [known-issues.md](./known-issues.md)
 - v0.1.1 フィードバック台帳: [v0.1.1-feedback.md](./v0.1.1-feedback.md)
 - v0.1.1 物理 backend 変更メモ: [physics-backend-migration-v0.1.1.md](./physics-backend-migration-v0.1.1.md)
+- カメラ用ポストエフェクト現行仕様: [camera-postfx-current-spec.md](./camera-postfx-current-spec.md)
 - v0.1.0 フィードバック台帳: [v0.1.0-feedback.md](./v0.1.0-feedback.md)
 - リリース手順メモ: [release-process.md](./release-process.md)
 - Undo / Redo 検討メモ: [undo-redo-investigation.md](./undo-redo-investigation.md)

@@ -30,6 +30,7 @@ declare module "./mmd-manager" {
     interface MmdManager {
         loadX(filePath: string): Promise<boolean>;
         getLoadedAccessories(): AccessoryState[];
+        clearAccessories(): void;
         setAccessoryVisibility(index: number, visible: boolean): boolean;
         toggleAccessoryVisibility(index: number): boolean;
         removeAccessory(index: number): boolean;
@@ -249,6 +250,7 @@ function toRadians(deg: number): number {
 const mmdManagerProto = MmdManager.prototype as unknown as {
     loadX?: (filePath: string) => Promise<boolean>;
     getLoadedAccessories?: () => AccessoryState[];
+    clearAccessories?: () => void;
     setAccessoryVisibility?: (index: number, visible: boolean) => boolean;
     toggleAccessoryVisibility?: (index: number) => boolean;
     removeAccessory?: (index: number) => boolean;
@@ -346,6 +348,16 @@ if (!mmdManagerProto.getLoadedAccessories) {
             path: entry.path,
             visible: isAccessoryVisible(entry),
         }));
+    };
+}
+
+if (!mmdManagerProto.clearAccessories) {
+    mmdManagerProto.clearAccessories = function(): void {
+        const entries = getAccessoryEntries(this as unknown as object);
+        while (entries.length > 0) {
+            const entry = entries.pop();
+            entry?.root.dispose(false);
+        }
     };
 }
 

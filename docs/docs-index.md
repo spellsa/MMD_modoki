@@ -27,6 +27,7 @@
 ## カメラ / タイムライン / キーフレーム
 
 - [カメラ実装仕様](./camera-implementation-spec.md)
+- [カメラ用ポストエフェクト現行仕様](./camera-postfx-current-spec.md)
 - [カメラVMD対応メモ](./camera-vmd.md)
 - [タイムライン仕様](./timeline-spec.md)
 - [Undo / Redo 検討メモ](./undo-redo-investigation.md)
