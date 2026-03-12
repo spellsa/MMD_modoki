@@ -11,8 +11,9 @@ toonRaw.g=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.g)).g;
 toonRaw.b=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.b)).b;
 let selfMask=smoothstep(0.43,0.57,clamp(info.ndl,0.0,1.0));
 let occlusionMask=smoothstep(0.43,0.57,clamp(shadow,0.0,1.0));
-let litMaskSoft=clamp(selfMask*occlusionMask,0.0,1.0);
-let litMask=smoothstep(0.30,0.40,litMaskSoft);
+let toneBandLuma=clamp(dot(toonRaw,vec3f(0.299,0.587,0.114)),0.0,1.0);
+let geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
+let litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,0.75),0.0,1.0);
 let shadowMask=1.0-litMask;
 let toonShadowBand=mix(shadowTint,toonRaw,toonInfluence);
 let shadowTerm=info.diffuse*mix(one,toonShadowBand,shadowMask);
@@ -25,4 +26,3 @@ diffuseBase+=shadowTerm;
 #else
 diffuseBase+=mix(info.diffuse*shadow,toonNdl*info.diffuse,info.isToon);
 #endif
-

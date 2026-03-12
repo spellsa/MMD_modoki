@@ -22,6 +22,8 @@ const RULER_H = 20;
 const ROW_H = 18;
 const PX_PER_F = 6;
 const PLAYHEAD_X = 24;
+const CURRENT_FRAME_COLOR = "#ff4fa3";
+const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -401,9 +403,9 @@ export class Timeline {
 
         // Playhead continuation line (into track area)
         ctx.save();
-        ctx.shadowColor = "rgba(99,102,241,0.4)";
+        ctx.shadowColor = CURRENT_FRAME_GLOW;
         ctx.shadowBlur = 6;
-        ctx.strokeStyle = "rgba(99,102,241,0.5)";
+        ctx.strokeStyle = CURRENT_FRAME_GLOW;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(PLAYHEAD_X, 0);
@@ -449,7 +451,7 @@ export class Timeline {
 
         // Playhead diamond
         const px = PLAYHEAD_X;
-        ctx.fillStyle = "#6366f1";
+        ctx.fillStyle = CURRENT_FRAME_COLOR;
         ctx.beginPath();
         ctx.moveTo(px - 6, 0);
         ctx.lineTo(px + 6, 0);

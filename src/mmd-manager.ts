@@ -452,11 +452,8 @@ export class MmdManager {
                 const selfMaskMax = (0.5 + selfWidth).toFixed(6);
                 const occlusionMaskMin = (0.5 - occlusionWidth).toFixed(6);
                 const occlusionMaskMax = (0.5 + occlusionWidth).toFixed(6);
-                const litThreshold = 0.35;
-                const litBlendWidth = Math.max(0.01, Math.min(0.25, (selfWidth + occlusionWidth) * 0.25));
-                const litMaskMin = (litThreshold - litBlendWidth).toFixed(6);
-                const litMaskMax = (litThreshold + litBlendWidth).toFixed(6);
                 const lightColorInfluence = MmdManager.toonFlatLightColorInfluence.toFixed(6);
+                const toonBandAlignment = 0.75;
                 const defaultReplacementLine = isWgsl
                     ? `#ifdef TOON_TEXTURE_COLOR
 {
@@ -471,8 +468,9 @@ toonRaw.g=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.g)).g;
 toonRaw.b=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.b)).b;
 let selfMask=smoothstep(${selfMaskMin},${selfMaskMax},clamp(info.ndl,0.0,1.0));
 let occlusionMask=smoothstep(${occlusionMaskMin},${occlusionMaskMax},clamp(shadow,0.0,1.0));
-let litMaskSoft=clamp(selfMask*occlusionMask,0.0,1.0);
-let litMask=smoothstep(${litMaskMin},${litMaskMax},litMaskSoft);
+let toneBandLuma=clamp(dot(toonRaw,vec3f(0.299,0.587,0.114)),0.0,1.0);
+let geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
+let litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,${toonBandAlignment.toFixed(6)}),0.0,1.0);
 let shadowMask=1.0-litMask;
 let toonShadowBand=mix(shadowTint,toonRaw,toonInfluence);
 let shadowTerm=info.diffuse*mix(one,toonShadowBand,shadowMask);
@@ -498,8 +496,9 @@ toonRaw.g=texture2D(toonSampler,vec2(0.5,toonRaw.g)).g;
 toonRaw.b=texture2D(toonSampler,vec2(0.5,toonRaw.b)).b;
 float selfMask=smoothstep(${selfMaskMin},${selfMaskMax},clamp(info.ndl,0.0,1.0));
 float occlusionMask=smoothstep(${occlusionMaskMin},${occlusionMaskMax},clamp(shadow,0.0,1.0));
-float litMaskSoft=clamp(selfMask*occlusionMask,0.0,1.0);
-float litMask=smoothstep(${litMaskMin},${litMaskMax},litMaskSoft);
+float toneBandLuma=clamp(dot(toonRaw,vec3(0.299,0.587,0.114)),0.0,1.0);
+float geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
+float litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,${toonBandAlignment.toFixed(6)}),0.0,1.0);
 float shadowMask=1.0-litMask;
 vec3 toonShadowBand=mix(shadowTint,toonRaw,toonInfluence);
 vec3 shadowTerm=info.diffuse*mix(one,toonShadowBand,shadowMask);
@@ -863,7 +862,7 @@ ${beforeFogAppendBlock}
     private renderFpsLimit = 0;
     private ground: Mesh | null = null;
     private skydome: Mesh | null = null;
-    private readonly defaultClearColor = new Color4(0.04, 0.04, 0.06, 1);
+    private readonly defaultClearColor = new Color4(0.94, 0.94, 0.94, 1);
     private readonly blackClearColor = new Color4(0, 0, 0, 1);
     private backgroundBlackEnabled = false;
     private audioPlayer: StreamAudioPlayer | null = null;
@@ -2934,6 +2933,7 @@ ${beforeFogAppendBlock}
 
         const groundMat = new StandardMaterial("groundMat", this.scene);
         groundMat.diffuseColor = new Color3(1, 1, 1);
+        groundMat.ambientColor = new Color3(1, 1, 1);
         groundMat.specularColor = new Color3(0, 0, 0);
         groundMat.alpha = 1.0;
 
@@ -2946,13 +2946,8 @@ ${beforeFogAppendBlock}
             true
         );
         const gridCtx = groundGridTexture.getContext();
-        for (let y = 0; y < gridTextureSize; y += gridCell) {
-            for (let x = 0; x < gridTextureSize; x += gridCell) {
-                const isEven = ((x / gridCell) + (y / gridCell)) % 2 === 0;
-                gridCtx.fillStyle = isEven ? "#ececec" : "#e0e0e0";
-                gridCtx.fillRect(x, y, gridCell, gridCell);
-            }
-        }
+        gridCtx.fillStyle = "#ededed";
+        gridCtx.fillRect(0, 0, gridTextureSize, gridTextureSize);
         for (let i = 0; i <= gridTextureSize; i += gridCell) {
             const isMajor = i % (gridCell * 4) === 0;
             gridCtx.strokeStyle = isMajor ? "#b6b6b6" : "#c8c8c8";
@@ -2984,7 +2979,7 @@ ${beforeFogAppendBlock}
             updatable: false,
         }, this.scene);
         const skydomeMat = new StandardMaterial("skydomeMat", this.scene);
-        const skydomeColor = new Color3(0.6, 0.6, 0.6);
+        const skydomeColor = new Color3(0.94, 0.94, 0.94);
         skydomeMat.diffuseColor = skydomeColor;
         skydomeMat.emissiveColor = skydomeColor;
         skydomeMat.specularColor = new Color3(0, 0, 0);

@@ -34,6 +34,7 @@ type XScene = { root: XFrame };
 const META = { name: "xfile", extensions: { ".x": { isBinary: false } } } as const;
 const HEADER = /^\s*xof\s+([0-9]{4})(txt|bin|tzip|bzip)\s+([0-9]{4})/i;
 const NUM = /^[+-]?(?:\d+\.\d*|\d+|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?/;
+const NON_TOON_SHADOW_AMBIENT = new Color3(1, 1, 1);
 
 function lex(s: string): Tok[] {
     const out: Tok[] = [];
@@ -537,6 +538,7 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, StandardMaterial>): St
     if (c) return c;
     const mat = new StandardMaterial(m.name || "x_material", scene);
     mat.diffuseColor = new Color3(m.diffuse.r, m.diffuse.g, m.diffuse.b);
+    mat.ambientColor = NON_TOON_SHADOW_AMBIENT.clone();
     mat.alpha = m.diffuse.a;
     mat.specularPower = m.power;
     mat.specularColor = m.specular.clone();
@@ -616,6 +618,7 @@ function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: 
     } else {
         const mat = new StandardMaterial(`${mesh.name}_mat`, scene);
         mat.diffuseColor = new Color3(0.8, 0.8, 0.8);
+        mat.ambientColor = NON_TOON_SHADOW_AMBIENT.clone();
         mat.backFaceCulling = false;
         mesh.material = mat;
     }
