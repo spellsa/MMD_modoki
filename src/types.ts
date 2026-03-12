@@ -1,6 +1,7 @@
 export interface ElectronAPI {
     openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
     openDirectoryDialog: () => Promise<string | null>;
+    snapMainWindowContentAspect: (aspectRatio: number) => Promise<boolean>;
     getPathForDroppedFile: (file: File) => string | null;
     readBinaryFile: (filePath: string) => Promise<Buffer | null>;
     readTextFile: (filePath: string) => Promise<string | null>;

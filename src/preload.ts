@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('dialog:openFile', filters),
     openDirectoryDialog: () =>
         ipcRenderer.invoke('dialog:openDirectory'),
+    snapMainWindowContentAspect: (aspectRatio: number) =>
+        ipcRenderer.invoke('window:snapMainWindowContentAspect', aspectRatio),
     getPathForDroppedFile: (file: File) => {
         try {
             const filePath = webUtils.getPathForFile(file);

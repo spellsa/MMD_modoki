@@ -2171,6 +2171,7 @@ export class UIController {
             }
 
             this.applyViewportAspectPresentation();
+            this.syncMainWindowPresentationAspect();
         };
 
         const syncDimensionWithLock = (source: "width" | "height"): void => {
@@ -3125,6 +3126,7 @@ export class UIController {
         this.isUiFullscreenActive = active;
         this.appRootEl.classList.toggle("ui-presentation-mode", active);
         this.updateFullscreenUiToggleButton(active);
+        this.syncMainWindowPresentationAspect();
     }
 
     private updateFullscreenUiToggleButton(active: boolean): void {
@@ -3189,6 +3191,7 @@ export class UIController {
             this.clampShaderWidthToLayout();
             this.clampBottomPanelHeightToLayout();
             this.applyViewportAspectPresentation();
+            this.syncMainWindowPresentationAspect();
         });
     }
 
@@ -3306,16 +3309,10 @@ export class UIController {
         const ratio = this.resolveSelectedOutputAspectRatio();
         const containerWidth = Math.max(1, Math.floor(this.viewportContainerEl.clientWidth));
         const containerHeight = Math.max(1, Math.floor(this.viewportContainerEl.clientHeight));
-        const shouldCoverViewport = this.isUiFullscreenActive;
 
         let renderWidth = containerWidth;
         let renderHeight = Math.max(1, Math.round(renderWidth / Math.max(0.1, ratio)));
-        if (shouldCoverViewport) {
-            if (renderHeight < containerHeight) {
-                renderHeight = containerHeight;
-                renderWidth = Math.max(1, Math.round(renderHeight * ratio));
-            }
-        } else if (renderHeight > containerHeight) {
+        if (renderHeight > containerHeight) {
             renderHeight = containerHeight;
             renderWidth = Math.max(1, Math.round(renderHeight * ratio));
         }
@@ -3323,6 +3320,18 @@ export class UIController {
         this.renderCanvasEl.style.width = `${renderWidth}px`;
         this.renderCanvasEl.style.height = `${renderHeight}px`;
         this.mmdManager.resize();
+    }
+
+    private syncMainWindowPresentationAspect(): void {
+        if (!this.isUiFullscreenActive) return;
+
+        const selectedAspect = this.outputAspectSelect?.value ?? "16:9";
+        if (selectedAspect === "viewport") return;
+
+        const ratio = this.resolveSelectedOutputAspectRatio();
+        if (Math.abs(ratio - 16 / 9) > 0.001) return;
+
+        void window.electronAPI.snapMainWindowContentAspect(ratio);
     }
 
     private computeTimelineMaxWidth(): number {

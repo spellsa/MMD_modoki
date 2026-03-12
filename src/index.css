@@ -150,13 +150,15 @@ body.exporter-mode #bone-overlay-canvas {
 
 #app.ui-presentation-mode #main-content {
   grid-template-columns: 1fr;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
 }
 
 #app.ui-presentation-mode #viewport-container {
   border-left: none;
   border-right: none;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
 }
 
 #app.ui-presentation-mode #bone-overlay-canvas {
@@ -891,6 +893,10 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   flex-direction: column;
   border-right: 1px solid var(--border-color);
   overflow: hidden;
+}
+
+#physics-section[hidden] {
+  display: none !important;
 }
 
 .bottom-section:last-child {

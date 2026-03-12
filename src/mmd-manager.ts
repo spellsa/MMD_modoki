@@ -3687,6 +3687,7 @@ ${beforeFogAppendBlock}
                 return null;
             }
             const loadFrame = this._currentFrame;
+            const previousTotalFrames = this._totalFrames;
             // Read the file via electron API
             const buffer = await window.electronAPI.readBinaryFile(filePath);
             if (!buffer) {
@@ -3698,18 +3699,26 @@ ${beforeFogAppendBlock}
             const uint8 = new Uint8Array(buffer as unknown as ArrayBuffer);
             const blob = new Blob([uint8]);
             const blobUrl = URL.createObjectURL(blob);
+            let animation: MmdAnimation;
+            try {
+                animation = await this.vmdLoader.loadAsync("modelMotion", blobUrl);
+            } finally {
+                URL.revokeObjectURL(blobUrl);
+            }
 
-            const animation = await this.vmdLoader.loadAsync("modelMotion", blobUrl);
+            const baseAnimation = this.modelSourceAnimationsByModel.get(targetModel);
+            const mergedAnimation = baseAnimation
+                ? this.mergeModelAnimations(baseAnimation, animation)
+                : animation;
 
-            URL.revokeObjectURL(blobUrl);
-
-            this.modelSourceAnimationsByModel.set(targetModel, animation);
-            this.setModelMotionImports(targetModel, [{ type: "vmd", path: filePath }]);
-            const animHandle = targetModel.createRuntimeAnimation(animation);
+            this.modelSourceAnimationsByModel.set(targetModel, mergedAnimation);
+            this.appendModelMotionImport(targetModel, { type: "vmd", path: filePath });
+            const animHandle = targetModel.createRuntimeAnimation(mergedAnimation);
             targetModel.setRuntimeAnimation(animHandle);
 
             // Get frame count from runtime animation duration
             this._totalFrames = Math.max(
+                previousTotalFrames,
                 Math.floor(this.mmdRuntime.animationFrameTimeDuration),
                 300
             );
@@ -3718,7 +3727,7 @@ ${beforeFogAppendBlock}
             // Extract keyframe tracks from model animation data
             this.modelKeyframeTracksByModel.set(
                 targetModel,
-                this.buildModelTrackFrameMapFromAnimation(animation)
+                this.buildModelTrackFrameMapFromAnimation(mergedAnimation)
             );
             this.emitMergedKeyframeTracks();
 
@@ -4547,7 +4556,6 @@ ${beforeFogAppendBlock}
                 continue;
             }
 
-            this.setModelMotionImports(targetModel, (modelState.motionImports ?? []).map((item) => ({ ...item })));
             this.applyImportedMaterialShaderStates(modelIndex, modelState.materialShaders, warnings, modelState.path);
 
             let restoredEmbeddedAnimation = false;
@@ -4558,6 +4566,7 @@ ${beforeFogAppendBlock}
                 const embeddedAnimation = this.deserializeModelAnimation(embeddedAnimationData, `${modelInfo.name}@project`);
                 if (embeddedAnimation) {
                     this.modelSourceAnimationsByModel.set(targetModel, embeddedAnimation);
+                    this.setModelMotionImports(targetModel, (modelState.motionImports ?? []).map((item) => ({ ...item })));
                     const animHandle = targetModel.createRuntimeAnimation(embeddedAnimation);
                     targetModel.setRuntimeAnimation(animHandle);
                     this.modelKeyframeTracksByModel.set(
@@ -4572,6 +4581,7 @@ ${beforeFogAppendBlock}
             }
 
             if (!restoredEmbeddedAnimation) {
+                this.setModelMotionImports(targetModel, []);
                 for (const motionImport of modelState.motionImports ?? []) {
                     if (motionImport.type === "vmd") {
                         const motion = await this.loadVMD(motionImport.path);
@@ -8569,15 +8579,77 @@ ${beforeFogAppendBlock}
         const mergedBoneTracks = this.mergeBoneTrackArrays(baseAnimation.boneTracks, overlayAnimation.boneTracks);
         const mergedMovableBoneTracks = this.mergeMovableBoneTrackArrays(baseAnimation.movableBoneTracks, overlayAnimation.movableBoneTracks);
         const mergedMorphTracks = this.mergeMorphTrackArrays(baseAnimation.morphTracks, overlayAnimation.morphTracks);
+        const mergedPropertyTrack = this.mergePropertyTrack(baseAnimation.propertyTrack, overlayAnimation.propertyTrack);
 
         return new MmdAnimation(
             `${baseAnimation.name}+${overlayAnimation.name}`,
             mergedBoneTracks,
             mergedMovableBoneTracks,
             mergedMorphTracks,
-            baseAnimation.propertyTrack,
+            mergedPropertyTrack,
             baseAnimation.cameraTrack,
         );
+    }
+
+    private mergePropertyTrack(
+        baseTrack: MmdPropertyAnimationTrack,
+        overlayTrack: MmdPropertyAnimationTrack,
+    ): MmdPropertyAnimationTrack {
+        if (overlayTrack.frameNumbers.length === 0) {
+            return baseTrack;
+        }
+        if (baseTrack.frameNumbers.length === 0) {
+            return overlayTrack;
+        }
+
+        const mergedFrames = mergeFrameNumbers(baseTrack.frameNumbers, overlayTrack.frameNumbers);
+        const mergedIkBoneNames = [...baseTrack.ikBoneNames];
+        for (const ikBoneName of overlayTrack.ikBoneNames) {
+            if (!mergedIkBoneNames.includes(ikBoneName)) {
+                mergedIkBoneNames.push(ikBoneName);
+            }
+        }
+
+        const mergedTrack = new MmdPropertyAnimationTrack(mergedFrames.length, mergedIkBoneNames);
+        mergedTrack.frameNumbers.set(mergedFrames);
+
+        const baseIndexMap = this.createFrameIndexMap(baseTrack.frameNumbers);
+        const overlayIndexMap = this.createFrameIndexMap(overlayTrack.frameNumbers);
+        const baseIkIndexByName = new Map<string, number>();
+        const overlayIkIndexByName = new Map<string, number>();
+
+        for (let i = 0; i < baseTrack.ikBoneNames.length; i += 1) {
+            baseIkIndexByName.set(baseTrack.ikBoneNames[i], i);
+        }
+        for (let i = 0; i < overlayTrack.ikBoneNames.length; i += 1) {
+            overlayIkIndexByName.set(overlayTrack.ikBoneNames[i], i);
+        }
+
+        for (let i = 0; i < mergedFrames.length; i += 1) {
+            const frame = mergedFrames[i];
+            const overlayIndex = overlayIndexMap.get(frame);
+            const baseIndex = baseIndexMap.get(frame);
+            const preferredVisible = overlayIndex !== undefined
+                ? overlayTrack.visibles[overlayIndex]
+                : (baseIndex !== undefined ? baseTrack.visibles[baseIndex] : 0);
+            mergedTrack.visibles[i] = preferredVisible;
+
+            for (let ikIndex = 0; ikIndex < mergedIkBoneNames.length; ikIndex += 1) {
+                const ikBoneName = mergedIkBoneNames[ikIndex];
+                const overlayIkIndex = overlayIkIndexByName.get(ikBoneName);
+                if (overlayIndex !== undefined && overlayIkIndex !== undefined) {
+                    mergedTrack.getIkState(ikIndex)[i] = overlayTrack.getIkState(overlayIkIndex)[overlayIndex];
+                    continue;
+                }
+
+                const baseIkIndex = baseIkIndexByName.get(ikBoneName);
+                if (baseIndex !== undefined && baseIkIndex !== undefined) {
+                    mergedTrack.getIkState(ikIndex)[i] = baseTrack.getIkState(baseIkIndex)[baseIndex];
+                }
+            }
+        }
+
+        return mergedTrack;
     }
 
     private mergeMovableBoneTrackArrays(

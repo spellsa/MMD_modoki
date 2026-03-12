@@ -96,6 +96,60 @@ const retainPngSequenceExportOwner = (ownerWindow: BrowserWindow | undefined): (
   };
 };
 
+const snapWindowContentAspect = (window: BrowserWindow, aspectRatio: number): void => {
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return;
+
+  const [windowWidth, windowHeight] = window.getSize();
+  const [contentWidth, contentHeight] = window.getContentSize();
+  const frameSize = {
+    width: Math.max(0, windowWidth - contentWidth),
+    height: Math.max(0, windowHeight - contentHeight),
+  };
+  const display = screen.getDisplayMatching(window.getBounds());
+  const maxContentWidth = Math.max(640, display.workArea.width - frameSize.width);
+  const maxContentHeight = Math.max(360, display.workArea.height - frameSize.height);
+  const minContentWidth = Math.min(MAIN_WINDOW_MIN_WIDTH, maxContentWidth);
+  const minContentHeight = Math.min(MAIN_WINDOW_MIN_HEIGHT, maxContentHeight);
+
+  window.setAspectRatio(0);
+
+  const currentAspectRatio = contentWidth / Math.max(1, contentHeight);
+  let targetContentWidth: number;
+  let targetContentHeight: number;
+
+  if (currentAspectRatio >= aspectRatio) {
+    targetContentHeight = Math.min(maxContentHeight, Math.max(minContentHeight, contentHeight));
+    targetContentWidth = Math.round(targetContentHeight * aspectRatio);
+  } else {
+    targetContentWidth = Math.min(maxContentWidth, Math.max(minContentWidth, contentWidth));
+    targetContentHeight = Math.round(targetContentWidth / aspectRatio);
+  }
+
+  if (targetContentWidth > maxContentWidth) {
+    targetContentWidth = maxContentWidth;
+    targetContentHeight = Math.round(targetContentWidth / aspectRatio);
+  }
+  if (targetContentHeight > maxContentHeight) {
+    targetContentHeight = maxContentHeight;
+    targetContentWidth = Math.round(targetContentHeight * aspectRatio);
+  }
+  if (targetContentWidth < minContentWidth) {
+    targetContentWidth = minContentWidth;
+    targetContentHeight = Math.round(targetContentWidth / aspectRatio);
+  }
+  if (targetContentHeight < minContentHeight) {
+    targetContentHeight = minContentHeight;
+    targetContentWidth = Math.round(targetContentHeight * aspectRatio);
+  }
+
+  targetContentWidth = Math.min(maxContentWidth, Math.max(1, targetContentWidth));
+  targetContentHeight = Math.min(maxContentHeight, Math.max(1, targetContentHeight));
+
+  if (targetContentWidth !== contentWidth || targetContentHeight !== contentHeight) {
+    window.setContentSize(targetContentWidth, targetContentHeight);
+  }
+};
+
 const sanitizePngSequenceExportRequest = (request: PngSequenceExportRequest): PngSequenceExportRequest | null => {
   if (!request || typeof request !== 'object') return null;
   if (!request.project || typeof request.project !== 'object') return null;
@@ -209,6 +263,7 @@ const createWindow = () => {
   const mainWindow = new BrowserWindow({
     width: MAIN_WINDOW_DEFAULT_WIDTH,
     height: MAIN_WINDOW_DEFAULT_HEIGHT,
+    useContentSize: true,
     minWidth: MAIN_WINDOW_MIN_WIDTH,
     minHeight: MAIN_WINDOW_MIN_HEIGHT,
     autoHideMenuBar: true,
@@ -222,7 +277,7 @@ const createWindow = () => {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.setAspectRatio(MAIN_WINDOW_ASPECT_RATIO);
+  snapWindowContentAspect(mainWindow, MAIN_WINDOW_ASPECT_RATIO);
 
   // Load the app
   void loadEditorWindow(mainWindow);
@@ -248,6 +303,10 @@ const createWindow = () => {
       detail: 'Please wait until export finishes before closing the main window.',
       noLink: true,
     });
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    snapWindowContentAspect(mainWindow, MAIN_WINDOW_ASPECT_RATIO);
   });
 };
 
@@ -276,6 +335,19 @@ ipcMain.handle('dialog:openDirectory', async () => {
     return null;
   }
   return result.filePaths[0];
+});
+
+ipcMain.handle('window:snapMainWindowContentAspect', async (event, aspectRatio: number) => {
+  const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!ownerWindow || ownerWindow.isDestroyed()) {
+    return false;
+  }
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return false;
+  }
+
+  snapWindowContentAspect(ownerWindow, aspectRatio);
+  return true;
 });
 
 ipcMain.handle('file:readBinary', async (_event, filePath: string) => {
