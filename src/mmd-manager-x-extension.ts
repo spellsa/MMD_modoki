@@ -1,11 +1,10 @@
-import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import type { Scene } from "@babylonjs/core/scene";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MmdManager } from "./mmd-manager";
-import "./x-file-loader";
+import { loadXIntoScene } from "./x-file-loader";
 
 export type AccessoryState = {
     index: number;
@@ -69,6 +68,7 @@ const tempPosition2 = new Vector3();
 const tempPosition3 = new Vector3();
 const tempRotation = Quaternion.Identity();
 const tempRotation2 = Quaternion.Identity();
+const X_ACCESSORY_IMPORT_SCALE = 10;
 
 function getAccessoryEntries(host: object): AccessoryEntry[] {
     let entries = accessoryStore.get(host);
@@ -270,11 +270,12 @@ if (!mmdManagerProto.loadX) {
             const dir = pathParts.substring(0, lastSlash + 1);
             const fileName = pathParts.substring(lastSlash + 1);
             const fileUrl = `file:///${dir}`;
+            const data = await window.electronAPI.readBinaryFile(filePath);
+            if (!data) {
+                throw new Error(`Unable to read X file: ${filePath}`);
+            }
 
-            const result = await ImportMeshAsync(fileName, host.scene, {
-                rootUrl: fileUrl,
-                pluginExtension: ".x",
-            });
+            const result = await loadXIntoScene(host.scene, data, fileUrl);
 
             if (result.meshes.length === 0) {
                 throw new Error("No mesh data found in X file");
@@ -287,6 +288,7 @@ if (!mmdManagerProto.loadX) {
             const offset = new TransformNode(`x_accessory_offset_${entries.length}`, host.scene);
             offset.name = `${accessoryName}_offset`;
             offset.parent = root;
+            offset.scaling.set(X_ACCESSORY_IMPORT_SCALE, X_ACCESSORY_IMPORT_SCALE, X_ACCESSORY_IMPORT_SCALE);
 
             const importedNodes = new Set<object>();
             for (const node of result.transformNodes) importedNodes.add(node);
@@ -310,7 +312,7 @@ if (!mmdManagerProto.loadX) {
                 mesh.isVisible = true;
                 mesh.receiveShadows = true;
                 if ((mesh.getTotalVertices?.() ?? 0) > 0) {
-                    host.shadowGenerator.addShadowCaster(mesh as AbstractMesh, true);
+                    host.shadowGenerator.addShadowCaster(mesh as AbstractMesh, false);
                 }
             }
 

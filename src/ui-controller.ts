@@ -1303,17 +1303,13 @@ export class UIController {
         };
 
         // Active model changed
-        this.mmdManager.onModelLoaded = (info: ModelInfo) => {
+        this.mmdManager.onModelLoaded = () => {
             this.setStatus("Model ready", false);
             this.viewportOverlay.classList.add("hidden");
             if (this.mmdManager.getTimelineTarget() === "camera") {
                 this.applyCameraSelectionUI();
             } else {
-                this.bottomPanel.updateBoneControls(info);
-                this.bottomPanel.updateMorphControls(info);
-                this.bottomPanel.updateModelInfo(info);
-                this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
-                this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
+                this.applyActiveModelSelectionUI();
             }
             this.refreshModelSelector();
             this.refreshShaderPanel();
@@ -1323,6 +1319,9 @@ export class UIController {
         this.mmdManager.onSceneModelLoaded = (info: ModelInfo, totalCount: number, active: boolean) => {
             this.setStatus("Model loaded", false);
             this.viewportOverlay.classList.add("hidden");
+            if (active) {
+                this.applyActiveModelSelectionUI();
+            }
             this.refreshModelSelector();
             this.refreshShaderPanel();
             const activeLabel = active ? " [active]" : "";
@@ -2863,6 +2862,19 @@ export class UIController {
         this.updateInfoActionButtons();
     }
 
+    private applyActiveModelSelectionUI(): void {
+        if (this.mmdManager.getTimelineTarget() !== "model") return;
+        const info = this.mmdManager.getActiveModelInfo();
+        if (!info) return;
+
+        this.bottomPanel.updateBoneControls(info);
+        this.bottomPanel.updateMorphControls(info);
+        this.bottomPanel.updateModelInfo(info);
+        this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
+        this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
+        this.updateInfoActionButtons();
+    }
+
     private updateInfoActionButtons(): void {
         const isModelTarget = this.mmdManager.getTimelineTarget() === "model";
         const hasModel = this.mmdManager.getLoadedModels().length > 0;
@@ -2948,6 +2960,7 @@ export class UIController {
         }
 
         this.mmdManager.setTimelineTarget("model");
+        this.applyActiveModelSelectionUI();
         this.refreshModelSelector();
         this.refreshShaderPanel();
         if (showToast) {
@@ -3827,7 +3840,7 @@ export class UIController {
 
         this.syncShaderModelSelectorFromInfo();
 
-        if (this.modelSelect.value === UIController.CAMERA_SELECT_VALUE) {
+        if (this.mmdManager.getTimelineTarget() === "camera") {
             this.renderShaderCameraPostEffectsPanel();
             return;
         }
@@ -3879,8 +3892,13 @@ export class UIController {
             return;
         }
 
+        const timelineTarget = this.mmdManager.getTimelineTarget();
         let selectedModelIndex = Number.parseInt(this.modelSelect.value, 10);
-        if (Number.isNaN(selectedModelIndex) || !models.some((model) => model.modelIndex === selectedModelIndex)) {
+        if (
+            timelineTarget !== "model" ||
+            Number.isNaN(selectedModelIndex) ||
+            !models.some((model) => model.modelIndex === selectedModelIndex)
+        ) {
             selectedModelIndex = models.find((model) => model.active)?.modelIndex ?? models[0].modelIndex;
         }
 
@@ -3990,8 +4008,8 @@ export class UIController {
             ? t("shader.reset.selected")
             : t("shader.reset.all");
 
-        if (externalWgslPath) {
-            this.shaderPanelNote.textContent = `External WGSL active: ${this.getBaseNameForRenderer(externalWgslPath)}`;
+        if (selectedExternalWgslPath) {
+            this.shaderPanelNote.textContent = `External WGSL active: ${this.getBaseNameForRenderer(selectedExternalWgslPath)}`;
         } else if (selectedMaterial) {
             this.shaderPanelNote.textContent = t("shader.note.selectedMaterial", {
                 name: selectedMaterial.name,

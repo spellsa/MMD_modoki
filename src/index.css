@@ -1768,7 +1768,21 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   box-shadow: 0 0 20px rgba(255, 79, 163, 0.35);
 }
 
+#btn-export-webm {
+  background: #ff4fa3;
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 0 20px rgba(255, 79, 163, 0.35);
+}
+
 #btn-export-png:hover {
+  background: #ff4fa3;
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 0 30px rgba(255, 79, 163, 0.55);
+}
+
+#btn-export-webm:hover {
   background: #ff4fa3;
   border-color: transparent;
   color: #ffffff;

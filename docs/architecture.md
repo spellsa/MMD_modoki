@@ -21,6 +21,10 @@ Renderer 側で以下のコンポーネントを組み立てます。
 
 - モデルは `MmdManager` 内で複数保持し、UI からアクティブ対象を切替
 - アクセサリー（`.x`）は拡張側で保持し、UI から親モデル/親ボーンや表示状態を変更
+- `.x` 読込は Babylon の URL 直読みに頼らず、Renderer 側でバイナリを読み込んでから `x-file-loader` へ渡す
+- `.x` テキストは UTF-8 / Shift-JIS の置換文字数を比較して自動判定する
+- `.x` の `baseTexture*sphere(.sph/.spa)` 形式は loader 側で diffuse / sphere に分解する
+- `.x` アクセサリーは MMD ステージに合わせるため、読込時の初期スケールを `10x` にしている
 - 地面表示は上部ツールバーのトグルで ON/OFF
 
 ## 起動フロー

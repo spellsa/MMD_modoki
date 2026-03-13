@@ -274,6 +274,30 @@ import twgslJsUrl from "@babylonjs/core/assets/twgsl/twgsl.js?url";
 // eslint-disable-next-line import/no-unresolved
 import twgslWasmUrl from "@babylonjs/core/assets/twgsl/twgsl.wasm?url";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
+// eslint-disable-next-line import/no-unresolved
+import animeSoftLutText from "../lut/anime-soft.3dl?raw";
+// eslint-disable-next-line import/no-unresolved
+import animeCoolLutText from "../lut/anime-cool.3dl?raw";
+// eslint-disable-next-line import/no-unresolved
+import animeDramaticLutText from "../lut/anime-dramatic.3dl?raw";
+// eslint-disable-next-line import/no-unresolved
+import monotoneLutText from "../lut/monotone.3dl?raw";
+// eslint-disable-next-line import/no-unresolved
+import sepiaLutText from "../lut/sepia.3dl?raw";
+// eslint-disable-next-line import/no-unresolved
+import tealOrangeLutText from "../lut/teal-orange.3dl?raw";
+// eslint-disable-next-line import/no-unresolved
+import luminousWgslText from "../wgsl/luminous.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import debugWhiteWgslText from "../wgsl/toon_debug_white_shadow.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import fullLightWgslText from "../wgsl/full_light.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import fullLightAddWgslText from "../wgsl/full_light_add.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import fullShadowWgslText from "../wgsl/full_shadow.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import lightAndShadowWgslText from "../wgsl/light_and_shadow.wgsl?raw";
 
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
@@ -283,6 +307,12 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-mmd-standard"
     | "wgsl-unlit"
     | "wgsl-soft-lit"
+    | "wgsl-autoluminous"
+    | "wgsl-debug-white"
+    | "wgsl-full-light"
+    | "wgsl-full-light-add"
+    | "wgsl-full-shadow"
+    | "wgsl-light-and-shadow"
     | "wgsl-specular"
     | "wgsl-cel-sharp"
     | "wgsl-rim-lift"
@@ -363,6 +393,36 @@ export class MmdManager {
             description: "Softer highlights with gentle emissive lift",
         },
         {
+            id: "wgsl-autoluminous",
+            label: "Luminous",
+            description: "Material-color neon lift with stronger emissive boost and reduced shadowing",
+        },
+        {
+            id: "wgsl-debug-white",
+            label: "debug_white",
+            description: "White-shadow debug view using the built-in toon debug WGSL",
+        },
+        {
+            id: "wgsl-full-light",
+            label: "full_light",
+            description: "Treat the material as always facing light regardless of PMX toon flags",
+        },
+        {
+            id: "wgsl-full-light-add",
+            label: "full_light_add",
+            description: "Read light sliders directly and add a dedicated light boost regardless of PMX toon flags",
+        },
+        {
+            id: "wgsl-full-shadow",
+            label: "full_shadow",
+            description: "Treat the material as always in shadow regardless of PMX toon flags",
+        },
+        {
+            id: "wgsl-light-and-shadow",
+            label: "light_and_shadow",
+            description: "Apply the standard light-and-shadow banding even to materials that normally skip toon shading",
+        },
+        {
             id: "wgsl-specular",
             label: "Specular Boost",
             description: "Sharper highlights for glossy materials",
@@ -387,7 +447,18 @@ export class MmdManager {
         { id: "anime-soft", label: "Anime Soft" },
         { id: "anime-cool", label: "Anime Cool" },
         { id: "anime-dramatic", label: "Anime Dramatic" },
+        { id: "monotone", label: "Monotone" },
+        { id: "sepia", label: "Sepia" },
+        { id: "teal-orange", label: "Teal Orange" },
     ] as const;
+    private static readonly POST_EFFECT_LUT_TEXT_BY_ID: Record<string, string> = {
+        "anime-soft": animeSoftLutText,
+        "anime-cool": animeCoolLutText,
+        "anime-dramatic": animeDramaticLutText,
+        "monotone": monotoneLutText,
+        "sepia": sepiaLutText,
+        "teal-orange": tealOrangeLutText,
+    };
     private static toonLightSeparationShaderPatched = false;
     private static toonSelfShadowBoundarySoftness = 0.035;
     private static toonOcclusionShadowBoundarySoftness = 0.035;
@@ -678,10 +749,8 @@ ${contactAoBeforeLights}
 
                 const beforeFogAppendBlock = isWgsl
                     ? `
-#if defined(TOON_TEXTURE_COLOR) && defined(TOON_TEXTURE)
 let toonFlatMix=clamp(toonFlatLightMask,0.0,1.0);
 color=vec4f(color.rgb+toonFlatLightColor*toonFlatMix,color.a);
-#endif
 let toonFinalMix=clamp(toonFinalOverrideMix,0.0,1.0);
 let toonFinalColorLumaMix=clamp(toonFinalOverrideUseColorLuma,0.0,1.0);
 let toonColorLuma=clamp(dot(color.rgb,vec3f(0.299,0.587,0.114)),0.0,1.0);
@@ -697,10 +766,8 @@ let toonContactAoMask=vec3f(1.0-toonContactAoApplied);
 color=vec4f(mix(color.rgb*toonContactAoMask,toonContactAoMask,toonContactAoDebug),color.a);
 `
                     : `
-#if defined(TOON_TEXTURE_COLOR) && defined(TOON_TEXTURE)
 float toonFlatMix=clamp(toonFlatLightMask,0.0,1.0);
 color.rgb+=toonFlatLightColor*toonFlatMix;
-#endif
 float toonFinalMix=clamp(toonFinalOverrideMix,0.0,1.0);
 float toonFinalColorLumaMix=clamp(toonFinalOverrideUseColorLuma,0.0,1.0);
 float toonColorLuma=clamp(dot(color.rgb,vec3(0.299,0.587,0.114)),0.0,1.0);
@@ -1247,6 +1314,10 @@ ${beforeFogAppendBlock}
         }));
     }
 
+    public getActiveModelInfo(): ModelInfo | null {
+        return this.activeModelInfo;
+    }
+
     public isWgslMaterialShaderAssignmentAvailable(): boolean {
         return this.isWebGpuEngine();
     }
@@ -1543,6 +1614,108 @@ ${beforeFogAppendBlock}
                         Math.min(1, baseEmissive.b + 0.04),
                     ),
                 );
+                break;
+            }
+            case "wgsl-autoluminous": {
+                if ("disableLighting" in material) {
+                    material.disableLighting = false;
+                }
+                if ("specularPower" in material) {
+                    const base = defaults.specularPower ?? 32;
+                    material.specularPower = Math.max(6, base * 0.3);
+                }
+                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
+                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
+                this.setMaterialColorProperty(
+                    material,
+                    "emissiveColor",
+                    new Color3(
+                        Math.min(1, baseEmissive.r + diffuse.r * 0.82),
+                        Math.min(1, baseEmissive.g + diffuse.g * 0.82),
+                        Math.min(1, baseEmissive.b + diffuse.b * 0.82),
+                    ),
+                );
+                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, luminousWgslText);
+                break;
+            }
+            case "wgsl-debug-white": {
+                if ("disableLighting" in material) {
+                    material.disableLighting = false;
+                }
+                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, debugWhiteWgslText);
+                break;
+            }
+            case "wgsl-full-light": {
+                if ("disableLighting" in material) {
+                    material.disableLighting = false;
+                }
+                if ("specularPower" in material) {
+                    material.specularPower = 0;
+                }
+                const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
+                const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+                const hasOpacityTexture = Boolean(material.opacityTexture);
+                const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
+                const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
+                const isTransparentLike = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled || Number(material.alpha ?? 1) < 0.999;
+                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
+                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
+                const emissiveBoost = isTransparentLike ? 0.82 : 0.32;
+                this.setMaterialColorProperty(
+                    material,
+                    "emissiveColor",
+                    new Color3(
+                        Math.min(1, baseEmissive.r + diffuse.r * emissiveBoost),
+                        Math.min(1, baseEmissive.g + diffuse.g * emissiveBoost),
+                        Math.min(1, baseEmissive.b + diffuse.b * emissiveBoost),
+                    ),
+                );
+                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, fullLightWgslText);
+                break;
+            }
+            case "wgsl-full-light-add": {
+                if ("disableLighting" in material) {
+                    material.disableLighting = false;
+                }
+                if ("specularPower" in material) {
+                    material.specularPower = 0;
+                }
+                const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
+                const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+                const hasOpacityTexture = Boolean(material.opacityTexture);
+                const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
+                const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
+                const isTransparentLike = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled || Number(material.alpha ?? 1) < 0.999;
+                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
+                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
+                const emissiveBoost = isTransparentLike ? 0.96 : 0.46;
+                this.setMaterialColorProperty(
+                    material,
+                    "emissiveColor",
+                    new Color3(
+                        Math.min(1, baseEmissive.r + diffuse.r * emissiveBoost),
+                        Math.min(1, baseEmissive.g + diffuse.g * emissiveBoost),
+                        Math.min(1, baseEmissive.b + diffuse.b * emissiveBoost),
+                    ),
+                );
+                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, fullLightAddWgslText);
+                break;
+            }
+            case "wgsl-full-shadow": {
+                if ("disableLighting" in material) {
+                    material.disableLighting = false;
+                }
+                if ("specularPower" in material) {
+                    material.specularPower = 0;
+                }
+                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, fullShadowWgslText);
+                break;
+            }
+            case "wgsl-light-and-shadow": {
+                if ("disableLighting" in material) {
+                    material.disableLighting = false;
+                }
+                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, lightAndShadowWgslText);
                 break;
             }
             case "wgsl-specular": {
@@ -2862,7 +3035,7 @@ ${beforeFogAppendBlock}
             "camera",
             -Math.PI / 2,
             Math.PI / 2.2,
-            30,
+            50,
             new Vector3(0, 10, 0),
             this.scene
         );
@@ -3552,6 +3725,7 @@ ${beforeFogAppendBlock}
                 this.currentMesh = mmdMesh;
                 this.currentModel = mmdModel;
                 this.activeModelInfo = modelInfo;
+                this.timelineTarget = "model";
                 this.refreshBoneVisualizerTarget();
                 this.updateBoneGizmoTarget();
                 this.onModelLoaded?.(modelInfo);
@@ -6565,7 +6739,10 @@ ${beforeFogAppendBlock}
             return existing;
         }
 
-        const lutText = this.buildLut3dlText(presetId);
+        const lutText = MmdManager.POST_EFFECT_LUT_TEXT_BY_ID[presetId];
+        if (!lutText) {
+            throw new Error(`Unknown built-in LUT preset: ${presetId}`);
+        }
         const blob = new Blob([lutText], { type: "text/plain" });
         const blobUrl = URL.createObjectURL(blob);
         this.postEffectLutPresetBlobUrlById.set(presetId, blobUrl);
@@ -6584,86 +6761,6 @@ ${beforeFogAppendBlock}
         const blobUrl = URL.createObjectURL(blob);
         this.postEffectLutExternalBlobUrl = blobUrl;
         return blobUrl;
-    }
-
-    private buildLut3dlText(presetId: string): string {
-        const size = 16;
-        const maxValue = 4095;
-        const lines: string[] = [];
-        lines.push(Array.from({ length: size }, (_, i) => String(i)).join(" "));
-
-        for (let r = 0; r < size; r += 1) {
-            for (let g = 0; g < size; g += 1) {
-                for (let b = 0; b < size; b += 1) {
-                    const color = this.transformLutColor(
-                        presetId,
-                        r / (size - 1),
-                        g / (size - 1),
-                        b / (size - 1),
-                    );
-                    const rr = Math.round(Math.max(0, Math.min(1, color.r)) * maxValue);
-                    const gg = Math.round(Math.max(0, Math.min(1, color.g)) * maxValue);
-                    const bb = Math.round(Math.max(0, Math.min(1, color.b)) * maxValue);
-                    lines.push(`${rr} ${gg} ${bb}`);
-                }
-            }
-        }
-
-        return lines.join("\n");
-    }
-
-    private transformLutColor(presetId: string, r: number, g: number, b: number): { r: number; g: number; b: number } {
-        let outR = r;
-        let outG = g;
-        let outB = b;
-
-        const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
-        const applySaturation = (saturationScale: number): void => {
-            const luma = outR * 0.2126 + outG * 0.7152 + outB * 0.0722;
-            outR = luma + (outR - luma) * saturationScale;
-            outG = luma + (outG - luma) * saturationScale;
-            outB = luma + (outB - luma) * saturationScale;
-        };
-        const applyContrast = (contrastScale: number): void => {
-            outR = (outR - 0.5) * contrastScale + 0.5;
-            outG = (outG - 0.5) * contrastScale + 0.5;
-            outB = (outB - 0.5) * contrastScale + 0.5;
-        };
-
-        switch (presetId) {
-            case "anime-soft": {
-                applyContrast(1.04);
-                applySaturation(1.14);
-                outR += 0.04;
-                outG += 0.015;
-                outB -= 0.03;
-                break;
-            }
-            case "anime-cool": {
-                applyContrast(1.05);
-                applySaturation(1.1);
-                outR -= 0.02;
-                outG += 0.015;
-                outB += 0.05;
-                break;
-            }
-            case "anime-dramatic": {
-                applyContrast(1.14);
-                applySaturation(1.22);
-                outR += 0.03;
-                outG -= 0.01;
-                outB += 0.015;
-                break;
-            }
-            default:
-                break;
-        }
-
-        return {
-            r: clamp01(outR),
-            g: clamp01(outG),
-            b: clamp01(outB),
-        };
     }
 
     private applyDefaultPipelinePostProcessSettings(): void {

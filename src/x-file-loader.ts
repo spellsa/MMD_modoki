@@ -26,6 +26,9 @@ type XMat = {
     emissive: Color3;
     texture: string | null;
     textureUrl: string | null;
+    sphereTexture: string | null;
+    sphereTextureUrl: string | null;
+    sphereTextureMode: "multiply" | "add" | null;
 };
 type XMesh = { name: string; pos: number[]; faces: number[][]; uvs: number[] | null; mats: XMat[]; faceMats: number[] };
 type XFrame = { name: string; matrix: number[] | null; frames: XFrame[]; meshes: XMesh[] };
@@ -260,6 +263,9 @@ class P {
             emissive,
             texture,
             textureUrl: null,
+            sphereTexture: null,
+            sphereTextureUrl: null,
+            sphereTextureMode: null,
         };
         if (name) this.mats.set(name, mat);
         this.sep();
@@ -320,6 +326,9 @@ class P {
             emissive: new Color3(0, 0, 0),
             texture: null,
             textureUrl: null,
+            sphereTexture: null,
+            sphereTextureUrl: null,
+            sphereTextureMode: null,
         };
     }
 
@@ -414,11 +423,21 @@ function parseX(data: string): XScene {
     return new P(lex(data.slice(m.index + m[0].length))).parse();
 }
 
+function decodeXText(bytes: Uint8Array): string {
+    const utf8 = new TextDecoder("utf-8").decode(bytes);
+    const utf8ReplacementCount = (utf8.match(/\uFFFD/g) ?? []).length;
+    if (utf8ReplacementCount === 0) return utf8;
+
+    const shiftJis = new TextDecoder("shift-jis").decode(bytes);
+    const shiftJisReplacementCount = (shiftJis.match(/\uFFFD/g) ?? []).length;
+    return shiftJisReplacementCount < utf8ReplacementCount ? shiftJis : utf8;
+}
+
 function dataToText(data: unknown): string {
     if (typeof data === "string") return data;
-    if (data instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(data));
+    if (data instanceof ArrayBuffer) return decodeXText(new Uint8Array(data));
     if (ArrayBuffer.isView(data)) {
-        return new TextDecoder("utf-8").decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+        return decodeXText(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
     }
     throw new Error("X loader expects text data");
 }
@@ -483,10 +502,33 @@ function texturePathCandidates(rawName: string): string[] {
     return Array.from(out);
 }
 
-async function resolveTextureUrlForMaterial(rootUrl: string, material: XMat): Promise<string | null> {
-    if (!material.texture || material.texture.trim().length === 0) return null;
+function parseCompositeTextureReference(rawName: string): {
+    diffuse: string | null;
+    sphere: string | null;
+    sphereMode: "multiply" | "add" | null;
+} {
+    const normalized = rawName.replace(/\\/g, "/").trim();
+    const composite = /^(.*?\.(?:png|bmp|tga|jpg|jpeg|webp))(?:[*?])([^*?]+\.(?:sph|spa))$/i.exec(normalized);
+    if (composite) {
+        const diffuse = composite[1]?.trim() || null;
+        const sphere = composite[2]?.trim() || null;
+        const sphereMode = sphere?.toLowerCase().endsWith(".spa") ? "add" : "multiply";
+        return { diffuse, sphere, sphereMode };
+    }
+    if (/\.(?:sph|spa)$/i.test(normalized)) {
+        return {
+            diffuse: null,
+            sphere: normalized,
+            sphereMode: normalized.toLowerCase().endsWith(".spa") ? "add" : "multiply",
+        };
+    }
+    return { diffuse: normalized, sphere: null, sphereMode: null };
+}
 
-    const original = material.texture.replace(/\\/g, "/");
+async function resolveSingleTextureUrl(rootUrl: string, rawName: string): Promise<string | null> {
+    if (!rawName || rawName.trim().length === 0) return null;
+
+    const original = rawName.replace(/\\/g, "/");
     if (/^data:/i.test(original)) return original;
     if (/^[a-z]+:/i.test(original)) return original;
 
@@ -503,11 +545,39 @@ async function resolveTextureUrlForMaterial(rootUrl: string, material: XMat): Pr
             const info = await fileInfoApi(localPath);
             if (info) return localPathToFileUrl(localPath);
         }
-        console.warn(`[X] Texture not found: ${original}`);
         return null;
     }
 
     return textureUrl(rootUrl, original);
+}
+
+async function resolveTextureUrlForMaterial(rootUrl: string, material: XMat): Promise<void> {
+    if (!material.texture || material.texture.trim().length === 0) {
+        material.textureUrl = null;
+        material.sphereTexture = null;
+        material.sphereTextureUrl = null;
+        material.sphereTextureMode = null;
+        return;
+    }
+
+    const parsed = parseCompositeTextureReference(material.texture);
+    material.texture = parsed.diffuse;
+    material.sphereTexture = parsed.sphere;
+    material.sphereTextureMode = parsed.sphereMode;
+
+    material.textureUrl = parsed.diffuse
+        ? await resolveSingleTextureUrl(rootUrl, parsed.diffuse)
+        : null;
+    material.sphereTextureUrl = parsed.sphere
+        ? await resolveSingleTextureUrl(rootUrl, parsed.sphere)
+        : null;
+
+    if (!material.textureUrl && parsed.diffuse) {
+        console.warn(`[X] Texture not found: ${parsed.diffuse}`);
+    }
+    if (!material.sphereTextureUrl && parsed.sphere) {
+        console.warn(`[X] Sphere texture not found: ${parsed.sphere}`);
+    }
 }
 
 function gatherMaterials(parsed: XScene): XMat[] {
@@ -529,7 +599,7 @@ function gatherMaterials(parsed: XScene): XMat[] {
 async function resolveSceneTextureUrls(rootUrl: string, parsed: XScene): Promise<void> {
     const materials = gatherMaterials(parsed);
     for (const material of materials) {
-        material.textureUrl = await resolveTextureUrlForMaterial(rootUrl, material);
+        await resolveTextureUrlForMaterial(rootUrl, material);
     }
 }
 
@@ -545,6 +615,19 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, StandardMaterial>): St
     mat.emissiveColor = m.emissive.clone();
     mat.backFaceCulling = false;
     if (m.textureUrl) mat.diffuseTexture = new Texture(m.textureUrl, scene, false, true);
+    if (m.sphereTextureUrl) {
+        // Approximate MMD sphere maps on .x accessories with Babylon's spherical reflection.
+        const sphereTex = new Texture(m.sphereTextureUrl, scene, false, true);
+        sphereTex.coordinatesMode = Texture.SPHERICAL_MODE;
+        mat.reflectionTexture = sphereTex;
+        mat.reflectionFresnelParameters = null;
+        if (m.sphereTextureMode === "add") {
+            mat.emissiveColor = mat.emissiveColor.add(new Color3(0.35, 0.35, 0.35));
+            mat.disableLighting = false;
+        } else {
+            mat.specularColor = mat.specularColor.add(new Color3(0.25, 0.25, 0.25));
+        }
+    }
     cache.set(m, mat);
     return mat;
 }
@@ -598,7 +681,9 @@ function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: 
                 multi.subMaterials.push(sub);
 
                 const start = rebuilt.length;
-                rebuilt.push(...triIndices);
+                for (let i = 0; i < triIndices.length; i += 1) {
+                    rebuilt.push(triIndices[i]);
+                }
                 ranges.push({ sub: subIndex, start, count: triIndices.length });
             }
 
@@ -678,6 +763,26 @@ function collectMats(meshes: Mesh[]): StandardMaterial[] {
     return Array.from(out);
 }
 
+export async function loadXIntoScene(
+    scene: Scene,
+    data: unknown,
+    rootUrl: string,
+): Promise<ISceneLoaderAsyncResult> {
+    const parsed = parseX(dataToText(data));
+    await resolveSceneTextureUrls(rootUrl, parsed);
+    const built = buildScene(scene, parsed);
+    return {
+        meshes: built.meshes,
+        particleSystems: [],
+        skeletons: [],
+        animationGroups: [],
+        transformNodes: built.nodes,
+        geometries: [],
+        lights: [],
+        spriteManagers: [],
+    } as ISceneLoaderAsyncResult;
+}
+
 export class XFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPluginFactory {
     public readonly name = META.name;
     public readonly extensions = META.extensions;
@@ -697,24 +802,7 @@ export class XFileLoader implements ISceneLoaderPluginAsync, ISceneLoaderPluginF
         data: unknown,
         rootUrl: string,
     ): Promise<ISceneLoaderAsyncResult> {
-        try {
-            const parsed = parseX(dataToText(data));
-            return resolveSceneTextureUrls(rootUrl, parsed).then(() => {
-                const built = buildScene(scene, parsed);
-                return {
-                    meshes: built.meshes,
-                    particleSystems: [],
-                    skeletons: [],
-                    animationGroups: [],
-                    transformNodes: built.nodes,
-                    geometries: [],
-                    lights: [],
-                    spriteManagers: [],
-                } as ISceneLoaderAsyncResult;
-            });
-        } catch (e) {
-            return Promise.reject(e);
-        }
+        return loadXIntoScene(scene, data, rootUrl);
     }
 
     public loadAsync(scene: Scene, data: unknown, rootUrl: string): Promise<void> {
