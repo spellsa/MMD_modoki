@@ -11,6 +11,7 @@
     "make": "electron-forge make",
     "make:zip": "electron-forge make --targets @electron-forge/maker-zip",
     "publish": "electron-forge publish",
+    "generate:luts": "node scripts/generate-builtin-luts.js",
     "lint": "eslint --ext .ts,.tsx ."
   },
   "keywords": [],
