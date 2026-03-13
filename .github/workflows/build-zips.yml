@@ -55,7 +55,21 @@ jobs:
       - name: Rename zip for release
         shell: bash
         run: |
-          node -e "const fs=require('fs'); const path=require('path'); const root=path.join(process.cwd(),'out','make'); const version=require('./package.json').version; const releasePlatform=process.env.RELEASE_PLATFORM; const walk=(dir)=>fs.readdirSync(dir,{withFileTypes:true}).flatMap((entry)=>entry.isDirectory()?walk(path.join(dir,entry.name)):path.join(dir,entry.name)); const zips=walk(root).filter((file)=>file.toLowerCase().endsWith('.zip')); if(zips.length!==1){console.error('Expected exactly one zip file, found:', zips); process.exit(1);} const source=zips[0]; const dir=path.dirname(source); const target=path.join(dir, `MMD.modoki-${releasePlatform}-x64-${version}.zip`); if(path.resolve(source)!==path.resolve(target)){ fs.renameSync(source,target); } console.log(`Renamed ${path.basename(source)} -> ${path.basename(target)}`);"
+          ZIP_DIR="out/make/zip/${{ matrix.forge_platform }}/x64"
+          shopt -s nullglob
+          zips=("$ZIP_DIR"/*.zip)
+          if [ "${#zips[@]}" -ne 1 ]; then
+            echo "Expected exactly one zip file in $ZIP_DIR, found:"
+            printf '  %s\n' "${zips[@]}"
+            exit 1
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          SOURCE="${zips[0]}"
+          TARGET="$ZIP_DIR/MMD.modoki-${RELEASE_PLATFORM}-x64-${VERSION}.zip"
+          if [ "$SOURCE" != "$TARGET" ]; then
+            mv "$SOURCE" "$TARGET"
+          fi
+          echo "Renamed $(basename "$SOURCE") -> $(basename "$TARGET")"
         env:
           RELEASE_PLATFORM: ${{ matrix.release_platform }}
 
