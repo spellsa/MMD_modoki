@@ -17,8 +17,8 @@
 5. tag を作成して push する。
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 6. GitHub Actions の `Build Zip Packages` が成功することを確認する。
