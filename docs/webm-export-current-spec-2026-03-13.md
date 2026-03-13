@@ -1,167 +1,236 @@
-# WebM出力 現行仕様 / 実装メモ
+# WebM 出力 現行仕様 / 実装
 
 更新日: 2026-03-13
 
-## 概要
+## 1. 概要
 
-- `出力` パネルに `WebM` ボタンを配置している。
-- 現状の WebM 出力は silent export のみ。音声 mux は未実装。
-- 出力範囲は `currentFrame -> totalFrames` 固定。
-- 出力 fps は `出力` パネルの `FPS` ドロップダウン (`24 / 30 / 60`) を使う。
-- コーデック選択は自動で、`vp8` を優先し、非対応時は `vp9` にフォールバックする。
+- `出力 > WebM動画` から `.webm` を保存する。
+- 出力 fps は `24 / 30 / 60` を選べる。
+- `音声あり` を ON にすると、読み込み済み音声を動画へ mux する。
+- 動画 codec は `Auto / VP8 / VP9` を選べる。
+- 既定値は `VP9`。
+- 出力中は main UI を lock し、右上オーバーレイに簡略進捗を表示する。
 
-## ユーザーフロー
-
-1. ユーザーが `出力 > WebM` を押す。
-2. main process 経由で `.webm` の保存先を選ぶ。
-3. renderer が現在の project state をシリアライズする。
-4. exporter 側では音声なし動画として扱うため、`project.assets.audioPath` は `null` にして渡す。
-5. main process が `mode=webm-exporter` の hidden exporter window を起動する。
-6. exporter window が fresh な `MmdManager` を作って project を読み込み、フレーム capture と encode を行い、保存完了後に main へ終了通知を送る。
-7. main process が exporter window を閉じ、メイン UI の lock を解除する。
-
-## 構成
-
-### 1. Main UI renderer
-
-対象ファイル: `src/ui-controller.ts`
-
-役割:
-
-- `WebmExportRequest` の組み立て
-- 出力設定の収集
-  - `outputWidth`
-  - `outputHeight`
-  - `fps`
-  - `startFrame`
-  - `endFrame`
-- `window.electronAPI.startWebmExportWindow(...)` による exporter 起動
-- background export lock の制御
-- busy overlay による進捗表示
-  - phase
-  - encoded / total
-  - captured / total
-  - 最終更新からの経過時間
-  - 補助メッセージ
-
-### 2. Main process
-
-対象ファイル: `src/main.ts`
-
-役割:
-
-- WebM export job の保持
-- owner window ごとの active count 管理
-- hidden exporter window の作成
-- progress forwarding
-- completion cleanup
-- streamed save 用の file write IPC 提供
-
-### 3. Exporter renderer
+## 2. UI 仕様
 
 対象ファイル:
+
+- `index.html`
+- `src/ui-controller.ts`
+- `src/index.css`
+
+出力欄の項目:
+
+- 比率
+- 解像度プリセット
+- 幅 / 高さ
+- FPS
+- codec (`Auto / VP8 / VP9`)
+- `音声あり` チェック
+- `PNG画像`
+- `WebM動画`
+
+補足:
+
+- `PNG Seq` は UI から外している。
+- `固定 / 比率を維持` チェックは UI から外している。
+- 新規状態の codec 既定値は `VP9`。
+
+## 3. 時間軸仕様
+
+MMD タイムラインは 30fps 基準で扱う。
+
+- `timelineFrameCount = endFrame - startFrame + 1`
+- `totalOutputFrames = round((timelineFrameCount / 30) * outputFps)`
+
+これにより:
+
+- 30fps 出力では timeline 1 frame = video 1 frame
+- 60fps 出力では動画フレーム数だけ増やし、再生時間は維持
+- 音声付き出力でも video / audio の長さを揃える
+
+## 4. 全体構成
+
+### Main UI renderer
+
+対象:
+
+- `src/ui-controller.ts`
+
+役割:
+
+- 出力 UI の値を `ProjectOutputState` に保存
+- `WebmExportRequest` を組み立てて main process へ渡す
+- 音声付き出力時は、scene 側の再生音声は exporter へ持ち込まず、元音声ファイルの path だけ request に載せる
+- background export lock と進捗オーバーレイを管理する
+
+### Main process
+
+対象:
+
+- `src/main.ts`
+- `src/preload.ts`
+- `src/types.ts`
+
+役割:
+
+- WebM export job の生成 / 受け渡し
+- request の sanitize
+- hidden exporter window の起動
+- export 中 state / progress の owner window への転送
+- streamed save 用 IPC
+- 完了時の exporter window close と UI lock 解放
+
+### Exporter renderer
+
+対象:
 
 - `src/renderer.ts`
 - `src/webm-exporter.ts`
 
 役割:
 
-- `takeWebmExportJob(jobId)` で 1 回だけ job を受け取る
-- fresh な Babylon / MMD runtime を `MmdManager.create(canvas)` で作る
+- `takeWebmExportJob(jobId)` で job を 1 回だけ受け取る
+- hidden window 上に fresh な `MmdManager` を作る
 - project state を isolated scene に import する
-- frame capture -> encode -> file write を行う
-- phase 付き progress を main UI に返す
-- 完了時に `finishWebmExportJob(jobId)` を呼び、main に window close を任せる
+- frame capture / encode / save を行う
+- 終了時に `finishWebmExportJob(jobId)` で main process へ返す
 
-## 出力パイプライン
+## 5. 出力処理
 
-### 1. Runtime 初期化
+対象:
 
-- `MmdManager.create(canvas)`
-- `importProjectState(request.project)`
-- `setTimelineTarget("camera")`
-- `pause()`
-- `setAutoRenderEnabled(false)`
+- `src/webm-exporter.ts`
 
-export は専用 window 内の isolated scene で行う。メイン UI 側の scene は直接使わない。
+流れ:
 
-### 2. フレーム進行
+1. hidden exporter window で `MmdManager.create(canvas)`
+2. `importProjectState(project, { forExport: true })`
+3. `setTimelineTarget("camera")`
+4. 1 frame 待機
+5. `pause()`, `setAutoRenderEnabled(false)`, `seekTo(startFrame)`
+6. codec と bitrate を決定
+7. 必要なら音声を decode / slice
+8. `Output + WebMOutputFormat + StreamTarget` を開始
+9. フレームごとに render / capture / encode
+10. `close -> finalize -> finishWebmExportJob`
 
-現在は、物理が止まりにくいように「毎フレーム hard seek」ではなく、連続時間で進める方式にしている。
+### capture 経路
 
-- 最初のフレーム:
-  - `seekTo(startFrame)`
-  - `renderOnce(0)`
-- 2 フレーム目以降:
+現状は安定性優先で、以下を使う。
+
+- reusable `RenderTargetTexture`
+- `readPixels()`
+- `VideoSample(RGBA)`
+
+補足:
+
+- `canvas -> VideoSample`
+- `ImageBitmap -> 2D canvas -> VideoSample`
+
+はこの環境で黒画化したため、現状は採用しない。
+
+### フレーム進行
+
+- 最初の 1 frame は `renderOnce(0)`
+- 2 frame 目以降は
   - `mmdRuntime.playAnimation()`
-  - `renderOnce(1000 / fps)`
+  - `renderOnce(1000 / outputFps)`
   - `mmdRuntime.pauseAnimation()`
 
-`renderOnce()` は auto render を切った状態でも固定 delta で 1 回 Babylon render を進められるようにしてあり、以下の更新を 1 フレーム分進める前提になっている。
+毎フレーム `seekTo(frame)` はしない。
+理由は、物理が毎回テレポート扱いになって固まるため。
 
-- 物理
-- カメラアニメーション
-- post effect 状態
-- render target 更新
+## 6. 音声トラック
 
-### 3. フレーム capture
+対象:
 
-- Babylon の reusable `RenderTargetTexture` を 1 枚使い回す
-- 旧実装の `CreateScreenshotUsingRenderTargetAsync()` は使用しない
-- 各フレームで以下を行う
-  - `resetRefreshCounter()`
-  - render target へ描画
-  - `readPixels(...)`
-  - RGBA `Uint8Array` 化
-  - 上下反転を in-place で実施
+- `src/webm-exporter.ts`
 
-これにより、screenshot helper を毎フレーム生成していた頃より capture コストを下げている。
+仕様:
 
-### 4. MediaBunny 入力
+- `音声あり` が ON かつ音声読込済みのときだけ mux する
+- exporter scene 内では `StreamAudioPlayer` を使わない
+- 元の音声ファイルを別経路で読み直して mux する
 
-- `VideoSampleSource` を使用
-- capture した RGBA を 1 フレームごとに `VideoSample` 化して追加
-- `frameRate` を track metadata に渡す
-- `maximumPacketCount` に総フレーム数を渡す
+流れ:
 
-### 5. MediaBunny 出力
+1. `audioFilePath` を Electron API で binary read
+2. renderer 側 `AudioContext.decodeAudioData()` で decode
+3. export 範囲に合わせて `AudioBuffer` を slice
+4. `AudioBufferSource` を作る
+5. `output.addAudioTrack(audioSource)`
+6. `audioSource.add(audioSegment)`
 
-- `Output + WebMOutputFormat + StreamTarget` を使用
-- `.webm` 全体を最後に 1 回で IPC 転送する方式は廃止
-- 現在は chunk 単位で main process へ流して保存する
+音声 codec:
 
-## 保存経路
+- 優先: `opus`
+- fallback: `vorbis`
 
-現在の保存は streamed save で行う。
+音声 bitrate:
+
+- mono: `128 kbps`
+- stereo 以上: `192 kbps`
+
+## 7. codec / bitrate
+
+対象:
+
+- `src/webm-exporter.ts`
+
+動画 codec:
+
+- UI 既定値: `VP9`
+- `Auto`: `VP9 -> VP8` の順で試す
+- 固定選択時はその codec だけを試す
+
+hardware acceleration:
+
+- まず `prefer-hardware`
+- 非対応時は `no-preference`
+
+動画 bitrate 既定値:
+
+- 1080p30: `8 Mbps`
+- 1080p60: `12 Mbps`
+- 1440p30: `16 Mbps`
+- 1440p60: `24 Mbps`
+- 4K30: `35 Mbps`
+- 4K60: `53 Mbps`
+
+補足:
+
+- `keyFrameInterval` は現状 `5`
+- この値はまだ調整途中で、現状維持
+
+## 8. 保存方式
+
+対象:
+
+- `src/webm-exporter.ts`
+- `src/main.ts`
+
+保存は streamed save を使う。
+
+流れ:
 
 1. exporter が `beginWebmStreamSave(filePath)` を呼ぶ
 2. `StreamTarget` から chunk が出る
-3. 各 chunk を `writeWebmStreamChunk(saveId, bytes, position)` で main process へ渡す
-4. writer close 時に `finishWebmStreamSave(saveId)` を呼ぶ
-5. 失敗時は `cancelWebmStreamSave(saveId)` を呼んで途中ファイルを破棄する
+3. `writeWebmStreamChunk(saveId, bytes, position)` で main process へ渡す
+4. close 時に `finishWebmStreamSave(saveId)`
+5. エラー時は `cancelWebmStreamSave(saveId)`
 
-この構成にした理由は、完成済み WebM バッファ全体を最後に IPC で渡すと、出力終了直後に大きな stall が起きやすかったため。
+完成した WebM 全体を最後に一括 IPC 転送しない。
+これにより、終了時の stall を避ける。
 
-## IPC 一覧
+## 9. 進捗表示
 
-### UI / job 制御
+対象:
 
-- `dialog:saveWebm`
-- `export:startWebmWindow`
-- `export:takeWebmJob`
-- `export:finishWebmJob`
-- `export:webmProgress`
+- `src/renderer.ts`
+- `src/ui-controller.ts`
 
-### streamed save
-
-- `file:beginWebmStreamSave`
-- `file:writeWebmStreamChunk`
-- `file:finishWebmStreamSave`
-- `file:cancelWebmStreamSave`
-
-## 進捗 phase
-
-`WebmExportProgress.phase` は現在以下を使う。
+進捗 phase:
 
 - `initializing`
 - `loading-project`
@@ -174,41 +243,43 @@ export は専用 window 内の isolated scene で行う。メイン UI 側の sc
 - `completed`
 - `failed`
 
-main UI の busy overlay はこの phase を使って現在位置を表示する。
+UI 表示:
 
-## finalize / cleanup の注意点
+- 右上オーバーレイに phase と `encoded / total` を表示
+- frame 番号は表示する
+- 詳細メッセージ、captured 数、計測値はユーザー表示から外した
 
-`finalize()` の診断をしやすくするため、内部的には以下の段階を分けて扱っている。
+更新頻度:
 
-1. track source flush
-2. muxer finalize
-3. writer flush
-4. writer close
+- phase 変化時は即時
+- 通常の数値更新は約 1 秒ごと
 
-運用上の重要点:
+## 10. 初動最適化
 
-- `MediaBunny` 側の finalize が終わっていても、その後の Babylon / physics teardown で exporter renderer が止まることがある
-- このため、成功時の exporter 側では重い同期 `mmdManager.dispose()` を待たない
-- 実リソース解放は dedicated exporter window の close に任せる
+現状入っている軽量化:
 
-## 現状の制約
+- `waitForAnimationFrames(3)` を `1` へ削減
+- export 用 import では active model 切替など UI 向け処理を一部省略
 
-- 音声 mux 未実装
-- export range UI 未実装
-- codec 選択 UI 未実装
-- bitrate UI 未実装
-- alpha / transparency UI 未実装
-- capture はまだ `readPixels()` ベースなので、GPU -> CPU readback が重い
-- 連続時間で進めるようにはしたが、途中フレーム開始時の物理再現を厳密に合わせる preroll は未実装
+採用していない案:
 
-## 既知のボトルネック / リスク
+- exporter window 常駐
 
-- `output.finalize()` は依然として重い処理
-- `window.isSecureContext` 前提
-- `vp8` / `vp9` の encode 速度は環境差が大きい
-- main renderer 内で直接 export すると UI / GPU / encode の競合が増えるので、現状は hidden exporter window 分離を前提とする
+理由:
 
-## 関連ファイル
+- 普段の GPU / メモリ負荷が増える
+- scene / texture / model が二重に乗る
+
+## 11. 既知の制約
+
+- capture は `readPixels()` ベースなので、GPU -> CPU readback が残る
+- そのため encode より capture が支配的になる場面がある
+- preroll は未実装なので、途中フレーム開始時の物理は厳密再現ではない
+- HDR 出力は未対応
+- alpha / transparency 出力 UI は未実装
+- bitrate 詳細 UI は未実装
+
+## 12. 関連ファイル
 
 - `src/ui-controller.ts`
 - `src/renderer.ts`

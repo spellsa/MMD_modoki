@@ -284,6 +284,8 @@ export interface ProjectOutputState {
     lockAspect: boolean;
     qualityScale: number;
     fps?: number;
+    includeAudio?: boolean;
+    webmCodec?: "auto" | "vp8" | "vp9";
 }
 
 export interface ProjectAccessoryState {
@@ -431,6 +433,9 @@ export interface WebmExportRequest {
     fps: number;
     outputWidth: number;
     outputHeight: number;
+    includeAudio?: boolean;
+    audioFilePath?: string | null;
+    preferredVideoCodec?: "auto" | "vp8" | "vp9";
 }
 
 export interface WebmExportLaunchResult {

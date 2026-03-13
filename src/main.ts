@@ -244,6 +244,13 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
   const fps = Number.isFinite(request.fps) ? Math.max(1, Math.floor(request.fps)) : 30;
   const outputWidth = Number.isFinite(request.outputWidth) ? Math.max(320, Math.floor(request.outputWidth)) : 1920;
   const outputHeight = Number.isFinite(request.outputHeight) ? Math.max(180, Math.floor(request.outputHeight)) : 1080;
+  const includeAudio = request.includeAudio === true;
+  const preferredVideoCodec = request.preferredVideoCodec === 'vp8' || request.preferredVideoCodec === 'vp9'
+    ? request.preferredVideoCodec
+    : 'auto';
+  const audioFilePath = includeAudio && typeof request.audioFilePath === 'string' && request.audioFilePath.trim().length > 0
+    ? request.audioFilePath
+    : null;
   const safeOutputFilePath = request.outputFilePath.toLowerCase().endsWith('.webm')
     ? request.outputFilePath
     : `${request.outputFilePath}.webm`;
@@ -256,6 +263,9 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
     fps,
     outputWidth,
     outputHeight,
+    includeAudio,
+    audioFilePath,
+    preferredVideoCodec,
   };
 };
 

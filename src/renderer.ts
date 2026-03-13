@@ -223,16 +223,17 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
     let encodedFrames = 0;
     let capturedFrames = 0;
     let currentFrame = request.startFrame;
+    const totalOutputFrames = Math.max(1, Math.round(((request.endFrame - request.startFrame + 1) / 30) * Math.max(1, request.fps || 30)));
     const emitWebmProgress = (phase: string, message: string, force = false): void => {
       const now = performance.now();
-      const shouldReport = force || now - lastProgressReportAt >= 200;
+      const shouldReport = force || now - lastProgressReportAt >= 1000;
       if (!shouldReport) return;
       lastProgressReportAt = now;
       window.electronAPI.reportWebmExportProgress({
         jobId,
         phase: phase as import("./types").WebmExportPhase,
         encoded: encodedFrames,
-        total: Math.max(0, request.endFrame - request.startFrame + 1),
+        total: totalOutputFrames,
         frame: currentFrame,
         captured: capturedFrames,
         message,

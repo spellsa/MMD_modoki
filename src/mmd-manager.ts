@@ -1755,17 +1755,21 @@ ${beforeFogAppendBlock}
     public setActiveModelVisibility(visible: boolean): boolean {
         if (!this.currentMesh) return false;
 
-        this.currentMesh.setEnabled(visible);
-        this.currentMesh.isVisible = visible;
-
-        for (const childMesh of this.currentMesh.getChildMeshes()) {
-            childMesh.setEnabled(visible);
-            childMesh.isVisible = visible;
-        }
+        this.applySceneMeshVisibility(this.currentMesh, visible);
 
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         return visible;
+    }
+
+    private applySceneMeshVisibility(mesh: MmdMesh, visible: boolean): void {
+        mesh.setEnabled(visible);
+        mesh.isVisible = visible;
+
+        for (const childMesh of mesh.getChildMeshes()) {
+            childMesh.setEnabled(visible);
+            childMesh.isVisible = visible;
+        }
     }
 
     public toggleActiveModelVisibility(): boolean {
@@ -4603,12 +4607,16 @@ ${beforeFogAppendBlock}
         };
     }
 
-    public async importProjectState(data: unknown): Promise<{ loadedModels: number; warnings: string[] }> {
+    public async importProjectState(
+        data: unknown,
+        options: { forExport?: boolean } = {},
+    ): Promise<{ loadedModels: number; warnings: string[] }> {
         if (!this.isProjectFileV1(data)) {
             throw new Error("Invalid project file format or version");
         }
 
         const warnings: string[] = [];
+        const isExportImport = options.forExport === true;
         this.clearProjectForImport();
 
         let loadedModels = 0;
@@ -4636,14 +4644,19 @@ ${beforeFogAppendBlock}
                 continue;
             }
 
-            this.setActiveModelByIndex(modelIndex);
-            this.setActiveModelVisibility(Boolean(modelState.visible));
-
-            const targetModel = this.currentModel;
-            if (!targetModel) {
+            const targetEntry = this.sceneModels[modelIndex];
+            if (!targetEntry) {
                 warnings.push(`Failed to activate model for motion restore: ${modelState.path}`);
                 continue;
             }
+            if (!isExportImport) {
+                this.setActiveModelByIndex(modelIndex);
+                this.setActiveModelVisibility(Boolean(modelState.visible));
+            } else {
+                this.applySceneMeshVisibility(targetEntry.mesh, Boolean(modelState.visible));
+            }
+
+            const targetModel = targetEntry.model;
 
             this.applyImportedMaterialShaderStates(modelIndex, modelState.materialShaders, warnings, modelState.path);
 
@@ -4720,7 +4733,7 @@ ${beforeFogAppendBlock}
             }
         }
 
-        if (data.scene.activeModelPath) {
+        if (!isExportImport && data.scene.activeModelPath) {
             const targetPath = this.normalizePathForCompare(data.scene.activeModelPath);
             const targetIndex = this.sceneModels.findIndex(
                 (entry) => this.normalizePathForCompare(entry.info.path) === targetPath,

@@ -161,6 +161,8 @@ export class UIController {
     private outputLockAspectInput: HTMLInputElement | null = null;
     private outputQualitySelect: HTMLSelectElement | null = null;
     private outputFpsSelect: HTMLSelectElement | null = null;
+    private outputWebmCodecSelect: HTMLSelectElement | null = null;
+    private outputIncludeAudioInput: HTMLInputElement | null = null;
     private outputAspectRatio = 16 / 9;
     private isSyncingOutputSettings = false;
     private btnToggleGround: HTMLElement;
@@ -303,6 +305,8 @@ export class UIController {
         this.outputLockAspectInput = document.getElementById("output-lock-aspect") as HTMLInputElement | null;
         this.outputQualitySelect = document.getElementById("output-quality") as HTMLSelectElement | null;
         this.outputFpsSelect = document.getElementById("output-fps") as HTMLSelectElement | null;
+        this.outputWebmCodecSelect = document.getElementById("output-webm-codec") as HTMLSelectElement | null;
+        this.outputIncludeAudioInput = document.getElementById("output-include-audio") as HTMLInputElement | null;
         this.btnToggleGround = document.getElementById("btn-toggle-ground")!;
         this.groundToggleText = document.getElementById("ground-toggle-text")!;
         this.btnToggleSkydome = document.getElementById("btn-toggle-skydome")!;
@@ -1440,16 +1444,16 @@ export class UIController {
 
     private formatWebmExportPhaseLabel(phase: WebmExportProgress["phase"]): string {
         switch (phase) {
-            case "initializing": return "Initializing";
-            case "loading-project": return "Loading project";
-            case "checking-codec": return "Checking codec";
-            case "opening-output": return "Opening output";
-            case "encoding": return "Encoding";
-            case "closing-track": return "Closing track";
-            case "finalizing": return "Finalizing";
-            case "finishing-job": return "Finishing job";
-            case "completed": return "Completed";
-            case "failed": return "Failed";
+            case "initializing": return "準備中";
+            case "loading-project": return "読込中";
+            case "checking-codec": return "設定確認中";
+            case "opening-output": return "保存準備中";
+            case "encoding": return "出力中";
+            case "closing-track": return "仕上げ中";
+            case "finalizing": return "保存中";
+            case "finishing-job": return "完了処理中";
+            case "completed": return "完了";
+            case "failed": return "失敗";
             default: return phase;
         }
     }
@@ -1492,21 +1496,20 @@ export class UIController {
                 const total = Math.max(0, Math.floor(progress.total));
                 const encoded = Math.max(0, Math.floor(progress.encoded));
                 const frame = Math.max(0, Math.floor(progress.frame));
-                const captured = Math.max(0, Math.floor(progress.captured ?? encoded));
                 const phaseLabel = this.formatWebmExportPhaseLabel(progress.phase);
-                const updated = this.formatExportAge(progress.timestampMs);
                 if (total > 0) {
                     const ratio = Math.min(100, Math.max(0, (encoded / total) * 100));
-                    const detail = progress.message?.trim() || "Waiting for next update";
-                    this.busyTextEl.textContent = `WebM ${phaseLabel} ${encoded}/${total} (${ratio.toFixed(1)}%) frame ${frame}\nCaptured ${captured}/${total} | Last update ${updated}\n${detail}`;
+                    this.busyTextEl.textContent = `WebM ${phaseLabel} ${encoded}/${total} (${ratio.toFixed(1)}%)\nフレーム ${frame}`;
                     return;
                 }
-            }
-            if (this.webmExportActiveCount > 1) {
-                this.busyTextEl.textContent = `WebM exporting in background (${this.webmExportActiveCount} jobs).`;
+                this.busyTextEl.textContent = `WebM ${phaseLabel}`;
                 return;
             }
-            this.busyTextEl.textContent = "WebM exporting in background. Main controls are locked.";
+            if (this.webmExportActiveCount > 1) {
+                this.busyTextEl.textContent = `WebM 出力中 (${this.webmExportActiveCount}件)`;
+                return;
+            }
+            this.busyTextEl.textContent = "WebM 出力中";
             return;
         }
 
@@ -2039,6 +2042,8 @@ export class UIController {
             lockAspect: Boolean(this.outputLockAspectInput?.checked),
             qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
             fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
+            includeAudio: Boolean(this.outputIncludeAudioInput?.checked),
+            webmCodec: (this.outputWebmCodecSelect?.value as "auto" | "vp8" | "vp9" | undefined) ?? "vp9",
         };
     }
 
@@ -2076,6 +2081,16 @@ export class UIController {
             hasOption(this.outputFpsSelect, String(state.fps))
         ) {
             this.outputFpsSelect.value = String(state.fps);
+        }
+        if (this.outputIncludeAudioInput) {
+            this.outputIncludeAudioInput.checked = Boolean(state.includeAudio);
+        }
+        if (
+            this.outputWebmCodecSelect &&
+            typeof state.webmCodec === "string" &&
+            hasOption(this.outputWebmCodecSelect, state.webmCodec)
+        ) {
+            this.outputWebmCodecSelect.value = state.webmCodec;
         }
 
         const width = this.clampOutputWidth(Number.parseInt(this.outputWidthInput?.value ?? "1920", 10));
@@ -2657,13 +2672,14 @@ export class UIController {
 
         const startFrame = Math.max(0, this.mmdManager.currentFrame);
         const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
-        const totalFrames = endFrame - startFrame + 1;
-        if (totalFrames <= 0) {
+        const totalTimelineFrames = endFrame - startFrame + 1;
+        if (totalTimelineFrames <= 0) {
             this.showToast("No frames to export", "error");
             return;
         }
 
         const outputSettings = this.getOutputSettings();
+        const totalOutputFrames = Math.max(1, Math.round((totalTimelineFrames / 30) * outputSettings.fps));
         const defaultFileName = this.buildWebmFileName(
             outputSettings.width,
             outputSettings.height,
@@ -2677,6 +2693,12 @@ export class UIController {
         }
 
         const project = this.buildProjectStateForPersistence();
+        const audioFilePath = project.assets.audioPath;
+        const includeAudio = Boolean(this.outputIncludeAudioInput?.checked) && typeof audioFilePath === "string" && audioFilePath.length > 0;
+        const preferredVideoCodec = (this.outputWebmCodecSelect?.value as "auto" | "vp8" | "vp9" | undefined) ?? "vp9";
+        if (Boolean(this.outputIncludeAudioInput?.checked) && !includeAudio) {
+            this.showToast("音声未読込のため無音 WebM を出力します", "info");
+        }
         project.assets.audioPath = null;
 
         this.setStatus("Launching WebM export window...", true);
@@ -2688,6 +2710,9 @@ export class UIController {
             fps: outputSettings.fps,
             outputWidth: outputSettings.width,
             outputHeight: outputSettings.height,
+            includeAudio,
+            audioFilePath: includeAudio ? audioFilePath : null,
+            preferredVideoCodec,
         });
 
         if (!result) {
@@ -2697,7 +2722,7 @@ export class UIController {
         }
 
         this.setStatus("WebM export started", false);
-        this.showToast(`WebM export started (${totalFrames} frames)`, "success");
+        this.showToast(`WebM export started (${totalOutputFrames} frames)`, "success");
     }
 
     private sanitizeFileNameSegment(value: string): string {

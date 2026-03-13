@@ -1667,6 +1667,10 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   gap: 6px;
 }
 
+.output-row-inline {
+  align-items: center;
+}
+
 .output-label {
   font-size: 10px;
   color: var(--text-tertiary);
@@ -1706,6 +1710,23 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 
 .output-row-toggle {
   align-items: center;
+}
+
+.output-inline-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.output-select-fps {
+  width: 64px;
+  flex: 0 0 64px;
+}
+
+.output-select-codec {
+  width: 76px;
+  flex: 0 0 76px;
 }
 
 .output-row-quality {

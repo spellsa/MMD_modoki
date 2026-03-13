@@ -790,13 +790,24 @@
                 <option value="2">超高画質 x2.0</option>
               </select>
             </div>
-            <div class="output-row">
+            <div class="output-row output-row-inline">
               <span class="output-label">FPS</span>
-              <select id="output-fps" class="output-select">
-                <option value="24">24</option>
-                <option value="30" selected>30</option>
-                <option value="60">60</option>
-              </select>
+              <div class="output-inline-controls">
+                <select id="output-fps" class="output-select output-select-fps">
+                  <option value="24">24</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+                <select id="output-webm-codec" class="output-select output-select-codec">
+                  <option value="auto">Auto</option>
+                  <option value="vp8">VP8</option>
+                  <option value="vp9" selected>VP9</option>
+                </select>
+                <label class="output-toggle-label">
+                  <input id="output-include-audio" type="checkbox">
+                  <span>音声あり</span>
+                </label>
+              </div>
             </div>
           </div>
         </section>

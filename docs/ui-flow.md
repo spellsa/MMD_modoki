@@ -64,10 +64,12 @@
 - `出力`:
   - アスペクト比、解像度プリセット、幅/高さ、画質
   - FPS ドロップダウン（`24 / 30 / 60`）
-  - PNG 出力 / PNG連番出力 / WebM 出力
-  - PNG連番と WebM は `currentFrame -> totalFrames` を出力
-  - WebM は現状 silent export（音声なし）
-  - WebM 出力中は background export lock が入り、busy overlay に phase / captured / encoded / 最終更新時刻を表示
+  - codec ドロップダウン（`Auto / VP8 / VP9`、既定値 `VP9`）
+  - `音声あり` チェック
+  - `PNG画像` / `WebM動画`
+  - WebM は `currentFrame -> totalFrames` を出力
+  - `音声あり` ON かつ音声読込済みの場合は WebM に音声を mux する
+  - WebM 出力中は background export lock が入り、busy overlay に phase と `encoded / total` を簡略表示する
 
 ## エフェクト欄補足
 
