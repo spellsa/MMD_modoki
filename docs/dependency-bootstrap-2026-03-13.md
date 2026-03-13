@@ -34,3 +34,8 @@
   - Quick start: https://mediabunny.dev/guide/quick-start
   - Writing media files: https://mediabunny.dev/guide/writing-media-files
   - Using WebCodecs: https://mediabunny.dev/guide/using-webcodecs
+
+## Status update
+
+- `mediabunny` is now wired into a silent `WebM` export PoC.
+- Current implementation note: `docs/webm-export-current-spec-2026-03-13.md`

@@ -3,7 +3,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import started from 'electron-squirrel-startup';
-import type { PngSequenceExportProgress, PngSequenceExportRequest, PngSequenceExportState } from './types';
+import type {
+  PngSequenceExportLaunchResult,
+  PngSequenceExportProgress,
+  PngSequenceExportRequest,
+  PngSequenceExportState,
+  WebmExportLaunchResult,
+  WebmExportProgress,
+  WebmExportRequest,
+  WebmExportState,
+} from './types';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -39,13 +48,14 @@ const MAIN_WINDOW_MIN_WIDTH = 1120;
 const MAIN_WINDOW_MIN_HEIGHT = Math.round(MAIN_WINDOW_MIN_WIDTH / MAIN_WINDOW_ASPECT_RATIO);
 const ALLOWED_PRODUCTION_PROTOCOLS = new Set(['file:', 'data:', 'blob:', 'devtools:']);
 
-type PngSequenceExportLaunchResult = {
-  jobId: string;
-};
-
 const pngSequenceExportJobMap = new Map<string, PngSequenceExportRequest>();
 const pngSequenceExportActiveCountByOwner = new Map<number, number>();
 const pngSequenceExportOwnerByJobId = new Map<string, number>();
+const webmExportJobMap = new Map<string, WebmExportRequest>();
+const webmExportActiveCountByOwner = new Map<number, number>();
+const webmExportOwnerByJobId = new Map<string, number>();
+const webmExportCleanupByJobId = new Map<string, () => void>();
+const webmSaveSessionMap = new Map<string, { filePath: string; handle: fs.promises.FileHandle }>();
 const ensuredDirectoryPathSet = new Set<string>();
 
 const ensureDirectoryExists = async (directoryPath: string): Promise<void> => {
@@ -75,6 +85,27 @@ const sendPngSequenceExportProgressToOwner = (
   ownerContents.send('export:pngSequenceProgress', progress);
 };
 
+const sendWebmExportState = (
+  ownerWindow: BrowserWindow | undefined,
+  state: WebmExportState,
+): void => {
+  if (!ownerWindow || ownerWindow.isDestroyed()) return;
+  ownerWindow.webContents.send('export:webmState', state);
+};
+
+const sendWebmExportProgressToOwner = (
+  jobId: string,
+  progress: WebmExportProgress,
+): void => {
+  const ownerId = webmExportOwnerByJobId.get(jobId);
+  if (!ownerId) return;
+  const ownerContents = BrowserWindow.getAllWindows()
+    .map((window) => window.webContents)
+    .find((contents) => contents.id === ownerId);
+  if (!ownerContents || ownerContents.isDestroyed()) return;
+  ownerContents.send('export:webmProgress', progress);
+};
+
 const retainPngSequenceExportOwner = (ownerWindow: BrowserWindow | undefined): (() => void) => {
   if (!ownerWindow || ownerWindow.isDestroyed()) return () => undefined;
   const ownerId = ownerWindow.webContents.id;
@@ -93,6 +124,27 @@ const retainPngSequenceExportOwner = (ownerWindow: BrowserWindow | undefined): (
     else pngSequenceExportActiveCountByOwner.set(ownerId, updatedCount);
 
     sendPngSequenceExportState(ownerWindow, { active: updatedCount > 0, activeCount: updatedCount });
+  };
+};
+
+const retainWebmExportOwner = (ownerWindow: BrowserWindow | undefined): (() => void) => {
+  if (!ownerWindow || ownerWindow.isDestroyed()) return () => undefined;
+  const ownerId = ownerWindow.webContents.id;
+  const nextCount = (webmExportActiveCountByOwner.get(ownerId) ?? 0) + 1;
+  webmExportActiveCountByOwner.set(ownerId, nextCount);
+  sendWebmExportState(ownerWindow, { active: true, activeCount: nextCount });
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+
+    const prevCount = webmExportActiveCountByOwner.get(ownerId) ?? 0;
+    const updatedCount = Math.max(0, prevCount - 1);
+    if (updatedCount === 0) webmExportActiveCountByOwner.delete(ownerId);
+    else webmExportActiveCountByOwner.set(ownerId, updatedCount);
+
+    sendWebmExportState(ownerWindow, { active: updatedCount > 0, activeCount: updatedCount });
   };
 };
 
@@ -176,6 +228,32 @@ const sanitizePngSequenceExportRequest = (request: PngSequenceExportRequest): Pn
     prefix,
     fps,
     precision,
+    outputWidth,
+    outputHeight,
+  };
+};
+
+const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportRequest | null => {
+  if (!request || typeof request !== 'object') return null;
+  if (!request.project || typeof request.project !== 'object') return null;
+  if (request.project.format !== 'mmd_modoki_project' || request.project.version !== 1) return null;
+  if (!request.outputFilePath || typeof request.outputFilePath !== 'string') return null;
+
+  const startFrame = Number.isFinite(request.startFrame) ? Math.max(0, Math.floor(request.startFrame)) : 0;
+  const endFrame = Number.isFinite(request.endFrame) ? Math.max(startFrame, Math.floor(request.endFrame)) : startFrame;
+  const fps = Number.isFinite(request.fps) ? Math.max(1, Math.floor(request.fps)) : 30;
+  const outputWidth = Number.isFinite(request.outputWidth) ? Math.max(320, Math.floor(request.outputWidth)) : 1920;
+  const outputHeight = Number.isFinite(request.outputHeight) ? Math.max(180, Math.floor(request.outputHeight)) : 1080;
+  const safeOutputFilePath = request.outputFilePath.toLowerCase().endsWith('.webm')
+    ? request.outputFilePath
+    : `${request.outputFilePath}.webm`;
+
+  return {
+    project: request.project,
+    outputFilePath: safeOutputFilePath,
+    startFrame,
+    endFrame,
+    fps,
     outputWidth,
     outputHeight,
   };
@@ -289,7 +367,9 @@ const createWindow = () => {
 
   mainWindow.on('close', (event) => {
     const ownerId = mainWindow.webContents.id;
-    const activeExports = pngSequenceExportActiveCountByOwner.get(ownerId) ?? 0;
+    const activeExports =
+      (pngSequenceExportActiveCountByOwner.get(ownerId) ?? 0)
+      + (webmExportActiveCountByOwner.get(ownerId) ?? 0);
     if (activeExports <= 0) return;
 
     event.preventDefault();
@@ -298,8 +378,8 @@ const createWindow = () => {
       buttons: ['OK'],
       defaultId: 0,
       cancelId: 0,
-      title: 'Export In Progress',
-      message: 'PNG sequence export is running in the background.',
+      title: 'Background Export In Progress',
+      message: 'A background export is running.',
       detail: 'Please wait until export finishes before closing the main window.',
       noLink: true,
     });
@@ -335,6 +415,28 @@ ipcMain.handle('dialog:openDirectory', async () => {
     return null;
   }
   return result.filePaths[0];
+});
+
+ipcMain.handle('dialog:saveWebm', async (_event, defaultFileName?: string) => {
+  try {
+    const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.webm'))
+      ? defaultFileName
+      : `${defaultFileName ?? 'mmd_capture'}.webm`;
+    const result = await dialog.showSaveDialog({
+      title: 'Save WebM',
+      defaultPath: path.join(app.getPath('videos'), safeName),
+      filters: [{ name: 'WebM Video', extensions: ['webm'] }],
+    });
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    return result.filePath.toLowerCase().endsWith('.webm')
+      ? result.filePath
+      : `${result.filePath}.webm`;
+  } catch (err) {
+    console.error('Failed to choose WebM save path:', err);
+    return null;
+  }
 });
 
 ipcMain.handle('window:snapMainWindowContentAspect', async (event, aspectRatio: number) => {
@@ -562,6 +664,81 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle('file:saveWebmToPath', async (_event, bytes: Uint8Array, filePath: string) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return null;
+    const safeFilePath = filePath.toLowerCase().endsWith('.webm') ? filePath : `${filePath}.webm`;
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) return null;
+    await fs.promises.mkdir(path.dirname(safeFilePath), { recursive: true });
+    await fs.promises.writeFile(safeFilePath, Buffer.from(bytes));
+    return safeFilePath;
+  } catch (err) {
+    console.error('Failed to save WebM to path:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('file:beginWebmStreamSave', async (_event, filePath: string) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') return null;
+    const safeFilePath = filePath.toLowerCase().endsWith('.webm') ? filePath : `${filePath}.webm`;
+    await fs.promises.mkdir(path.dirname(safeFilePath), { recursive: true });
+    const handle = await fs.promises.open(safeFilePath, 'w');
+    const saveId = randomUUID();
+    webmSaveSessionMap.set(saveId, { filePath: safeFilePath, handle });
+    return { saveId, filePath: safeFilePath };
+  } catch (err) {
+    console.error('Failed to begin streamed WebM save:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('file:writeWebmStreamChunk', async (_event, saveId: string, bytes: Uint8Array, position: number) => {
+  try {
+    if (!saveId || typeof saveId !== 'string') return false;
+    const session = webmSaveSessionMap.get(saveId);
+    if (!session) return false;
+    if (!(bytes instanceof Uint8Array)) return false;
+    const writePosition = Number.isFinite(position) ? Math.max(0, Math.floor(position)) : 0;
+    if (bytes.byteLength > 0) {
+      await session.handle.write(bytes, 0, bytes.byteLength, writePosition);
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to write streamed WebM chunk:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('file:finishWebmStreamSave', async (_event, saveId: string) => {
+  try {
+    if (!saveId || typeof saveId !== 'string') return null;
+    const session = webmSaveSessionMap.get(saveId);
+    if (!session) return null;
+    webmSaveSessionMap.delete(saveId);
+    await session.handle.close();
+    return session.filePath;
+  } catch (err) {
+    console.error('Failed to finish streamed WebM save:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('file:cancelWebmStreamSave', async (_event, saveId: string) => {
+  try {
+    if (!saveId || typeof saveId !== 'string') return false;
+    const session = webmSaveSessionMap.get(saveId);
+    if (!session) return false;
+    webmSaveSessionMap.delete(saveId);
+    await session.handle.close();
+    await fs.promises.unlink(session.filePath).catch(() => undefined);
+    return true;
+  } catch (err) {
+    console.error('Failed to cancel streamed WebM save:', err);
+    return false;
+  }
+});
+
 ipcMain.handle(
   'export:startPngSequenceWindow',
   async (event, request: PngSequenceExportRequest): Promise<PngSequenceExportLaunchResult | null> => {
@@ -658,6 +835,107 @@ ipcMain.on('export:pngSequenceProgress', (_event, progress: PngSequenceExportPro
   if (typeof progress.jobId !== 'string' || progress.jobId.length === 0) return;
   if (!pngSequenceExportOwnerByJobId.has(progress.jobId)) return;
   sendPngSequenceExportProgressToOwner(progress.jobId, progress);
+});
+
+ipcMain.handle(
+  'export:startWebmWindow',
+  async (event, request: WebmExportRequest): Promise<WebmExportLaunchResult | null> => {
+    let exportWindow: BrowserWindow | undefined;
+    let releaseOwnerExport = () => undefined;
+    let jobId: string | null = null;
+    let cleanedUp = false;
+    const cleanup = (): void => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (jobId) {
+        webmExportJobMap.delete(jobId);
+        webmExportOwnerByJobId.delete(jobId);
+        webmExportCleanupByJobId.delete(jobId);
+      }
+      releaseOwnerExport();
+    };
+
+    try {
+      const sanitized = sanitizeWebmExportRequest(request);
+      if (!sanitized) return null;
+
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      releaseOwnerExport = retainWebmExportOwner(ownerWindow);
+      jobId = randomUUID();
+      webmExportJobMap.set(jobId, sanitized);
+      webmExportCleanupByJobId.set(jobId, cleanup);
+      if (ownerWindow && !ownerWindow.isDestroyed()) {
+        webmExportOwnerByJobId.set(jobId, ownerWindow.webContents.id);
+      }
+
+      exportWindow = new BrowserWindow({
+        width: sanitized.outputWidth,
+        height: sanitized.outputHeight,
+        useContentSize: true,
+        minWidth: 640,
+        minHeight: 360,
+        show: false,
+        paintWhenInitiallyHidden: true,
+        skipTaskbar: true,
+        autoHideMenuBar: true,
+        title: `WebM Export - ${jobId.slice(0, 8)}`,
+        backgroundColor: '#0a0a0f',
+        parent: ownerWindow,
+        webPreferences: {
+          preload: path.join(__dirname, 'preload.js'),
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: false,
+          backgroundThrottling: false,
+        },
+      });
+      exportWindow.setAspectRatio(sanitized.outputWidth / sanitized.outputHeight);
+      exportWindow.setMenuBarVisibility(false);
+      exportWindow.setContentSize(sanitized.outputWidth, sanitized.outputHeight);
+
+      exportWindow.on('closed', () => {
+        cleanup();
+      });
+
+      await loadEditorWindow(exportWindow, { mode: 'webm-exporter', jobId });
+
+      return { jobId };
+    } catch (err) {
+      cleanup();
+      if (exportWindow && !exportWindow.isDestroyed()) {
+        exportWindow.close();
+      }
+      console.error('Failed to start WebM export window:', err);
+      return null;
+    }
+  },
+);
+
+ipcMain.handle('export:takeWebmJob', async (_event, jobId: string): Promise<WebmExportRequest | null> => {
+  if (!jobId || typeof jobId !== 'string') return null;
+  const job = webmExportJobMap.get(jobId);
+  if (!job) return null;
+  webmExportJobMap.delete(jobId);
+  return job;
+});
+
+ipcMain.handle('export:finishWebmJob', async (event, jobId: string): Promise<boolean> => {
+  if (!jobId || typeof jobId !== 'string') return false;
+  const cleanup = webmExportCleanupByJobId.get(jobId);
+  if (!cleanup) return false;
+  cleanup();
+  const exporterWindow = BrowserWindow.fromWebContents(event.sender);
+  if (exporterWindow && !exporterWindow.isDestroyed()) {
+    exporterWindow.close();
+  }
+  return true;
+});
+
+ipcMain.on('export:webmProgress', (_event, progress: WebmExportProgress) => {
+  if (!progress || typeof progress !== 'object') return;
+  if (typeof progress.jobId !== 'string' || progress.jobId.length === 0) return;
+  if (!webmExportOwnerByJobId.has(progress.jobId)) return;
+  sendWebmExportProgressToOwner(progress.jobId, progress);
 });
 
 app.on('window-all-closed', () => {

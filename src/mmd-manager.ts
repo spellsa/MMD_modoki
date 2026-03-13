@@ -9410,6 +9410,34 @@ ${beforeFogAppendBlock}
         this.nextRenderDueTimestampMs = now;
     }
 
+    public renderOnce(deltaMs = 1000 / 30): void {
+        const clampedDeltaMs = Math.max(0, Math.min(100, deltaMs));
+        const now = performance.now();
+        this.lastRenderTimestampMs = now;
+        this.nextRenderDueTimestampMs = now;
+        const engineWithDelta = this.engine as typeof this.engine & { _deltaTime?: number };
+        engineWithDelta._deltaTime = clampedDeltaMs;
+        this.updateSimpleMotionBlurState(clampedDeltaMs);
+        this.scene.render();
+        if (!this._isPlaying) return;
+
+        if (this.manualPlaybackWithoutAudio) {
+            const deltaFrames = (clampedDeltaMs / (1000 / 30)) * this._playbackSpeed;
+            this.manualPlaybackFrameCursor = Math.min(this._totalFrames, this.manualPlaybackFrameCursor + deltaFrames);
+            const nextFrame = Math.floor(this.manualPlaybackFrameCursor);
+            if (nextFrame !== this._currentFrame) {
+                this._currentFrame = nextFrame;
+                this.mmdRuntime.seekAnimation(this._currentFrame, true);
+            }
+            this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+            return;
+        }
+
+        const runtimeFrame = Math.floor(this.mmdRuntime.currentFrameTime);
+        this._currentFrame = Math.min(runtimeFrame, this._totalFrames);
+        this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+    }
+
     public setRenderFpsLimit(limit: number): void {
         if (!Number.isFinite(limit)) {
             this.renderFpsLimit = 0;

@@ -63,7 +63,11 @@
   - 位置（X/Y/Z）、回転（Rx/Ry/Rz）、拡大率（Si）
 - `出力`:
   - アスペクト比、解像度プリセット、幅/高さ、画質
-  - PNG 出力 / PNG連番出力
+  - FPS ドロップダウン（`24 / 30 / 60`）
+  - PNG 出力 / PNG連番出力 / WebM 出力
+  - PNG連番と WebM は `currentFrame -> totalFrames` を出力
+  - WebM は現状 silent export（音声なし）
+  - WebM 出力中は background export lock が入り、busy overlay に phase / captured / encoded / 最終更新時刻を表示
 
 ## エフェクト欄補足
 

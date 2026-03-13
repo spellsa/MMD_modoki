@@ -747,11 +747,11 @@
           </div>
           <div class="output-controls">
             <div class="output-export-row">
-              <button id="btn-export-png" class="playback-export-btn" title="現在の描画をPNGで保存">
-                <span>PNG保存</span>
+              <button id="btn-export-png" class="playback-export-btn" title="現在の描画をPNG画像で保存">
+                <span>PNG画像</span>
               </button>
-              <button id="btn-export-png-seq" class="playback-export-btn" title="連番PNGを書き出し">
-                <span>PNG Seq</span>
+              <button id="btn-export-webm" class="playback-export-btn" title="WebM動画を書き出し">
+                <span>WebM動画</span>
               </button>
             </div>
             <div class="output-row">
@@ -782,19 +782,20 @@
                 <input id="output-height" class="output-number" type="number" min="180" max="8192" step="1" value="1080">
               </div>
             </div>
-            <div class="output-row output-row-toggle" hidden>
-              <span class="output-label">固定</span>
-              <label class="output-toggle-label">
-                <input id="output-lock-aspect" type="checkbox" checked>
-                <span>比率を維持</span>
-              </label>
-            </div>
             <div class="output-row output-row-quality" hidden>
               <span class="output-label">画質</span>
               <select id="output-quality" class="output-select">
                 <option value="1" selected>標準 x1.0</option>
                 <option value="1.5">高画質 x1.5</option>
                 <option value="2">超高画質 x2.0</option>
+              </select>
+            </div>
+            <div class="output-row">
+              <span class="output-label">FPS</span>
+              <select id="output-fps" class="output-select">
+                <option value="24">24</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
               </select>
             </div>
           </div>

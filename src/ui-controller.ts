@@ -14,12 +14,14 @@ import type {
     PngSequenceExportState,
     ProjectOutputState,
     TimelineInterpolationPreview,
+    WebmExportProgress,
+    WebmExportState,
 } from "./types";
 
 type CameraViewPreset = "left" | "front" | "right";
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type NumericArrayLike = ArrayLike<number> | null | undefined;
-type OutputSettings = { width: number; height: number; qualityScale: number };
+type OutputSettings = { width: number; height: number; qualityScale: number; fps: number };
 
 type RuntimeMovableBoneTrackLike = {
     name: string;
@@ -151,12 +153,14 @@ export class UIController {
     private btnLoadProject: HTMLElement;
     private btnExportPng: HTMLElement;
     private btnExportPngSeq: HTMLElement | null = null;
+    private btnExportWebm: HTMLElement | null = null;
     private outputAspectSelect: HTMLSelectElement | null = null;
     private outputSizePresetSelect: HTMLSelectElement | null = null;
     private outputWidthInput: HTMLInputElement | null = null;
     private outputHeightInput: HTMLInputElement | null = null;
     private outputLockAspectInput: HTMLInputElement | null = null;
     private outputQualitySelect: HTMLSelectElement | null = null;
+    private outputFpsSelect: HTMLSelectElement | null = null;
     private outputAspectRatio = 16 / 9;
     private isSyncingOutputSettings = false;
     private btnToggleGround: HTMLElement;
@@ -254,8 +258,15 @@ export class UIController {
     private busyTextEl: HTMLElement | null = null;
     private pngSequenceExportStateUnsubscribe: (() => void) | null = null;
     private pngSequenceExportProgressUnsubscribe: (() => void) | null = null;
+    private webmExportStateUnsubscribe: (() => void) | null = null;
+    private webmExportProgressUnsubscribe: (() => void) | null = null;
     private isPngSequenceExportActive = false;
+    private pngSequenceExportActiveCount = 0;
     private latestPngSequenceExportProgress: PngSequenceExportProgress | null = null;
+    private isWebmExportActive = false;
+    private webmExportActiveCount = 0;
+    private latestWebmExportProgress: WebmExportProgress | null = null;
+    private backgroundExportMonitorIntervalId: number | null = null;
     private isUiFullscreenActive = false;
     private postFxLutExternalPath: string | null = null;
     private postFxLutExternalText: string | null = null;
@@ -284,12 +295,14 @@ export class UIController {
         this.btnLoadProject = document.getElementById("btn-load-project")!;
         this.btnExportPng = document.getElementById("btn-export-png")!;
         this.btnExportPngSeq = document.getElementById("btn-export-png-seq");
+        this.btnExportWebm = document.getElementById("btn-export-webm");
         this.outputAspectSelect = document.getElementById("output-aspect") as HTMLSelectElement | null;
         this.outputSizePresetSelect = document.getElementById("output-size-preset") as HTMLSelectElement | null;
         this.outputWidthInput = document.getElementById("output-width") as HTMLInputElement | null;
         this.outputHeightInput = document.getElementById("output-height") as HTMLInputElement | null;
         this.outputLockAspectInput = document.getElementById("output-lock-aspect") as HTMLInputElement | null;
         this.outputQualitySelect = document.getElementById("output-quality") as HTMLSelectElement | null;
+        this.outputFpsSelect = document.getElementById("output-fps") as HTMLSelectElement | null;
         this.btnToggleGround = document.getElementById("btn-toggle-ground")!;
         this.groundToggleText = document.getElementById("ground-toggle-text")!;
         this.btnToggleSkydome = document.getElementById("btn-toggle-skydome")!;
@@ -355,6 +368,8 @@ export class UIController {
         this.setupKeyboard();
         this.setupFileDrop();
         this.setupPngSequenceExportStateBridge();
+        this.setupWebmExportStateBridge();
+        this.startBackgroundExportMonitor();
         this.setupPerfDisplay();
         this.showStartupRenderingDiagnostics();
         this.setupViewportAspectSync();
@@ -381,7 +396,7 @@ export class UIController {
         document.addEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
 
         window.addEventListener("beforeunload", (event) => {
-            if (this.isPngSequenceExportActive) {
+            if (this.hasBackgroundExportActive()) {
                 event.preventDefault();
                 event.returnValue = "";
                 return;
@@ -390,6 +405,14 @@ export class UIController {
             this.pngSequenceExportStateUnsubscribe = null;
             this.pngSequenceExportProgressUnsubscribe?.();
             this.pngSequenceExportProgressUnsubscribe = null;
+            this.webmExportStateUnsubscribe?.();
+            this.webmExportStateUnsubscribe = null;
+            this.webmExportProgressUnsubscribe?.();
+            this.webmExportProgressUnsubscribe = null;
+            if (this.backgroundExportMonitorIntervalId !== null) {
+                window.clearInterval(this.backgroundExportMonitorIntervalId);
+                this.backgroundExportMonitorIntervalId = null;
+            }
             this.viewportAspectResizeObserver?.disconnect();
             this.viewportAspectResizeObserver = null;
             document.removeEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
@@ -406,6 +429,9 @@ export class UIController {
         this.btnExportPng.addEventListener("click", () => this.exportPNG());
         this.btnExportPngSeq?.addEventListener("click", () => {
             void this.exportPNGSequence();
+        });
+        this.btnExportWebm?.addEventListener("click", () => {
+            void this.exportWebm();
         });
         this.setupOutputControls();
         this.interpolationTypeSelect.addEventListener("change", () => this.updateTimelineEditState());
@@ -1364,69 +1390,144 @@ export class UIController {
     }
 
     private applyPngSequenceExportState(state: PngSequenceExportState): void {
-        const active = Boolean(state?.active);
-        const activeCount = Math.max(0, Math.floor(state?.activeCount ?? 0));
-        this.setPngSequenceExportLock(active, activeCount);
+        this.isPngSequenceExportActive = Boolean(state?.active);
+        this.pngSequenceExportActiveCount = Math.max(0, Math.floor(state?.activeCount ?? 0));
+        if (!this.isPngSequenceExportActive) {
+            this.latestPngSequenceExportProgress = null;
+        }
+        this.refreshBackgroundExportLock();
     }
 
     private applyPngSequenceExportProgress(progress: PngSequenceExportProgress): void {
         if (!this.isPngSequenceExportActive) return;
-        const total = Math.max(0, Math.floor(progress?.total ?? 0));
-        const saved = Math.max(0, Math.floor(progress?.saved ?? 0));
-        const frame = Math.max(0, Math.floor(progress?.frame ?? 0));
-        if (total <= 0) return;
-
         this.latestPngSequenceExportProgress = progress;
-        if (!this.busyTextEl) return;
-        const ratio = Math.min(100, Math.max(0, (saved / total) * 100));
-        this.busyTextEl.textContent = `PNG sequence exporting... ${saved}/${total} (${ratio.toFixed(1)}%) frame ${frame}`;
+        this.refreshBackgroundExportLock();
     }
 
-    private setPngSequenceExportLock(active: boolean, activeCount: number): void {
-        if (this.isPngSequenceExportActive === active) {
-            if (active) {
-                this.updatePngSequenceBusyMessage(activeCount);
-            }
-            return;
-        }
+    private setupWebmExportStateBridge(): void {
+        this.webmExportStateUnsubscribe?.();
+        this.webmExportStateUnsubscribe = window.electronAPI.onWebmExportState((state) => {
+            this.applyWebmExportState(state);
+        });
+        this.webmExportProgressUnsubscribe?.();
+        this.webmExportProgressUnsubscribe = window.electronAPI.onWebmExportProgress((progress) => {
+            this.applyWebmExportProgress(progress);
+        });
+    }
 
-        this.isPngSequenceExportActive = active;
+    private startBackgroundExportMonitor(): void {
+        if (this.backgroundExportMonitorIntervalId !== null) return;
+        this.backgroundExportMonitorIntervalId = window.setInterval(() => {
+            if (!this.hasBackgroundExportActive()) return;
+            this.refreshBackgroundExportLock();
+        }, 500);
+    }
+
+    private applyWebmExportState(state: WebmExportState): void {
+        this.isWebmExportActive = Boolean(state?.active);
+        this.webmExportActiveCount = Math.max(0, Math.floor(state?.activeCount ?? 0));
+        if (!this.isWebmExportActive) {
+            this.latestWebmExportProgress = null;
+        }
+        this.refreshBackgroundExportLock();
+    }
+
+    private applyWebmExportProgress(progress: WebmExportProgress): void {
+        if (!this.isWebmExportActive) return;
+        this.latestWebmExportProgress = progress;
+        this.refreshBackgroundExportLock();
+    }
+
+    private formatWebmExportPhaseLabel(phase: WebmExportProgress["phase"]): string {
+        switch (phase) {
+            case "initializing": return "Initializing";
+            case "loading-project": return "Loading project";
+            case "checking-codec": return "Checking codec";
+            case "opening-output": return "Opening output";
+            case "encoding": return "Encoding";
+            case "closing-track": return "Closing track";
+            case "finalizing": return "Finalizing";
+            case "finishing-job": return "Finishing job";
+            case "completed": return "Completed";
+            case "failed": return "Failed";
+            default: return phase;
+        }
+    }
+
+    private formatExportAge(timestampMs: number | undefined): string {
+        if (!timestampMs || !Number.isFinite(timestampMs)) return "n/a";
+        const seconds = Math.max(0, (Date.now() - timestampMs) / 1000);
+        return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s ago`;
+    }
+
+    private hasBackgroundExportActive(): boolean {
+        return this.isPngSequenceExportActive || this.isWebmExportActive;
+    }
+
+    private refreshBackgroundExportLock(): void {
+        const active = this.hasBackgroundExportActive();
         this.appRootEl.classList.toggle("ui-export-lock", active);
         this.busyOverlayEl?.classList.toggle("hidden", !active);
         this.busyOverlayEl?.setAttribute("aria-hidden", active ? "false" : "true");
 
-        if (active) {
-            this.updatePngSequenceBusyMessage(activeCount);
-            if (this.mmdManager.isPlaying) {
-                this.pause(false);
+        if (!active) {
+            if (this.busyTextEl) {
+                this.busyTextEl.textContent = "Background export finished.";
             }
             return;
         }
 
-        if (this.busyTextEl) {
-            this.busyTextEl.textContent = "Exporting PNG sequence...";
+        if (this.mmdManager.isPlaying) {
+            this.pause(false);
         }
-        this.latestPngSequenceExportProgress = null;
+        this.updateBackgroundExportBusyMessage();
     }
 
-    private updatePngSequenceBusyMessage(activeCount: number): void {
+    private updateBackgroundExportBusyMessage(): void {
         if (!this.busyTextEl) return;
-        const progress = this.latestPngSequenceExportProgress;
-        if (progress) {
-            const total = Math.max(0, Math.floor(progress.total));
-            const saved = Math.max(0, Math.floor(progress.saved));
-            const frame = Math.max(0, Math.floor(progress.frame));
-            if (total > 0) {
-                const ratio = Math.min(100, Math.max(0, (saved / total) * 100));
-                this.busyTextEl.textContent = `PNG sequence exporting... ${saved}/${total} (${ratio.toFixed(1)}%) frame ${frame}`;
+
+        if (this.isWebmExportActive) {
+            const progress = this.latestWebmExportProgress;
+            if (progress) {
+                const total = Math.max(0, Math.floor(progress.total));
+                const encoded = Math.max(0, Math.floor(progress.encoded));
+                const frame = Math.max(0, Math.floor(progress.frame));
+                const captured = Math.max(0, Math.floor(progress.captured ?? encoded));
+                const phaseLabel = this.formatWebmExportPhaseLabel(progress.phase);
+                const updated = this.formatExportAge(progress.timestampMs);
+                if (total > 0) {
+                    const ratio = Math.min(100, Math.max(0, (encoded / total) * 100));
+                    const detail = progress.message?.trim() || "Waiting for next update";
+                    this.busyTextEl.textContent = `WebM ${phaseLabel} ${encoded}/${total} (${ratio.toFixed(1)}%) frame ${frame}\nCaptured ${captured}/${total} | Last update ${updated}\n${detail}`;
+                    return;
+                }
+            }
+            if (this.webmExportActiveCount > 1) {
+                this.busyTextEl.textContent = `WebM exporting in background (${this.webmExportActiveCount} jobs).`;
                 return;
             }
-        }
-        if (activeCount > 1) {
-            this.busyTextEl.textContent = `PNG sequence exporting in background (${activeCount} jobs).`;
+            this.busyTextEl.textContent = "WebM exporting in background. Main controls are locked.";
             return;
         }
-        this.busyTextEl.textContent = "PNG sequence exporting in background. Main controls are locked.";
+
+        if (this.isPngSequenceExportActive) {
+            const progress = this.latestPngSequenceExportProgress;
+            if (progress) {
+                const total = Math.max(0, Math.floor(progress.total));
+                const saved = Math.max(0, Math.floor(progress.saved));
+                const frame = Math.max(0, Math.floor(progress.frame));
+                if (total > 0) {
+                    const ratio = Math.min(100, Math.max(0, (saved / total) * 100));
+                    this.busyTextEl.textContent = `PNG sequence exporting... ${saved}/${total} (${ratio.toFixed(1)}%) frame ${frame}`;
+                    return;
+                }
+            }
+            if (this.pngSequenceExportActiveCount > 1) {
+                this.busyTextEl.textContent = `PNG sequence exporting in background (${this.pngSequenceExportActiveCount} jobs).`;
+                return;
+            }
+            this.busyTextEl.textContent = "PNG sequence exporting in background. Main controls are locked.";
+        }
     }
 
     private setupFileDrop(): void {
@@ -1469,8 +1570,8 @@ export class UIController {
             dragDepth = 0;
             setDragActive(false);
 
-            if (this.isPngSequenceExportActive) {
-                this.showToast("Cannot load files during PNG sequence export", "error");
+            if (this.hasBackgroundExportActive()) {
+                this.showToast("Cannot load files during background export", "error");
                 return;
             }
 
@@ -1523,7 +1624,7 @@ export class UIController {
                 return;
             }
 
-            if (this.isPngSequenceExportActive) {
+            if (this.hasBackgroundExportActive()) {
                 e.preventDefault();
                 return;
             }
@@ -1928,6 +2029,7 @@ export class UIController {
     private exportOutputProjectState(): ProjectOutputState {
         const outputSettings = this.getOutputSettings();
         const qualityRaw = Number.parseFloat(this.outputQualitySelect?.value ?? "1");
+        const fpsRaw = Number.parseInt(this.outputFpsSelect?.value ?? "30", 10);
 
         return {
             aspectPreset: this.outputAspectSelect?.value ?? "16:9",
@@ -1936,6 +2038,7 @@ export class UIController {
             height: outputSettings.height,
             lockAspect: Boolean(this.outputLockAspectInput?.checked),
             qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
+            fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
         };
     }
 
@@ -1966,6 +2069,13 @@ export class UIController {
             hasOption(this.outputQualitySelect, String(state.qualityScale))
         ) {
             this.outputQualitySelect.value = String(state.qualityScale);
+        }
+        if (
+            this.outputFpsSelect &&
+            Number.isFinite(state.fps) &&
+            hasOption(this.outputFpsSelect, String(state.fps))
+        ) {
+            this.outputFpsSelect.value = String(state.fps);
         }
 
         const width = this.clampOutputWidth(Number.parseInt(this.outputWidthInput?.value ?? "1920", 10));
@@ -2325,8 +2435,8 @@ export class UIController {
             !this.outputSizePresetSelect ||
             !this.outputWidthInput ||
             !this.outputHeightInput ||
-            !this.outputLockAspectInput ||
-            !this.outputQualitySelect
+            !this.outputQualitySelect ||
+            !this.outputFpsSelect
         ) {
             return;
         }
@@ -2359,12 +2469,12 @@ export class UIController {
         };
 
         const syncDimensionWithLock = (source: "width" | "height"): void => {
-            if (!this.outputWidthInput || !this.outputHeightInput || !this.outputLockAspectInput) return;
+            if (!this.outputWidthInput || !this.outputHeightInput) return;
             if (this.isSyncingOutputSettings) return;
 
             let width = this.clampOutputWidth(Number.parseInt(this.outputWidthInput.value, 10));
             let height = this.clampOutputHeight(Number.parseInt(this.outputHeightInput.value, 10));
-            const locked = this.outputLockAspectInput.checked;
+            const locked = this.outputLockAspectInput?.checked === true;
             const ratio = Math.max(0.1, this.outputAspectRatio);
 
             if (locked) {
@@ -2387,7 +2497,7 @@ export class UIController {
         this.outputSizePresetSelect.addEventListener("change", applyPreset);
         this.outputWidthInput.addEventListener("input", () => syncDimensionWithLock("width"));
         this.outputHeightInput.addEventListener("input", () => syncDimensionWithLock("height"));
-        this.outputLockAspectInput.addEventListener("change", () => {
+        this.outputLockAspectInput?.addEventListener("change", () => {
             if (!this.outputLockAspectInput) return;
             if (this.outputLockAspectInput.checked) {
                 this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
@@ -2396,6 +2506,7 @@ export class UIController {
         });
 
         this.outputQualitySelect.value = this.outputQualitySelect.value || "1";
+        this.outputFpsSelect.value = this.outputFpsSelect.value || "30";
         this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
         applyPreset();
         this.applyViewportAspectPresentation();
@@ -2429,11 +2540,13 @@ export class UIController {
         const widthRaw = Number.parseInt(this.outputWidthInput?.value ?? "1920", 10);
         const heightRaw = Number.parseInt(this.outputHeightInput?.value ?? "1080", 10);
         const qualityRaw = Number.parseFloat(this.outputQualitySelect?.value ?? "1");
+        const fpsRaw = Number.parseInt(this.outputFpsSelect?.value ?? "30", 10);
 
         return {
             width: this.clampOutputWidth(widthRaw),
             height: this.clampOutputHeight(heightRaw),
             qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
+            fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
         };
     }
 
@@ -2520,7 +2633,7 @@ export class UIController {
             endFrame,
             step,
             prefix,
-            fps: 30,
+            fps: outputSettings.fps,
             precision: outputSettings.qualityScale,
             outputWidth: outputSettings.width,
             outputHeight: outputSettings.height,
@@ -2534,6 +2647,57 @@ export class UIController {
 
         this.setStatus("PNG sequence export started", false);
         this.showToast(`PNG sequence export started (${frameList.length} files)`, "success");
+    }
+
+    private async exportWebm(): Promise<void> {
+        if (!window.isSecureContext) {
+            this.showToast("WebM export requires a secure context", "error");
+            return;
+        }
+
+        const startFrame = Math.max(0, this.mmdManager.currentFrame);
+        const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
+        const totalFrames = endFrame - startFrame + 1;
+        if (totalFrames <= 0) {
+            this.showToast("No frames to export", "error");
+            return;
+        }
+
+        const outputSettings = this.getOutputSettings();
+        const defaultFileName = this.buildWebmFileName(
+            outputSettings.width,
+            outputSettings.height,
+            startFrame,
+            endFrame,
+        );
+        const outputFilePath = await window.electronAPI.saveWebmDialog(defaultFileName);
+        if (!outputFilePath) {
+            this.showToast("WebM export canceled", "info");
+            return;
+        }
+
+        const project = this.buildProjectStateForPersistence();
+        project.assets.audioPath = null;
+
+        this.setStatus("Launching WebM export window...", true);
+        const result = await window.electronAPI.startWebmExportWindow({
+            project,
+            outputFilePath,
+            startFrame,
+            endFrame,
+            fps: outputSettings.fps,
+            outputWidth: outputSettings.width,
+            outputHeight: outputSettings.height,
+        });
+
+        if (!result) {
+            this.setStatus("WebM export launch failed", false);
+            this.showToast("Failed to start WebM export window", "error");
+            return;
+        }
+
+        this.setStatus("WebM export started", false);
+        this.showToast(`WebM export started (${totalFrames} frames)`, "success");
     }
 
     private sanitizeFileNameSegment(value: string): string {
@@ -2555,6 +2719,13 @@ export class UIController {
         const pad = (value: number): string => String(value).padStart(2, "0");
         const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
         return this.sanitizeFileNameSegment(`${prefix}_${timestamp}_${startFrame}-${endFrame}_s${step}`);
+    }
+
+    private buildWebmFileName(width: number, height: number, startFrame: number, endFrame: number): string {
+        const now = new Date();
+        const pad = (value: number): string => String(value).padStart(2, "0");
+        const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        return `${this.sanitizeFileNameSegment(`mmd_capture_${width}x${height}_${timestamp}_${startFrame}-${endFrame}`)}.webm`;
     }
 
     private joinPathForRenderer(basePath: string, childName: string): string {

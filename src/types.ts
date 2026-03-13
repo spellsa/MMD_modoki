@@ -1,6 +1,7 @@
 export interface ElectronAPI {
     openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
     openDirectoryDialog: () => Promise<string | null>;
+    saveWebmDialog: (defaultFileName?: string) => Promise<string | null>;
     snapMainWindowContentAspect: (aspectRatio: number) => Promise<boolean>;
     getPathForDroppedFile: (file: File) => string | null;
     readBinaryFile: (filePath: string) => Promise<Buffer | null>;
@@ -22,6 +23,11 @@ export interface ElectronAPI {
         directoryPath: string,
         fileName: string,
     ) => Promise<string | null>;
+    saveWebmFileToPath: (bytes: Uint8Array, filePath: string) => Promise<string | null>;
+    beginWebmStreamSave: (filePath: string) => Promise<{ saveId: string; filePath: string } | null>;
+    writeWebmStreamChunk: (saveId: string, bytes: Uint8Array, position: number) => Promise<boolean>;
+    finishWebmStreamSave: (saveId: string) => Promise<string | null>;
+    cancelWebmStreamSave: (saveId: string) => Promise<boolean>;
     startPngSequenceExportWindow: (
         request: PngSequenceExportRequest,
     ) => Promise<PngSequenceExportLaunchResult | null>;
@@ -29,6 +35,14 @@ export interface ElectronAPI {
     reportPngSequenceExportProgress: (progress: PngSequenceExportProgress) => void;
     onPngSequenceExportState: (callback: (state: PngSequenceExportState) => void) => () => void;
     onPngSequenceExportProgress: (callback: (progress: PngSequenceExportProgress) => void) => () => void;
+    startWebmExportWindow: (
+        request: WebmExportRequest,
+    ) => Promise<WebmExportLaunchResult | null>;
+    takeWebmExportJob: (jobId: string) => Promise<WebmExportRequest | null>;
+    finishWebmExportJob: (jobId: string) => Promise<boolean>;
+    reportWebmExportProgress: (progress: WebmExportProgress) => void;
+    onWebmExportState: (callback: (state: WebmExportState) => void) => () => void;
+    onWebmExportProgress: (callback: (progress: WebmExportProgress) => void) => () => void;
 }
 
 export type UiLocale = "ja" | "en";
@@ -269,6 +283,7 @@ export interface ProjectOutputState {
     height: number;
     lockAspect: boolean;
     qualityScale: number;
+    fps?: number;
 }
 
 export interface ProjectAccessoryState {
@@ -406,4 +421,46 @@ export interface PngSequenceExportProgress {
     captured: number;
     total: number;
     frame: number;
+}
+
+export interface WebmExportRequest {
+    project: MmdModokiProjectFileV1;
+    outputFilePath: string;
+    startFrame: number;
+    endFrame: number;
+    fps: number;
+    outputWidth: number;
+    outputHeight: number;
+}
+
+export interface WebmExportLaunchResult {
+    jobId: string;
+}
+
+export interface WebmExportState {
+    active: boolean;
+    activeCount: number;
+}
+
+export type WebmExportPhase =
+    | "initializing"
+    | "loading-project"
+    | "checking-codec"
+    | "opening-output"
+    | "encoding"
+    | "closing-track"
+    | "finalizing"
+    | "finishing-job"
+    | "completed"
+    | "failed";
+
+export interface WebmExportProgress {
+    jobId: string;
+    phase: WebmExportPhase;
+    encoded: number;
+    total: number;
+    frame: number;
+    captured?: number;
+    message?: string;
+    timestampMs: number;
 }

@@ -3,7 +3,10 @@ import type {
     ElectronAPI,
     PngSequenceExportProgress,
     PngSequenceExportRequest,
-    PngSequenceExportState
+    PngSequenceExportState,
+    WebmExportProgress,
+    WebmExportRequest,
+    WebmExportState
 } from './types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -11,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('dialog:openFile', filters),
     openDirectoryDialog: () =>
         ipcRenderer.invoke('dialog:openDirectory'),
+    saveWebmDialog: (defaultFileName?: string) =>
+        ipcRenderer.invoke('dialog:saveWebm', defaultFileName),
     snapMainWindowContentAspect: (aspectRatio: number) =>
         ipcRenderer.invoke('window:snapMainWindowContentAspect', aspectRatio),
     getPathForDroppedFile: (file: File) => {
@@ -48,6 +53,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         directoryPath: string,
         fileName: string,
     ) => ipcRenderer.invoke('file:savePngRgbaToPath', rgbaData, width, height, directoryPath, fileName),
+    saveWebmFileToPath: (bytes: Uint8Array, filePath: string) =>
+        ipcRenderer.invoke('file:saveWebmToPath', bytes, filePath),
+    beginWebmStreamSave: (filePath: string) =>
+        ipcRenderer.invoke('file:beginWebmStreamSave', filePath),
+    writeWebmStreamChunk: (saveId: string, bytes: Uint8Array, position: number) =>
+        ipcRenderer.invoke('file:writeWebmStreamChunk', saveId, bytes, position),
+    finishWebmStreamSave: (saveId: string) =>
+        ipcRenderer.invoke('file:finishWebmStreamSave', saveId),
+    cancelWebmStreamSave: (saveId: string) =>
+        ipcRenderer.invoke('file:cancelWebmStreamSave', saveId),
     startPngSequenceExportWindow: (request: PngSequenceExportRequest) =>
         ipcRenderer.invoke('export:startPngSequenceWindow', request),
     takePngSequenceExportJob: (jobId: string) =>
@@ -71,6 +86,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('export:pngSequenceProgress', listener);
         return () => {
             ipcRenderer.removeListener('export:pngSequenceProgress', listener);
+        };
+    },
+    startWebmExportWindow: (request: WebmExportRequest) =>
+        ipcRenderer.invoke('export:startWebmWindow', request),
+    takeWebmExportJob: (jobId: string) =>
+        ipcRenderer.invoke('export:takeWebmJob', jobId),
+    finishWebmExportJob: (jobId: string) =>
+        ipcRenderer.invoke('export:finishWebmJob', jobId),
+    reportWebmExportProgress: (progress: WebmExportProgress) => {
+        ipcRenderer.send('export:webmProgress', progress);
+    },
+    onWebmExportState: (callback: (state: WebmExportState) => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: WebmExportState) => {
+            callback(state);
+        };
+        ipcRenderer.on('export:webmState', listener);
+        return () => {
+            ipcRenderer.removeListener('export:webmState', listener);
+        };
+    },
+    onWebmExportProgress: (callback: (progress: WebmExportProgress) => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, progress: WebmExportProgress) => {
+            callback(progress);
+        };
+        ipcRenderer.on('export:webmProgress', listener);
+        return () => {
+            ipcRenderer.removeListener('export:webmProgress', listener);
         };
     },
 } as ElectronAPI);

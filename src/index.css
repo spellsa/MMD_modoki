@@ -1786,6 +1786,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   font-size: 11px;
   color: var(--text-primary);
   line-height: 1.35;
+  white-space: pre-line;
 }
 
 #app.ui-export-lock #toolbar,

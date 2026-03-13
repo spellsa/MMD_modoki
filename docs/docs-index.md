@@ -55,6 +55,7 @@
 - [PNG 連番出力仕様](./png-sequence-export-spec.md)
 - [WebCodecs API 調査](./webcodecs-api-research.md)
 - [WebCodecs + MediaBunny WebM 調査](./webcodecs-mediabunny-webm-research.md)
+- [WebM 出力 現行仕様 / 実装](./webm-export-current-spec-2026-03-13.md)
 
 ## 品質 / 運用
 
