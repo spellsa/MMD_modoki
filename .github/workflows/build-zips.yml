@@ -20,14 +20,17 @@ jobs:
           - label: Windows Zip
             os: windows-latest
             forge_platform: win32
+            release_platform: windows
             artifact_name: mmd-modoki-windows-x64-zip
           - label: macOS Zip
             os: macos-latest
             forge_platform: darwin
+            release_platform: mac
             artifact_name: mmd-modoki-macos-x64-zip
           - label: Linux Zip
             os: ubuntu-latest
             forge_platform: linux
+            release_platform: linux
             artifact_name: mmd-modoki-linux-x64-zip
 
     steps:
@@ -48,6 +51,13 @@ jobs:
 
       - name: Build zip package
         run: npm run make:zip -- --platform=${{ matrix.forge_platform }} --arch=x64
+
+      - name: Rename zip for release
+        shell: bash
+        run: |
+          node -e "const fs=require('fs'); const path=require('path'); const root=path.join(process.cwd(),'out','make'); const version=require('./package.json').version; const releasePlatform=process.env.RELEASE_PLATFORM; const walk=(dir)=>fs.readdirSync(dir,{withFileTypes:true}).flatMap((entry)=>entry.isDirectory()?walk(path.join(dir,entry.name)):path.join(dir,entry.name)); const zips=walk(root).filter((file)=>file.toLowerCase().endsWith('.zip')); if(zips.length!==1){console.error('Expected exactly one zip file, found:', zips); process.exit(1);} const source=zips[0]; const dir=path.dirname(source); const target=path.join(dir, `MMD.modoki-${releasePlatform}-x64-${version}.zip`); if(path.resolve(source)!==path.resolve(target)){ fs.renameSync(source,target); } console.log(`Renamed ${path.basename(source)} -> ${path.basename(target)}`);"
+        env:
+          RELEASE_PLATFORM: ${{ matrix.release_platform }}
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4

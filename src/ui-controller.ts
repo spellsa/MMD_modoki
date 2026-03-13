@@ -133,14 +133,12 @@ export class UIController {
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 90;
     private static readonly EXTERNAL_WGSL_PRESET_PREFIX = "external-wgsl::";
-    private static readonly VISIBLE_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
-        "wgsl-mmd-standard",
-        "wgsl-unlit",
-        "wgsl-soft-lit",
-    ]);
-    private static readonly VISIBLE_BUNDLED_WGSL_FILE_NAMES = new Set<string>([
-        "ToonTemplate.wgsl",
-        "toon_debug_white_shadow.wgsl",
+    private static readonly HIDDEN_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
+        "wgsl-specular",
+        "wgsl-cel-sharp",
+        "wgsl-rim-lift",
+        "wgsl-mono-flat",
+        "wgsl-full-light-add",
     ]);
 
     private mmdManager: MmdManager;
@@ -3835,18 +3833,15 @@ export class UIController {
         }
         this.restoreCameraDofControlsToCameraPanel();
 
-        const now = Date.now();
-        if (!this.bundledWgslScanInFlight && now - this.bundledWgslLastScanMs > 2000) {
+        if (!this.bundledWgslScanInFlight) {
             void this.reloadBundledWgslShaderFiles(false);
         }
 
         const isAvailable = this.mmdManager.isWgslMaterialShaderAssignmentAvailable();
         const presets = this.mmdManager.getWgslMaterialShaderPresets()
-            .filter((preset) => UIController.VISIBLE_SHADER_PRESET_IDS.has(preset.id));
+            .filter((preset) => !UIController.HIDDEN_SHADER_PRESET_IDS.has(preset.id));
         const models = this.mmdManager.getWgslModelShaderStates();
         const activeExternalWgslPath = this.mmdManager.getExternalWgslToonShaderPath();
-        const bundledWgslShaderFiles = this.bundledWgslShaderFiles
-            .filter((shaderFile) => UIController.VISIBLE_BUNDLED_WGSL_FILE_NAMES.has(shaderFile.name));
 
         this.shaderPresetSelect.innerHTML = "";
         for (const preset of presets) {
@@ -3856,20 +3851,7 @@ export class UIController {
             this.shaderPresetSelect.appendChild(option);
         }
 
-        if (bundledWgslShaderFiles.length > 0) {
-            const separator = document.createElement("option");
-            separator.value = "";
-            separator.textContent = "--- WGSL Files ---";
-            separator.disabled = true;
-            this.shaderPresetSelect.appendChild(separator);
-            for (const shaderFile of bundledWgslShaderFiles) {
-                const option = document.createElement("option");
-                option.value = this.makeExternalWgslPresetValue(shaderFile.path);
-                option.textContent = `WGSL: ${shaderFile.name}`;
-                this.shaderPresetSelect.appendChild(option);
-            }
-        }
-        if (activeExternalWgslPath && !bundledWgslShaderFiles.some((file) => this.isSamePathForRenderer(file.path, activeExternalWgslPath))) {
+        if (activeExternalWgslPath) {
             const option = document.createElement("option");
             option.value = this.makeExternalWgslPresetValue(activeExternalWgslPath);
             option.textContent = `WGSL: ${this.getBaseNameForRenderer(activeExternalWgslPath)}`;
@@ -3968,92 +3950,6 @@ export class UIController {
 
         const presetLabelById = new Map(presets.map((preset) => [preset.id, preset.label]));
         this.shaderMaterialList.innerHTML = "";
-
-        const externalWgslPath = selectedExternalWgslPath;
-        const externalWgslFileName = externalWgslPath
-            ? this.getBaseNameForRenderer(externalWgslPath)
-            : "None";
-        const externalWgslStateLabel = externalWgslPath ? "ON" : "OFF";
-
-        const externalWgslControls = document.createElement("div");
-        externalWgslControls.className = "shader-external-wgsl-controls";
-        externalWgslControls.innerHTML = `
-            <div class="effect-row">
-                <span class="effect-label">WGSL</span>
-                <button data-ext-wgsl-btn="load" type="button" class="effect-button">Load...</button>
-                <span data-ext-wgsl-val="state" class="effect-value">${externalWgslStateLabel}</span>
-            </div>
-            <div class="effect-row">
-                <span class="effect-label">WGSLFile</span>
-                <button data-ext-wgsl-btn="clear" type="button" class="effect-button">Clear</button>
-                <span data-ext-wgsl-val="path" class="effect-value">${externalWgslFileName}</span>
-            </div>
-        `;
-
-        const externalWgslLoadButton = externalWgslControls.querySelector<HTMLButtonElement>('button[data-ext-wgsl-btn="load"]');
-        const externalWgslClearButton = externalWgslControls.querySelector<HTMLButtonElement>('button[data-ext-wgsl-btn="clear"]');
-        if (externalWgslLoadButton && externalWgslClearButton) {
-            externalWgslClearButton.disabled = !externalWgslPath;
-
-            externalWgslLoadButton.addEventListener("click", () => {
-                void (async () => {
-                    const shaderPath = await window.electronAPI.openFileDialog([
-                        { name: "WGSL Shader", extensions: ["wgsl"] },
-                        { name: "All files", extensions: ["*"] },
-                    ]);
-                    if (!shaderPath) return;
-
-                    const shaderText = await window.electronAPI.readTextFile(shaderPath);
-                    if (!shaderText) {
-                        this.showToast("Failed to read WGSL shader file", "error");
-                        return;
-                    }
-                    const validationError = this.validateExternalWgslToonSnippet(shaderText);
-                    if (validationError) {
-                        this.showToast(`WGSL invalid: ${validationError}`, "error");
-                        return;
-                    }
-
-                    const targetMaterialKey = selectedMaterial?.key ?? null;
-                    const ok = this.mmdManager.setExternalWgslToonShaderForModel(
-                        selectedModel.modelIndex,
-                        targetMaterialKey,
-                        shaderPath,
-                        shaderText,
-                    );
-                    if (!ok) {
-                        this.showToast("WGSL shader assignment failed", "error");
-                        return;
-                    }
-
-                    this.postFxWgslToonPath = shaderPath;
-                    this.postFxWgslToonText = shaderText;
-                    this.showToast(`Loaded WGSL shader: ${this.getBaseNameForRenderer(shaderPath)}`, "success");
-                    this.refreshShaderPanel();
-                })();
-            });
-
-            externalWgslClearButton.addEventListener("click", () => {
-                const targetMaterialKey = selectedMaterial?.key ?? null;
-                const ok = this.mmdManager.setExternalWgslToonShaderForModel(
-                    selectedModel.modelIndex,
-                    targetMaterialKey,
-                    null,
-                    null,
-                );
-                if (!ok) {
-                    this.showToast("WGSL shader clear failed", "error");
-                    return;
-                }
-
-                this.postFxWgslToonPath = null;
-                this.postFxWgslToonText = null;
-                this.showToast("Cleared external WGSL shader", "info");
-                this.refreshShaderPanel();
-            });
-        }
-
-        this.shaderMaterialList.appendChild(externalWgslControls);
 
         for (const material of selectedModel.materials) {
             const item = document.createElement("div");
@@ -4247,7 +4143,7 @@ export class UIController {
                 </div>
                 <div class="effect-row">
                     <span class="effect-label">LUTInt</span>
-                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
                     <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
                 </div>
                 <div class="effect-row effect-row-toggle">
@@ -4685,7 +4581,7 @@ export class UIController {
             ? this.mmdManager.postEffectLutPreset
             : "anime-soft";
         lutIntensityInput.value = String(
-            Math.round(this.mmdManager.postEffectLutIntensity * 100),
+            Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectLutIntensity * 100))),
         );
         motionBlurStrengthInput.value = String(
             Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectMotionBlurEnabled ? this.mmdManager.postEffectMotionBlurStrength : 0) * 100))),
