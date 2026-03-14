@@ -26,7 +26,7 @@ macOS:
 - `MMD modoki.app`
 
 Linux:
-- Linux 版は環境によって `--no-sandbox` / `--disable-setuid-sandbox` を付けて起動する必要がある場合があります。`chrome-sandbox` 起因の起動失敗を避けるための暫定対応です。
+- Linux 版は環境によって `--no-sandbox`を付けて起動する必要がある場合があります。`chrome-sandbox` 起因の起動失敗を避けるための暫定対応です。
 - 展開先の実行ファイルを直接起動します。
 
 ## 初回起動時の注意
