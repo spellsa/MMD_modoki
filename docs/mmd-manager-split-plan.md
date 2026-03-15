@@ -1,0 +1,439 @@
+# mmd-manager.ts 機能棚卸しと分割方針
+
+## 目的
+
+`src/mmd-manager.ts` は現在 8,700 行を超えており、アプリの中核ロジックをほぼ 1 ファイルで抱えています。  
+この文書は、まず `MmdManager` が今何をやっているのかを責務単位で洗い出し、その上で現実的な分割方針を整理するためのメモです。
+
+前提:
+
+- いきなり `MmdManager` を消すのではなく、当面は public API を持つ facade として残す
+- 内部実装を小さな service / controller に委譲していく
+- 既存の UI や exporter から見える API はなるべく維持する
+
+## おすすめの対応順
+
+まず読むべき結論として、着手順は以下がおすすめです。
+
+1. `project-serializer.ts`
+2. `editor/timeline-edit-service.ts`
+3. `assets/model-asset-service.ts`
+4. `assets/motion-asset-service.ts`
+5. `runtime/playback-controller.ts`
+6. `render/effects-pipeline-controller.ts`
+
+この順番をおすすめする理由:
+
+- 最初に Babylon 依存の薄い pure logic と serialize 系を外へ出せる
+- 次に timeline と asset loader を分けることで、`MmdManager` の主要な肥大化要因を減らせる
+- 最後に Babylon 依存の強い playback / effects を扱うことで、途中の回帰リスクを抑えやすい
+
+## 現在の `MmdManager` の役割
+
+今の `MmdManager` は、実質的に次の責務をまとめて持っています。
+
+1. エンジン選択とシーン初期化
+2. Physics 初期化と runtime 接続
+3. PMX / VMD / VPD / camera VMD / MP3 の読み込み
+4. 再生制御と seek
+5. アクティブモデル選択とモデル表示状態管理
+6. マテリアルと WGSL シェーダ状態管理
+7. ボーン gizmo、ボーン可視化、morph / camera 編集
+8. タイムラインのキーフレーム編集と統合 track 生成
+9. プロジェクト保存/読込
+10. ライティング、影、post effect、DoF、SSAO、SSR、VLS、fog 管理
+11. 診断情報と screenshot capture
+
+肥大化の主因は、pure なデータ処理、editor state、Babylon scene への副作用コード、project の serialize / deserialize が同居していることです。
+
+## 責務マップ
+
+### 1. エンジン、シーン、runtime の初期化
+
+主な入口:
+
+- `create`, `createWebGlEngine`, `createPreferredEngine` (`src/mmd-manager.ts:2945`)
+- `constructor` (`src/mmd-manager.ts:2988`)
+- `initializePhysics`, `initializeBulletPhysicsBackend`, `initializeAmmoPhysicsBackend` (`src/mmd-manager.ts:3266`)
+- `resize`, `setAutoRenderEnabled`, `renderOnce`, `setRenderFpsLimit`, `dispose` (`src/mmd-manager.ts:9512`)
+
+やっていること:
+
+- WebGPU / WebGL2 の選択
+- Babylon scene, camera, light, shadow, ground, skydome の生成
+- MMD runtime と physics backend の構築
+- render loop、resize、dispose の管理
+
+この領域は `SceneRuntime` として切り出すのが自然です。
+
+### 2. アセット読み込み
+
+主な入口:
+
+- `loadPMX` (`src/mmd-manager.ts:3478`)
+- `loadVMD` (`src/mmd-manager.ts:3911`)
+- `loadVPD` (`src/mmd-manager.ts:3989`)
+- `loadCameraVMD` (`src/mmd-manager.ts:4055`)
+- `loadMP3` (`src/mmd-manager.ts:4119`)
+
+やっていること:
+
+- Electron API 経由でのファイル読み込み
+- scene への mesh / animation import
+- MMD model / runtime animation / audio player の生成
+- 読み込み後の editor state 更新
+- material や shadow の互換調整
+
+これは `ModelAssetService` と `MotionAssetService` に分けやすいです。
+
+### 3. モデル registry と material shader state
+
+主な入口:
+
+- WGSL material state 周辺 (`src/mmd-manager.ts:1321` 付近)
+- `setExternalWgslToonShader*`, `setWgslMaterialShaderPreset`, `applyWgslShaderPresetToMaterial` (`src/mmd-manager.ts:1378`, `src/mmd-manager.ts:1460`, `src/mmd-manager.ts:1571`)
+- `collectSceneModelMaterials`, `getSerializedMaterialShaderStates`, `applyImportedMaterialShaderStates` (`src/mmd-manager.ts:1796`, `src/mmd-manager.ts:1842`, `src/mmd-manager.ts:1857`)
+- モデル表示 / active model 切替周辺 (`src/mmd-manager.ts:1889`, `src/mmd-manager.ts:1928`, `src/mmd-manager.ts:1954`, `src/mmd-manager.ts:1993`)
+
+やっていること:
+
+- `sceneModels` の管理
+- active model の切替
+- material ごとの shader preset / external WGSL の保持
+- project 保存用の material shader state の serialize / deserialize
+
+この責務は以下に分けるのがよいです。
+
+- `SceneModelRegistry`
+- `MaterialShaderService`
+
+### 4. ボーン編集、gizmo、ボーン可視化、morph / camera 編集
+
+主な入口:
+
+- `setTimelineTarget`, `setBoneVisualizerSelectedBone` (`src/mmd-manager.ts:2008`, `src/mmd-manager.ts:2021`)
+- `updateBoneGizmoTarget`, `syncBoneGizmoProxyToRuntimeBone`, `applyBoneGizmoProxyToRuntimeBone` (`src/mmd-manager.ts:2030`, `src/mmd-manager.ts:2086`, `src/mmd-manager.ts:2121`)
+- `refreshBoneVisualizerTarget`, `updateBoneVisualizer`, `tryPickBoneVisualizerAtClientPosition` (`src/mmd-manager.ts:2197`, `src/mmd-manager.ts:2337`, `src/mmd-manager.ts:2538`)
+- morph / bone / camera 編集 API (`src/mmd-manager.ts:8741` 付近)
+
+やっていること:
+
+- 編集対象の選択管理
+- gizmo と runtime bone の同期
+- bone overlay canvas の描画
+- UI から使う morph / bone / camera 編集 API の提供
+
+この領域は `BoneEditController` として分けるのがよさそうです。
+
+### 5. タイムライン編集と animation merge
+
+主な入口:
+
+- `hasTimelineKeyframe`, `addTimelineKeyframe`, `removeTimelineKeyframe`, `moveTimelineKeyframe` (`src/mmd-manager.ts:2743`)
+- frame utility 群 (`src/mmd-manager.ts:83` 付近)
+- animation merge / frame map 周辺 (`src/mmd-manager.ts:8980` 付近)
+- timeline track 生成 (`src/mmd-manager.ts:9365`, `src/mmd-manager.ts:9444`, `src/mmd-manager.ts:9500`)
+
+やっていること:
+
+- キーフレームの追加 / 削除 / 移動
+- frame list の統合
+- base motion と overlay motion の merge
+- UI 向け timeline track の生成
+
+この領域は pure logic の比率が高く、最初に外へ出しやすいです。
+
+### 6. 再生制御と seek
+
+主な入口:
+
+- `play`, `pause`, `stop`, `seekTo`, `seekToBoundary`, `setPlaybackSpeed` (`src/mmd-manager.ts:4175`)
+- `stabilizePhysicsAfterHardSeek` (`src/mmd-manager.ts:4237`)
+- constructor 内 render loop の playback 更新処理
+
+やっていること:
+
+- 再生 / 一時停止 / 停止
+- audio 同期あり / なし両方の playback
+- current frame と total frames の更新
+- hard seek 後の physics 安定化
+
+この領域は `PlaybackController` に分離しやすいです。
+
+### 7. プロジェクト保存 / 読込
+
+主な入口:
+
+- project pack / unpack helper 群 (`src/mmd-manager.ts:4262` 付近)
+- `serialize*` 系 (`src/mmd-manager.ts:4433` 付近)
+- `deserialize*` 系 (`src/mmd-manager.ts:4499` 付近)
+- `exportProjectState` (`src/mmd-manager.ts:4608`)
+- `importProjectState` (`src/mmd-manager.ts:4784`)
+- `clearProjectForImport`, `isProjectFileV1` (`src/mmd-manager.ts:5267`, `src/mmd-manager.ts:5322`)
+
+やっていること:
+
+- project file format v1 の encode / decode
+- scene, camera, lighting, effects, keyframes, accessories の保存 / 復元
+- import 時の asset 再読み込み
+
+この領域は次の 2 つに分けるのが妥当です。
+
+- `ProjectSerializer`
+- `ProjectImporter`
+
+### 8. ライティング、影、post effect
+
+主な入口:
+
+- post effect getter / setter 群 (`src/mmd-manager.ts:5475` 付近)
+- light / shadow getter / setter 群 (`src/mmd-manager.ts:6196` 付近)
+- pipeline 初期化 (`src/mmd-manager.ts:6433` 以降)
+- custom shader 構築 (`src/mmd-manager.ts:503`, `src/mmd-manager.ts:7196`, `src/mmd-manager.ts:7826`, `src/mmd-manager.ts:8271`)
+
+やっていること:
+
+- editor 向け effect state の保持
+- Babylon post-process pipeline の生成 / 更新 / 破棄
+- LUT、motion blur、SSAO、SSR、VLS、fog、AA、DoF の適用
+- WebGPU / WebGL の差異吸収
+
+ここは最も重い領域で、`EffectsPipelineController` としてまとめるのが本命です。
+
+### 9. 診断と capture
+
+主な入口:
+
+- 診断系メソッド (`src/mmd-manager.ts:5328` 付近)
+- `capturePngDataUrl` (`src/mmd-manager.ts:5417`)
+
+やっていること:
+
+- runtime diagnostics の蓄積
+- UI 向け label 生成
+- screenshot capture
+
+この領域は比較的小さいので、必要なら facade 側に残しても問題ありません。
+
+## 目標構成
+
+### `MmdManager` は facade として残す
+
+今の `MmdManager` は以下から直接使われています。
+
+- `src/ui-controller.ts`
+- `src/bottom-panel.ts`
+- `src/png-sequence-exporter.ts`
+- `src/webm-exporter.ts`
+
+そのため、最初の段階では API 窓口として残し、内部だけを分割するのが安全です。
+
+### 想定モジュール
+
+#### `runtime/scene-runtime.ts`
+
+責務:
+
+- エンジン選択
+- scene bootstrap
+- camera / light / ground / skydome 作成
+- render loop
+- resize / dispose
+
+#### `runtime/playback-controller.ts`
+
+責務:
+
+- play / pause / stop / seek / speed
+- current frame / total frame 管理
+- audio 同期
+- hard seek 後の安定化
+
+#### `assets/model-asset-service.ts`
+
+責務:
+
+- PMX / PMD 読み込み
+- MMD model 作成
+- model info 抽出
+- material / shadow 互換処理
+
+#### `assets/motion-asset-service.ts`
+
+責務:
+
+- VMD / VPD / camera VMD 読み込み
+- MP3 読み込み
+- animation の適用 / 差し替え / merge の入口
+
+#### `scene/material-shader-service.ts`
+
+責務:
+
+- WGSL preset の適用
+- external WGSL state の保持
+- material default の snapshot / restore
+- material shader state の serialize
+
+#### `editor/bone-edit-controller.ts`
+
+責務:
+
+- bone selection と edit target 管理
+- gizmo 同期
+- bone overlay 描画 / pick
+- morph / bone / camera 編集 API
+
+#### `editor/timeline-edit-service.ts`
+
+責務:
+
+- frame utility
+- track key helper
+- keyframe add / remove / move
+- animation merge
+- timeline track 生成
+
+#### `project/project-serializer.ts`
+
+責務:
+
+- typed array pack / unpack
+- animation serialize / deserialize
+- project file schema の encode / decode
+
+#### `project/project-importer.ts`
+
+責務:
+
+- import のオーケストレーション
+- import 前クリア処理
+- asset 再ロードと state 復元
+
+#### `render/effects-pipeline-controller.ts`
+
+責務:
+
+- post effect state の apply
+- Babylon pipeline の生成 / 破棄
+- WebGPU / WebGL fallback の吸収
+- custom post-process shader の登録
+
+## 分割順の提案
+
+### Step 1: まず pure logic を外へ出す
+
+最初に切る候補:
+
+- frame utility
+- track key helper
+- animation merge
+- project pack / unpack helper
+- animation serialize / deserialize helper
+
+理由:
+
+- Babylon 依存が最も薄い
+- 回帰リスクが低い
+- テストしやすい
+
+### Step 2: project 系を切り出す
+
+候補:
+
+- `ProjectSerializer`
+- `ProjectImporter`
+
+理由:
+
+- 責務がまとまっている
+- exporter 側でも import / export 周りの恩恵が出る
+- 差分が比較的読みやすい
+
+### Step 3: asset loader を切り出す
+
+候補:
+
+- `ModelAssetService`
+- `MotionAssetService`
+
+理由:
+
+- `loadPMX` と `loadVMD` は自然な分割境界になっている
+- facade からかなりの行数を外へ出せる
+
+### Step 4: playback と timeline 編集を分ける
+
+候補:
+
+- `PlaybackController`
+- `TimelineEditService`
+
+理由:
+
+- editor 挙動を追いやすくなる
+- exporter からの再利用も考えやすい
+
+### Step 5: effects pipeline を最後に分ける
+
+候補:
+
+- `EffectsPipelineController`
+- `MaterialShaderService`
+- `BoneEditController`
+
+理由:
+
+- Babylon 依存が最も強い
+- state が最も多い
+- 他の責務を先に抜いた方が依存関係を整理しやすい
+
+## 最初の分割候補としておすすめの 3 つ
+
+### 1. `project-serializer.ts`
+
+最も低リスクです。  
+主にデータ変換で、scene 依存が薄いです。
+
+### 2. `editor/timeline-edit-service.ts`
+
+価値が高く、比較的 pure です。  
+timeline のテストもしやすくなります。
+
+### 3. `assets/model-asset-service.ts`
+
+`loadPMX` は単体でも十分大きいので、これを抜くだけで見通しがかなり改善します。
+
+## 分割後のイメージ
+
+```ts
+export class MmdManager {
+  private readonly runtime: SceneRuntime;
+  private readonly playback: PlaybackController;
+  private readonly modelAssets: ModelAssetService;
+  private readonly motionAssets: MotionAssetService;
+  private readonly timelineEdit: TimelineEditService;
+  private readonly effects: EffectsPipelineController;
+  private readonly projectSerializer: ProjectSerializer;
+  private readonly projectImporter: ProjectImporter;
+}
+```
+
+この形にしておけば、UI から見た入口を維持しつつ、内部責務を明確にできます。
+
+## 補足
+
+- `src/mmd-manager-x-extension.ts` のような prototype 拡張は optional feature には向いていますが、これを標準パターンにはしない方がよいです
+- accessories のような optional feature は、将来的に plugin 風の扱いにする余地があります
+- `EffectsPipelineController` は一気に全部抜くより、段階的に移した方が安全です
+
+## 次の一手
+
+順番としては次の 2 パターンが考えやすいです。
+
+1. 安全重視:
+   `project-serializer.ts` -> `timeline-edit-service.ts` -> `model-asset-service.ts`
+2. 体感の改善重視:
+   `model-asset-service.ts` -> `motion-asset-service.ts` -> `project-serializer.ts`
+
+リファクタの事故を減らすなら、安全重視の順番の方が無難です。
