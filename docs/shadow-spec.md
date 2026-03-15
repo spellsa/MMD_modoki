@@ -4,6 +4,7 @@
 
 関連:
 - [光・影実装メモ（Toon分離 + フラット光）](./light-shadow-implementation.md)
+- [影品質向上の検討メモ](./shadow-quality-investigation.md)
 
 ## PMX 材質フラグ（影関連）
 
