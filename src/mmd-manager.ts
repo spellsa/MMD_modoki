@@ -1207,6 +1207,7 @@ ${beforeFogAppendBlock}
             event.preventDefault();
         }
     };
+    private suspendSceneRenderCount = 0;
 
     private resolveCameraMouseDragMode(event: PointerEvent): "rotate" | "pan" | "zoom" | null {
         if (this.hasCameraMotion && this._isPlaying) {
@@ -3217,6 +3218,11 @@ ${beforeFogAppendBlock}
         // Start render loop
         this.engine.runRenderLoop(() => {
             const nowMs = performance.now();
+            if (this.suspendSceneRenderCount > 0) {
+                this.lastRenderTimestampMs = nowMs;
+                this.nextRenderDueTimestampMs = nowMs;
+                return;
+            }
             if (!this.autoRenderEnabled) {
                 this.lastRenderTimestampMs = nowMs;
                 this.nextRenderDueTimestampMs = nowMs;
@@ -3475,6 +3481,92 @@ ${beforeFogAppendBlock}
         return { castsShadow, receivesShadow };
     }
 
+    private getSkeletonBoneTextureWidth(skeleton: Skeleton): number {
+        return Math.max(1, (skeleton.bones.length + 1) * 4);
+    }
+
+    private getGpuBoneTextureBoneLimit(maxTextureSize: number): number {
+        return Math.max(0, Math.floor(maxTextureSize / 4) - 1);
+    }
+
+    private getSafeCpuSkinningFallbackBoneThreshold(maxTextureSize: number): number {
+        const hardLimit = this.getGpuBoneTextureBoneLimit(maxTextureSize);
+        const safetyMargin = Math.max(32, Math.floor(hardLimit * 0.03));
+        return Math.max(0, hardLimit - safetyMargin);
+    }
+
+    private applyCpuSkinningFallbackForOversizedSkeletons(
+        modelLabel: string,
+        meshes: readonly Mesh[],
+        skeletons: readonly Skeleton[],
+    ): void {
+        const maxTextureSize = this.engine.getCaps().maxTextureSize;
+        if (!Number.isFinite(maxTextureSize) || maxTextureSize <= 0) {
+            return;
+        }
+
+        const hardBoneLimit = this.getGpuBoneTextureBoneLimit(maxTextureSize);
+        const safeBoneThreshold = this.getSafeCpuSkinningFallbackBoneThreshold(maxTextureSize);
+
+        const oversizedSkeletons = skeletons.filter((skeleton) => {
+            if (!skeleton.useTextureToStoreBoneMatrices) {
+                return false;
+            }
+            return skeleton.bones.length >= safeBoneThreshold || this.getSkeletonBoneTextureWidth(skeleton) > maxTextureSize;
+        });
+        if (oversizedSkeletons.length === 0) {
+            return;
+        }
+
+        const oversizedSkeletonSet = new Set(oversizedSkeletons);
+        let affectedMeshCount = 0;
+        let maxBones = 0;
+        let maxBoneTextureWidth = 0;
+
+        for (const skeleton of oversizedSkeletons) {
+            skeleton.useTextureToStoreBoneMatrices = false;
+            maxBones = Math.max(maxBones, skeleton.bones.length);
+            maxBoneTextureWidth = Math.max(maxBoneTextureWidth, this.getSkeletonBoneTextureWidth(skeleton));
+        }
+
+        for (const mesh of meshes) {
+            const skeleton = mesh.skeleton;
+            if (!skeleton || !oversizedSkeletonSet.has(skeleton)) {
+                continue;
+            }
+            if (!mesh.useBones || mesh.numBoneInfluencers <= 0) {
+                continue;
+            }
+
+            mesh.computeBonesUsingShaders = false;
+            affectedMeshCount += 1;
+        }
+
+        const detail = `${modelLabel}: ${maxBones} bones requires bone texture width ${maxBoneTextureWidth}, exceeding max texture size ${maxTextureSize}`;
+        console.warn(`[PMX] CPU skinning fallback enabled for oversized or near-limit skeleton. ${detail}.`, {
+            model: modelLabel,
+            skeletonCount: oversizedSkeletons.length,
+            affectedMeshCount,
+            maxBones,
+            maxBoneTextureWidth,
+            maxTextureSize,
+            hardBoneLimit,
+            safeBoneThreshold,
+            engine: this.getEngineType(),
+        });
+        this.addRuntimeDiagnostic(`CPU skinning fallback: ${modelLabel} (${maxBones} bones, safe threshold ${safeBoneThreshold}, hard limit ${hardBoneLimit})`);
+    }
+
+    private suspendSceneRendering(): void {
+        this.suspendSceneRenderCount += 1;
+    }
+
+    private resumeSceneRendering(): void {
+        if (this.suspendSceneRenderCount > 0) {
+            this.suspendSceneRenderCount -= 1;
+        }
+    }
+
     async loadPMX(filePath: string): Promise<ModelInfo | null> {
         try {
             await this.physicsInitializationPromise;
@@ -3489,6 +3581,7 @@ ${beforeFogAppendBlock}
             const fileUrl = `file:///${dir}`;
 
             console.log("[PMX] Loading:", fileName, "from:", fileUrl);
+            this.suspendSceneRendering();
 
             // Use ImportMeshAsync with explicit materialBuilder via pluginOptions.
             // PmxLoader uses createPlugin(options) to create a new instance per load,
@@ -3515,6 +3608,17 @@ ${beforeFogAppendBlock}
 
             // The first mesh is the root mesh (MmdMesh)
             const mmdMesh = result.meshes[0] as MmdMesh;
+
+            const skeletonPool: Skeleton[] = [];
+            if (mmdMesh.skeleton) skeletonPool.push(mmdMesh.skeleton);
+            for (const mesh of result.meshes) {
+                if (mesh.skeleton) skeletonPool.push(mesh.skeleton);
+            }
+            for (const skeleton of result.skeletons) {
+                if (skeleton) skeletonPool.push(skeleton);
+            }
+            const uniqueSkeletons = Array.from(new Set(skeletonPool));
+            this.applyCpuSkinningFallbackForOversizedSkeletons(fileName, result.meshes as Mesh[], uniqueSkeletons);
 
             // Enable root mesh and all children
             mmdMesh.setEnabled(true);
@@ -3594,16 +3698,6 @@ ${beforeFogAppendBlock}
                 return sum + meshVertices;
             }, 0);
 
-            const skeletonPool: Skeleton[] = [];
-            if (mmdMesh.skeleton) skeletonPool.push(mmdMesh.skeleton);
-            for (const mesh of result.meshes) {
-                if (mesh.skeleton) skeletonPool.push(mesh.skeleton);
-            }
-            for (const skeleton of result.skeletons) {
-                if (skeleton) skeletonPool.push(skeleton);
-            }
-
-            const uniqueSkeletons = Array.from(new Set(skeletonPool));
             const boneCount = uniqueSkeletons.reduce((max, skeleton) => {
                 return Math.max(max, skeleton.bones.length);
             }, 0);
@@ -3733,8 +3827,10 @@ ${beforeFogAppendBlock}
             }
 
             this.onSceneModelLoaded?.(modelInfo, this.sceneModels.length, activateAsCurrent);
+            this.resumeSceneRendering();
             return modelInfo;
         } catch (err: unknown) {
+            this.resumeSceneRendering();
             const message = err instanceof Error ? err.message : String(err);
             console.error("Failed to load PMX/PMD:", message);
             this.onError?.(`PMX/PMD load error: ${message}`);
