@@ -122,8 +122,8 @@ export function setPostEffectFogEnabled(host: any, v: boolean): void {
 export function getPostEffectFogMode(host: any): number {
     return host.postEffectFogModeValue;
 }
-export function setPostEffectFogMode(host: any, _v: number): void {
-    void _v;
+export function setPostEffectFogMode(host: any, v: number): void {
+    void v;
     host.postEffectFogModeValue = 2;
     host.applyFogSettings();
 }

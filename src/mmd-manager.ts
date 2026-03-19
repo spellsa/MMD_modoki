@@ -64,7 +64,9 @@ import {
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
+    ensureMaterialShaderDefaults as ensureMaterialShaderDefaultsImpl,
     getExternalWgslToonShaderPath as getExternalWgslToonShaderPathImpl,
+    getExternalWgslToonShaderPathForMaterial as getExternalWgslToonShaderPathForMaterialImpl,
     getSerializedMaterialShaderStates as getSerializedMaterialShaderStatesImpl,
     getWgslMaterialShaderPresetForMaterial as getWgslMaterialShaderPresetForMaterialImpl,
     getWgslMaterialShaderPresets as getWgslMaterialShaderPresetsImpl,
@@ -308,19 +310,6 @@ import monotoneLutText from "../lut/monotone.3dl?raw";
 import sepiaLutText from "../lut/sepia.3dl?raw";
 // eslint-disable-next-line import/no-unresolved
 import tealOrangeLutText from "../lut/teal-orange.3dl?raw";
-// eslint-disable-next-line import/no-unresolved
-import luminousWgslText from "../wgsl/luminous.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
-import debugWhiteWgslText from "../wgsl/toon_debug_white_shadow.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
-import fullLightWgslText from "../wgsl/full_light.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
-import fullLightAddWgslText from "../wgsl/full_light_add.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
-import fullShadowWgslText from "../wgsl/full_shadow.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
-import lightAndShadowWgslText from "../wgsl/light_and_shadow.wgsl?raw";
-
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
 import type { MmdRuntimeAnimationHandle } from "babylon-mmd/esm/Runtime/mmdRuntimeAnimationHandle";
@@ -1361,24 +1350,6 @@ ${beforeFogAppendBlock}
         return hasExternalWgslToonShaderImpl(this, modelIndex, materialKey);
     }
 
-    private getExternalWgslToonShaderPathForMaterial(material: any): string | null {
-        if (!material || typeof material !== "object") return null;
-        return this.externalWgslToonShaderPathByMaterial.get(material as object) ?? null;
-    }
-
-    private setExternalWgslToonShaderForMaterial(material: any, path: string | null, source: string | null): void {
-        if (!material || typeof material !== "object") return;
-        const key = material as object;
-        if (path && source) {
-            this.externalWgslToonShaderPathByMaterial.set(key, path);
-            MmdManager.externalWgslToonFragmentByMaterial.set(key, source);
-            return;
-        }
-
-        this.externalWgslToonShaderPathByMaterial.delete(key);
-        MmdManager.externalWgslToonFragmentByMaterial.delete(key);
-    }
-
     public setExternalWgslToonShader(path: string | null, source: string | null): void {
         setExternalWgslToonShaderImpl(this, path, source);
     }
@@ -1392,19 +1363,6 @@ ${beforeFogAppendBlock}
         return setExternalWgslToonShaderForModelImpl(this, modelIndex, materialKey, path, source);
     }
 
-    private markTargetMaterialsShaderDirty(targets: SceneModelMaterialEntry[]): void {
-        for (const target of targets) {
-            this.markMaterialShaderDirty(target.material);
-        }
-    }
-
-    private markAllSceneMaterialsShaderDirty(): void {
-        for (const entry of this.sceneModels) {
-            for (const material of entry.materials) {
-                this.markMaterialShaderDirty(material.material);
-            }
-        }
-    }
     public getWgslModelShaderStates(): WgslModelShaderInfo[] {
         return getWgslModelShaderStatesImpl(this);
     }
@@ -1415,65 +1373,6 @@ ${beforeFogAppendBlock}
         presetId: WgslMaterialShaderPresetId,
     ): boolean {
         return setWgslMaterialShaderPresetImpl(this, modelIndex, materialKey, presetId);
-    }
-
-    private getWgslMaterialShaderPresetForMaterial(material: any): WgslMaterialShaderPresetId {
-        return getWgslMaterialShaderPresetForMaterialImpl(this, material) as WgslMaterialShaderPresetId;
-    }
-
-    private cloneColor3OrNull(value: any): Color3 | null {
-        if (!value || typeof value !== "object") return null;
-        const r = Number(value.r);
-        const g = Number(value.g);
-        const b = Number(value.b);
-        if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null;
-        return new Color3(r, g, b);
-    }
-
-    private setMaterialColorProperty(material: any, propertyName: string, color: Color3): void {
-        if (!material || typeof material !== "object") return;
-
-        const current = material[propertyName];
-        if (current && typeof current.set === "function") {
-            current.set(color.r, color.g, color.b);
-            return;
-        }
-
-        material[propertyName] = new Color3(color.r, color.g, color.b);
-    }
-
-    private ensureMaterialShaderDefaults(material: any): MaterialShaderDefaults {
-        let defaults = this.materialShaderDefaultsByMaterial.get(material as object);
-        if (!defaults) {
-            defaults = {
-                disableLighting: "disableLighting" in material ? Boolean(material.disableLighting) : null,
-                specularPower: "specularPower" in material && Number.isFinite(Number(material.specularPower))
-                    ? Number(material.specularPower)
-                    : null,
-                emissiveColor: this.cloneColor3OrNull(material.emissiveColor),
-            };
-            this.materialShaderDefaultsByMaterial.set(material as object, defaults);
-        }
-
-        return defaults;
-    }
-
-    private restoreMaterialShaderDefaults(material: any, defaults: MaterialShaderDefaults): void {
-        if (!material || typeof material !== "object") return;
-
-        if (defaults.disableLighting !== null && "disableLighting" in material) {
-            material.disableLighting = defaults.disableLighting;
-        }
-
-        if (defaults.specularPower !== null && "specularPower" in material) {
-            material.specularPower = defaults.specularPower;
-        }
-
-        if (defaults.emissiveColor) {
-            this.setMaterialColorProperty(material, "emissiveColor", defaults.emissiveColor);
-        } else if ("emissiveColor" in material) {
-            this.setMaterialColorProperty(material, "emissiveColor", new Color3(0, 0, 0));
-        }
     }
 
     private markMaterialShaderDirty(material: any): void {
@@ -1498,231 +1397,6 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private applyWgslShaderPresetToMaterial(material: any, presetId: WgslMaterialShaderPresetId): void {
-        if (!material || typeof material !== "object") return;
-
-        const defaults = this.ensureMaterialShaderDefaults(material);
-        this.restoreMaterialShaderDefaults(material, defaults);
-
-        switch (presetId) {
-            case "wgsl-unlit": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = true;
-                }
-                if ("specularPower" in material) {
-                    material.specularPower = 0;
-                }
-                const diffuse = this.cloneColor3OrNull(material.diffuseColor);
-                if (diffuse) {
-                    this.setMaterialColorProperty(
-                        material,
-                        "emissiveColor",
-                        new Color3(
-                            Math.min(1, diffuse.r * 0.95),
-                            Math.min(1, diffuse.g * 0.95),
-                            Math.min(1, diffuse.b * 0.95),
-                        ),
-                    );
-                }
-                break;
-            }
-            case "wgsl-soft-lit": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    const base = defaults.specularPower ?? 32;
-                    material.specularPower = Math.max(8, base * 0.4);
-                }
-                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
-                this.setMaterialColorProperty(
-                    material,
-                    "emissiveColor",
-                    new Color3(
-                        Math.min(1, baseEmissive.r + 0.04),
-                        Math.min(1, baseEmissive.g + 0.04),
-                        Math.min(1, baseEmissive.b + 0.04),
-                    ),
-                );
-                break;
-            }
-            case "wgsl-autoluminous": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    const base = defaults.specularPower ?? 32;
-                    material.specularPower = Math.max(6, base * 0.3);
-                }
-                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
-                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
-                this.setMaterialColorProperty(
-                    material,
-                    "emissiveColor",
-                    new Color3(
-                        Math.min(1, baseEmissive.r + diffuse.r * 0.82),
-                        Math.min(1, baseEmissive.g + diffuse.g * 0.82),
-                        Math.min(1, baseEmissive.b + diffuse.b * 0.82),
-                    ),
-                );
-                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, luminousWgslText);
-                break;
-            }
-            case "wgsl-debug-white": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, debugWhiteWgslText);
-                break;
-            }
-            case "wgsl-full-light": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    material.specularPower = 0;
-                }
-                const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
-                const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
-                const hasOpacityTexture = Boolean(material.opacityTexture);
-                const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
-                const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
-                const isTransparentLike = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled || Number(material.alpha ?? 1) < 0.999;
-                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
-                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
-                const emissiveBoost = isTransparentLike ? 0.82 : 0.32;
-                this.setMaterialColorProperty(
-                    material,
-                    "emissiveColor",
-                    new Color3(
-                        Math.min(1, baseEmissive.r + diffuse.r * emissiveBoost),
-                        Math.min(1, baseEmissive.g + diffuse.g * emissiveBoost),
-                        Math.min(1, baseEmissive.b + diffuse.b * emissiveBoost),
-                    ),
-                );
-                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, fullLightWgslText);
-                break;
-            }
-            case "wgsl-full-light-add": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    material.specularPower = 0;
-                }
-                const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
-                const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
-                const hasOpacityTexture = Boolean(material.opacityTexture);
-                const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
-                const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
-                const isTransparentLike = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled || Number(material.alpha ?? 1) < 0.999;
-                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
-                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
-                const emissiveBoost = isTransparentLike ? 0.96 : 0.46;
-                this.setMaterialColorProperty(
-                    material,
-                    "emissiveColor",
-                    new Color3(
-                        Math.min(1, baseEmissive.r + diffuse.r * emissiveBoost),
-                        Math.min(1, baseEmissive.g + diffuse.g * emissiveBoost),
-                        Math.min(1, baseEmissive.b + diffuse.b * emissiveBoost),
-                    ),
-                );
-                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, fullLightAddWgslText);
-                break;
-            }
-            case "wgsl-full-shadow": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    material.specularPower = 0;
-                }
-                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, fullShadowWgslText);
-                break;
-            }
-            case "wgsl-light-and-shadow": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                MmdManager.externalWgslToonFragmentByMaterial.set(material as object, lightAndShadowWgslText);
-                break;
-            }
-            case "wgsl-specular": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    const base = defaults.specularPower ?? 32;
-                    material.specularPower = Math.min(512, Math.max(32, base * 1.85));
-                }
-                break;
-            }
-            case "wgsl-cel-sharp": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    const base = defaults.specularPower ?? 32;
-                    material.specularPower = Math.max(4, base * 0.18);
-                }
-                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
-                this.setMaterialColorProperty(
-                    material,
-                    "emissiveColor",
-                    new Color3(
-                        Math.min(1, baseEmissive.r + 0.015),
-                        Math.min(1, baseEmissive.g + 0.015),
-                        Math.min(1, baseEmissive.b + 0.015),
-                    ),
-                );
-                break;
-            }
-            case "wgsl-rim-lift": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = false;
-                }
-                if ("specularPower" in material) {
-                    const base = defaults.specularPower ?? 32;
-                    material.specularPower = Math.max(24, base * 0.75);
-                }
-                const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
-                const diffuse = this.cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
-                this.setMaterialColorProperty(
-                    material,
-                    "emissiveColor",
-                    new Color3(
-                        Math.min(1, baseEmissive.r + diffuse.r * 0.12),
-                        Math.min(1, baseEmissive.g + diffuse.g * 0.12),
-                        Math.min(1, baseEmissive.b + diffuse.b * 0.12),
-                    ),
-                );
-                break;
-            }
-            case "wgsl-mono-flat": {
-                if ("disableLighting" in material) {
-                    material.disableLighting = true;
-                }
-                if ("specularPower" in material) {
-                    material.specularPower = 0;
-                }
-                const diffuse = this.cloneColor3OrNull(material.diffuseColor);
-                if (diffuse) {
-                    const luma = Math.max(0, Math.min(1, diffuse.r * 0.299 + diffuse.g * 0.587 + diffuse.b * 0.114));
-                    const mono = luma * 0.92;
-                    this.setMaterialColorProperty(material, "emissiveColor", new Color3(mono, mono, mono));
-                }
-                break;
-            }
-            case "wgsl-mmd-standard":
-            default:
-                break;
-        }
-
-        this.materialShaderPresetByMaterial.set(material as object, presetId);
-        this.markMaterialShaderDirty(material);
-    }
-
     private collectSceneModelMaterials(meshes: Mesh[]): SceneModelMaterialEntry[] {
         const materialMap = new Map<object, SceneModelMaterialEntry>();
         let materialIndex = 0;
@@ -1743,7 +1417,7 @@ ${beforeFogAppendBlock}
                 material,
             });
 
-            this.ensureMaterialShaderDefaults(material);
+            ensureMaterialShaderDefaultsImpl(this, material);
             if (!this.materialShaderPresetByMaterial.has(material as object)) {
                 this.materialShaderPresetByMaterial.set(
                     material as object,
@@ -4805,10 +4479,10 @@ ${beforeFogAppendBlock}
 
         for (const entry of this.sceneModels) {
             for (const materialEntry of entry.materials) {
-                if (this.getExternalWgslToonShaderPathForMaterial(materialEntry.material)) {
+                if (getExternalWgslToonShaderPathForMaterialImpl(this, materialEntry.material)) {
                     return "Mixed";
                 }
-                if (this.getWgslMaterialShaderPresetForMaterial(materialEntry.material) !== MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
+                if (getWgslMaterialShaderPresetForMaterialImpl(this, materialEntry.material) !== MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
                     return "Mixed";
                 }
             }
@@ -6320,10 +5994,10 @@ ${beforeFogAppendBlock}
             hasVisibleSceneModel = true;
 
             for (const materialEntry of entry.materials) {
-                if (this.getExternalWgslToonShaderPathForMaterial(materialEntry.material)) {
+                if (getExternalWgslToonShaderPathForMaterialImpl(this, materialEntry.material)) {
                     return false;
                 }
-                if (this.getWgslMaterialShaderPresetForMaterial(materialEntry.material) !== MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
+                if (getWgslMaterialShaderPresetForMaterialImpl(this, materialEntry.material) !== MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
                     return false;
                 }
             }
