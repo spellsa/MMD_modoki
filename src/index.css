@@ -1016,6 +1016,15 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   cursor: not-allowed;
 }
 
+#bone-select {
+  font-size: 11px;
+  line-height: 1.35;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .bone-controls,
 .morph-controls {
   flex: 1;

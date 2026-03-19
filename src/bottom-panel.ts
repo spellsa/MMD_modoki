@@ -43,6 +43,7 @@ export class BottomPanel {
     }
 
     updateBoneControls(info: ModelInfo): void {
+        const previousBoneName = this.currentBoneName;
         this.boneSelect.innerHTML = "";
         this.boneSliders.clear();
         this.boneSliderValues.clear();
@@ -67,7 +68,10 @@ export class BottomPanel {
         }
 
         this.boneSelect.disabled = false;
-        this.setSelectedBone(info.boneNames[0]);
+        const preferredBoneName = previousBoneName && info.boneNames.includes(previousBoneName)
+            ? previousBoneName
+            : info.boneNames[0];
+        this.setSelectedBone(preferredBoneName, true);
     }
 
     updateMorphControls(info: ModelInfo): void {
@@ -134,8 +138,21 @@ export class BottomPanel {
         return this.currentBoneName;
     }
 
-    setSelectedBone(boneName: string | null): boolean {
-        if (!boneName || this.boneSelect.disabled) return false;
+    clearSelectedBone(forceRender = false): boolean {
+        const selectionChanged = this.currentBoneName !== null || this.boneSelect.selectedIndex !== -1;
+        this.currentBoneName = null;
+        this.boneSelect.selectedIndex = -1;
+        if (forceRender || selectionChanged) {
+            this.renderSelectedBone();
+        }
+        return selectionChanged;
+    }
+
+    setSelectedBone(boneName: string | null, forceRender = false): boolean {
+        if (!boneName) {
+            return this.clearSelectedBone(forceRender);
+        }
+        if (this.boneSelect.disabled) return false;
 
         let exists = false;
         for (let i = 0; i < this.boneSelect.options.length; i += 1) {
@@ -146,9 +163,12 @@ export class BottomPanel {
         }
         if (!exists) return false;
 
+        const selectionChanged = this.currentBoneName !== boneName || this.boneSelect.value !== boneName;
         this.currentBoneName = boneName;
         this.boneSelect.value = boneName;
-        this.renderSelectedBone();
+        if (forceRender || selectionChanged) {
+            this.renderSelectedBone();
+        }
         return true;
     }
 

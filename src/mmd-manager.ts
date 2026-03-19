@@ -61,6 +61,7 @@ import {
     getWgslModelShaderStates as getWgslModelShaderStatesImpl,
     hasExternalWgslToonShader as hasExternalWgslToonShaderImpl,
     isWgslMaterialShaderAssignmentAvailable as isWgslMaterialShaderAssignmentAvailableImpl,
+    ensureMaterialShaderDefaults as ensureMaterialShaderDefaultsImpl,
     setExternalWgslToonShader as setExternalWgslToonShaderImpl,
     setExternalWgslToonShaderForModel as setExternalWgslToonShaderForModelImpl,
     setWgslMaterialShaderPreset as setWgslMaterialShaderPresetImpl,
@@ -250,6 +251,7 @@ import {
     getBoneWorldPositionToRef as getBoneWorldPositionToRefImpl,
     refreshBoneVisualizerTarget as refreshBoneVisualizerTargetImpl,
     syncBoneVisualizerVisibility as syncBoneVisualizerVisibilityImpl,
+    resizeBoneOverlayCanvas as resizeBoneOverlayCanvasImpl,
     tryPickBoneVisualizerAtClientPosition as tryPickBoneVisualizerAtClientPositionImpl,
     updateBoneVisualizer as updateBoneVisualizerImpl,
 } from "./editor/bone-visualizer-controller";
@@ -1412,6 +1414,16 @@ ${beforeFogAppendBlock}
         return this.activeModelInfo;
     }
 
+    public setModelMotionImports(model: MmdModel, imports: ProjectMotionImport[]): void {
+        this.modelMotionImportsByModel.set(model, imports.map((item) => ({ ...item })));
+    }
+
+    public appendModelMotionImport(model: MmdModel, value: ProjectMotionImport): void {
+        const current = this.modelMotionImportsByModel.get(model) ?? [];
+        current.push({ ...value });
+        this.modelMotionImportsByModel.set(model, current);
+    }
+
     public isWgslMaterialShaderAssignmentAvailable(): boolean {
         return isWgslMaterialShaderAssignmentAvailableImpl(this);
     }
@@ -1750,22 +1762,7 @@ ${beforeFogAppendBlock}
     }
 
     private resizeBoneOverlayCanvas(): void {
-        if (!this.boneOverlayCanvas || !this.boneOverlayCtx) return;
-
-        const width = Math.max(1, Math.floor(this.renderingCanvas.clientWidth));
-        const height = Math.max(1, Math.floor(this.renderingCanvas.clientHeight));
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
-
-        this.boneOverlayDpr = dpr;
-        const targetWidth = Math.floor(width * dpr);
-        const targetHeight = Math.floor(height * dpr);
-
-        if (this.boneOverlayCanvas.width !== targetWidth || this.boneOverlayCanvas.height !== targetHeight) {
-            this.boneOverlayCanvas.width = targetWidth;
-            this.boneOverlayCanvas.height = targetHeight;
-        }
-
-        this.boneOverlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return resizeBoneOverlayCanvasImpl(this);
     }
 
     private disposeBoneVisualizer(): void {
@@ -1991,6 +1988,8 @@ ${beforeFogAppendBlock}
             this.scene
         );
         this.camera.fov = (30 * Math.PI) / 180;
+        this.camera.minZ = 0.1;
+        this.camera.maxZ = 100000;
         this.camera.lowerRadiusLimit = 2;
         this.camera.upperRadiusLimit = 100;
         this.camera.wheelDeltaPercentage = 0.01;
@@ -2518,6 +2517,52 @@ ${beforeFogAppendBlock}
             const meshes = [sceneModel.mesh, ...sceneModel.mesh.getChildMeshes()];
             this.applyModelEdgeToMeshes(meshes as Mesh[]);
         }
+    }
+
+    private collectSceneModelMaterials(meshes: Mesh[]): SceneModelMaterialEntry[] {
+        const materialMap = new Map<object, SceneModelMaterialEntry>();
+        let materialIndex = 0;
+
+        const registerMaterial = (material: any, fallbackName: string): void => {
+            if (!material || typeof material !== "object") return;
+            if (materialMap.has(material as object)) return;
+
+            const materialName = typeof material.name === "string" && material.name.trim().length > 0
+                ? material.name
+                : fallbackName;
+            const key = String(materialIndex) + ":" + materialName;
+            materialIndex += 1;
+
+            materialMap.set(material as object, {
+                key,
+                name: materialName,
+                material,
+            });
+
+            ensureMaterialShaderDefaultsImpl(this, material);
+            if (!this.materialShaderPresetByMaterial.has(material as object)) {
+                this.materialShaderPresetByMaterial.set(
+                    material as object,
+                    MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET,
+                );
+            }
+        };
+
+        for (const mesh of meshes) {
+            const material = mesh.material as any;
+            if (!material) continue;
+
+            if (Array.isArray(material.subMaterials)) {
+                for (let subIndex = 0; subIndex < material.subMaterials.length; subIndex += 1) {
+                    const subMaterial = material.subMaterials[subIndex];
+                    registerMaterial(subMaterial, (mesh.name || "mesh") + "#" + String(subIndex + 1));
+                }
+            } else {
+                registerMaterial(material, mesh.name || ("material_" + String(materialIndex)));
+            }
+        }
+
+        return Array.from(materialMap.values());
     }
 
     applyToonShadowInfluenceToAllModels(): void {

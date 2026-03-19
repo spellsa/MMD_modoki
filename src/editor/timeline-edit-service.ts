@@ -133,15 +133,11 @@ export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
         consumed.add(key);
     };
 
+    // Keep the timeline row order aligned with the bone selection list.
+    // Category is still preserved in the track key, but row ordering follows
+    // the model's bone order instead of grouping roots/bones separately.
     for (const boneName of host.activeModelInfo.boneNames) {
-        if (classifyBone(boneName) !== "root") continue;
-        appendByKey(createTrackKey("root", boneName));
-    }
-
-    for (const boneName of host.activeModelInfo.boneNames) {
-        const category = classifyBone(boneName);
-        if (category === "root") continue;
-        appendByKey(createTrackKey(category, boneName));
+        appendByKey(createTrackKey(classifyBone(boneName), boneName));
     }
 
     for (const morphName of host.activeModelInfo.morphNames) {

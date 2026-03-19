@@ -5,6 +5,7 @@ import type { BoneControlInfo, ModelInfo } from "../types";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
 import { MmdStandardMaterialProxy } from "babylon-mmd/esm/Runtime/mmdStandardMaterialProxy";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
+import { ensureMaterialShaderDefaults } from "../scene/material-shader-service";
 
 const PMX_BONE_FLAG_VISIBLE = 0x0008;
 const PMX_BONE_FLAG_ROTATABLE = 0x0002;
@@ -22,6 +23,58 @@ function splitFilePath(filePath: string): { dir: string; fileName: string } {
         dir: pathParts.substring(0, lastSlash + 1),
         fileName: pathParts.substring(lastSlash + 1),
     };
+}
+
+type SceneModelMaterialEntry = {
+    key: string;
+    name: string;
+    material: any;
+};
+
+function collectSceneModelMaterials(host: any, meshes: Mesh[]): SceneModelMaterialEntry[] {
+    const materialMap = new Map<object, SceneModelMaterialEntry>();
+    let materialIndex = 0;
+
+    const registerMaterial = (material: any, fallbackName: string): void => {
+        if (!material || typeof material !== "object") return;
+        if (materialMap.has(material as object)) return;
+
+        const materialName = typeof material.name === "string" && material.name.trim().length > 0
+            ? material.name
+            : fallbackName;
+        const key = String(materialIndex) + ":" + materialName;
+        materialIndex += 1;
+
+        materialMap.set(material as object, {
+            key,
+            name: materialName,
+            material,
+        });
+
+        ensureMaterialShaderDefaults(host, material);
+        if (!host.materialShaderPresetByMaterial.has(material as object)) {
+            host.materialShaderPresetByMaterial.set(
+                material as object,
+                host.constructor.DEFAULT_WGSL_MATERIAL_SHADER_PRESET,
+            );
+        }
+    };
+
+    for (const mesh of meshes) {
+        const material = mesh.material as any;
+        if (!material) continue;
+
+        if (Array.isArray(material.subMaterials)) {
+            for (let subIndex = 0; subIndex < material.subMaterials.length; subIndex += 1) {
+                const subMaterial = material.subMaterials[subIndex];
+                registerMaterial(subMaterial, (mesh.name || "mesh") + "#" + String(subIndex + 1));
+            }
+        } else {
+            registerMaterial(material, mesh.name || ("material_" + String(materialIndex)));
+        }
+    }
+
+    return Array.from(materialMap.values());
 }
 
 export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | null> {
@@ -112,7 +165,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
 
         host.applyModelEdgeToMeshes(result.meshes as Mesh[]);
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
-        const sceneMaterials = host.collectSceneModelMaterials(result.meshes as Mesh[]);
+        const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
             materialProxyConstructor: MmdStandardMaterialProxy,

@@ -168,7 +168,7 @@ export function updateBoneVisualizer(host: any): void {
     const ctx = host.boneOverlayCtx;
     const width = host.boneOverlayCanvas.width / host.boneOverlayDpr;
     const height = host.boneOverlayCanvas.height / host.boneOverlayDpr;
-    const viewport = host.camera.viewport.toGlobal(host.engine.getRenderWidth(), host.engine.getRenderHeight());
+    const viewport = host.camera.viewport.toGlobal(width, height);
     const transformMatrix = host.scene.getTransformMatrix();
     const selectedBoneName = host.boneVisualizerSelectedBoneName;
 
@@ -410,9 +410,14 @@ export function ensureBoneOverlayCanvas(host: any): void {
 export function resizeBoneOverlayCanvas(host: any): void {
     if (!host.boneOverlayCanvas || !host.boneOverlayCtx) return;
 
-    const width = Math.max(1, Math.floor(host.renderingCanvas.clientWidth));
-    const height = Math.max(1, Math.floor(host.renderingCanvas.clientHeight));
+    const canvasRect = host.renderingCanvas.getBoundingClientRect();
+    const container = host.renderingCanvas.parentElement;
+    const containerRect = container?.getBoundingClientRect();
+    const width = Math.max(1, Math.floor(canvasRect.width));
+    const height = Math.max(1, Math.floor(canvasRect.height));
     const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const left = Math.max(0, Math.floor(canvasRect.left - (containerRect?.left ?? 0)));
+    const top = Math.max(0, Math.floor(canvasRect.top - (containerRect?.top ?? 0)));
 
     host.boneOverlayDpr = dpr;
     const targetWidth = Math.floor(width * dpr);
@@ -423,6 +428,10 @@ export function resizeBoneOverlayCanvas(host: any): void {
         host.boneOverlayCanvas.height = targetHeight;
     }
 
+    host.boneOverlayCanvas.style.left = `${left}px`;
+    host.boneOverlayCanvas.style.top = `${top}px`;
+    host.boneOverlayCanvas.style.width = `${width}px`;
+    host.boneOverlayCanvas.style.height = `${height}px`;
     host.boneOverlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 

@@ -13,6 +13,7 @@ import type {
     PngSequenceExportProgress,
     PngSequenceExportState,
     ProjectOutputState,
+    TrackCategory,
     TimelineInterpolationPreview,
     WebmExportProgress,
     WebmExportState,
@@ -251,6 +252,7 @@ export class UIController {
     private isSyncingAccessoryUi = false;
     private isSyncingAccessoryParentUi = false;
     private syncingBoneSelection = false;
+    private selectedBoneTrackCategory: TrackCategory | null = null;
     private readonly interpolationChannelBindings = new Map<string, InterpolationChannelBinding>();
     private interpolationDragState: InterpolationDragState | null = null;
     private appRootEl: HTMLElement;
@@ -5063,13 +5065,18 @@ export class UIController {
     }
 
     private syncBottomBoneSelectionFromTimeline(track: KeyframeTrack | null): void {
-        if (!this.isBoneTrackForEditor(track)) return;
         if (this.mmdManager.getTimelineTarget() !== "model") return;
         if (this.syncingBoneSelection) return;
 
         this.syncingBoneSelection = true;
         try {
-            this.bottomPanel.setSelectedBone(track.name);
+            if (this.isBoneTrackForEditor(track)) {
+                this.selectedBoneTrackCategory = track.category;
+                this.bottomPanel.setSelectedBone(track.name);
+            } else {
+                this.selectedBoneTrackCategory = null;
+                this.bottomPanel.clearSelectedBone();
+            }
         } finally {
             this.syncingBoneSelection = false;
         }
@@ -5083,7 +5090,18 @@ export class UIController {
         this.mmdManager.setBoneVisualizerSelectedBone(boneName);
         this.syncingBoneSelection = true;
         try {
-            this.timeline.selectTrackByNameAndCategory(boneName, ["root", "semi-standard", "bone"]);
+            const preferredCategories: TrackCategory[] = this.selectedBoneTrackCategory
+                ? [
+                    this.selectedBoneTrackCategory,
+                    ...(["bone", "semi-standard", "root"] as TrackCategory[]).filter(
+                        (category) => category !== this.selectedBoneTrackCategory
+                    ),
+                ]
+                : ["bone", "semi-standard", "root"];
+            if (this.timeline.selectTrackByNameAndCategory(boneName, preferredCategories)) {
+                const selectedTrack = this.timeline.getSelectedTrack();
+                this.selectedBoneTrackCategory = this.isBoneTrackForEditor(selectedTrack) ? selectedTrack.category : null;
+            }
         } finally {
             this.syncingBoneSelection = false;
         }
@@ -5091,16 +5109,19 @@ export class UIController {
 
     private syncBoneVisualizerSelection(track: KeyframeTrack | null): void {
         if (this.mmdManager.getTimelineTarget() !== "model") {
+            this.selectedBoneTrackCategory = null;
             this.mmdManager.setBoneVisualizerSelectedBone(null);
             return;
         }
 
         if (this.isBoneTrackForEditor(track)) {
+            this.selectedBoneTrackCategory = track.category;
             this.mmdManager.setBoneVisualizerSelectedBone(track.name);
             return;
         }
 
-        this.mmdManager.setBoneVisualizerSelectedBone(this.bottomPanel.getSelectedBone());
+        this.selectedBoneTrackCategory = null;
+        this.mmdManager.setBoneVisualizerSelectedBone(null);
     }
 
     private updateTimelineEditState(): void {

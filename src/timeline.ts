@@ -264,14 +264,18 @@ export class Timeline {
 
     resize(): void {
         const dpr = window.devicePixelRatio || 1;
+        // Keep the track area scroll range aligned with the label column.
+        // The label canvas includes the ruler row at the top, so the track canvas
+        // gets a matching spacer at the bottom to avoid scroll drift near the end.
         const trackRowsH = Math.max(1, this.tracks.length) * ROW_H;
+        const trackContentH = trackRowsH + RULER_H;
         const tw = this.trackScrollEl.clientWidth || 400;
 
-        // Static canvas (track rows only – no ruler height added)
+        // Static canvas (track rows + bottom spacer to match the label column height)
         this.staticCanvas.width = tw * dpr;
-        this.staticCanvas.height = trackRowsH * dpr;
+        this.staticCanvas.height = trackContentH * dpr;
         this.staticCanvas.style.width = `${tw}px`;
-        this.staticCanvas.style.height = `${trackRowsH}px`;
+        this.staticCanvas.style.height = `${trackContentH}px`;
         this.staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         // Overlay canvas (ruler, RULER_H tall, full width, above scroll)
@@ -535,8 +539,7 @@ export class Timeline {
         const rect = this.staticCanvas.getBoundingClientRect();
         const localX = e.clientX - rect.left;
         const localY = e.clientY - rect.top;
-        const y = localY + this.trackScrollEl.scrollTop;
-        const row = Math.floor(y / ROW_H);
+        const row = Math.floor(localY / ROW_H);
         if (row < 0 || row >= this.tracks.length) return;
 
         this.selectedTrackIndex = row;
@@ -550,8 +553,7 @@ export class Timeline {
     private selectTrackFromLabelEvent(e: MouseEvent): void {
         const rect = this.labelCanvas.getBoundingClientRect();
         const localY = e.clientY - rect.top;
-        const y = localY - RULER_H + this.labelsEl.scrollTop;
-        const row = Math.floor(y / ROW_H);
+        const row = Math.floor((localY - RULER_H) / ROW_H);
         if (row < 0 || row >= this.tracks.length) return;
 
         this.selectedTrackIndex = row;
