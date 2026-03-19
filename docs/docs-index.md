@@ -68,3 +68,6 @@
 
 ## WGSL
 - [WGSL シェーダーでできること / できないこと](./wgsl-shader-capabilities.md)
+
+## GI
+- [Babylon RSM GI 繝｡繝｢](./babylon-rsm-gi-notes.md)

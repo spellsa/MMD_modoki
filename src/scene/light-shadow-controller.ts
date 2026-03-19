@@ -353,6 +353,9 @@ export function setLightDirection(host: any, azimuthDeg: number, elevationDeg: n
     if (typeof host.applyVolumetricLightSettings === "function") {
         host.applyVolumetricLightSettings();
     }
+    if (typeof host.refreshGlobalIlluminationLightParameters === "function") {
+        host.refreshGlobalIlluminationLightParameters();
+    }
 }
 
 export function getLightAzimuth(host: any): number {

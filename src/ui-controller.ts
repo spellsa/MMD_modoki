@@ -170,6 +170,8 @@ export class UIController {
     private skydomeToggleText: HTMLElement;
     private btnTogglePhysics: HTMLElement;
     private physicsToggleText: HTMLElement;
+    private btnToggleGi: HTMLElement;
+    private giToggleText: HTMLElement;
     private btnToggleShaderPanel: HTMLButtonElement | null = null;
     private shaderPanelToggleText: HTMLElement | null = null;
     private btnToggleFullscreenUi: HTMLButtonElement | null = null;
@@ -279,6 +281,7 @@ export class UIController {
     private bundledWgslScanInFlight = false;
     private bundledWgslLastScanMs = 0;
     private refreshAaToggleUi: (() => void) | null = null;
+    private refreshGiToggleUi: (() => void) | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
         this.refreshShaderPanel();
@@ -313,6 +316,8 @@ export class UIController {
         this.skydomeToggleText = document.getElementById("skydome-toggle-text")!;
         this.btnTogglePhysics = document.getElementById("btn-toggle-physics")!;
         this.physicsToggleText = document.getElementById("physics-toggle-text")!;
+        this.btnToggleGi = document.getElementById("btn-toggle-gi")!;
+        this.giToggleText = document.getElementById("gi-toggle-text")!;
         this.btnToggleShaderPanel = document.getElementById("btn-toggle-shader-panel") as HTMLButtonElement | null;
         this.shaderPanelToggleText = document.getElementById("shader-panel-toggle-text");
         this.btnToggleFullscreenUi = document.getElementById("btn-toggle-fullscreen-ui") as HTMLButtonElement | null;
@@ -385,6 +390,7 @@ export class UIController {
             this.mmdManager.getPhysicsEnabled(),
             this.mmdManager.isPhysicsAvailable()
         );
+        this.updateGiToggleButton();
         this.updateInfoActionButtons();
         this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
         this.updateFullscreenUiToggleButton(false);
@@ -479,6 +485,21 @@ export class UIController {
             const enabled = this.mmdManager.togglePhysicsEnabled();
             this.updatePhysicsToggleButton(enabled, true);
             this.showToast(enabled ? t("toast.physics.on") : t("toast.physics.off"), "info");
+        });
+        this.btnToggleGi.addEventListener("click", () => {
+            const wasEnabled = this.mmdManager.isGlobalIlluminationEnabled();
+            const enabled = this.mmdManager.toggleGlobalIlluminationEnabled();
+            this.updateGiToggleButton();
+            this.showToast(
+                this.mmdManager.isGlobalIlluminationPending()
+                    ? t("toast.gi.loading")
+                    : !wasEnabled && !enabled
+                    ? t("toast.gi.unavailable")
+                    : enabled
+                        ? t("toast.gi.on")
+                        : t("toast.gi.off"),
+                this.mmdManager.isGlobalIlluminationPending() || (!wasEnabled && !enabled) ? "info" : "info",
+            );
         });
         this.btnToggleShaderPanel?.addEventListener("click", () => {
             const nextVisible = !this.isShaderPanelExpanded();
@@ -1367,6 +1388,10 @@ export class UIController {
 
         this.mmdManager.onPhysicsStateChanged = (enabled: boolean, available: boolean) => {
             this.updatePhysicsToggleButton(enabled, available);
+        };
+
+        this.mmdManager.onGlobalIlluminationStateChanged = () => {
+            this.updateGiToggleButton();
         };
 
         this.mmdManager.onBoneVisualizerBonePicked = (boneName: string) => {
@@ -4769,6 +4794,7 @@ export class UIController {
 
     private applyLocalizedUiState(): void {
         this.refreshAaToggleUi?.();
+        this.refreshGiToggleUi?.();
         this.updateGroundToggleButton(this.mmdManager.isGroundVisible());
         this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
         this.updatePhysicsToggleButton(
@@ -4816,6 +4842,23 @@ export class UIController {
         if (this.physicsGravityDirZSlider) this.physicsGravityDirZSlider.disabled = !available;
         if (this.physicsSimulationRateSelect) this.physicsSimulationRateSelect.disabled = !available;
         this.refreshPhysicsSimulationRateUi();
+    }
+
+    private updateGiToggleButton(): void {
+        this.refreshGiToggleUi = () => {
+            const active = this.mmdManager.isGlobalIlluminationEnabled();
+            const pending = this.mmdManager.isGlobalIlluminationPending();
+            this.giToggleText.textContent = t("toolbar.gi.short");
+            this.btnToggleGi.setAttribute("aria-pressed", active || pending ? "true" : "false");
+            this.btnToggleGi.classList.toggle("toggle-on", active);
+            this.btnToggleGi.classList.toggle("toggle-loading", pending && !active);
+            this.btnToggleGi.title = pending && !active
+                ? t("toolbar.gi.title.loading")
+                : active
+                    ? t("toolbar.gi.title.on")
+                    : t("toolbar.gi.title.off");
+        };
+        this.refreshGiToggleUi();
     }
 
     private refreshPhysicsSimulationRateUi(): void {

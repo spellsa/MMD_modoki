@@ -1,4 +1,4 @@
-{
+﻿{
   "toolbar.loadFile.label": "ファイル読込",
   "toolbar.loadFile.title": "PMX / VMD / VPD / 音源を読み込む",
   "toolbar.saveProject.label": "プロジェクト保存",
@@ -20,6 +20,10 @@
   "toolbar.physics.title.on": "物理演算: ON (クリックでOFF)",
   "toolbar.physics.title.off": "物理演算: OFF (クリックでON)",
   "toolbar.physics.title.unavailable": "物理演算: 利用不可",
+  "toolbar.gi.short": "GI",
+  "toolbar.gi.title.loading": "グローバルイルミネーション: 読み込み中...",
+  "toolbar.gi.title.on": "グローバルイルミネーション: ON (クリックでOFF)",
+  "toolbar.gi.title.off": "グローバルイルミネーション: OFF (クリックでON)",
   "toolbar.fx.short": "FX",
   "toolbar.fx.title.on": "エフェクト欄: 表示中 (クリックで非表示)",
   "toolbar.fx.title.off": "エフェクト欄: 非表示 (クリックで表示)",
@@ -46,6 +50,10 @@
   "toast.physics.on": "物理: ON",
   "toast.physics.off": "物理: OFF",
   "toast.physics.unavailable": "この環境では物理演算は利用できません",
+  "toast.gi.on": "GI: ON",
+  "toast.gi.off": "GI: OFF",
+  "toast.gi.loading": "GI: 読み込み中...",
+  "toast.gi.unavailable": "この環境ではGIを利用できません",
   "toast.fx.shown": "エフェクト欄を表示",
   "toast.fx.hidden": "エフェクト欄を非表示",
   "toast.ui.hidden": "UIを非表示にしました (ESCで戻る)",

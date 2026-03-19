@@ -1,4 +1,4 @@
-{
+﻿{
   "toolbar.loadFile.label": "Load File",
   "toolbar.loadFile.title": "Load PMX / VMD / VPD / audio",
   "toolbar.saveProject.label": "Save Project",
@@ -20,6 +20,10 @@
   "toolbar.physics.title.on": "Physics: ON (click to turn OFF)",
   "toolbar.physics.title.off": "Physics: OFF (click to turn ON)",
   "toolbar.physics.title.unavailable": "Physics: unavailable",
+  "toolbar.gi.short": "GI",
+  "toolbar.gi.title.loading": "Global illumination: loading...",
+  "toolbar.gi.title.on": "Global illumination: ON (click to turn OFF)",
+  "toolbar.gi.title.off": "Global illumination: OFF (click to turn ON)",
   "toolbar.fx.short": "FX",
   "toolbar.fx.title.on": "Effect panel: shown (click to hide)",
   "toolbar.fx.title.off": "Effect panel: hidden (click to show)",
@@ -46,6 +50,10 @@
   "toast.physics.on": "Physics: ON",
   "toast.physics.off": "Physics: OFF",
   "toast.physics.unavailable": "Physics is unavailable in this environment",
+  "toast.gi.on": "GI: ON",
+  "toast.gi.off": "GI: OFF",
+  "toast.gi.loading": "GI: loading...",
+  "toast.gi.unavailable": "GI is unavailable in this environment",
   "toast.fx.shown": "Effect panel shown",
   "toast.fx.hidden": "Effect panel hidden",
   "toast.ui.hidden": "UI hidden (press ESC to restore)",

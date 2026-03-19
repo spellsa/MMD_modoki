@@ -284,6 +284,32 @@ body.exporter-mode #bone-overlay-canvas {
   color: var(--text-primary);
 }
 
+.toolbar-btn.toggle-loading {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.16), rgba(56, 189, 248, 0.08));
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25) inset;
+  color: var(--text-primary);
+}
+
+.toolbar-btn.toggle-loading::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-left: 0.35em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: toolbar-toggle-spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes toolbar-toggle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .status-badge {
   display: flex;
   align-items: center;

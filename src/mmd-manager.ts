@@ -222,6 +222,7 @@ import {
     setShadowFrustumSize as setShadowFrustumSizeImpl,
     setToonShadowInfluence as setToonShadowInfluenceImpl,
 } from "./scene/light-shadow-controller";
+import { GlobalIlluminationController } from "./render/global-illumination-controller";
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
     buildModelTrackFrameMapFromAnimation as buildModelTrackFrameMapFromAnimationImpl,
@@ -1075,6 +1076,7 @@ ${beforeFogAppendBlock}
     private readonly boneGizmoTempRotation = Quaternion.Identity();
     private readonly boneGizmoTempRotation2 = Quaternion.Identity();
     private physicsEnabledBeforeBoneGizmoDrag: boolean | null = null;
+    private globalIlluminationController: GlobalIlluminationController | null = null;
     private physicsPlugin: MmdAmmoJSPlugin | null = null;
     private bulletPhysicsRuntime: MultiPhysicsRuntime | null = null;
     private physicsRuntime: MmdAmmoPhysics | MmdBulletPhysics | null = null;
@@ -1400,6 +1402,7 @@ ${beforeFogAppendBlock}
     public onPhysicsStateChanged: ((enabled: boolean, available: boolean) => void) | null = null;
     public onBoneVisualizerBonePicked: ((boneName: string) => void) | null = null;
     public onMaterialShaderStateChanged: (() => void) | null = null;
+    public onGlobalIlluminationStateChanged: ((enabled: boolean) => void) | null = null;
 
     public getLoadedModels(): { index: number; name: string; path: string; active: boolean }[] {
         return this.sceneModels.map((entry, index) => ({
@@ -1565,6 +1568,7 @@ ${beforeFogAppendBlock}
             // no-op
         }
 
+        this.removeGlobalIlluminationSceneModel(removed);
         this.modelKeyframeTracksByModel.delete(removed.model);
         this.modelSourceAnimationsByModel.delete(removed.model);
         this.modelMotionImportsByModel.delete(removed.model);
@@ -1616,6 +1620,34 @@ ${beforeFogAppendBlock}
     }
     public getTimelineTarget(): "model" | "camera" {
         return this.timelineTarget;
+    }
+
+    public isGlobalIlluminationEnabled(): boolean {
+        return this.globalIlluminationController?.isEnabled() ?? false;
+    }
+
+    public isGlobalIlluminationPending(): boolean {
+        return this.globalIlluminationController?.isPending() ?? false;
+    }
+
+    public setGlobalIlluminationEnabled(enabled: boolean): boolean {
+        return this.globalIlluminationController?.setEnabled(enabled) ?? false;
+    }
+
+    public toggleGlobalIlluminationEnabled(): boolean {
+        return this.globalIlluminationController?.toggleEnabled() ?? false;
+    }
+
+    public syncGlobalIlluminationSceneModels(): void {
+        this.globalIlluminationController?.syncSceneModels();
+    }
+
+    public removeGlobalIlluminationSceneModel(sceneModel: { mesh: Mesh }): void {
+        this.globalIlluminationController?.removeSceneModel(sceneModel);
+    }
+
+    public refreshGlobalIlluminationLightParameters(): void {
+        this.globalIlluminationController?.updateLightParameters();
     }
 
     public setBoneVisualizerSelectedBone(boneName: string | null): void {
@@ -2129,6 +2161,13 @@ ${beforeFogAppendBlock}
         // VMD Loader
         this.vmdLoader = new VmdLoader(this.scene);
         this.vpdLoader = new VpdLoader(this.scene);
+        this.globalIlluminationController = new GlobalIlluminationController(
+            this.scene,
+            this.renderingCanvas,
+            () => this.dirLight ?? null,
+            () => this.sceneModels,
+            (enabled) => this.onGlobalIlluminationStateChanged?.(enabled),
+        );
 
         this.scene.onBeforeRenderObservable.add(() => {
             if (this.shouldApplyCameraMotionToViewport()) {
@@ -2959,6 +2998,7 @@ ${beforeFogAppendBlock}
         this.audioSourcePath = null;
 
         for (const entry of this.sceneModels) {
+            this.removeGlobalIlluminationSceneModel(entry);
             try {
                 this.mmdRuntime.destroyMmdModel(entry.model);
             } catch {
@@ -5097,6 +5137,7 @@ ${beforeFogAppendBlock}
             this.skydome.dispose();
             this.skydome = null;
         }
+        this.globalIlluminationController?.dispose();
         this.scene.dispose();
         this.engine.dispose();
     }
@@ -5111,6 +5152,7 @@ ${beforeFogAppendBlock}
         // Keep drawing buffer aligned to CSS pixel size to avoid edge tearing artifacts.
         if (this.engine.getRenderWidth() !== width || this.engine.getRenderHeight() !== height) {
             this.engine.setSize(width, height);
+            this.resizeGlobalIllumination();
             if (this.ssaoDepthRenderer) {
                 this.disposeSsaoDepthRenderer();
                 if (this.postEffectSsaoEnabledValue) {
@@ -5127,6 +5169,10 @@ ${beforeFogAppendBlock}
                 this.enforceFinalPostProcessOrder();
             }
         }
+    }
+
+    private resizeGlobalIllumination(): void {
+        this.globalIlluminationController?.resize();
     }
 }
 
