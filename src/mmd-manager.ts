@@ -56,6 +56,7 @@ import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
     getExternalWgslToonShaderPath as getExternalWgslToonShaderPathImpl,
     getExternalWgslToonShaderPathForMaterial as getExternalWgslToonShaderPathForMaterialImpl,
+    getSerializedMaterialShaderStates as getSerializedMaterialShaderStatesImpl,
     getWgslMaterialShaderPresetForMaterial as getWgslMaterialShaderPresetForMaterialImpl,
     getWgslMaterialShaderPresets as getWgslMaterialShaderPresetsImpl,
     getWgslModelShaderStates as getWgslModelShaderStatesImpl,
@@ -1462,6 +1463,10 @@ ${beforeFogAppendBlock}
 
     public getWgslModelShaderStates(): WgslModelShaderInfo[] {
         return getWgslModelShaderStatesImpl(this);
+    }
+
+    public getSerializedMaterialShaderStates(entry: SceneModelEntry): ProjectModelMaterialShaderState[] {
+        return getSerializedMaterialShaderStatesImpl(this, entry);
     }
 
     public setWgslMaterialShaderPreset(
