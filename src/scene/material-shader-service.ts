@@ -1,15 +1,15 @@
 // eslint-disable-next-line import/no-unresolved
-import luminousWgslText from "../wgsl/luminous.wgsl?raw";
+import luminousWgslText from "../../wgsl/luminous.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
-import debugWhiteWgslText from "../wgsl/toon_debug_white_shadow.wgsl?raw";
+import debugWhiteWgslText from "../../wgsl/toon_debug_white_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
-import fullLightWgslText from "../wgsl/full_light.wgsl?raw";
+import fullLightWgslText from "../../wgsl/full_light.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
-import fullLightAddWgslText from "../wgsl/full_light_add.wgsl?raw";
+import fullLightAddWgslText from "../../wgsl/full_light_add.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
-import fullShadowWgslText from "../wgsl/full_shadow.wgsl?raw";
+import fullShadowWgslText from "../../wgsl/full_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
-import lightAndShadowWgslText from "../wgsl/light_and_shadow.wgsl?raw";
+import lightAndShadowWgslText from "../../wgsl/light_and_shadow.wgsl?raw";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import type { ProjectModelMaterialShaderState } from "../types";
 

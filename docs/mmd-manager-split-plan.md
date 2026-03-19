@@ -455,3 +455,84 @@ export class MmdManager {
 - `loadPMX` では PMX 読み込み後の `ModelInfo` 組み立て、物理補助、材質補正、モデル初期化、ロード後通知までをまとめて扱う
 - ランタイム / playback は今回は分割せず、`MmdManager` 本体に残す方針にした
 - `npm run lint` は警告のみで通過している
+### 2026-03-19 shader/effects cleanup
+- `src/scene/material-shader-service.ts` に WGSL preset / external shader / shader state / preset apply の実体を寄せて、`MmdManager` 側の shader helper を削った
+- `src/render/effects-pipeline-controller.ts` は post effect と DoF の窓口として維持しつつ、`MmdManager` の getter / setter を薄くした
+- `src/mmd-manager.ts` は shader 周りの旧 helper を削除した結果、`8508` 行まで縮んだ
+- 起動時の import エラーも WGSL raw import の相対パス修正で復旧した
+- `npm run lint` は通過
+- `npx tsc --noEmit` は既存の `i18n` と wasm typed array 系エラーのみが残っている
+### 2026-03-19 SSAO split
+- `src/render/ssao-controller.ts` を追加し、SSAO の有効/無効判定、fallback post process、WebGPU fallback pipeline、depth renderer 管理を外出しした
+- `src/render/ssao-shader.ts` を追加し、`ensureSimpleSsaoShader()` の巨大な shader 登録処理を別ファイルへ移した
+- `src/mmd-manager.ts` 側は SSAO の wrapper だけを残す形にして、実装本体を controller / shader module に委譲した
+- `src/mmd-manager.ts` はこの時点で 6,858 行まで縮んだ
+- `npm run lint` は通過
+- `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみで停止する
+- SSAO はほぼ独立したので、次は bone visualizer か light/shadow の分離が自然
+### 2026-03-19 bone visualizer split
+- `src/editor/bone-visualizer-controller.ts` を追加し、bone overlay / pick / visibility / canvas 管理を外出しした
+- `src/mmd-manager.ts` 側は bone visualizer の wrapper だけを残して、描画とヒット判定の実装本体を controller に委譲した
+- `src/mmd-manager.ts` はこの時点で 6,457 行まで縮んだ
+- `npm run lint` は通過
+- `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみで停止する
+- bone visualizer の次は gizmo / light-shadow / remaining render orchestration の順で切り分ける候補
+### 2026-03-19 light/shadow split
+- `src/scene/light-shadow-controller.ts` を追加して、`lightColorTemperature` / `lightColor` / `shadowColor` / `shadowEnabled` / `shadowFrustumSize` / `shadowEdgeSoftness` / `setLightDirection` / `toonShadowInfluence` と、`toon` 系の反映ロジックをまとめて外出しした
+- `src/mmd-manager.ts` は light/shadow の getter / setter と初期化を controller 委譲にして、旧 helper の本体を削除した
+- `src/mmd-manager.ts` はこの時点で `6,963` 行まで縮んだ
+- `npm run lint` は通過
+- `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 系エラーのみ
+- 次は `bone gizmo` か `render orchestration` の残りを切る候補
+### 2026-03-19 bone gizmo split
+- `src/editor/bone-gizmo-controller.ts` を追加して、bone gizmo の target 判定、proxy 同期、drag 反映、初期化、dispose をまとめて移した
+- `src/mmd-manager.ts` 側は wrapper と wiring だけ残し、constructor / onBeforeRender / dispose から controller を呼ぶ形に整理した
+- `src/mmd-manager.ts` は今回の分離で `6,761` 行まで縮んだ
+- `npm run lint` は通過
+- `npx tsc --noEmit` は既存の `src/i18n.ts` と wasm typed array 周りのエラーのみ
+- 次は `render orchestration` か、まだ残っている表示系のまとまりを切るのが自然
+
+### 2026-03-19 render orchestration split
+- `src/render/post-process-controller.ts` を追加して、motion blur / fog / final lens distortion / antialias / volumetric light 周りの制御を集約した
+- `src/mmd-manager.ts` から `initializeDofPipeline` / `setupEditorDofPipeline` / `applyMotionBlurSettings` / `applyVolumetricLightSettings` / `applyFogSettings` / `setupOriginFogPostProcess` / `setupFinalLensDistortionPostProcess` / `applyAntialiasSettings` / `enforceFinalPostProcessOrder` / `updateSimpleMotionBlurState` を委譲化した
+- `src/mmd-manager.ts` は今回の分離で `6,194` 行まで縮んだ
+- `npm run lint` は通過
+- `npx tsc --noEmit` は既存の `src/i18n.ts` と wasm typed array 周りのエラーのみ
+- まだ残っている大きい塊は `applyImageProcessingSettings` / `applyLutSettings` / `applySsrSettings` / `applyEditorDofSettings` / `setupFarDofPostProcess` あたり
+### 2026-03-19 post-process cleanup
+- `src/render/post-process-controller.ts` now owns `applyImageProcessingSettings`, `applyLutSettings`, `applySsrSettings`, `applyEditorDofSettings`, `applyDofLensBlurSettings`, `applyDofLensOpticsSettings`, and `setupFarDofPostProcess`.
+- `src/mmd-manager.ts` keeps only thin wrappers for those post-process entry points.
+- `src/mmd-manager.ts` is down to 5039 lines after this cleanup.
+- The missing `applyLutSettingsImpl` import and the old `ensureSignedLensDistortionShader` helper have been fixed.
+- `npm run lint` passes.
+- `npx tsc --noEmit` still fails only on the pre-existing `src/i18n.ts` and wasm typed array issues.
+### 2026-03-19 post-process wiring
+- `src/render/post-process-controller.ts` now owns `applyImageProcessingSettings`, `applyLutSettings`, `applySsrSettings`, `applyEditorDofSettings`, `applyDofLensBlurSettings`, `applyDofLensOpticsSettings`, `applyMotionBlurSettings`, `applyVolumetricLightSettings`, `applyFogSettings`, `setupOriginFogPostProcess`, `setupFinalLensDistortionPostProcess`, `applyAntialiasSettings`, `enforceFinalPostProcessOrder`, and `setupFarDofPostProcess`.
+- `src/mmd-manager.ts` now keeps thin wrappers for those post-process entry points instead of the old inline bodies.
+- `src/mmd-manager.ts` is down to 6,586 lines after this cut.
+- The remaining volumetric-light sync in `setLightDirection()` now goes through the existing wrapper path.
+- `npm run lint` passes.
+- `npx tsc --noEmit` still fails only on the pre-existing `src/i18n.ts` and wasm typed array issues.
+- Next candidates are the remaining SSAO block, light/shadow, and bone visualizer/gizmo cleanup.
+### 2026-03-19 old helper cleanup
+- `src/mmd-manager.ts` から、使われなくなった project 系の型 import と旧 helper の残骸を整理した。
+- 具体的には `collectSceneModelMaterials`、`getSerializedMaterialShaderStates`、`setModelMotionImports`、`appendModelMotionImport`、`normalizePathForCompare` などの dead code を削除した。
+- `exportProjectState` / `importProjectState` の public wrapper は残し、`project-serializer.ts` / `project-importer.ts` への委譲構造は維持している。
+- `src/mmd-manager.ts` は現在 7,609 行まで減っている。
+- `npm run lint` は通過。
+- `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみが残っている。
+
+### 2026-03-19 light/shadow wrapper fix
+- `src/scene/light-shadow-controller.ts` の `setLightDirection()` を `applyVolumetricLightSettings()` 連動に揃えて、`MmdManager` 側の volumetric light 同期と一致させた。
+- `src/mmd-manager.ts` の light/shadow wrapper は UI から触る API を public のまま維持し、`getLightColor` / `setLightColor` / `getShadowColor` / `setShadowColor` / `setShadowEnabled` / `getLightAzimuth` / `getLightElevation` の公開性を戻した。
+- `src/mmd-manager.ts` は現在 5,669 行まで縮小している。
+- `npm run lint` は通過。
+- `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみが残っている。
+- 次は `bone visualizer` / `bone gizmo` / `render orchestration` の残りを詰めるのが自然。
+### 2026-03-19 bone visualizer / gizmo split
+- `src/editor/bone-visualizer-controller.ts` と `src/editor/bone-gizmo-controller.ts` へ骨表示系の実装を寄せた。
+- `MmdManager` 側は `initializeBoneGizmoSystem()` / `handleBoneGizmoBeforeRender()` / `disposeBoneGizmoSystem()` / `updateBoneGizmoTarget()` の薄い wrapper と、bone visualizer の entry wrapper だけを残した。
+- `bone gizmo` の古い helper ブロックを削って、`mmd-manager.ts` は現在 5,088 行まで減っている。
+- `npm run lint` は通過。
+- `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみが残っている。
+- 次は残っている render orchestration と、必要なら bone visualizer の残りの dead code を詰める。

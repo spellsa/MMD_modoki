@@ -1,0 +1,1217 @@
+import { Effect } from "@babylonjs/core/Materials/effect";
+import { ColorCurves } from "@babylonjs/core/Materials/colorCurves";
+import { ColorGradingTexture } from "@babylonjs/core/Materials/Textures/colorGradingTexture";
+import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
+import { LensRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/lensRenderingPipeline";
+import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
+import { FxaaPostProcess } from "@babylonjs/core/PostProcesses/fxaaPostProcess";
+import { SSRRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssrRenderingPipeline";
+import { VolumetricLightScatteringPostProcess } from "@babylonjs/core/PostProcesses/volumetricLightScatteringPostProcess";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Scene } from "@babylonjs/core/scene";
+
+export function updateSimpleMotionBlurState(host: any, deltaMs: number): void {
+    if (!host.motionBlurPostProcess || !host.postEffectMotionBlurEnabledValue) {
+        return;
+    }
+
+    const cameraPosition = host.camera.globalPosition ?? host.camera.position;
+    if (!host.motionBlurPreviousCameraPosition) {
+        host.motionBlurPreviousCameraPosition = cameraPosition.clone();
+        host.motionBlurScreenDirection.set(0, 0);
+        host.motionBlurScreenAmount = 0;
+        return;
+    }
+
+    const deltaWorld = cameraPosition.subtract(host.motionBlurPreviousCameraPosition);
+    host.motionBlurPreviousCameraPosition.copyFrom(cameraPosition);
+
+    const deltaView = Vector3.TransformNormal(deltaWorld, host.camera.getViewMatrix());
+    const rawX = -deltaView.x;
+    const rawY = deltaView.y;
+    const rawLen = Math.hypot(rawX, rawY);
+    if (rawLen < 0.000001) {
+        host.motionBlurScreenDirection.scaleInPlace(0.8);
+        host.motionBlurScreenAmount *= 0.8;
+        return;
+    }
+
+    const dirX = rawX / rawLen;
+    const dirY = rawY / rawLen;
+    const speedPerMs = rawLen / Math.max(1, deltaMs);
+    const targetAmount = Math.min(0.04, speedPerMs * 2.4);
+    const smooth = 0.35;
+
+    host.motionBlurScreenDirection.x = host.motionBlurScreenDirection.x * (1 - smooth) + dirX * smooth;
+    host.motionBlurScreenDirection.y = host.motionBlurScreenDirection.y * (1 - smooth) + dirY * smooth;
+
+    const dirLen = Math.hypot(host.motionBlurScreenDirection.x, host.motionBlurScreenDirection.y);
+    if (dirLen > 0.000001) {
+        host.motionBlurScreenDirection.x /= dirLen;
+        host.motionBlurScreenDirection.y /= dirLen;
+    }
+
+    host.motionBlurScreenAmount = host.motionBlurScreenAmount * (1 - smooth) + targetAmount * smooth;
+}
+
+export function applyMotionBlurSettings(host: any): void {
+    const postProcesses = [...host.camera._postProcesses];
+    for (const postProcess of postProcesses) {
+        if (postProcess && postProcess !== host.motionBlurPostProcess && postProcess.name === "motionBlur") {
+            host.camera.detachPostProcess(postProcess);
+            postProcess.dispose(host.camera);
+        }
+    }
+
+    if (!host.postEffectMotionBlurEnabledValue) {
+        if (host.motionBlurPostProcess) {
+            host.motionBlurPostProcess.dispose(host.camera);
+            host.motionBlurPostProcess = null;
+        }
+        host.motionBlurPreviousCameraPosition = null;
+        host.motionBlurScreenDirection.set(0, 0);
+        host.motionBlurScreenAmount = 0;
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
+    if (!host.motionBlurPostProcess) {
+        host.ensureSimpleMotionBlurShader();
+        host.motionBlurPostProcess = new PostProcess(
+            "motionBlur",
+            "mmdSimpleMotionBlur",
+            {
+                uniforms: ["blurDirection", "blurAmount"],
+                size: 1.0,
+                camera: host.camera,
+                samplingMode: Texture.BILINEAR_SAMPLINGMODE,
+                engine: host.engine,
+                reusable: false,
+                shaderLanguage: host.getPostProcessShaderLanguage(),
+            },
+        );
+        host.motionBlurPostProcess.onApplyObservable.add((effect: any) => {
+            const sampleScale = Math.max(0.25, Math.min(2, host.postEffectMotionBlurSamplesValue / 32));
+            const blurAmount = host.motionBlurScreenAmount * host.postEffectMotionBlurStrengthValue * sampleScale;
+            effect.setFloat2("blurDirection", host.motionBlurScreenDirection.x, host.motionBlurScreenDirection.y);
+            effect.setFloat("blurAmount", blurAmount);
+        });
+        host.motionBlurPreviousCameraPosition = null;
+        host.motionBlurScreenDirection.set(0, 0);
+        host.motionBlurScreenAmount = 0;
+    }
+
+    host.enforceFinalPostProcessOrder();
+}
+
+function updateVolumetricLightPosition(host: any): void {
+    if (!host.volumetricLightPostProcess || !host.dirLight) {
+        return;
+    }
+    const position = host.dirLight.position;
+    host.volumetricLightPostProcess.useCustomMeshPosition = true;
+    host.volumetricLightPostProcess.setCustomMeshPosition(position.clone());
+    if (host.volumetricLightPostProcess.mesh) {
+        host.volumetricLightPostProcess.mesh.position.copyFrom(position);
+    }
+}
+
+export function applyVolumetricLightSettings(host: any): void {
+    if (!host.postEffectVlsEnabledValue || !host.dirLight) {
+        if (host.volumetricLightPostProcess) {
+            host.volumetricLightPostProcess.dispose(host.camera);
+            host.volumetricLightPostProcess = null;
+        }
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
+    if (!host.volumetricLightPostProcess) {
+        try {
+            host.volumetricLightPostProcess = new VolumetricLightScatteringPostProcess(
+                "volumetricLight",
+                1.0,
+                host.camera,
+                undefined,
+                100,
+                Texture.BILINEAR_SAMPLINGMODE,
+                host.engine,
+                false,
+                host.scene,
+            );
+            host.volumetricLightPostProcess.autoClear = false;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.warn(`Volumetric light initialization failed on ${host.getEngineType()}. Volumetric light was disabled. Reason: ${message}`);
+            host.addRuntimeDiagnostic(`Volumetric light disabled on ${host.getEngineType()}.`);
+            host.postEffectVlsEnabledValue = false;
+            host.volumetricLightPostProcess = null;
+            host.enforceFinalPostProcessOrder();
+            return;
+        }
+    }
+
+    host.volumetricLightPostProcess.exposure = host.postEffectVlsExposureValue;
+    host.volumetricLightPostProcess.decay = host.postEffectVlsDecayValue;
+    host.volumetricLightPostProcess.weight = host.postEffectVlsWeightValue;
+    host.volumetricLightPostProcess.density = host.postEffectVlsDensityValue;
+    updateVolumetricLightPosition(host);
+    host.enforceFinalPostProcessOrder();
+}
+
+export function applyFogSettings(host: any): void {
+    host.scene.fogMode = Scene.FOGMODE_NONE;
+    host.scene.fogColor.set(
+        host.postEffectFogColorValue.r,
+        host.postEffectFogColorValue.g,
+        host.postEffectFogColorValue.b,
+    );
+    if (!host.originFogPostProcess && host.depthRenderer) {
+        host.setupOriginFogPostProcess();
+    }
+}
+
+export function setupOriginFogPostProcess(host: any): void {
+    if (host.originFogPostProcess || !host.depthRenderer) {
+        return;
+    }
+
+    const shaderKey = "mmdOriginFogFragmentShader";
+    if (!Effect.ShadersStore[shaderKey]) {
+        Effect.ShadersStore[shaderKey] = `
+                precision highp float;
+                varying vec2 vUV;
+                uniform sampler2D textureSampler;
+                uniform sampler2D depthSampler;
+                uniform float fogEnabled;
+                uniform float fogMode;
+                uniform float fogStart;
+                uniform float fogEnd;
+                uniform float fogDensity;
+                uniform float fogOpacity;
+                uniform vec3 fogColor;
+                uniform vec2 cameraNearFar;
+                uniform vec3 cameraPosition;
+                uniform mat4 inverseViewProjection;
+
+                float computeFogAmount(float originDistance) {
+                    if (fogEnabled <= 0.5) {
+                        return 0.0;
+                    }
+                    if (fogMode < 0.5) {
+                        float fogSpan = max(fogEnd - fogStart, 0.0001);
+                        return clamp((originDistance - fogStart) / fogSpan, 0.0, 1.0);
+                    }
+                    if (fogMode < 1.5) {
+                        float density = max(fogDensity, 0.0);
+                        return clamp(1.0 - exp(-density * originDistance), 0.0, 1.0);
+                    }
+                    float density = max(fogDensity, 0.0);
+                    float squared = density * originDistance;
+                    return clamp(1.0 - exp(-(squared * squared)), 0.0, 1.0);
+                }
+
+                vec3 reconstructWorldPosition(vec2 uv, float depthMetric) {
+                    float cameraDistance = mix(cameraNearFar.x, cameraNearFar.y, clamp(depthMetric, 0.0, 1.0));
+                    vec4 clipFar = vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+                    vec4 worldFarH = inverseViewProjection * clipFar;
+                    vec3 worldFar = worldFarH.xyz / max(worldFarH.w, 0.0001);
+                    vec3 rayDirection = normalize(worldFar - cameraPosition);
+                    return cameraPosition + rayDirection * cameraDistance;
+                }
+
+                void main(void) {
+                    vec4 color = texture2D(textureSampler, vUV);
+                    if (fogEnabled <= 0.5) {
+                        gl_FragColor = color;
+                        return;
+                    }
+
+                    float depthMetric = clamp(abs(texture2D(depthSampler, clamp(vUV, vec2(0.001), vec2(0.999))).r), 0.0, 1.0);
+                    if (depthMetric <= 0.00001) {
+                        gl_FragColor = color;
+                        return;
+                    }
+
+                    vec3 worldPosition = reconstructWorldPosition(vUV, depthMetric);
+                    float fogAmount = computeFogAmount(length(worldPosition));
+                    float fogBlend = clamp(fogAmount * fogOpacity, 0.0, 1.0);
+                    gl_FragColor = vec4(mix(color.rgb, fogColor, fogBlend), color.a);
+                }
+            `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+                varying vUV: vec2f;
+                var textureSamplerSampler: sampler;
+                var textureSampler: texture_2d<f32>;
+                var depthSamplerSampler: sampler;
+                var depthSampler: texture_2d<f32>;
+                uniform fogEnabled: f32;
+                uniform fogMode: f32;
+                uniform fogStart: f32;
+                uniform fogEnd: f32;
+                uniform fogDensity: f32;
+                uniform fogOpacity: f32;
+                uniform fogColor: vec3f;
+                uniform cameraNearFar: vec2f;
+                uniform cameraPosition: vec3f;
+                uniform inverseViewProjection: mat4x4f;
+
+                fn computeFogAmount(originDistance: f32) -> f32 {
+                    if (uniforms.fogEnabled <= 0.5) {
+                        return 0.0;
+                    }
+                    if (uniforms.fogMode < 0.5) {
+                        let fogSpan = max(uniforms.fogEnd - uniforms.fogStart, 0.0001);
+                        return clamp((originDistance - uniforms.fogStart) / fogSpan, 0.0, 1.0);
+                    }
+                    if (uniforms.fogMode < 1.5) {
+                        let density = max(uniforms.fogDensity, 0.0);
+                        return clamp(1.0 - exp(-density * originDistance), 0.0, 1.0);
+                    }
+                    let density = max(uniforms.fogDensity, 0.0);
+                    let squared = density * originDistance;
+                    return clamp(1.0 - exp(-(squared * squared)), 0.0, 1.0);
+                }
+
+                fn reconstructWorldPosition(uv: vec2f, depthMetric: f32) -> vec3f {
+                    let cameraDistance = mix(uniforms.cameraNearFar.x, uniforms.cameraNearFar.y, clamp(depthMetric, 0.0, 1.0));
+                    let clipFar = vec4f(uv * 2.0 - 1.0, 1.0, 1.0);
+                    let worldFarH = uniforms.inverseViewProjection * clipFar;
+                    let worldFar = worldFarH.xyz / max(worldFarH.w, 0.0001);
+                    let rayDirection = normalize(worldFar - uniforms.cameraPosition);
+                    return uniforms.cameraPosition + rayDirection * cameraDistance;
+                }
+
+                @fragment
+                fn main(input: FragmentInputs) -> FragmentOutputs {
+                    let color = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+                    if (uniforms.fogEnabled <= 0.5) {
+                        fragmentOutputs.color = color;
+                        return fragmentOutputs;
+                    }
+
+                    let depthMetric = clamp(abs(textureSampleLevel(depthSampler, depthSamplerSampler, clamp(input.vUV, vec2f(0.001), vec2f(0.999)), 0.0).r), 0.0, 1.0);
+                    if (depthMetric <= 0.00001) {
+                        fragmentOutputs.color = color;
+                        return fragmentOutputs;
+                    }
+
+                    let worldPosition = reconstructWorldPosition(input.vUV, depthMetric);
+                    let fogAmount = computeFogAmount(length(worldPosition));
+                    let fogBlend = clamp(fogAmount * uniforms.fogOpacity, 0.0, 1.0);
+                    fragmentOutputs.color = vec4f(mix(color.rgb, uniforms.fogColor, fogBlend), color.a);
+                    return fragmentOutputs;
+                }
+            `;
+    }
+
+    host.originFogPostProcess = new PostProcess(
+        "originFog",
+        "mmdOriginFog",
+        {
+            uniforms: ["fogEnabled", "fogMode", "fogStart", "fogEnd", "fogDensity", "fogOpacity", "fogColor", "cameraNearFar", "cameraPosition", "inverseViewProjection"],
+            samplers: ["depthSampler"],
+            size: 1.0,
+            camera: host.camera,
+            samplingMode: Texture.BILINEAR_SAMPLINGMODE,
+            engine: host.engine,
+            reusable: false,
+            shaderLanguage: host.getPostProcessShaderLanguage(),
+        },
+    );
+    host.originFogPostProcess.onApplyObservable.add((effect: any) => {
+        const depthMap = host.depthRenderer?.getDepthMap();
+        if (!depthMap) {
+            return;
+        }
+
+        effect.setTexture("depthSampler", depthMap);
+        effect.setFloat("fogEnabled", host.postEffectFogEnabledValue ? 1 : 0);
+        effect.setFloat("fogMode", host.postEffectFogModeValue);
+        effect.setFloat("fogStart", host.postEffectFogStartValue);
+        effect.setFloat("fogEnd", Math.max(host.postEffectFogStartValue + 0.01, host.postEffectFogEndValue));
+        effect.setFloat("fogDensity", host.postEffectFogDensityValue);
+        effect.setFloat("fogOpacity", host.postEffectFogOpacityValue);
+        effect.setColor3("fogColor", host.postEffectFogColorValue);
+        effect.setFloat2("cameraNearFar", host.camera.minZ, host.camera.maxZ);
+        effect.setVector3("cameraPosition", host.camera.globalPosition);
+        const inverseViewProjection = host.camera.getTransformationMatrix().clone();
+        inverseViewProjection.invert();
+        effect.setMatrix("inverseViewProjection", inverseViewProjection);
+    });
+    host.enforceFinalPostProcessOrder();
+}
+
+export function setupFinalLensDistortionPostProcess(host: any): void {
+    const shaderKey = "mmdFinalLensDistortionFragmentShader";
+    if (!Effect.ShadersStore[shaderKey]) {
+        Effect.ShadersStore[shaderKey] = `
+                precision highp float;
+                varying vec2 vUV;
+                uniform sampler2D textureSampler;
+                uniform float distortion;
+
+                void main(void) {
+                    if (abs(distortion) < 0.0001) {
+                        gl_FragColor = texture2D(textureSampler, vUV);
+                        return;
+                    }
+
+                    vec2 centered = vUV - vec2(0.5);
+                    float radius2 = dot(centered, centered);
+                    if (radius2 < 1e-8) {
+                        gl_FragColor = texture2D(textureSampler, vUV);
+                        return;
+                    }
+
+                    vec2 direction = normalize(centered);
+                    float amount = clamp(abs(distortion) * 0.23, 0.0, 1.0);
+
+                    vec2 barrelUv = vec2(0.5) + direction * radius2;
+                    barrelUv = mix(vUV, barrelUv, amount);
+
+                    vec2 pincushionUv = vec2(0.5) - direction * radius2;
+                    pincushionUv = mix(vUV, pincushionUv, amount);
+
+                    vec2 finalUv = distortion >= 0.0 ? barrelUv : pincushionUv;
+                    finalUv = clamp(finalUv, vec2(0.0), vec2(1.0));
+                    gl_FragColor = texture2D(textureSampler, finalUv);
+                }
+            `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+                varying vUV: vec2f;
+                var textureSamplerSampler: sampler;
+                var textureSampler: texture_2d<f32>;
+                uniform distortion: f32;
+
+                #define CUSTOM_FRAGMENT_DEFINITIONS
+                @fragment
+                fn main(input: FragmentInputs)->FragmentOutputs {
+                    let centered: vec2f = input.vUV - vec2f(0.5);
+                    let radius2: f32 = dot(centered, centered);
+
+                    var finalUv: vec2f = input.vUV;
+                    if (abs(uniforms.distortion) >= 0.0001 && radius2 >= 1e-8) {
+                        let direction: vec2f = normalize(centered);
+                        let amount: f32 = clamp(abs(uniforms.distortion) * 0.23, 0.0, 1.0);
+
+                        var barrelUv: vec2f = vec2f(0.5) + direction * radius2;
+                        barrelUv = mix(input.vUV, barrelUv, amount);
+
+                        var pincushionUv: vec2f = vec2f(0.5) - direction * radius2;
+                        pincushionUv = mix(input.vUV, pincushionUv, amount);
+
+                        finalUv = pincushionUv;
+                        if (uniforms.distortion >= 0.0) {
+                            finalUv = barrelUv;
+                        }
+                        finalUv = clamp(finalUv, vec2f(0.0), vec2f(1.0));
+                    }
+
+                    fragmentOutputs.color = textureSample(textureSampler, textureSamplerSampler, finalUv);
+                }
+            `;
+    }
+
+    if (host.finalLensDistortionPostProcess) {
+        host.finalLensDistortionPostProcess.dispose(host.camera);
+        host.finalLensDistortionPostProcess = null;
+    }
+
+    host.finalLensDistortionPostProcess = new PostProcess(
+        "finalLensDistortion",
+        "mmdFinalLensDistortion",
+        {
+            uniforms: ["distortion"],
+            size: 1.0,
+            camera: host.camera,
+            samplingMode: Texture.BILINEAR_SAMPLINGMODE,
+            engine: host.engine,
+            reusable: false,
+            shaderLanguage: host.getPostProcessShaderLanguage(),
+        },
+    );
+    host.finalLensDistortionPostProcess.onApplyObservable.add((effect: any) => {
+        effect.setFloat("distortion", host.dofLensDistortionValue);
+    });
+    host.enforceFinalPostProcessOrder();
+}
+
+export function applyAntialiasSettings(host: any): void {
+    if (host.finalAntialiasPostProcess) {
+        host.finalAntialiasPostProcess.dispose(host.camera);
+        host.finalAntialiasPostProcess = null;
+    }
+    if (!host.antialiasEnabledValue) {
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+    host.finalAntialiasPostProcess = new FxaaPostProcess(
+        "finalFxaa",
+        1.0,
+        host.camera,
+        Texture.BILINEAR_SAMPLINGMODE,
+        host.engine,
+        false
+    );
+    host.enforceFinalPostProcessOrder();
+}
+
+export function enforceFinalPostProcessOrder(host: any): void {
+    const tail: PostProcess[] = [];
+    if (host.volumetricLightPostProcess) tail.push(host.volumetricLightPostProcess);
+    if (host.originFogPostProcess) tail.push(host.originFogPostProcess);
+    if (host.motionBlurPostProcess) tail.push(host.motionBlurPostProcess);
+    if (host.finalLensDistortionPostProcess) tail.push(host.finalLensDistortionPostProcess);
+    if (host.finalAntialiasPostProcess) tail.push(host.finalAntialiasPostProcess);
+
+    if (tail.length === 0) return;
+
+    for (const postProcess of tail) host.camera.detachPostProcess(postProcess);
+    for (const postProcess of tail) host.camera.attachPostProcess(postProcess);
+}
+
+export function initializePostProcessRenderSystem(host: any): void {
+    host.setupEditorDofPipeline();
+    if (host.farDofEnabled) {
+        host.setupFarDofPostProcess();
+    } else {
+        host.postEffectFarDofStrengthValue = 0;
+    }
+}
+
+export function setupEditorDofPipeline(host: any): void {
+    if (host.defaultRenderingPipeline) {
+        host.defaultRenderingPipeline.dispose();
+        host.defaultRenderingPipeline = null;
+    }
+    if (host.lensRenderingPipeline) {
+        host.lensRenderingPipeline.dispose(false);
+        host.lensRenderingPipeline = null;
+    }
+    if (host.ssrRenderingPipeline) {
+        host.ssrRenderingPipeline.dispose(false);
+        host.ssrRenderingPipeline = null;
+    }
+    host.disablePrePassRendererIfSupported?.();
+    if (host.motionBlurPostProcess) {
+        host.motionBlurPostProcess.dispose(host.camera);
+        host.motionBlurPostProcess = null;
+    }
+    if (host.volumetricLightPostProcess) {
+        host.volumetricLightPostProcess.dispose(host.camera);
+        host.volumetricLightPostProcess = null;
+    }
+    if (host.originFogPostProcess) {
+        host.originFogPostProcess.dispose(host.camera);
+        host.originFogPostProcess = null;
+    }
+
+    host.defaultRenderingPipeline = new DefaultRenderingPipeline(
+        "DefaultRenderingPipeline",
+        false,
+        host.scene,
+        [host.camera]
+    );
+
+    host.defaultRenderingPipeline.samples = 4;
+    host.defaultRenderingPipeline.fxaaEnabled = false;
+    host.defaultRenderingPipeline.glowLayerEnabled = false;
+    host.applyImageProcessingSettings();
+    host.applyDefaultPipelinePostProcessSettings();
+    host.applySsrSettings();
+    host.applyFogSettings();
+    host.configureDofDepthRenderer();
+    host.setupOriginFogPostProcess();
+    if (host.dofLensDistortionFollowsCameraFov) {
+        host.updateDofLensDistortionFromCameraFov();
+    }
+    host.setupLensHighlightsPipeline();
+    host.defaultRenderingPipeline.depthOfFieldBlurLevel = host.dofBlurLevelValue;
+    host.applyEditorDofSettings();
+    host.setupFinalLensDistortionPostProcess();
+    host.applyAntialiasSettings();
+    host.applyVolumetricLightSettings();
+    host.applyMotionBlurSettings();
+    host.enforceFinalPostProcessOrder();
+}
+
+export function isImageProcessingEffectsEnabled(host: any): boolean {
+    const epsilon = 1e-4;
+    return host.postEffectToneMappingEnabledValue
+        || host.postEffectDitheringEnabledValue
+        || host.postEffectVignetteEnabledValue
+        || host.postEffectColorCurvesEnabledValue
+        || (host.postEffectLutEnabledValue && isLutSourceReady(host))
+        || Math.abs(host.postEffectExposureValue - 1) > epsilon;
+}
+
+export function applyImageProcessingSettings(host: any): void {
+    const imageProcessing = host.scene.imageProcessingConfiguration;
+    imageProcessing.exposure = host.postEffectExposureValue;
+    imageProcessing.toneMappingEnabled = host.postEffectToneMappingEnabledValue;
+    imageProcessing.toneMappingType = host.postEffectToneMappingTypeValue;
+    imageProcessing.ditheringEnabled = host.postEffectDitheringEnabledValue;
+    imageProcessing.ditheringIntensity = host.postEffectDitheringIntensityValue;
+    imageProcessing.vignetteEnabled = host.postEffectVignetteEnabledValue;
+    imageProcessing.vignetteWeight = host.postEffectVignetteWeightValue;
+    imageProcessing.vignetteColor.set(0, 0, 0, 1);
+
+    if (host.postEffectColorCurvesEnabledValue) {
+        if (!imageProcessing.colorCurves) {
+            imageProcessing.colorCurves = new ColorCurves();
+        }
+        imageProcessing.colorCurves.globalHue = host.postEffectColorCurvesHueValue;
+        imageProcessing.colorCurves.globalDensity = host.postEffectColorCurvesDensityValue;
+        imageProcessing.colorCurves.globalSaturation = host.postEffectColorCurvesSaturationValue;
+        imageProcessing.colorCurves.globalExposure = host.postEffectColorCurvesExposureValue;
+    }
+    imageProcessing.colorCurvesEnabled = host.postEffectColorCurvesEnabledValue;
+    applyLutSettings(host);
+
+    const shouldEnable = isImageProcessingEffectsEnabled(host);
+    const pipeline = host.defaultRenderingPipeline;
+    if (pipeline) {
+        pipeline.imageProcessingEnabled = shouldEnable;
+    } else {
+        host.scene.imageProcessingConfiguration.isEnabled = shouldEnable;
+    }
+}
+
+export function isLutSourceReady(host: any): boolean {
+    if (host.postEffectLutSourceModeValue === "builtin") {
+        return host.constructor.POST_EFFECT_LUT_PRESETS.some((preset: any) => preset.id === host.postEffectLutPresetValue);
+    }
+    return host.postEffectLutExternalTextValue !== null;
+}
+
+export function applyLutSettings(host: any): void {
+    const imageProcessing = host.scene.imageProcessingConfiguration;
+    const mode = host.postEffectLutSourceModeValue;
+    const enabled = host.postEffectLutEnabledValue && isLutSourceReady(host);
+    if (!enabled) {
+        imageProcessing.colorGradingEnabled = false;
+        imageProcessing.colorGradingTexture = null;
+        if (host.postEffectLutTexture) {
+            host.postEffectLutTexture.dispose();
+            host.postEffectLutTexture = null;
+        }
+        host.postEffectLutTextureKey = null;
+        return;
+    }
+
+    const key = mode === "builtin"
+        ? `builtin:${host.postEffectLutPresetValue}`
+        : `external:${mode}:${host.postEffectLutExternalPathValue ?? ""}:${host.postEffectLutExternalRevision}`;
+
+    if (!host.postEffectLutTexture || host.postEffectLutTextureKey !== key) {
+        if (host.postEffectLutTexture) {
+            host.postEffectLutTexture.dispose();
+            host.postEffectLutTexture = null;
+        }
+        try {
+            const lutUrl = mode === "builtin"
+                ? getOrCreateLutPresetBlobUrl(host, host.postEffectLutPresetValue)
+                : getOrCreateExternalLutBlobUrl(host);
+            host.postEffectLutTexture = new ColorGradingTexture(lutUrl, host.scene);
+            host.postEffectLutTextureKey = key;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            const sourceLabel = mode === "builtin"
+                ? host.postEffectLutPresetValue
+                : (host.postEffectLutExternalPathValue ?? "external");
+            console.warn(`Failed to create LUT '${sourceLabel}': ${message}`);
+            imageProcessing.colorGradingEnabled = false;
+            imageProcessing.colorGradingTexture = null;
+            host.postEffectLutTexture = null;
+            host.postEffectLutTextureKey = null;
+            return;
+        }
+    }
+
+    if (!host.postEffectLutTexture) {
+        imageProcessing.colorGradingEnabled = false;
+        imageProcessing.colorGradingTexture = null;
+        return;
+    }
+
+    host.postEffectLutTexture.level = host.postEffectLutIntensityValue;
+    imageProcessing.colorGradingTexture = host.postEffectLutTexture;
+    imageProcessing.colorGradingEnabled = true;
+}
+
+export function getOrCreateLutPresetBlobUrl(host: any, presetId: string): string {
+    const existing = host.postEffectLutPresetBlobUrlById.get(presetId);
+    if (existing) {
+        return existing;
+    }
+
+    const lutText = host.constructor.POST_EFFECT_LUT_TEXT_BY_ID[presetId];
+    if (!lutText) {
+        throw new Error(`Unknown built-in LUT preset: ${presetId}`);
+    }
+    const blob = new Blob([lutText], { type: "text/plain" });
+    const blobUrl = URL.createObjectURL(blob);
+    host.postEffectLutPresetBlobUrlById.set(presetId, blobUrl);
+    return blobUrl;
+}
+
+export function getOrCreateExternalLutBlobUrl(host: any): string {
+    if (!host.postEffectLutExternalTextValue) {
+        throw new Error("External LUT text is empty");
+    }
+    if (host.postEffectLutExternalBlobUrl) {
+        return host.postEffectLutExternalBlobUrl;
+    }
+
+    const blob = new Blob([host.postEffectLutExternalTextValue], { type: "text/plain" });
+    const blobUrl = URL.createObjectURL(blob);
+    host.postEffectLutExternalBlobUrl = blobUrl;
+    return blobUrl;
+}
+
+export function applyDefaultPipelinePostProcessSettings(host: any): void {
+    const pipeline = host.defaultRenderingPipeline;
+    if (!pipeline) {
+        return;
+    }
+
+    pipeline.bloomEnabled = host.postEffectBloomEnabledValue;
+    pipeline.bloomWeight = host.postEffectBloomWeightValue;
+    pipeline.bloomThreshold = host.postEffectBloomThresholdValue;
+    pipeline.bloomKernel = host.postEffectBloomKernelValue;
+
+    pipeline.glowLayerEnabled = host.postEffectGlowEnabledValue;
+    if (pipeline.glowLayer) {
+        pipeline.glowLayer.intensity = host.postEffectGlowIntensityValue;
+        pipeline.glowLayer.blurKernelSize = host.postEffectGlowKernelValue;
+    }
+
+    pipeline.chromaticAberrationEnabled = host.postEffectChromaticAberrationValue > 1e-4;
+    if (pipeline.chromaticAberration) {
+        pipeline.chromaticAberration.aberrationAmount = host.postEffectChromaticAberrationValue;
+    }
+
+    pipeline.grainEnabled = host.postEffectGrainIntensityValue > 1e-4;
+    if (pipeline.grain) {
+        pipeline.grain.intensity = host.postEffectGrainIntensityValue;
+        pipeline.grain.animated = false;
+    }
+
+    pipeline.sharpenEnabled = host.postEffectSharpenEdgeValue > 1e-4;
+    if (pipeline.sharpen) {
+        pipeline.sharpen.edgeAmount = host.postEffectSharpenEdgeValue;
+        pipeline.sharpen.colorAmount = 1;
+    }
+
+    if (host.dofEnabledValue) {
+        configureDofDepthRenderer(host);
+        applyEditorDofSettings(host);
+    }
+}
+
+export function applySsrSettings(host: any): void {
+    if (!host.postEffectSsrEnabledValue) {
+        if (host.ssrRenderingPipeline) {
+            host.ssrRenderingPipeline.dispose(false);
+            host.ssrRenderingPipeline = null;
+        }
+        host.disablePrePassRendererIfSupported();
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
+    if (!host.hasPrePassRendererSupport()) {
+        if (host.ssrRenderingPipeline) {
+            host.ssrRenderingPipeline.dispose(false);
+            host.ssrRenderingPipeline = null;
+        }
+        host.disablePrePassRendererIfSupported();
+        host.postEffectSsrEnabledValue = false;
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
+    if (!host.ssrRenderingPipeline) {
+        try {
+            host.ssrRenderingPipeline = new SSRRenderingPipeline(
+                "SsrRenderingPipeline",
+                host.scene,
+                [host.camera],
+                false,
+            );
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.warn(`SSR pipeline initialization failed on ${host.getEngineType()}. SSR was disabled. Reason: ${message}`);
+            host.addRuntimeDiagnostic(`SSR disabled on ${host.getEngineType()}.`);
+            host.postEffectSsrEnabledValue = false;
+            host.ssrRenderingPipeline = null;
+            host.enforceFinalPostProcessOrder();
+            return;
+        }
+    }
+
+    if (!host.ssrRenderingPipeline || !host.ssrRenderingPipeline.isSupported) {
+        if (host.ssrRenderingPipeline) {
+            host.ssrRenderingPipeline.dispose(false);
+            host.ssrRenderingPipeline = null;
+        }
+        host.disablePrePassRendererIfSupported();
+        host.postEffectSsrEnabledValue = false;
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
+    host.ssrRenderingPipeline.isEnabled = true;
+    host.ssrRenderingPipeline.samples = 1;
+    host.ssrRenderingPipeline.strength = host.postEffectSsrStrengthValue;
+    host.ssrRenderingPipeline.step = host.postEffectSsrStepValue;
+    host.ssrRenderingPipeline.maxDistance = 1000;
+    host.ssrRenderingPipeline.maxSteps = 64;
+    host.ssrRenderingPipeline.thickness = 0.2;
+    host.ssrRenderingPipeline.roughnessFactor = 0;
+    host.ssrRenderingPipeline.blurDispersionStrength = 0;
+    host.ssrRenderingPipeline.enableSmoothReflections = host.postEffectSsrStepValue > 1;
+    host.enforceFinalPostProcessOrder();
+}
+
+export function applyEditorDofSettings(host: any): void {
+    if (!host.defaultRenderingPipeline) return;
+    const dof = host.defaultRenderingPipeline.depthOfField;
+    if (host.depthRenderer) {
+        dof.depthTexture = host.depthRenderer.getDepthMap();
+    }
+    dof.lensSize = host.dofLensSizeValue;
+    dof.focalLength = host.dofFocalLengthValue;
+    updateEditorDofFocusAndFStop(host);
+    host.defaultRenderingPipeline.depthOfFieldEnabled = host.dofEnabledValue;
+    applyDofLensBlurSettings(host);
+}
+
+export function applyDofLensBlurSettings(host: any): void {
+    if (!host.lensRenderingPipeline) return;
+    applyDofLensOpticsSettings(host);
+    const strength = host.dofLensBlurStrengthValue;
+    const enabled = host.dofEnabledValue && strength > 0.0001;
+
+    if (!enabled) {
+        host.lensRenderingPipeline.setHighlightsGain(0);
+        host.lensRenderingPipeline.setFocusDistance(-1);
+        return;
+    }
+
+    const focusDistance = Math.max(0.1, host.dofFocusDistanceMmValue / 1000);
+    const boostedStrength = Math.pow(strength, 0.7);
+    const highlightsGain = host.dofLensHighlightsBaseGain + boostedStrength * host.dofLensHighlightsGainRange;
+    const highlightsThreshold = Math.max(
+        0.08,
+        host.dofLensHighlightsBaseThreshold - boostedStrength * host.dofLensHighlightsThresholdRange
+    );
+
+    const aperture = Math.max(0.35, 0.55 + boostedStrength * 1.1);
+    host.lensRenderingPipeline.setFocusDistance(focusDistance);
+    host.lensRenderingPipeline.setAperture(aperture);
+    host.lensRenderingPipeline.setHighlightsGain(highlightsGain);
+    host.lensRenderingPipeline.setHighlightsThreshold(highlightsThreshold);
+}
+
+export function updateEditorDofFocusAndFStop(host: any): void {
+    if (host.dofFocalLengthFollowsCameraFov) {
+        updateDofFocalLengthFromCameraFov(host);
+    }
+    if (host.dofLensDistortionFollowsCameraFov) {
+        updateDofLensDistortionFromCameraFov(host);
+    }
+    if (host.dofAutoFocusToCameraTarget) {
+        const targetFocusMm = host.getCameraFocusDistanceMm();
+        const minFocusMm = host.camera.minZ * 1000;
+        host.dofFocusDistanceMmValue = Math.max(minFocusMm, targetFocusMm - host.dofAutoFocusNearOffsetMmValue);
+    }
+    const autoMinFStopRaw = host.dofAutoFocusToCameraTarget
+        ? computeAutoFocusMinFStop(host, host.dofFocusDistanceMmValue)
+        : 0;
+    const autoMinFStop = host.dofAutoFocusToCameraTarget
+        ? computeAdjustedAutoMinFStop(host, host.dofFStopValue, autoMinFStopRaw, host.dofFocusDistanceMmValue)
+        : 0;
+    host.dofEffectiveFStopValue = Math.max(
+        0.01,
+        Math.min(32, Math.max(host.dofFStopValue, autoMinFStop))
+    );
+    if (!host.defaultRenderingPipeline) return;
+    const dof = host.defaultRenderingPipeline.depthOfField;
+    dof.focusDistance = host.dofFocusDistanceMmValue;
+    dof.fStop = host.dofEffectiveFStopValue;
+    applyDofLensBlurSettings(host);
+}
+
+export function updateDofLensDistortionFromCameraFov(host: any): void {
+    const fovDeg = (host.camera.fov * 180) / Math.PI;
+    const minTele = host.dofLensDistortionMinTeleFovDeg;
+    const neutral = host.dofLensDistortionNeutralFovDeg;
+    const maxWide = host.dofLensDistortionMaxWideFovDeg;
+    const clampedFovDeg = Math.max(minTele, Math.min(maxWide, fovDeg));
+
+    let distortion = 0;
+    if (clampedFovDeg >= neutral) {
+        const wideSpan = Math.max(0.0001, maxWide - neutral);
+        distortion = (clampedFovDeg - neutral) / wideSpan;
+    } else {
+        const teleSpan = Math.max(0.0001, neutral - minTele);
+        distortion = -((neutral - clampedFovDeg) / teleSpan);
+    }
+
+    const influencedDistortion = distortion * host.dofLensDistortionInfluenceValue;
+    host.dofLensDistortionValue = Math.max(-1, Math.min(1, influencedDistortion));
+    applyDofLensOpticsSettings(host);
+}
+
+export function updateDofFocalLengthFromCameraFov(host: any): void {
+    const fovRad = Math.max(0.01, host.camera.fov);
+    const baseFocalLengthMm = (0.5 * host.dofFovLinkSensorWidthMm) / Math.tan(fovRad * 0.5);
+    let focalLengthMm = baseFocalLengthMm;
+
+    if (host.dofFocalLengthDistanceInvertedValue) {
+        const minFovRad = (10 * Math.PI) / 180;
+        const maxFovRad = (120 * Math.PI) / 180;
+        const focalAtTeleMm = (0.5 * host.dofFovLinkSensorWidthMm) / Math.tan(minFovRad * 0.5);
+        const focalAtWideMm = (0.5 * host.dofFovLinkSensorWidthMm) / Math.tan(maxFovRad * 0.5);
+        focalLengthMm = focalAtWideMm + focalAtTeleMm - baseFocalLengthMm;
+    }
+
+    host.dofFocalLengthValue = Math.max(1, Math.min(1000, focalLengthMm));
+    if (host.defaultRenderingPipeline) {
+        host.defaultRenderingPipeline.depthOfField.focalLength = host.dofFocalLengthValue;
+    }
+}
+
+export function computeAdjustedAutoMinFStop(host: any, baseFStop: number, autoMinFStop: number, focusDistanceMm: number): number {
+    if (autoMinFStop <= baseFStop) {
+        return autoMinFStop;
+    }
+
+    const focusBandRadiusMm = Math.max(1, host.dofAutoFocusInFocusRadiusMm);
+    const compensationStartMm = focusBandRadiusMm * 1.5;
+    const compensationFullMm = focusBandRadiusMm * 6.0;
+    const blendDenominator = Math.max(1, compensationFullMm - compensationStartMm);
+    const t = Math.max(0, Math.min(1, (focusDistanceMm - compensationStartMm) / blendDenominator));
+    const distanceWeight = t * t * (3 - 2 * t);
+
+    const softenedAutoMinFStop = baseFStop + (autoMinFStop - baseFStop) * distanceWeight;
+    const maxCompensationBoost = 2.0;
+    return Math.min(baseFStop + maxCompensationBoost, softenedAutoMinFStop);
+}
+
+export function computeAutoFocusMinFStop(host: any, focusDistanceMm: number): number {
+    const focalLengthMm = Math.max(1, host.dofFocalLengthValue);
+    const lensSizeMm = Math.max(0.001, host.dofLensSizeValue);
+    const safeFocusDistanceMm = Math.max(focalLengthMm + 1, focusDistanceMm);
+    const focusBandRadiusMm = Math.max(1, host.dofAutoFocusInFocusRadiusMm);
+    const nearFocusBandRadiusMm = focusBandRadiusMm * host.dofNearSuppressionScaleValue;
+    const nearBandDistanceMm = Math.max(focalLengthMm + 1, safeFocusDistanceMm - nearFocusBandRadiusMm);
+    const compensatedLensSizeMm = Math.pow(lensSizeMm, host.dofAutoFocusLensCompensationExponent);
+    const numerator = compensatedLensSizeMm * focalLengthMm * focusBandRadiusMm;
+    const denominator = host.dofAutoFocusCocAtRangeEdge * nearBandDistanceMm * (safeFocusDistanceMm - focalLengthMm);
+    if (denominator <= 1e-6) {
+        return 32;
+    }
+    return Math.max(0.01, Math.min(32, numerator / denominator));
+}
+
+export function configureDofDepthRenderer(host: any): void {
+    const depthRenderer = host.scene.enableDepthRenderer(host.camera, false);
+    depthRenderer.useOnlyInActiveCamera = true;
+    depthRenderer.forceDepthWriteTransparentMeshes = true;
+    host.depthRenderer = depthRenderer;
+}
+
+export function setupFarDofPostProcess(host: any): void {
+    if (!host.farDofEnabled) {
+        host.postEffectFarDofStrengthValue = 0;
+        return;
+    }
+    host.depthRenderer = host.scene.enableDepthRenderer(host.camera, false, true);
+    host.depthRenderer.useOnlyInActiveCamera = true;
+    host.depthRenderer.forceDepthWriteTransparentMeshes = true;
+
+    const shaderKey = "mmdFarDofFragmentShader";
+    if (!Effect.ShadersStore[shaderKey]) {
+        Effect.ShadersStore[shaderKey] = `
+                precision highp float;
+                varying vec2 vUV;
+                uniform sampler2D textureSampler;
+                uniform sampler2D depthSampler;
+                uniform vec2 cameraNearFar;
+                uniform vec2 texelSize;
+                uniform float focusDistance;
+                uniform float focusSharpRadius;
+                uniform float farDofStrength;
+
+                void main(void) {
+                    vec4 sharp = texture2D(textureSampler, vUV);
+                    if (farDofStrength <= 0.0001) {
+                        gl_FragColor = sharp;
+                        return;
+                    }
+
+                    float depthMetric = clamp(texture2D(depthSampler, vUV).r, 0.0, 1.0);
+                    float pixelDistance = mix(cameraNearFar.x, cameraNearFar.y, depthMetric) * 1000.0;
+
+                    // Keep about 1m around focus pin-sharp, then blur increases linearly with distance.
+                    float farStart = focusDistance + focusSharpRadius;
+                    float farSpan = max(cameraNearFar.y * 1000.0 - farStart, 1.0);
+                    float blurFactor = clamp((pixelDistance - farStart) / farSpan, 0.0, 1.0) * farDofStrength;
+
+                    if (blurFactor <= 0.0001) {
+                        gl_FragColor = sharp;
+                        return;
+                    }
+
+                    // Ease-in to avoid hard transition while preserving distance proportionality.
+                    blurFactor = blurFactor * blurFactor * (3.0 - 2.0 * blurFactor);
+
+                    vec2 baseRadius = texelSize * (1.8 + 42.0 * blurFactor);
+
+                    const int DIR_COUNT = 16;
+                    vec2 dirs[DIR_COUNT];
+                    dirs[0] = vec2(1.0, 0.0);
+                    dirs[1] = vec2(0.9239, 0.3827);
+                    dirs[2] = vec2(0.7071, 0.7071);
+                    dirs[3] = vec2(0.3827, 0.9239);
+                    dirs[4] = vec2(0.0, 1.0);
+                    dirs[5] = vec2(-0.3827, 0.9239);
+                    dirs[6] = vec2(-0.7071, 0.7071);
+                    dirs[7] = vec2(-0.9239, 0.3827);
+                    dirs[8] = vec2(-1.0, 0.0);
+                    dirs[9] = vec2(-0.9239, -0.3827);
+                    dirs[10] = vec2(-0.7071, -0.7071);
+                    dirs[11] = vec2(-0.3827, -0.9239);
+                    dirs[12] = vec2(0.0, -1.0);
+                    dirs[13] = vec2(0.3827, -0.9239);
+                    dirs[14] = vec2(0.7071, -0.7071);
+                    dirs[15] = vec2(0.9239, -0.3827);
+
+                    float ringScale[4];
+                    ringScale[0] = 0.55;
+                    ringScale[1] = 1.1;
+                    ringScale[2] = 1.85;
+                    ringScale[3] = 2.75;
+
+                    float ringWeight[4];
+                    ringWeight[0] = 0.020;
+                    ringWeight[1] = 0.017;
+                    ringWeight[2] = 0.014;
+                    ringWeight[3] = 0.011;
+
+                    float depthWeightScale = mix(240.0, 90.0, blurFactor);
+
+                    vec4 blur = sharp * 0.18;
+                    float blurWeight = 0.18;
+
+                    for (int ring = 0; ring < 4; ++ring) {
+                        vec2 radius = baseRadius * ringScale[ring];
+                        float baseWeight = ringWeight[ring];
+
+                        for (int i = 0; i < DIR_COUNT; ++i) {
+                            vec2 sampleUv = clamp(vUV + dirs[i] * radius, vec2(0.001), vec2(0.999));
+                            float sampleDepthMetric = texture2D(depthSampler, sampleUv).r;
+                            float depthWeight = exp(-abs(sampleDepthMetric - depthMetric) * depthWeightScale);
+                            float sampleWeight = baseWeight * depthWeight;
+                            blur += texture2D(textureSampler, sampleUv) * sampleWeight;
+                            blurWeight += sampleWeight;
+                        }
+                    }
+
+                    vec4 blurColor = blur / max(blurWeight, 0.0001);
+                    gl_FragColor = mix(sharp, blurColor, blurFactor);
+                }
+            `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+                varying vUV: vec2f;
+                var textureSamplerSampler: sampler;
+                var textureSampler: texture_2d<f32>;
+                var depthSamplerSampler: sampler;
+                var depthSampler: texture_2d<f32>;
+                uniform cameraNearFar: vec2f;
+                uniform texelSize: vec2f;
+                uniform focusDistance: f32;
+                uniform focusSharpRadius: f32;
+                uniform farDofStrength: f32;
+
+                fn directionForIndex(index: i32) -> vec2f {
+                    switch index {
+                        case 0: { return vec2f(1.0, 0.0); }
+                        case 1: { return vec2f(0.9239, 0.3827); }
+                        case 2: { return vec2f(0.7071, 0.7071); }
+                        case 3: { return vec2f(0.3827, 0.9239); }
+                        case 4: { return vec2f(0.0, 1.0); }
+                        case 5: { return vec2f(-0.3827, 0.9239); }
+                        case 6: { return vec2f(-0.7071, 0.7071); }
+                        case 7: { return vec2f(-0.9239, 0.3827); }
+                        case 8: { return vec2f(-1.0, 0.0); }
+                        case 9: { return vec2f(-0.9239, -0.3827); }
+                        case 10: { return vec2f(-0.7071, -0.7071); }
+                        case 11: { return vec2f(-0.3827, -0.9239); }
+                        case 12: { return vec2f(0.0, -1.0); }
+                        case 13: { return vec2f(0.3827, -0.9239); }
+                        case 14: { return vec2f(0.7071, -0.7071); }
+                        default: { return vec2f(0.9239, -0.3827); }
+                    }
+                }
+
+                fn ringScaleForIndex(index: i32) -> f32 {
+                    switch index {
+                        case 0: { return 0.55; }
+                        case 1: { return 1.1; }
+                        case 2: { return 1.85; }
+                        default: { return 2.75; }
+                    }
+                }
+
+                fn ringWeightForIndex(index: i32) -> f32 {
+                    switch index {
+                        case 0: { return 0.020; }
+                        case 1: { return 0.017; }
+                        case 2: { return 0.014; }
+                        default: { return 0.011; }
+                    }
+                }
+
+                #define CUSTOM_FRAGMENT_DEFINITIONS
+                @fragment
+                fn main(input: FragmentInputs)->FragmentOutputs {
+                    let sharp: vec4f = textureSampleLevel(textureSampler, textureSamplerSampler, input.vUV, 0.0);
+                    var finalColor: vec4f = sharp;
+
+                    if (uniforms.farDofStrength > 0.0001) {
+                        let depthMetric: f32 = clamp(textureSampleLevel(depthSampler, depthSamplerSampler, input.vUV, 0.0).r, 0.0, 1.0);
+                        let pixelDistance: f32 = mix(uniforms.cameraNearFar.x, uniforms.cameraNearFar.y, depthMetric) * 1000.0;
+
+                        let farStart: f32 = uniforms.focusDistance + uniforms.focusSharpRadius;
+                        let farSpan: f32 = max(uniforms.cameraNearFar.y * 1000.0 - farStart, 1.0);
+                        var blurFactor: f32 = clamp((pixelDistance - farStart) / farSpan, 0.0, 1.0) * uniforms.farDofStrength;
+
+                        if (blurFactor > 0.0001) {
+                            blurFactor = blurFactor * blurFactor * (3.0 - 2.0 * blurFactor);
+                            let baseRadius: vec2f = uniforms.texelSize * (1.8 + 42.0 * blurFactor);
+                            let depthWeightScale: f32 = mix(240.0, 90.0, blurFactor);
+
+                            var blur: vec4f = sharp * 0.18;
+                            var blurWeight: f32 = 0.18;
+
+                            for (var ring: i32 = 0; ring < 4; ring = ring + 1) {
+                                let radius: vec2f = baseRadius * ringScaleForIndex(ring);
+                                let baseWeight: f32 = ringWeightForIndex(ring);
+
+                                for (var i: i32 = 0; i < 16; i = i + 1) {
+                                    let dir: vec2f = directionForIndex(i);
+                                    let sampleUv: vec2f = clamp(input.vUV + dir * radius, vec2f(0.001), vec2f(0.999));
+                                    let sampleDepthMetric: f32 = textureSampleLevel(depthSampler, depthSamplerSampler, sampleUv, 0.0).r;
+                                    let depthWeight: f32 = exp(-abs(sampleDepthMetric - depthMetric) * depthWeightScale);
+                                    let sampleWeight: f32 = baseWeight * depthWeight;
+                                    blur = blur + textureSampleLevel(textureSampler, textureSamplerSampler, sampleUv, 0.0) * sampleWeight;
+                                    blurWeight = blurWeight + sampleWeight;
+                                }
+                            }
+
+                            let blurColor: vec4f = blur / max(blurWeight, 0.0001);
+                            finalColor = mix(sharp, blurColor, blurFactor);
+                        }
+                    }
+
+                    fragmentOutputs.color = finalColor;
+                }
+            `;
+    }
+
+    host.dofPostProcess = new PostProcess(
+        "farDepthOfField",
+        "mmdFarDof",
+        {
+            uniforms: ["cameraNearFar", "texelSize", "focusDistance", "focusSharpRadius", "farDofStrength"],
+            samplers: ["depthSampler"],
+            size: 1.6,
+            camera: host.camera,
+            samplingMode: Texture.TRILINEAR_SAMPLINGMODE,
+            engine: host.engine,
+            reusable: false,
+            shaderLanguage: host.getPostProcessShaderLanguage(),
+        },
+    );
+
+    host.dofPostProcess.onApplyObservable.add((effect: any) => {
+        const depthMap = host.depthRenderer?.getDepthMap();
+        if (!depthMap) return;
+
+        effect.setTexture("depthSampler", depthMap);
+        effect.setFloat2("cameraNearFar", host.camera.minZ, host.camera.maxZ);
+        effect.setFloat2(
+            "texelSize",
+            1 / Math.max(1, host.dofPostProcess?.width ?? host.engine.getRenderWidth()),
+            1 / Math.max(1, host.dofPostProcess?.height ?? host.engine.getRenderHeight())
+        );
+        effect.setFloat("focusDistance", host.getCameraFocusDistanceMm());
+        effect.setFloat("focusSharpRadius", host.farDofFocusSharpRadiusMm);
+        effect.setFloat("farDofStrength", host.postEffectFarDofStrengthValue);
+    });
+}
+
+function ensureSignedLensDistortionShader(): void {
+    const shaderKey = "depthOfFieldPixelShader";
+    const source = Effect.ShadersStore[shaderKey];
+    if (!source || source.includes("mmdSignedLensDistortion")) {
+        return;
+    }
+
+    const from = "float dist_amount=clamp(distortion*0.23,0.0,1.0);dist_coords=mix(coords,dist_coords,dist_amount);return dist_coords;}";
+    const to = "float dist_amount=clamp(abs(distortion)*0.23,0.0,1.0);dist_coords=mix(coords,dist_coords,dist_amount);vec2 inv_coords=vec2(0.5,0.5);inv_coords.x=0.5-direction.x*radius2*1.0;inv_coords.y=0.5-direction.y*radius2*1.0;inv_coords=mix(coords,inv_coords,dist_amount);dist_coords=distortion>=0.0?dist_coords:inv_coords;return dist_coords;}/*mmdSignedLensDistortion*/";
+
+    if (source.includes(from)) {
+        Effect.ShadersStore[shaderKey] = source.replace(from, to);
+    }
+}
+
+export function applyDofLensOpticsSettings(host: any): void {
+    if (!host.lensRenderingPipeline) return;
+    host.lensRenderingPipeline.setEdgeBlur(host.dofLensEdgeBlurValue);
+    host.lensRenderingPipeline.setEdgeDistortion(0);
+}
+
+export function setupLensHighlightsPipeline(host: any): void {
+    if (host.lensRenderingPipeline) {
+        host.lensRenderingPipeline.dispose(false);
+        host.lensRenderingPipeline = null;
+    }
+    if (host.isWebGpuEngine()) {
+        return;
+    }
+
+    ensureSignedLensDistortionShader();
+    host.lensRenderingPipeline = new LensRenderingPipeline(
+        "DofLensHighlightsPipeline",
+        {
+            edge_blur: host.dofLensEdgeBlurValue,
+            grain_amount: 0,
+            chromatic_aberration: 0,
+            distortion: 0,
+            dof_focus_distance: Math.max(0.1, host.dofFocusDistanceMmValue / 1000),
+            dof_aperture: 0.8,
+            dof_darken: 0,
+            dof_pentagon: true,
+            dof_gain: 0,
+            dof_threshold: 1,
+            blur_noise: false,
+        },
+        host.scene,
+        1.0,
+        [host.camera]
+    );
+    applyDofLensOpticsSettings(host);
+}
