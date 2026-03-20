@@ -51,8 +51,8 @@
   --bottom-panel-height: 180px;
 
   /* Typography */
-  --font-sans: 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
-  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Meiryo UI', monospace;
+  --font-sans: 'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
+  --font-mono: 'Noto Sans Mono CJK JP', 'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Meiryo UI', monospace;
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -69,6 +69,22 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 10px;
+}
+
+@font-face {
+  font-family: 'Noto Sans CJK OTC';
+  src: url('./assets/fonts/NotoSansCJK-Regular.ttc') format('collection');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans Mono CJK JP';
+  src: url('./assets/fonts/NotoSansMonoCJKjp-Regular.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
 }
 
 /* ============================================
@@ -94,6 +110,19 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   user-select: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+select,
+option,
+optgroup {
+  font-family: var(--font-sans);
 }
 
 /* ============================================
@@ -188,6 +217,36 @@ body.exporter-mode #bone-overlay-canvas {
   align-items: center;
   gap: 6px;
   -webkit-app-region: no-drag;
+}
+
+.toolbar-locale-select {
+  min-width: 112px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.2;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.toolbar-locale-select:hover {
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.toolbar-locale-select:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  color: var(--text-primary);
+}
+
+.toolbar-locale-select option {
+  color: var(--text-primary);
+  background: var(--bg-primary);
 }
 
 .app-logo {
@@ -1029,7 +1088,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   outline: none;
 }
 
@@ -1722,7 +1781,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   outline: none;
 }
 
@@ -1990,7 +2049,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   outline: none;
 }
 
@@ -2073,7 +2132,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   outline: none;
 }
 
@@ -2408,6 +2467,7 @@ body.bottom-panel-resizing {
   background: var(--bg-card);
   color: var(--text-secondary);
   font-size: 10px;
+  font-family: var(--font-sans);
   padding: 0 6px;
   outline: none;
 }
@@ -2887,7 +2947,7 @@ body.bottom-panel-resizing {
   background: var(--bg-secondary);
   color: var(--text-secondary);
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 
 .effect-select:focus {

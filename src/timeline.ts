@@ -24,6 +24,7 @@ const PX_PER_F = 6;
 const PLAYHEAD_X = 24;
 const CURRENT_FRAME_COLOR = "#ff4fa3";
 const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
+const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -445,7 +446,7 @@ export class Timeline {
             ctx.fillRect(sx, RULER_H - tickH, 1, tickH);
 
             if (isMajor) {
-                ctx.font = "500 9px 'Inter', sans-serif";
+                ctx.font = `500 9px ${UI_FONT_FAMILY}`;
                 ctx.fillStyle = "#6b7280";
                 ctx.textAlign = "left";
                 ctx.textBaseline = "top";
@@ -466,7 +467,7 @@ export class Timeline {
         ctx.fill();
 
         // Frame number
-        ctx.font = "600 8px 'Inter', sans-serif";
+        ctx.font = `600 8px ${UI_FONT_FAMILY}`;
         ctx.fillStyle = "#fff";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
@@ -491,7 +492,7 @@ export class Timeline {
 
         if (this.tracks.length === 0) {
             ctx.fillStyle = "rgba(255,255,255,0.2)";
-            ctx.font = "500 10px 'Inter', sans-serif";
+            ctx.font = `500 10px ${UI_FONT_FAMILY}`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillText("F", w / 2, RULER_H + ROW_H / 2);
@@ -522,8 +523,8 @@ export class Timeline {
             ctx.rect(4, y, w - 6, ROW_H);
             ctx.clip();
             ctx.font = (track.category === "root" || track.category === "camera")
-                ? "600 10px 'Inter', sans-serif"
-                : "400 9px 'Inter', sans-serif";
+                ? `600 10px ${UI_FONT_FAMILY}`
+                : `400 9px ${UI_FONT_FAMILY}`;
             ctx.fillStyle = col.text;
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";

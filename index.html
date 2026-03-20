@@ -41,28 +41,28 @@
           <span data-i18n="toolbar.loadProject.label">プロジェクト読込</span>
         </button>
         <div class="toolbar-toggle-group" role="group" aria-label="表示と機能の切替" data-i18n-aria-label="toolbar.toggleGroup.ariaLabel">
-          <button id="btn-toggle-ground" class="toolbar-btn toolbar-btn--compact toggle-on" title="地面表示を切り替える" aria-pressed="true">
+          <button id="btn-toggle-ground" class="toolbar-btn toolbar-btn--compact toggle-on" title="地面表示を切り替える" data-i18n-title="toolbar.ground.title.on" aria-pressed="true">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M1 4h14v8H1z" />
               <path d="M1 8h14M8 4v8" stroke="currentColor" stroke-width="1" fill="none" />
             </svg>
             <span id="ground-toggle-text" data-i18n="toolbar.ground.short">GND</span>
           </button>
-          <button id="btn-toggle-skydome" class="toolbar-btn toolbar-btn--compact toggle-on" title="スカイドーム表示を切り替える" aria-pressed="true">
+          <button id="btn-toggle-skydome" class="toolbar-btn toolbar-btn--compact toggle-on" title="スカイドーム表示を切り替える" data-i18n-title="toolbar.sky.title.on" aria-pressed="true">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M2 10a6 6 0 1 1 12 0v4H2v-4z" />
               <path d="M2 10h12" stroke="currentColor" stroke-width="1" fill="none" />
             </svg>
             <span id="skydome-toggle-text" data-i18n="toolbar.sky.short">SKY</span>
           </button>
-          <button id="btn-toggle-aa" class="toolbar-btn toolbar-btn--compact toggle-on" title="アンチエイリアスの有効/無効を切り替える" aria-pressed="true">
+          <button id="btn-toggle-aa" class="toolbar-btn toolbar-btn--compact toggle-on" title="アンチエイリアスの有効/無効を切り替える" data-i18n-title="toolbar.aa.title.on" aria-pressed="true">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M2 12l3-8h2l3 8h-2l-.6-1.8H4.6L4 12H2zm3.1-3.3h1.8L6 6z" />
               <path d="M11 5h3v1h-3zM11 8h3v1h-3zM11 11h3v1h-3z" />
             </svg>
             <span id="aa-toggle-text" data-i18n="toolbar.aa.short">AA</span>
           </button>
-          <button id="btn-toggle-physics" class="toolbar-btn toolbar-btn--compact toggle-on" title="物理演算の有効/無効を切り替える" aria-pressed="true">
+          <button id="btn-toggle-physics" class="toolbar-btn toolbar-btn--compact toggle-on" title="物理演算の有効/無効を切り替える" data-i18n-title="toolbar.physics.title.on" aria-pressed="true">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 1.5a3 3 0 0 1 3 3v1h1.5a2 2 0 0 1 0 4H11v1a3 3 0 0 1-6 0v-1H3.5a2 2 0 0 1 0-4H5v-1a3 3 0 0 1 3-3z" />
             </svg>
@@ -75,14 +75,14 @@
             </svg>
             <span id="gi-toggle-text" data-i18n="toolbar.gi.short">GI</span>
           </button>
-          <button id="btn-toggle-shader-panel" class="toolbar-btn toolbar-btn--compact" title="エフェクト欄の表示/非表示" aria-pressed="false">
+          <button id="btn-toggle-shader-panel" class="toolbar-btn toolbar-btn--compact" title="エフェクト欄の表示/非表示" data-i18n-title="toolbar.fx.title.off" aria-pressed="false">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
               <rect x="2.2" y="3" width="11.6" height="10" rx="1.2" />
               <path d="M6 5.2v5.6M8.5 5.2v5.6M11 5.2v5.6" />
             </svg>
             <span id="shader-panel-toggle-text" data-i18n="toolbar.fx.short">FX</span>
           </button>
-          <button id="btn-toggle-fullscreen-ui" class="toolbar-btn toolbar-btn--compact" title="UIを非表示/表示 (ESCで戻る)" aria-pressed="false">
+          <button id="btn-toggle-fullscreen-ui" class="toolbar-btn toolbar-btn--compact" title="UIを非表示/表示 (ESCで戻る)" data-i18n-title="toolbar.ui.title.off" aria-pressed="false">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
               <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
             </svg>
@@ -91,6 +91,20 @@
         </div>
       </div>
       <div class="toolbar-right">
+        <select
+          id="toolbar-locale-select"
+          class="toolbar-locale-select"
+          title="UI言語を切り替える"
+          data-i18n-title="toolbar.locale.title"
+          data-i18n-aria-label="toolbar.locale.ariaLabel"
+          aria-label="UI言語を切り替える"
+        >
+          <option value="ja">日本語</option>
+          <option value="en">English</option>
+          <option value="zh-Hant">繁體中文</option>
+          <option value="zh-Hans">简体中文</option>
+          <option value="ko">한국어</option>
+        </select>
         <div id="perf-display" class="perf-badge">
           <span id="fps-value">--</span>
           <span class="perf-label">FPS</span>
@@ -117,7 +131,7 @@
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
               <path d="M4 2l8 5-8 5V2z" />
             </svg>
-            <span>再生</span>
+            <span data-i18n="section.playback">再生</span>
           </div>
           <div id="playback-controls" class="playback-controls">
             <div class="playback-compact-row">
@@ -164,7 +178,7 @@
                 <span id="total-frames" class="frame-number">0</span>
               </div>
               <div class="volume-control">
-                <button id="btn-mute" class="volume-mute-btn" title="ミュート切替">
+                <button id="btn-mute" class="volume-mute-btn" title="ミュート切替" data-i18n-title="playback.mute.title">
                   <svg id="icon-volume-on" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
                     <path d="M2 5h3l4-3v10l-4-3H2V5zm8 .5a3 3 0 0 1 0 3" stroke="currentColor" stroke-width="1.2"
                       fill="none" />
@@ -188,14 +202,14 @@
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
               <path d="M1 1h12v2H1V1zm0 4h12v2H1V5zm0 4h12v2H1V9z" />
             </svg>
-            <span>タイムライン</span>
+            <span data-i18n="section.timeline">タイムライン</span>
           </div>
           <div id="timeline-edit-toolbar">
             <div class="timeline-edit-buttons">
-              <button id="btn-kf-add" class="timeline-edit-btn" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title">登録</button>
-              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title">削除</button>
+              <button id="btn-kf-add" class="timeline-edit-btn" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
+              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
             </div>
-            <span id="timeline-selection-label" class="timeline-selection-label">トラック未選択</span>
+            <span id="timeline-selection-label" class="timeline-selection-label" data-i18n="empty.trackNotSelected">トラック未選択</span>
           </div>
           <div id="timeline-container">
             <!-- Fixed left: frame labels -->
@@ -240,28 +254,28 @@
             <rect x="1.7" y="2" width="10.6" height="10" rx="1.2" />
             <path d="M4.6 4.2v5.6M7 4.2v5.6M9.4 4.2v5.6" />
           </svg>
-          <span>エフェクト</span>
+          <span data-i18n="section.effect">エフェクト</span>
         </div>
         <div class="shader-panel-body">
           <div class="shader-panel-row">
-            <span class="info-label">対象</span>
+            <span class="info-label" data-i18n="label.target">対象</span>
             <select id="shader-model-select" class="panel-select" disabled>
               <option value="">-</option>
             </select>
           </div>
           <div class="shader-panel-row">
-            <span class="info-label">種類</span>
+            <span class="info-label" data-i18n="label.type">種類</span>
             <select id="shader-preset-select" class="panel-select" disabled>
               <option value="">-</option>
             </select>
           </div>
           <div class="shader-panel-actions">
-            <button id="btn-shader-apply" class="info-action-btn" type="button" disabled>全材質へ割り当て</button>
-            <button id="btn-shader-reset" class="info-action-btn" type="button" disabled>全材質を標準化</button>
+            <button id="btn-shader-apply" class="info-action-btn" type="button" disabled data-i18n="button.applyAllMaterials">全材質へ割り当て</button>
+            <button id="btn-shader-reset" class="info-action-btn" type="button" disabled data-i18n="button.resetAllMaterials">全材質を標準化</button>
           </div>
-          <div id="shader-panel-note" class="shader-panel-note">モデルを読み込んでください</div>
+          <div id="shader-panel-note" class="shader-panel-note" data-i18n="empty.loadModel">モデルを読み込んでください</div>
           <div id="shader-material-list" class="shader-material-list">
-            <div class="panel-empty-state">No model</div>
+            <div class="panel-empty-state" data-i18n="empty.noModel">No model</div>
           </div>
         </div>
       </aside>
@@ -281,23 +295,23 @@
               <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.5" />
               <path d="M7 4v1M7 6.5v4" />
             </svg>
-            <span>情報</span>
+            <span data-i18n="section.info">情報</span>
           </div>
           <div id="model-info" class="model-info">
             <div class="info-compact-top">
               <div class="info-target-row">
-                <span class="info-label">対象</span>
+                <span class="info-label" data-i18n="label.target">対象</span>
                 <select id="info-model-select" class="info-model-select" disabled>
                   <option value="">-</option>
                 </select>
               </div>
               <div class="info-actions">
-                <button id="btn-model-visibility" class="info-action-btn" type="button" disabled>非表示</button>
-                <button id="btn-model-delete" class="info-action-btn info-action-btn--danger" type="button" disabled>削除</button>
+                <button id="btn-model-visibility" class="info-action-btn" type="button" disabled data-i18n="button.hide">非表示</button>
+                <button id="btn-model-delete" class="info-action-btn info-action-btn--danger" type="button" disabled data-i18n="button.delete">削除</button>
               </div>
             </div>
             <div class="info-compact-stats">
-              <span class="info-compact-item"><span class="info-compact-key">モデル</span><span id="info-model-name"
+              <span class="info-compact-item"><span class="info-compact-key" data-i18n="label.model">モデル</span><span id="info-model-name"
                   class="info-value">-</span></span>
               <span class="info-compact-item"><span class="info-compact-key">V</span><span id="info-vertices"
                   class="info-value">-</span></span>
@@ -317,22 +331,22 @@
               <circle cx="2.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
               <circle cx="11.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
             </svg>
-            <span>補間</span>
+            <span data-i18n="section.interpolation">補間</span>
           </div>
           <div class="model-info interpolation-info">
-            <div class="info-row interpolation-row--hidden"><span class="info-label">対象</span><span id="interp-track-name" class="info-value">-</span></div>
-            <div class="info-row interpolation-row--hidden"><span class="info-label">フレーム</span><span id="interp-frame" class="info-value">-</span></div>
+            <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.target">対象</span><span id="interp-track-name" class="info-value">-</span></div>
+            <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.frame">フレーム</span><span id="interp-frame" class="info-value">-</span></div>
             <div class="interpolation-meta">
               <div class="info-row">
-                <span class="info-label">種別</span>
+                <span class="info-label" data-i18n="label.type">種別</span>
                 <select id="interp-type" class="interp-type-select" disabled>
-                  <option value="__all__">全て</option>
+                  <option value="__all__" data-i18n="option.all">全て</option>
                 </select>
               </div>
-              <div class="info-row interpolation-row--hidden"><span class="info-label">状態</span><span id="interp-status" class="info-value">準備中</span></div>
+              <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.status">状態</span><span id="interp-status" class="info-value" data-i18n="status.preparing">準備中</span></div>
             </div>
             <div id="interp-curve-list" class="interp-curve-list">
-              <div class="interp-curve-empty">トラックを選択すると表示されます</div>
+              <div class="interp-curve-empty" data-i18n="empty.selectTrackToShow">トラックを選択すると表示されます</div>
             </div>
           </div>
         </section>
@@ -343,16 +357,16 @@
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
               <path d="M3 4.5a1.5 1.5 0 1 1 3 0v1.2h2V4.5a1.5 1.5 0 1 1 3 0V9a1.5 1.5 0 1 1-3 0V7.9H6V9a1.5 1.5 0 1 1-3 0V4.5z" />
             </svg>
-            <span>ボーン</span>
+            <span data-i18n="section.bone">ボーン</span>
           </div>
           <div class="panel-select-row">
-            <span class="panel-select-label">対象</span>
+            <span class="panel-select-label" data-i18n="label.target">対象</span>
             <select id="bone-select" class="panel-select" disabled>
               <option value="">-</option>
             </select>
           </div>
           <div id="bone-controls" class="bone-controls">
-            <div class="panel-empty-state">モデル未読込</div>
+            <div class="panel-empty-state" data-i18n="empty.modelNotLoaded">モデル未読込</div>
           </div>
         </section>
 
@@ -363,16 +377,16 @@
               <circle cx="7" cy="5" r="3" />
               <path d="M2 12c0-2.5 2.2-4 5-4s5 1.5 5 4" />
             </svg>
-            <span>モーフ</span>
+            <span data-i18n="section.morph">モーフ</span>
           </div>
           <div class="panel-select-row">
-            <span class="panel-select-label">表示枠</span>
+            <span class="panel-select-label" data-i18n="label.displayFrame">表示枠</span>
             <select id="morph-frame-select" class="panel-select" disabled>
               <option value="">-</option>
             </select>
           </div>
           <div id="morph-controls" class="morph-controls">
-            <div class="panel-empty-state">モデル未読込</div>
+            <div class="panel-empty-state" data-i18n="empty.modelNotLoaded">モデル未読込</div>
           </div>
         </section>
 
@@ -382,13 +396,13 @@
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
               <path d="M2 3h7v8H2V3zm8 1l3-2v10l-3-2V4z" />
             </svg>
-            <span>カメラ</span>
+            <span data-i18n="section.camera">カメラ</span>
           </div>
           <div id="camera-controls" class="camera-controls">
-            <div class="camera-view-buttons" role="group" aria-label="カメラ視点">
-              <button id="btn-cam-left" class="camera-view-btn" type="button" aria-pressed="false">左面</button>
-              <button id="btn-cam-front" class="camera-view-btn camera-view-btn--active" type="button" aria-pressed="true">正面</button>
-              <button id="btn-cam-right" class="camera-view-btn" type="button" aria-pressed="false">右面</button>
+            <div class="camera-view-buttons" role="group" aria-label="カメラ視点" data-i18n-aria-label="label.cameraView">
+              <button id="btn-cam-left" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.left">左面</button>
+              <button id="btn-cam-front" class="camera-view-btn camera-view-btn--active" type="button" aria-pressed="true" data-i18n="camera.view.front">正面</button>
+              <button id="btn-cam-right" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.right">右面</button>
             </div>
             <div class="control-row cam-slider-row cam-fov-row">
               <label class="cam-axis-label">FOV</label>
@@ -396,7 +410,7 @@
               <span id="cam-fov-value" class="value-display">30°</span>
             </div>
             <div class="control-row cam-slider-row dof-row-hidden">
-              <label class="cam-axis-label">距離</label>
+              <label class="cam-axis-label" data-i18n="label.distance">距離</label>
               <input type="range" id="cam-distance" class="cam-slider" min="5" max="400" value="50" step="1">
               <span id="cam-distance-value" class="value-display">50.0m</span>
             </div>
@@ -405,12 +419,12 @@
                 <span class="effect-label">DoF</span>
                 <label class="effect-check-wrap">
                   <input type="checkbox" id="effect-dof-enabled" class="effect-check">
-                  <span>有効</span>
+                  <span data-i18n="status.enabled">有効</span>
                 </label>
                 <span id="effect-dof-enabled-val" class="effect-value">OFF</span>
               </div>
               <div class="effect-row dof-row-hidden">
-                <span class="effect-label">DoF品質</span>
+                <span class="effect-label" data-i18n="label.dofQuality">DoF品質</span>
                 <select id="effect-dof-quality" class="effect-select">
                   <option value="0">Low</option>
                   <option value="1" selected>Medium</option>
@@ -419,12 +433,12 @@
                 <span id="effect-dof-quality-val" class="effect-value">Medium</span>
               </div>
               <div class="effect-row dof-row-hidden">
-                <span class="effect-label">DoFフォーカス</span>
+                <span class="effect-label" data-i18n="label.dofFocus">DoFフォーカス</span>
                 <input type="range" id="effect-dof-focus" class="effect-slider" min="100" max="300000" value="55000" step="100">
                 <span id="effect-dof-focus-val" class="effect-value">55.0m</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">前後補正</span>
+                <span class="effect-label" data-i18n="label.dofOffset">前後補正</span>
                 <input type="range" id="effect-dof-focus-offset" class="effect-slider" min="-20000" max="20000" value="0" step="100">
                 <span id="effect-dof-focus-offset-val" class="effect-value">0.0m</span>
               </div>
@@ -434,25 +448,25 @@
                 <span id="effect-dof-fstop-val" class="effect-value">2.80</span>
               </div>
               <div class="effect-row dof-row-hidden">
-                <span class="effect-label">前抑制</span>
+                <span class="effect-label" data-i18n="label.dofNearOffset">前抑制</span>
                 <input type="range" id="effect-dof-near-suppression" class="effect-slider" min="0" max="1000" value="400" step="1">
                 <span id="effect-dof-near-suppression-val" class="effect-value">400%</span>
               </div>
               <div class="effect-row effect-row-toggle dof-row-hidden">
-                <span class="effect-label">焦点距離反転</span>
+                <span class="effect-label" data-i18n="label.dofInvertFocalLength">焦点距離反転</span>
                 <label class="effect-check-wrap">
                   <input type="checkbox" id="effect-dof-focal-invert" class="effect-check">
-                  <span>有効</span>
+                  <span data-i18n="status.enabled">有効</span>
                 </label>
                 <span id="effect-dof-focal-invert-val" class="effect-value">OFF</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">DoFレンズ</span>
+                <span class="effect-label" data-i18n="label.dofLens">DoFレンズ</span>
                 <input type="range" id="effect-dof-lens-size" class="effect-slider" min="1" max="4096" value="30" step="1">
                 <span id="effect-dof-lens-size-val" class="effect-value">30</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">レンズブラー</span>
+                <span class="effect-label" data-i18n="label.dofLensBlur">レンズブラー</span>
                 <input type="range" id="effect-dof-lens-blur" class="effect-slider" min="0" max="100" value="0" step="1">
                 <span id="effect-dof-lens-blur-val" class="effect-value">0%</span>
               </div>
@@ -460,12 +474,12 @@
                 <span class="effect-label">Fog</span>
                 <label class="effect-check-wrap">
                   <input type="checkbox" id="effect-fog-enabled" class="effect-check">
-                  <span>有効</span>
+                  <span data-i18n="status.enabled">有効</span>
                 </label>
                 <span id="effect-fog-enabled-val" class="effect-value">OFF</span>
               </div>
               <div class="effect-row" hidden>
-                <span class="effect-label">Fog方式</span>
+                <span class="effect-label" data-i18n="label.fogMode">Fog方式</span>
                 <select id="effect-fog-mode" class="effect-select">
                   <option value="0">Linear</option>
                   <option value="1">Exp</option>
@@ -474,42 +488,42 @@
                 <span id="effect-fog-mode-val" class="effect-value">Exp2</span>
               </div>
               <div class="effect-row" hidden>
-                <span class="effect-label">Fog開始</span>
+                <span class="effect-label" data-i18n="label.fogStart">Fog開始</span>
                 <input type="range" id="effect-fog-start" class="effect-slider" min="0" max="1000" value="100" step="1">
                 <span id="effect-fog-start-val" class="effect-value">100</span>
               </div>
               <div class="effect-row" hidden>
-                <span class="effect-label">Fog終了</span>
+                <span class="effect-label" data-i18n="label.fogEnd">Fog終了</span>
                 <input type="range" id="effect-fog-end" class="effect-slider" min="1" max="2000" value="300" step="1">
                 <span id="effect-fog-end-val" class="effect-value">300</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">Fog濃度</span>
+                <span class="effect-label" data-i18n="label.fogDensity">Fog濃度</span>
                 <input type="range" id="effect-fog-density" class="effect-slider" min="0" max="0.01" value="0.002" step="0.0001" data-display-scale="10000" data-display-decimals="0">
                 <span id="effect-fog-density-val" class="effect-value">20</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">Fog透明度</span>
+                <span class="effect-label" data-i18n="label.fogOpacity">Fog透明度</span>
                 <input type="range" id="effect-fog-opacity" class="effect-slider" min="0" max="1" value="0.2" step="0.01" data-display-scale="100" data-display-decimals="0">
                 <span id="effect-fog-opacity-val" class="effect-value">20</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">Fog色R</span>
+                <span class="effect-label" data-i18n="label.fogColorR">Fog色R</span>
                 <input type="range" id="effect-fog-color-r" class="effect-slider" min="0" max="255" value="10" step="1">
                 <span id="effect-fog-color-r-val" class="effect-value">10</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">Fog色G</span>
+                <span class="effect-label" data-i18n="label.fogColorG">Fog色G</span>
                 <input type="range" id="effect-fog-color-g" class="effect-slider" min="0" max="255" value="10" step="1">
                 <span id="effect-fog-color-g-val" class="effect-value">10</span>
               </div>
               <div class="effect-row">
-                <span class="effect-label">Fog色B</span>
+                <span class="effect-label" data-i18n="label.fogColorB">Fog色B</span>
                 <input type="range" id="effect-fog-color-b" class="effect-slider" min="0" max="255" value="15" step="1">
                 <span id="effect-fog-color-b-val" class="effect-value">15</span>
               </div>
               <div class="effect-row dof-row-hidden">
-                <span class="effect-label">DoF焦点距離</span>
+                <span class="effect-label" data-i18n="label.dofFocalLength">DoF焦点距離</span>
                 <input type="range" id="effect-dof-focal-length" class="effect-slider" min="1" max="300" value="50" step="1">
                 <span id="effect-dof-focal-length-val" class="effect-value">50</span>
               </div>
@@ -524,11 +538,11 @@
               <path d="M3 2.5h3.5v3.5H3zM7.5 8h3.5v3.5H7.5z" />
               <path d="M6.5 4.25h1.2M8.6 4.25h2.2M5.4 9.75H4.2M7.5 9.75H6.3M6.5 5.1v1.8M7.5 7.1v1.8" />
             </svg>
-            <span>物理</span>
+            <span data-i18n="section.physics">物理</span>
           </div>
           <div class="physics-controls">
             <div class="physics-row">
-              <span class="physics-label">演算Hz</span>
+              <span class="physics-label" data-i18n="label.physicsHz">演算Hz</span>
               <select id="physics-step-rate" class="panel-select">
                 <option value="30">30Hz</option>
                 <option value="60" selected>60Hz</option>
@@ -537,22 +551,22 @@
               <span id="physics-step-rate-val" class="physics-value">60Hz</span>
             </div>
             <div class="physics-row">
-              <span class="physics-label">重力</span>
+              <span class="physics-label" data-i18n="label.gravity">重力</span>
               <input type="range" id="physics-gravity-accel" class="physics-slider" min="0" max="200" value="98" step="1">
               <span id="physics-gravity-accel-val" class="physics-value">98</span>
             </div>
             <div class="physics-row">
-              <span class="physics-label">重力X</span>
+              <span class="physics-label" data-i18n="label.gravityX">重力X</span>
               <input type="range" id="physics-gravity-dir-x" class="physics-slider" min="-100" max="100" value="0" step="1">
               <span id="physics-gravity-dir-x-val" class="physics-value">0</span>
             </div>
             <div class="physics-row">
-              <span class="physics-label">重力Y</span>
+              <span class="physics-label" data-i18n="label.gravityY">重力Y</span>
               <input type="range" id="physics-gravity-dir-y" class="physics-slider" min="-100" max="100" value="-100" step="1">
               <span id="physics-gravity-dir-y-val" class="physics-value">-100</span>
             </div>
             <div class="physics-row">
-              <span class="physics-label">重力Z</span>
+              <span class="physics-label" data-i18n="label.gravityZ">重力Z</span>
               <input type="range" id="physics-gravity-dir-z" class="physics-slider" min="-100" max="100" value="0" step="1">
               <span id="physics-gravity-dir-z-val" class="physics-value">0</span>
             </div>
@@ -568,99 +582,99 @@
                 d="M7 1v2M7 11v2M1 7h2M11 7h2M3.22 3.22l1.41 1.41M9.37 9.37l1.41 1.41M3.22 10.78l1.41-1.41M9.37 4.63l1.41-1.41"
                 stroke="currentColor" stroke-width="1.2" fill="none" />
             </svg>
-            <span>照明</span>
+            <span data-i18n="section.lighting">照明</span>
           </div>
           <div class="lighting-controls">
             <div class="light-row light-row-select">
-              <span class="light-label">種別</span>
+              <span class="light-label" data-i18n="label.mode">種別</span>
               <select id="light-mode-select" class="light-select">
-                <option value="light" selected>光</option>
-                <option value="shadow">影</option>
+                <option value="light" selected data-i18n="light.mode.light">光</option>
+                <option value="shadow" data-i18n="light.mode.shadow">影</option>
               </select>
               <span class="light-value">-</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label">方位角</span>
+              <span class="light-label" data-i18n="label.azimuth">方位角</span>
               <input type="range" id="light-azimuth" class="light-slider" min="-180" max="180" value="20" step="1">
               <span id="light-azimuth-val" class="light-value">20°</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label">仰角</span>
+              <span class="light-label" data-i18n="label.elevation">仰角</span>
               <input type="range" id="light-elevation" class="light-slider" min="-85" max="-5" value="-50" step="1">
               <span id="light-elevation-val" class="light-value">-50°</span>
             </div>
             <div class="light-row light-row--shadow">
-              <span class="light-label">影の強さ</span>
+              <span class="light-label" data-i18n="label.shadowStrength">影の強さ</span>
               <input type="range" id="light-intensity" class="light-slider" min="0" max="200" value="100" step="1">
               <span id="light-intensity-val" class="light-value">1.0</span>
             </div>
             <div class="light-row light-row--light" hidden>
-              <span class="light-label">環境光</span>
+              <span class="light-label" data-i18n="label.ambientLight">環境光</span>
               <input type="range" id="light-ambient" class="light-slider" min="0" max="200" value="0" step="1">
               <span id="light-ambient-val" class="light-value">0.0</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label">光色R</span>
+              <span class="light-label" data-i18n="label.lightColorR">光色R</span>
               <input type="range" id="light-color-r" class="light-slider" min="0" max="255" value="128" step="1">
               <span id="light-color-r-val" class="light-value">100%</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label">光色G</span>
+              <span class="light-label" data-i18n="label.lightColorG">光色G</span>
               <input type="range" id="light-color-g" class="light-slider" min="0" max="255" value="128" step="1">
               <span id="light-color-g-val" class="light-value">100%</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label">光色B</span>
+              <span class="light-label" data-i18n="label.lightColorB">光色B</span>
               <input type="range" id="light-color-b" class="light-slider" min="0" max="255" value="128" step="1">
               <span id="light-color-b-val" class="light-value">100%</span>
             </div>
             <div class="light-row light-row--light light-row--always-hidden" hidden>
-              <span class="light-label">光面強度</span>
+              <span class="light-label" data-i18n="label.flatStrength">光面強度</span>
               <input type="range" id="light-flat-strength" class="light-slider" min="0" max="10" value="0" step="1">
               <span id="light-flat-strength-val" class="light-value">0%</span>
             </div>
             <div class="light-row light-row--light light-row--always-hidden" hidden>
-              <span class="light-label">光色反映</span>
+              <span class="light-label" data-i18n="label.flatColorInfluence">光色反映</span>
               <input type="range" id="light-flat-color-influence" class="light-slider" min="0" max="100" value="35" step="1">
               <span id="light-flat-color-influence-val" class="light-value">35%</span>
             </div>
             <div class="light-row light-row--shadow" style="display:none;">
-              <span class="light-label">影の濃さ</span>
+              <span class="light-label" data-i18n="label.shadowDarkness">影の濃さ</span>
               <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="0" step="1">
               <span id="light-shadow-val" class="light-value">0.00</span>
             </div>
             <div class="light-row light-row--shadow">
-              <span class="light-label">影範囲</span>
+              <span class="light-label" data-i18n="label.shadowFrustumSize">影範囲</span>
               <input type="range" id="light-shadow-frustum-size" class="light-slider" min="120" max="6000" value="220" step="20">
               <span id="light-shadow-frustum-size-val" class="light-value">220</span>
             </div>
             <div class="light-row light-row--shadow">
-              <span class="light-label">影色R</span>
+              <span class="light-label" data-i18n="label.shadowColorR">影色R</span>
               <input type="range" id="light-shadow-color-r" class="light-slider" min="0" max="255" value="38" step="1">
               <span id="light-shadow-color-r-val" class="light-value">38</span>
             </div>
             <div class="light-row light-row--shadow">
-              <span class="light-label">影色G</span>
+              <span class="light-label" data-i18n="label.shadowColorG">影色G</span>
               <input type="range" id="light-shadow-color-g" class="light-slider" min="0" max="255" value="38" step="1">
               <span id="light-shadow-color-g-val" class="light-value">38</span>
             </div>
             <div class="light-row light-row--shadow">
-              <span class="light-label">影色B</span>
+              <span class="light-label" data-i18n="label.shadowColorB">影色B</span>
               <input type="range" id="light-shadow-color-b" class="light-slider" min="0" max="255" value="51" step="1">
               <span id="light-shadow-color-b-val" class="light-value">51</span>
             </div>
             <div class="light-row light-row--shadow">
-              <span class="light-label">Toon影響度</span>
+              <span class="light-label" data-i18n="label.toonInfluence">Toon影響度</span>
               <input type="range" id="light-toon-shadow-influence" class="light-slider" min="0" max="100" value="100" step="1">
               <span id="light-toon-shadow-influence-val" class="light-value">100%</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label">セルフ影境界</span>
+              <span class="light-label" data-i18n="label.selfShadowEdge">セルフ影境界</span>
               <input type="range" id="light-self-shadow-softness" class="light-slider" min="5" max="120" value="35" step="1">
               <span id="light-self-shadow-softness-val" class="light-value">0.035</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label">遮蔽影境界</span>
+              <span class="light-label" data-i18n="label.occlusionShadowEdge">遮蔽影境界</span>
               <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="35" step="1">
               <span id="light-occlusion-shadow-softness-val" class="light-value">0.035</span>
             </div>
@@ -674,11 +688,11 @@
               <rect x="2.2" y="4.2" width="9.6" height="6.6" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2" />
               <path d="M4.4 7.5h5.2M4.4 9.2h3.2" stroke="currentColor" stroke-width="1.1" />
             </svg>
-            <span>アクセサリー</span>
+            <span data-i18n="section.accessory">アクセサリー</span>
           </div>
           <div id="accessory-controls" class="accessory-controls">
             <div class="panel-select-row">
-              <span class="panel-select-label">対象</span>
+              <span class="panel-select-label" data-i18n="label.target">対象</span>
               <select id="accessory-select" class="panel-select" disabled>
                 <option value="">-</option>
               </select>
@@ -721,24 +735,24 @@
               </div>
             </div>
             <div class="info-actions accessory-actions">
-              <button id="btn-accessory-visibility" class="info-action-btn" type="button" disabled>非表示</button>
-              <button id="btn-accessory-delete" class="info-action-btn info-action-btn--danger" type="button" disabled>削除</button>
+              <button id="btn-accessory-visibility" class="info-action-btn" type="button" disabled data-i18n="button.hide">非表示</button>
+              <button id="btn-accessory-delete" class="info-action-btn info-action-btn--danger" type="button" disabled data-i18n="button.delete">削除</button>
             </div>
             <div class="panel-select-row">
-              <span class="panel-select-label">親</span>
+              <span class="panel-select-label" data-i18n="label.parent">親</span>
               <select id="accessory-parent-model" class="panel-select" disabled>
                 <option value="">World</option>
               </select>
             </div>
             <div class="panel-select-row">
-              <span class="panel-select-label">ボーン</span>
+              <span class="panel-select-label" data-i18n="label.bone">ボーン</span>
               <select id="accessory-parent-bone" class="panel-select" disabled>
                 <option value="">-</option>
               </select>
             </div>
             <div class="accessory-empty-state" id="accessory-empty-state">
-              <span>アクセサリー未読込</span>
-              <span class="accessory-empty-sub">.x を読み込むとここで操作できます</span>
+              <span data-i18n="empty.accessoryNotLoaded">アクセサリー未読込</span>
+              <span class="accessory-empty-sub" data-i18n="empty.accessoryHint">.x を読み込むとここで操作できます</span>
             </div>
           </div>
         </section>
@@ -750,39 +764,39 @@
               <rect x="2" y="2" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2" />
               <path d="M5 7h4M7 5v4" stroke="currentColor" stroke-width="1.2" />
             </svg>
-            <span>出力</span>
+            <span data-i18n="section.output">出力</span>
           </div>
           <div class="output-controls">
             <div class="output-export-row">
-              <button id="btn-export-png" class="playback-export-btn" title="現在の描画をPNG画像で保存">
-                <span>PNG画像</span>
+              <button id="btn-export-png" class="playback-export-btn" title="現在の描画をPNG画像で保存" data-i18n-title="output.png.title">
+                <span data-i18n="output.png.label">PNG画像</span>
               </button>
-              <button id="btn-export-webm" class="playback-export-btn" title="WebM動画を書き出し">
-                <span>WebM動画</span>
+              <button id="btn-export-webm" class="playback-export-btn" title="WebM動画を書き出し" data-i18n-title="output.webm.title">
+                <span data-i18n="output.webm.label">WebM動画</span>
               </button>
             </div>
             <div class="output-row">
-              <span class="output-label">比率</span>
+              <span class="output-label" data-i18n="label.aspect">比率</span>
               <select id="output-aspect" class="output-select">
-                <option value="16:9">16:9 横</option>
-                <option value="9:16">9:16 縦</option>
-                <option value="1:1">1:1 正方形</option>
-                <option value="4:3">4:3 横</option>
-                <option value="3:4">3:4 縦</option>
-                <option value="viewport">現在の画面比</option>
+                <option value="16:9" data-i18n="output.aspect.landscape169">16:9 横</option>
+                <option value="9:16" data-i18n="output.aspect.portrait916">9:16 縦</option>
+                <option value="1:1" data-i18n="output.aspect.square11">1:1 正方形</option>
+                <option value="4:3" data-i18n="output.aspect.landscape43">4:3 横</option>
+                <option value="3:4" data-i18n="output.aspect.portrait34">3:4 縦</option>
+                <option value="viewport" data-i18n="output.aspect.viewport">現在の画面比</option>
               </select>
             </div>
             <div class="output-row">
-              <span class="output-label">長辺</span>
+              <span class="output-label" data-i18n="label.longSide">長辺</span>
               <select id="output-size-preset" class="output-select">
-                <option value="1280">HD</option>
-                <option value="1920" selected>FullHD</option>
-                <option value="2560">QHD</option>
-                <option value="3840">4K</option>
+                <option value="1280" data-i18n="output.sizePreset.hd">HD</option>
+                <option value="1920" selected data-i18n="output.sizePreset.fullhd">FullHD</option>
+                <option value="2560" data-i18n="output.sizePreset.qhd">QHD</option>
+                <option value="3840" data-i18n="output.sizePreset.k4">4K</option>
               </select>
             </div>
             <div class="output-row output-row-dimensions">
-              <span class="output-label">サイズ</span>
+              <span class="output-label" data-i18n="label.size">サイズ</span>
               <div class="output-dimensions">
                 <input id="output-width" class="output-number" type="number" min="320" max="8192" step="1" value="1920">
                 <span class="output-dim-sep">x</span>
@@ -790,15 +804,15 @@
               </div>
             </div>
             <div class="output-row output-row-quality" hidden>
-              <span class="output-label">画質</span>
+              <span class="output-label" data-i18n="label.quality">画質</span>
               <select id="output-quality" class="output-select">
-                <option value="1" selected>標準 x1.0</option>
-                <option value="1.5">高画質 x1.5</option>
-                <option value="2">超高画質 x2.0</option>
+                <option value="1" selected data-i18n="output.quality.standard">標準 x1.0</option>
+                <option value="1.5" data-i18n="output.quality.high">高画質 x1.5</option>
+                <option value="2" data-i18n="output.quality.ultra">超高画質 x2.0</option>
               </select>
             </div>
             <div class="output-row output-row-inline">
-              <span class="output-label">FPS</span>
+              <span class="output-label" data-i18n="label.fps">FPS</span>
               <div class="output-inline-controls">
                 <select id="output-fps" class="output-select output-select-fps">
                   <option value="24">24</option>
@@ -807,7 +821,7 @@
                 </select>
                 <label class="output-toggle-label">
                   <input id="output-include-audio" type="checkbox">
-                  <span>音声あり</span>
+                  <span data-i18n="label.audioIncluded">音声あり</span>
                 </label>
               </div>
             </div>
@@ -820,7 +834,7 @@
     <div id="ui-busy-overlay" class="ui-busy-overlay hidden" aria-hidden="true">
       <div class="ui-busy-card">
         <div class="loading-spinner"></div>
-        <div id="ui-busy-text" class="ui-busy-text">Exporting PNG sequence...</div>
+        <div id="ui-busy-text" class="ui-busy-text" data-i18n="busy.exportingPngSequence">Exporting PNG sequence...</div>
       </div>
     </div>
   </div>

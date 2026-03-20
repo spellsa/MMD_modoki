@@ -1,7 +1,7 @@
 import type { MmdManager, WgslMaterialShaderPresetId } from "./mmd-manager";
 import type { Timeline } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
-import { t } from "./i18n";
+import { getLocale, setLocale, t } from "./i18n";
 import { Quaternion } from "@babylonjs/core/Maths/math.vector";
 import type {
     InterpolationChannelPreview,
@@ -13,6 +13,7 @@ import type {
     PngSequenceExportProgress,
     PngSequenceExportState,
     ProjectOutputState,
+    UiLocale,
     TrackCategory,
     TimelineInterpolationPreview,
     WebmExportProgress,
@@ -172,6 +173,7 @@ export class UIController {
     private physicsToggleText: HTMLElement;
     private btnToggleGi: HTMLElement;
     private giToggleText: HTMLElement;
+    private toolbarLocaleSelect: HTMLSelectElement | null = null;
     private btnToggleShaderPanel: HTMLButtonElement | null = null;
     private shaderPanelToggleText: HTMLElement | null = null;
     private btnToggleFullscreenUi: HTMLButtonElement | null = null;
@@ -318,6 +320,7 @@ export class UIController {
         this.physicsToggleText = document.getElementById("physics-toggle-text")!;
         this.btnToggleGi = document.getElementById("btn-toggle-gi")!;
         this.giToggleText = document.getElementById("gi-toggle-text")!;
+        this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
         this.btnToggleShaderPanel = document.getElementById("btn-toggle-shader-panel") as HTMLButtonElement | null;
         this.shaderPanelToggleText = document.getElementById("shader-panel-toggle-text");
         this.btnToggleFullscreenUi = document.getElementById("btn-toggle-fullscreen-ui") as HTMLButtonElement | null;
@@ -403,6 +406,7 @@ export class UIController {
         void this.reloadBundledWgslShaderFiles();
         this.updateTimelineEditState();
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
+        this.applyLocalizedUiState();
         document.addEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
 
         window.addEventListener("beforeunload", (event) => {
@@ -508,6 +512,14 @@ export class UIController {
         });
         this.btnToggleFullscreenUi?.addEventListener("click", () => {
             this.toggleUiFullscreenMode();
+        });
+        this.toolbarLocaleSelect?.addEventListener("change", () => {
+            const nextLocale = this.getSelectedToolbarLocale();
+            if (!nextLocale || nextLocale === getLocale()) {
+                this.syncToolbarLocaleSelect();
+                return;
+            }
+            setLocale(nextLocale);
         });
         const physicsGravityAccel = document.getElementById("physics-gravity-accel") as HTMLInputElement | null;
         const physicsGravityAccelVal = document.getElementById("physics-gravity-accel-val");
@@ -1468,16 +1480,16 @@ export class UIController {
 
     private formatWebmExportPhaseLabel(phase: WebmExportProgress["phase"]): string {
         switch (phase) {
-            case "initializing": return "準備中";
-            case "loading-project": return "読込中";
-            case "checking-codec": return "設定確認中";
-            case "opening-output": return "保存準備中";
-            case "encoding": return "出力中";
-            case "closing-track": return "仕上げ中";
-            case "finalizing": return "保存中";
-            case "finishing-job": return "完了処理中";
-            case "completed": return "完了";
-            case "failed": return "失敗";
+            case "initializing": return t("webm.phase.initializing");
+            case "loading-project": return t("webm.phase.loadingProject");
+            case "checking-codec": return t("webm.phase.checkingCodec");
+            case "opening-output": return t("webm.phase.openingOutput");
+            case "encoding": return t("webm.phase.encoding");
+            case "closing-track": return t("webm.phase.closingTrack");
+            case "finalizing": return t("webm.phase.finalizing");
+            case "finishing-job": return t("webm.phase.finishingJob");
+            case "completed": return t("webm.phase.completed");
+            case "failed": return t("webm.phase.failed");
             default: return phase;
         }
     }
@@ -1500,7 +1512,7 @@ export class UIController {
 
         if (!active) {
             if (this.busyTextEl) {
-                this.busyTextEl.textContent = "Background export finished.";
+                this.busyTextEl.textContent = t("busy.backgroundExportFinished");
             }
             return;
         }
@@ -1523,17 +1535,17 @@ export class UIController {
                 const phaseLabel = this.formatWebmExportPhaseLabel(progress.phase);
                 if (total > 0) {
                     const ratio = Math.min(100, Math.max(0, (encoded / total) * 100));
-                    this.busyTextEl.textContent = `WebM ${phaseLabel} ${encoded}/${total} (${ratio.toFixed(1)}%)\nフレーム ${frame}`;
+                    this.busyTextEl.textContent = t("busy.webmProgress", { phase: phaseLabel, encoded, total, ratio: ratio.toFixed(1), frame });
                     return;
                 }
-                this.busyTextEl.textContent = `WebM ${phaseLabel}`;
+                this.busyTextEl.textContent = t("busy.webmExportRunning");
                 return;
             }
             if (this.webmExportActiveCount > 1) {
-                this.busyTextEl.textContent = `WebM 出力中 (${this.webmExportActiveCount}件)`;
+                this.busyTextEl.textContent = t("busy.webmExportActive", { count: this.webmExportActiveCount });
                 return;
             }
-            this.busyTextEl.textContent = "WebM 出力中";
+            this.busyTextEl.textContent = t("busy.webmExportRunning");
             return;
         }
 
@@ -1545,15 +1557,15 @@ export class UIController {
                 const frame = Math.max(0, Math.floor(progress.frame));
                 if (total > 0) {
                     const ratio = Math.min(100, Math.max(0, (saved / total) * 100));
-                    this.busyTextEl.textContent = `PNG sequence exporting... ${saved}/${total} (${ratio.toFixed(1)}%) frame ${frame}`;
+                    this.busyTextEl.textContent = t("busy.webmProgress", { phase: "PNG", encoded: saved, total, ratio: ratio.toFixed(1), frame });
                     return;
                 }
             }
             if (this.pngSequenceExportActiveCount > 1) {
-                this.busyTextEl.textContent = `PNG sequence exporting in background (${this.pngSequenceExportActiveCount} jobs).`;
+                this.busyTextEl.textContent = t("busy.webmExportActive", { count: this.pngSequenceExportActiveCount });
                 return;
             }
-            this.busyTextEl.textContent = "PNG sequence exporting in background. Main controls are locked.";
+            this.busyTextEl.textContent = t("busy.exportingPngSequence");
         }
     }
 
@@ -2712,7 +2724,7 @@ export class UIController {
         );
         const outputFilePath = await window.electronAPI.saveWebmDialog(defaultFileName);
         if (!outputFilePath) {
-            this.showToast("WebM export canceled", "info");
+            this.showToast(t("toast.webmExportCanceled"), "info");
             return;
         }
 
@@ -2721,11 +2733,11 @@ export class UIController {
         const includeAudio = Boolean(this.outputIncludeAudioInput?.checked) && typeof audioFilePath === "string" && audioFilePath.length > 0;
         const preferredVideoCodec = (this.outputWebmCodecSelect?.value as "auto" | "vp8" | "vp9" | undefined) ?? "vp9";
         if (Boolean(this.outputIncludeAudioInput?.checked) && !includeAudio) {
-            this.showToast("音声未読込のため無音 WebM を出力します", "info");
+            this.showToast(t("toast.audioMissingForWebm"), "info");
         }
         project.assets.audioPath = null;
 
-        this.setStatus("Launching WebM export window...", true);
+        this.setStatus(t("busy.webmExportLaunching"), true);
         const result = await window.electronAPI.startWebmExportWindow({
             project,
             outputFilePath,
@@ -3518,14 +3530,14 @@ export class UIController {
         btnDelete.disabled = !enabled;
 
         if (!enabled) {
-            btnVisibility.textContent = "非表示";
+            btnVisibility.textContent = t("button.hide");
             return;
         }
 
         const accessories = this.mmdManager.getLoadedAccessories();
         const current = accessories.find((item) => item.index === selectedIndex);
         const visible = current?.visible ?? true;
-        btnVisibility.textContent = visible ? "非表示" : "表示";
+        btnVisibility.textContent = visible ? t("button.hide") : t("button.show");
     }
 
     private isShaderPanelExpanded(): boolean {
@@ -4200,7 +4212,7 @@ export class UIController {
                     <span data-postfx-val="bloom-enabled" class="effect-value">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Bloom強度</span>
+                    <span class="effect-label" data-i18n="label.bloomStrength">Bloom���x</span>
                     <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
                 </div>
@@ -4803,6 +4815,27 @@ export class UIController {
         );
         this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
         this.updateFullscreenUiToggleButton(this.isUiFullscreenActive);
+        this.syncToolbarLocaleSelect();
+    }
+
+    private getSelectedToolbarLocale(): UiLocale | null {
+        if (!this.toolbarLocaleSelect) return null;
+        const value = this.toolbarLocaleSelect.value;
+        return value === "ja"
+            || value === "en"
+            || value === "zh-Hant"
+            || value === "zh-Hans"
+            || value === "ko"
+            ? value
+            : null;
+    }
+
+    private syncToolbarLocaleSelect(): void {
+        if (!this.toolbarLocaleSelect) return;
+        const locale = getLocale();
+        if (this.toolbarLocaleSelect.value !== locale) {
+            this.toolbarLocaleSelect.value = locale;
+        }
     }
 
     private updateGroundToggleButton(visible: boolean): void {

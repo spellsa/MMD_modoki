@@ -11,7 +11,7 @@ import { BottomPanel } from "./bottom-panel";
 import { UIController } from "./ui-controller";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
-import { applyI18nToDom, getLocale, initializeI18n, setLocale } from "./i18n";
+import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 
 document.addEventListener("DOMContentLoaded", () => {
   initializeI18n(document);
@@ -65,7 +65,7 @@ async function initializeApp(): Promise<void> {
 
     const statusText = document.getElementById("status-text");
     if (statusText) {
-      statusText.textContent = "初期化に失敗しました";
+      statusText.textContent = t("error.initializationFailed");
     }
 
     const overlay = document.getElementById("viewport-overlay");
@@ -73,8 +73,8 @@ async function initializeApp(): Promise<void> {
       overlay.classList.remove("hidden");
       const title = overlay.querySelector("p");
       const hint = overlay.querySelector(".hint-text");
-      if (title) title.textContent = "初期化に失敗しました";
-      if (hint) hint.textContent = `詳細: ${message}`;
+      if (title) title.textContent = t("error.initializationFailed");
+      if (hint) hint.textContent = t("error.details", { message });
     }
   }
 }

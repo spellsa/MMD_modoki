@@ -45,15 +45,23 @@ export interface ElectronAPI {
     onWebmExportProgress: (callback: (progress: WebmExportProgress) => void) => () => void;
 }
 
-export type UiLocale = "ja" | "en";
+export type UiLocale = "ja" | "en" | "zh-Hant" | "zh-Hans" | "ko";
 
 declare global {
     interface Window {
         electronAPI: ElectronAPI;
         mmdI18n?: {
             getLocale: () => UiLocale;
-            setLocale: (locale: UiLocale) => void;
-            apply: () => void;
+            setLocale: (
+                locale: UiLocale,
+                options?: {
+                    persist?: boolean;
+                    applyToDom?: boolean;
+                    root?: ParentNode;
+                    emitEvent?: boolean;
+                },
+            ) => void;
+            apply: (root?: ParentNode) => void;
         };
     }
 }

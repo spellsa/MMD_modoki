@@ -1,8 +1,12 @@
 import { createInstance, type Resource } from "i18next";
+import type { UiLocale } from "./types";
 import jaTranslation from "../language/ja.json";
 import enTranslation from "../language/en.json";
+import zhHantTranslation from "../language/zh-Hant.json";
+import zhHansTranslation from "../language/zh-Hans.json";
+import koTranslation from "../language/ko.json";
 
-export type UiLocale = "ja" | "en";
+export type { UiLocale } from "./types";
 
 type TranslationTable = Record<string, string>;
 
@@ -12,11 +16,17 @@ const DEFAULT_LOCALE: UiLocale = "ja";
 const translations: Record<UiLocale, TranslationTable> = {
     ja: jaTranslation as TranslationTable,
     en: enTranslation as TranslationTable,
+    "zh-Hant": zhHantTranslation as TranslationTable,
+    "zh-Hans": zhHansTranslation as TranslationTable,
+    ko: koTranslation as TranslationTable,
 };
 
 const resources: Resource = {
     ja: { translation: translations.ja },
     en: { translation: translations.en },
+    "zh-Hant": { translation: translations["zh-Hant"] },
+    "zh-Hans": { translation: translations["zh-Hans"] },
+    ko: { translation: translations.ko },
 };
 
 const i18nInstance = createInstance();
@@ -25,14 +35,45 @@ let currentLocale: UiLocale = DEFAULT_LOCALE;
 let i18nInitialized = false;
 
 const isLocale = (value: string | null | undefined): value is UiLocale => {
-    return value === "ja" || value === "en";
+    return value === "ja"
+        || value === "en"
+        || value === "zh-Hant"
+        || value === "zh-Hans"
+        || value === "ko";
+};
+
+const normalizeLocaleTag = (value: string): UiLocale | null => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.startsWith("ja")) return "ja";
+    if (normalized.startsWith("en")) return "en";
+    if (normalized.startsWith("ko")) return "ko";
+    if (!normalized.startsWith("zh")) return null;
+    if (
+        normalized.includes("hant")
+        || normalized.includes("tw")
+        || normalized.includes("hk")
+        || normalized.includes("mo")
+    ) {
+        return "zh-Hant";
+    }
+    if (normalized.includes("hans") || normalized.includes("cn") || normalized.includes("sg")) {
+        return "zh-Hans";
+    }
+    return "zh-Hans";
 };
 
 const resolveLocaleFromEnvironment = (): UiLocale => {
     const stored = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     if (isLocale(stored)) return stored;
-    const nav = typeof navigator !== "undefined" ? navigator.language.toLowerCase() : "";
-    return nav.startsWith("ja") ? "ja" : DEFAULT_LOCALE;
+    if (typeof navigator !== "undefined") {
+        const candidates = [...(navigator.languages ?? []), navigator.language].filter(Boolean);
+        for (const candidate of candidates) {
+            const locale = normalizeLocaleTag(candidate);
+            if (locale) return locale;
+        }
+    }
+    return DEFAULT_LOCALE;
 };
 
 const ensureI18nInitialized = (locale: UiLocale): void => {
@@ -40,7 +81,7 @@ const ensureI18nInitialized = (locale: UiLocale): void => {
     void i18nInstance.init({
         resources,
         lng: locale,
-        fallbackLng: DEFAULT_LOCALE,
+        fallbackLng: "en",
         initImmediate: false,
         interpolation: {
             escapeValue: false,
@@ -62,6 +103,12 @@ const applyKeyToAttribute = (
         if (!key) return;
         element.setAttribute(targetAttr, t(key));
     });
+};
+
+const syncDocumentLocale = (locale: UiLocale): void => {
+    if (typeof document === "undefined") return;
+    document.documentElement.lang = locale;
+    document.documentElement.setAttribute("lang", locale);
 };
 
 export const t = (key: string, params?: Record<string, string | number>): string => {
@@ -102,6 +149,7 @@ export const setLocale = (
 
     currentLocale = locale;
     ensureI18nInitialized(locale);
+    syncDocumentLocale(locale);
     if (i18nInstance.language !== locale) {
         void i18nInstance.changeLanguage(locale);
     }
@@ -131,16 +179,6 @@ export const initializeI18n = (root: ParentNode = document): UiLocale => {
     });
     return initialLocale;
 };
-
-declare global {
-    interface Window {
-        mmdI18n?: {
-            getLocale: typeof getLocale;
-            setLocale: typeof setLocale;
-            apply: typeof applyI18nToDom;
-        };
-    }
-}
 
 if (typeof window !== "undefined") {
     window.mmdI18n = {
