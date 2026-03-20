@@ -19,6 +19,7 @@ import type {
     WebmExportProgress,
     WebmExportState,
 } from "./types";
+import { normalizeLutFile } from "./lut-file";
 
 type CameraViewPreset = "left" | "front" | "right";
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
@@ -123,6 +124,14 @@ type MmdManagerInternalView = {
     cameraSourceAnimation: RuntimeCameraAnimationLike | null;
     mmdCamera: RuntimeCameraLike;
     cameraAnimationHandle: unknown | null;
+};
+
+type ImportedLutRegistryEntry = {
+    sourcePath: string;
+    displayName: string;
+    rawText: string;
+    runtimeText: string;
+    sourceFormat: "3dl" | "cube";
 };
 
 export class UIController {
@@ -276,6 +285,8 @@ export class UIController {
     private isUiFullscreenActive = false;
     private postFxLutExternalPath: string | null = null;
     private postFxLutExternalText: string | null = null;
+    private postFxLutExternalRuntimeText: string | null = null;
+    private readonly customLutEntriesByPath = new Map<string, ImportedLutRegistryEntry>();
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
     private currentProjectFilePath: string | null = null;
@@ -1627,15 +1638,17 @@ export class UIController {
                         if (!resolvedPath) return null;
                         const filePath = resolvedPath;
                         const ext = this.getFileExtension(filePath);
-                        const priority = ext === "pmx" || ext === "pmd"
+                        const priority = ext === "3dl" || ext === "cube"
                             ? 0
-                            : ext === "x"
-                                ? 0
-                            : ext === "vmd" || ext === "vpd"
+                            : ext === "pmx" || ext === "pmd"
                                 ? 1
-                                : ext === "mp3" || ext === "wav" || ext === "ogg"
-                                    ? 2
-                                    : 3;
+                                : ext === "x"
+                                    ? 1
+                                    : ext === "vmd" || ext === "vpd"
+                                        ? 2
+                                        : ext === "mp3" || ext === "wav" || ext === "ogg"
+                                            ? 3
+                                            : 4;
                         return { filePath, priority };
                     })
                     .filter((entry): entry is { filePath: string; priority: number } => entry !== null)
@@ -2266,14 +2279,26 @@ export class UIController {
                     const lutText = await window.electronAPI.readTextFile(resolvedExternalLutPath);
                     if (lutText) {
                         resolvedExternalLutText = lutText;
+                        const imported = await this.importExternalLutFile(
+                            resolvedExternalLutPath,
+                            "project",
+                            false,
+                            lutText,
+                            requestedLutMode === "project-relative" ? "project-relative" : "external-absolute",
+                        );
+                        if (!imported) {
+                            resolvedExternalLutText = null;
+                            this.postFxLutExternalRuntimeText = null;
+                            this.mmdManager.setPostEffectExternalLut(null, null, null);
+                            externalLutWarning = 'External LUT parse failed: ' + requestedLutPath;
+                        }
                     } else {
-                        externalLutWarning = `External LUT load failed: ${requestedLutPath}`;
+                        externalLutWarning = 'External LUT load failed: ' + requestedLutPath;
                     }
                 } else {
-                    externalLutWarning = "External LUT path is missing";
+                    externalLutWarning = 'External LUT path is missing';
                 }
             }
-
             if (typeof requestedWgslToonPath === "string" && requestedWgslToonPath.trim().length > 0) {
                 const normalizedPath = requestedWgslToonPath.trim();
                 resolvedWgslToonPath = this.isAbsolutePathForRenderer(normalizedPath)
@@ -2302,7 +2327,9 @@ export class UIController {
             this.mmdManager.setExternalWgslToonShader(resolvedWgslToonPath, resolvedWgslToonText);
             this.postFxLutExternalPath = resolvedExternalLutPath;
             this.postFxLutExternalText = resolvedExternalLutText;
-            this.mmdManager.setPostEffectExternalLut(resolvedExternalLutPath, resolvedExternalLutText);
+            if (!resolvedExternalLutText) {
+                this.postFxLutExternalRuntimeText = null;
+            }
             if (isExternalLutMode && !resolvedExternalLutText) {
                 this.mmdManager.postEffectLutEnabled = false;
             }
@@ -2366,6 +2393,121 @@ export class UIController {
         return fileName.substring(dot + 1).toLowerCase();
     }
 
+    private normalizeImportedLutPath(filePath: string): string {
+        return filePath.replace(/[\\/]+/g, "\\").toLowerCase();
+    }
+
+    private escapeHtml(value: string): string {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    private getImportedLutEntry(filePath: string): ImportedLutRegistryEntry | null {
+        return this.customLutEntriesByPath.get(this.normalizeImportedLutPath(filePath)) ?? null;
+    }
+
+    private registerImportedLutEntry(filePath: string, normalizedLut: {
+        displayName: string;
+        rawText: string;
+        runtimeText: string;
+        sourceFormat: '3dl' | 'cube';
+    }): ImportedLutRegistryEntry {
+        const entry: ImportedLutRegistryEntry = {
+            sourcePath: filePath,
+            displayName: normalizedLut.displayName,
+            rawText: normalizedLut.rawText,
+            runtimeText: normalizedLut.runtimeText,
+            sourceFormat: normalizedLut.sourceFormat,
+        };
+        this.customLutEntriesByPath.set(this.normalizeImportedLutPath(filePath), entry);
+        return entry;
+    }
+
+    private buildLutPresetOptionsHtml(): string {
+        const importedEntries = Array.from(this.customLutEntriesByPath.values())
+            .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.sourcePath.localeCompare(b.sourcePath, undefined, { sensitivity: 'base' }));
+        const labelCounts = new Map<string, number>();
+        const importedOptionsHtml = importedEntries
+            .map((entry) => {
+                const baseName = entry.displayName || this.getBaseNameForRenderer(entry.sourcePath) || 'Imported LUT';
+                const count = (labelCounts.get(baseName) ?? 0) + 1;
+                labelCounts.set(baseName, count);
+                const label = count === 1 ? baseName : baseName + ' (' + count + ')';
+                return '<option value="' + this.escapeHtml(entry.sourcePath) + '">' + this.escapeHtml(label) + '</option>';
+            })
+            .join('');
+        const builtInOptionsHtml = this.mmdManager.getPostEffectLutPresetOptions()
+            .map((preset) => '<option value="' + this.escapeHtml(preset.id) + '">' + this.escapeHtml(preset.label) + '</option>')
+            .join('');
+
+        const importedGroupHtml = importedEntries.length > 0
+            ? '<optgroup label="Imported LUTs">' + importedOptionsHtml + '</optgroup>'
+            : '';
+        const builtInGroupHtml = '<optgroup label="Built-in LUTs">' + builtInOptionsHtml + '</optgroup>';
+
+        return importedGroupHtml + builtInGroupHtml;
+    }
+
+    private getCurrentLutPresetSelectValue(): string {
+        if (this.mmdManager.postEffectLutSourceMode !== 'builtin') {
+            const activeImportedEntry = this.postFxLutExternalPath ? this.getImportedLutEntry(this.postFxLutExternalPath) : null;
+            if (activeImportedEntry) {
+                return activeImportedEntry.sourcePath;
+            }
+            if (this.postFxLutExternalPath) {
+                return this.postFxLutExternalPath;
+            }
+        }
+        return this.mmdManager.postEffectLutPreset;
+    }
+
+    private async importExternalLutFile(
+        filePath: string,
+        source: 'dialog' | 'drop' | 'project',
+        notify = true,
+        rawTextOverride?: string,
+        sourceModeOverride: 'external-absolute' | 'project-relative' = 'external-absolute',
+    ): Promise<boolean> {
+        const rawText = typeof rawTextOverride === 'string'
+            ? rawTextOverride
+            : await window.electronAPI.readTextFile(filePath);
+        if (!rawText) {
+            if (notify) {
+                this.showToast('Failed to load LUT file', 'error');
+            }
+            return false;
+        }
+
+        let normalizedLut: ReturnType<typeof normalizeLutFile>;
+        try {
+            normalizedLut = normalizeLutFile(filePath, rawText);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (notify) {
+                this.showToast('Failed to load LUT file: ' + message, 'error');
+            }
+            return false;
+        }
+
+        const entry = this.registerImportedLutEntry(filePath, normalizedLut);
+        this.postFxLutExternalPath = entry.sourcePath;
+        this.postFxLutExternalText = entry.rawText;
+        this.postFxLutExternalRuntimeText = entry.runtimeText;
+        this.mmdManager.setPostEffectExternalLut(entry.sourcePath, entry.runtimeText, entry.sourceFormat);
+        this.mmdManager.postEffectLutSourceMode = sourceModeOverride;
+        if (source !== "project") {
+            this.mmdManager.postEffectLutEnabled = true;
+        }
+        if (notify) {
+            this.showToast('Loaded LUT: ' + this.getBaseNameForRenderer(filePath), 'success');
+        }
+        this.refreshShaderPanel();
+        return true;
+    }
     private isLikelyCameraVmdPath(filePath: string): boolean {
         if (this.mmdManager.getTimelineTarget() === "camera") return true;
         if (this.mmdManager.getLoadedModels().length === 0) return true;
@@ -2394,6 +2536,15 @@ export class UIController {
                 }
                 return;
             }
+            case "3dl":
+            case "cube":
+                this.setStatus("Loading LUT...", true);
+                if (await this.importExternalLutFile(filePath, source)) {
+                    this.setStatus("LUT loaded", false);
+                } else {
+                    this.setStatus("LUT load failed", false);
+                }
+                return;
             case "vpd":
                 this.setStatus("Loading motion/pose...", true);
                 await this.mmdManager.loadVMD(filePath);
@@ -4087,9 +4238,7 @@ export class UIController {
         this.shaderApplyButton.disabled = true;
         this.shaderResetButton.disabled = true;
         this.shaderPanelNote.textContent = t("shader.camera.note");
-        const lutPresetOptionsHtml = this.mmdManager.getPostEffectLutPresetOptions()
-            .map((preset) => `<option value="${preset.id}">${preset.label}</option>`)
-            .join("");
+        const lutPresetOptionsHtml = this.buildLutPresetOptionsHtml();
 
         this.shaderMaterialList.innerHTML = `
             <div class="shader-postfx-controls">
@@ -4212,7 +4361,7 @@ export class UIController {
                     <span data-postfx-val="bloom-enabled" class="effect-value">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label" data-i18n="label.bloomStrength">Bloom‹­“x</span>
+                    <span class="effect-label" data-i18n="label.bloomStrength">Bloomï¿½ï¿½ï¿½x</span>
                     <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
                 </div>
@@ -4490,50 +4639,67 @@ export class UIController {
 
         const chooseExternalLut = async (): Promise<void> => {
             const lutPath = await window.electronAPI.openFileDialog([
-                { name: "LUT Files", extensions: ["3dl"] },
+                { name: "LUT Files", extensions: ["3dl", "cube"] },
                 { name: "All files", extensions: ["*"] },
             ]);
             if (!lutPath) return;
 
-            const lutText = await window.electronAPI.readTextFile(lutPath);
-            if (!lutText) {
-                this.showToast("Failed to load LUT file", "error");
-                return;
+            this.setStatus("Loading LUT...", true);
+            if (await this.importExternalLutFile(lutPath, "dialog")) {
+                this.setStatus("LUT loaded", false);
+            } else {
+                this.setStatus("LUT load failed", false);
             }
-
-            this.postFxLutExternalPath = lutPath;
-            this.postFxLutExternalText = lutText;
-            this.mmdManager.setPostEffectExternalLut(lutPath, lutText);
-            applyLut();
-            this.showToast(`Loaded LUT: ${this.getBaseNameForRenderer(lutPath)}`, "success");
         };
 
         const applyLut = (): void => {
-            const selectedMode = lutSourceSelect.value === "external-absolute" || lutSourceSelect.value === "project-relative"
-                ? lutSourceSelect.value
+            const selectedPresetValue = lutPresetSelect.value;
+            const selectedImportedEntry = this.getImportedLutEntry(selectedPresetValue);
+            const selectedMode = selectedImportedEntry
+                ? (lutSourceSelect.value === "project-relative" ? "project-relative" : "external-absolute")
                 : "builtin";
-            const isBuiltinMode = selectedMode === "builtin";
-            const hasExternalLut = Boolean(this.postFxLutExternalText);
+            const hasLutSource = selectedMode === "builtin" || Boolean(selectedImportedEntry);
+
+            if (lutSourceSelect.value !== selectedMode) {
+                lutSourceSelect.value = selectedMode;
+            }
+
+            if (selectedImportedEntry) {
+                lutEnabledInput.checked = true;
+            }
+
+            if (selectedImportedEntry) {
+                this.postFxLutExternalPath = selectedImportedEntry.sourcePath;
+                this.postFxLutExternalText = selectedImportedEntry.rawText;
+                this.postFxLutExternalRuntimeText = selectedImportedEntry.runtimeText;
+                this.mmdManager.setPostEffectExternalLut(
+                    selectedImportedEntry.sourcePath,
+                    selectedImportedEntry.runtimeText,
+                    selectedImportedEntry.sourceFormat,
+                );
+            } else {
+                this.postFxLutExternalPath = null;
+                this.postFxLutExternalText = null;
+                this.postFxLutExternalRuntimeText = null;
+                this.mmdManager.setPostEffectExternalLut(null, null, null);
+                this.mmdManager.postEffectLutPreset = selectedPresetValue;
+            }
 
             this.mmdManager.postEffectLutSourceMode = selectedMode;
-            this.mmdManager.postEffectLutPreset = lutPresetSelect.value;
             this.mmdManager.postEffectLutIntensity = Number(lutIntensityInput.value) / 100;
-
-            lutPresetSelect.disabled = !isBuiltinMode;
-            lutFileButton.disabled = isBuiltinMode;
-            const hasSource = isBuiltinMode || hasExternalLut;
-            lutIntensityInput.disabled = !lutEnabledInput.checked || !hasSource;
-
             this.mmdManager.postEffectLutEnabled = lutEnabledInput.checked
-                && hasSource
+                && hasLutSource
                 && this.mmdManager.postEffectLutIntensity > 0.000001;
 
+            lutIntensityInput.disabled = !lutEnabledInput.checked || !hasLutSource;
             lutSourceVal.textContent = lutModeToLabel(selectedMode);
             lutFileVal.textContent = this.postFxLutExternalPath
                 ? this.getBaseNameForRenderer(this.postFxLutExternalPath)
                 : "None";
             lutVal.textContent = this.mmdManager.postEffectLutEnabled
-                ? (isBuiltinMode ? this.mmdManager.postEffectLutPreset : "external")
+                ? (selectedImportedEntry
+                    ? this.getBaseNameForRenderer(selectedImportedEntry.sourcePath)
+                    : this.mmdManager.postEffectLutPreset)
                 : "OFF";
             lutIntensityVal.textContent = this.mmdManager.postEffectLutEnabled
                 ? this.mmdManager.postEffectLutIntensity.toFixed(2)
@@ -4634,9 +4800,7 @@ export class UIController {
             ? this.mmdManager.postEffectLutSourceMode
             : "builtin";
         lutEnabledInput.checked = this.mmdManager.postEffectLutEnabled;
-        lutPresetSelect.value = Array.from(lutPresetSelect.options).some((option) => option.value === this.mmdManager.postEffectLutPreset)
-            ? this.mmdManager.postEffectLutPreset
-            : "anime-soft";
+        lutPresetSelect.value = this.getCurrentLutPresetSelectValue();
         lutIntensityInput.value = String(
             Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectLutIntensity * 100))),
         );

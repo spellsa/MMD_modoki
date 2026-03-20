@@ -68,6 +68,7 @@ Available through normal open operations or drag and drop:
 Available from dedicated UI:
 
 - Project: `.json` (default file name pattern: `*.modoki.json`)
+- LUT: `.3dl` `.cube` (load from the LUT picker or by drag and drop)
 
 Notes:
 

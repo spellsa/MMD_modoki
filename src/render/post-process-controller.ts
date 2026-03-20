@@ -608,7 +608,7 @@ export function applyLutSettings(host: any): void {
 
     const key = mode === "builtin"
         ? `builtin:${host.postEffectLutPresetValue}`
-        : `external:${mode}:${host.postEffectLutExternalPathValue ?? ""}:${host.postEffectLutExternalRevision}`;
+        : `external:${mode}:${host.postEffectLutExternalPathValue ?? ""}:${host.postEffectLutExternalSourceFormatValue ?? ""}:${host.postEffectLutExternalRevision}`;
 
     if (!host.postEffectLutTexture || host.postEffectLutTextureKey !== key) {
         if (host.postEffectLutTexture) {
@@ -641,7 +641,7 @@ export function applyLutSettings(host: any): void {
         return;
     }
 
-    host.postEffectLutTexture.level = host.postEffectLutIntensityValue;
+    host.postEffectLutTexture.level = Math.max(0, Math.min(1, host.postEffectLutIntensityValue));
     imageProcessing.colorGradingTexture = host.postEffectLutTexture;
     imageProcessing.colorGradingEnabled = true;
 }

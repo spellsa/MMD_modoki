@@ -29,10 +29,19 @@
   - `External Abs`
   - `Project LUT`
 - `LUTFile` の `Load...` ボタンで外部ファイルを選択
+- ドラッグ&ドロップでも `3dl` / `cube` を読み込める
+- 読み込んだ LUT は `LUT` ドロップダウンに追加される
 
 ### 読み込める拡張子
 
 - `.3dl`
+- `.cube`
+
+### 変換方針
+
+- `.3dl` はそのまま runtime に渡す
+- `.cube` はアプリ側で解析して runtime 用の `3dl` テキストへ正規化する
+- `cube` の 1D LUT も受け付け、runtime では 3D LUT 相当として適用する
 
 ### モードごとの保存動作
 

@@ -1135,6 +1135,7 @@ ${beforeFogAppendBlock}
     private postEffectLutSourceModeValue: PostEffectLutSourceMode = "builtin";
     private postEffectLutExternalPathValue: string | null = null;
     private postEffectLutExternalTextValue: string | null = null;
+    private postEffectLutExternalSourceFormatValue: "3dl" | "cube" | null = null;
     private postEffectLutExternalRevision = 0;
     private postEffectMotionBlurEnabledValue = false;
     private postEffectMotionBlurStrengthValue = 0.5;
@@ -3510,8 +3511,8 @@ ${beforeFogAppendBlock}
     }
 
     /** Set external LUT source path/text. */
-    public setPostEffectExternalLut(path: string | null, text: string | null): void {
-        setPostEffectExternalLutImpl(this, path, text);
+    public setPostEffectExternalLut(path: string | null, text: string | null, sourceFormat: "3dl" | "cube" | null = null): void {
+        setPostEffectExternalLutImpl(this, path, text, sourceFormat);
     }
 
     /** Motion blur enabled state. */

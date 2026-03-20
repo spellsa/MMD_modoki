@@ -8,9 +8,27 @@ export function getPostEffectLutPresetOptions(host: any): ReadonlyArray<{ id: st
     return host.constructor.POST_EFFECT_LUT_PRESETS ?? [];
 }
 
-export function setPostEffectExternalLut(host: any, path: string | null, text: string | null): void {
-    host.postEffectLutExternalPathValue = typeof path === "string" && path.trim().length > 0 ? path.trim() : null;
-    host.postEffectLutExternalTextValue = typeof text === "string" && text.length > 0 ? text : null;
+export function setPostEffectExternalLut(
+    host: any,
+    path: string | null,
+    text: string | null,
+    sourceFormat: "3dl" | "cube" | null = null,
+): void {
+    const normalizedPath = typeof path === "string" && path.trim().length > 0 ? path.trim() : null;
+    const normalizedText = typeof text === "string" && text.length > 0 ? text : null;
+    const normalizedSourceFormat = sourceFormat === "cube" ? "cube" : null;
+    const hasChanged =
+        host.postEffectLutExternalPathValue !== normalizedPath
+        || host.postEffectLutExternalTextValue !== normalizedText
+        || host.postEffectLutExternalSourceFormatValue !== normalizedSourceFormat;
+
+    if (!hasChanged) {
+        return;
+    }
+
+    host.postEffectLutExternalPathValue = normalizedPath;
+    host.postEffectLutExternalTextValue = normalizedText;
+    host.postEffectLutExternalSourceFormatValue = normalizedSourceFormat;
     host.postEffectLutExternalRevision += 1;
     if (host.postEffectLutExternalBlobUrl) {
         URL.revokeObjectURL(host.postEffectLutExternalBlobUrl);
