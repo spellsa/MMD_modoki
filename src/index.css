@@ -204,6 +204,7 @@ body.exporter-mode #bone-overlay-canvas {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 0 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
@@ -216,7 +217,12 @@ body.exporter-mode #bone-overlay-canvas {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   -webkit-app-region: no-drag;
+}
+
+.toolbar-right {
+  flex-shrink: 0;
 }
 
 #btn-toggle-gi {
@@ -288,6 +294,14 @@ body.exporter-mode #bone-overlay-canvas {
   font-size: 12px;
   font-weight: 500;
   transition: all var(--transition-fast);
+}
+
+.toolbar-btn svg {
+  flex: 0 0 auto;
+}
+
+.toolbar-btn span {
+  line-height: 1.1;
 }
 
 .toolbar-toggle-group {
@@ -382,6 +396,12 @@ body.exporter-mode #bone-overlay-canvas {
   border-radius: 20px;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+#status-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .perf-badge {
@@ -1402,7 +1422,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .camera-view-buttons {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 
 .camera-view-btn {
@@ -1410,14 +1430,18 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   align-items: center;
   justify-content: center;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
+  height: 27px;
+  padding: 0 5px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
@@ -1750,6 +1774,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .playback-export-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 28px;
   padding: 0 10px;
@@ -1758,6 +1783,11 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
@@ -1893,6 +1923,12 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .output-controls .playback-export-btn {
   width: 100%;
   justify-content: center;
+}
+
+.output-controls .playback-export-btn span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .output-export-row .playback-export-btn {
@@ -3036,6 +3072,387 @@ body.bottom-panel-resizing {
 @media (max-width: 1480px) {
   :root {
     --shader-panel-width: 244px;
+  }
+}
+
+@media (max-width: 1760px) {
+  #toolbar {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    gap: 4px;
+  }
+
+  .toolbar-divider {
+    margin: 0 2px;
+  }
+
+  .toolbar-btn {
+    gap: 5px;
+    padding: 5px 9px;
+    font-size: 11px;
+  }
+
+  .toolbar-btn--compact {
+    gap: 3px;
+    padding: 4px 6px;
+    font-size: 10px;
+    min-height: 24px;
+  }
+
+  .toolbar-locale-select {
+    min-width: 104px;
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .perf-badge {
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .perf-label,
+  .engine-badge {
+    font-size: 9px;
+  }
+
+  .status-badge {
+    gap: 4px;
+    max-width: 84px;
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+
+  .output-export-row {
+    gap: 4px;
+  }
+
+  .output-controls .playback-export-btn {
+    gap: 4px;
+    height: 27px;
+    padding: 0 6px;
+    font-size: 10px;
+  }
+}
+
+@media (min-width: 1600px) and (min-height: 900px) {
+  :root {
+    --toolbar-height: 52px;
+    --timeline-width: 304px;
+    --shader-panel-width: 316px;
+    --bottom-panel-height: 232px;
+  }
+
+  html,
+  body {
+    font-size: 14px;
+  }
+
+  #toolbar {
+    padding: 0 14px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    gap: 8px;
+  }
+
+  .app-title {
+    font-size: 16px;
+  }
+
+  .toolbar-btn {
+    min-height: 36px;
+    padding: 7px 13px;
+    font-size: 13px;
+  }
+
+  .toolbar-btn--compact {
+    min-height: 30px;
+    padding: 6px 9px;
+    font-size: 12px;
+  }
+
+  .toolbar-locale-select {
+    min-width: 124px;
+    height: 36px;
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .status-badge,
+  .perf-badge {
+    padding: 5px 11px;
+    font-size: 12px;
+  }
+
+  .perf-label,
+  .engine-badge {
+    font-size: 11px;
+  }
+
+  #timeline-panel .section-header,
+  #timeline-panel .panel-header {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  #timeline-edit-toolbar {
+    gap: 8px;
+    padding: 10px 10px 8px;
+  }
+
+  .timeline-edit-btn {
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .timeline-selection-label {
+    font-size: 11px;
+  }
+
+  #timeline-labels {
+    width: 60px;
+  }
+
+  #timeline-panel #playback-controls {
+    padding: 10px 10px 8px;
+    gap: 8px;
+  }
+
+  #timeline-panel .playback-compact-row {
+    gap: 8px;
+  }
+
+  #timeline-panel .playback-step-btn {
+    width: 30px;
+    height: 30px;
+    font-size: 14px;
+  }
+
+  #timeline-panel .transport-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  #timeline-panel .transport-btn.play-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  #timeline-panel .frame-label {
+    font-size: 10px;
+  }
+
+  #timeline-panel .frame-number {
+    font-size: 14px;
+  }
+
+  #timeline-panel .frame-separator,
+  #timeline-panel .playback-export-btn {
+    font-size: 11px;
+  }
+
+  #timeline-panel .volume-slider {
+    width: 84px;
+  }
+
+  #timeline-panel .info-action-btn,
+  #bottom-panel #info-section .info-action-btn {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  #timeline-panel .info-compact-key,
+  #bottom-panel #info-section .info-compact-key,
+  #timeline-panel .info-compact-item .info-value,
+  #bottom-panel #info-section .info-compact-item .info-value {
+    font-size: 11px;
+  }
+
+  .section-header {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .section-kf-btn {
+    min-width: 24px;
+    height: 20px;
+    font-size: 13px;
+  }
+
+  .panel-select-row {
+    grid-template-columns: 50px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .panel-select-label,
+  .panel-select,
+  .panel-empty-state {
+    font-size: 11px;
+  }
+
+  #bone-select {
+    font-size: 12px;
+  }
+
+  .bone-controls,
+  .morph-controls,
+  .camera-controls,
+  .shadow-controls,
+  .physics-controls {
+    padding: 10px;
+  }
+
+  .lighting-controls {
+    gap: 6px;
+    padding: 6px 6px 8px 0;
+  }
+
+  .bone-slider-row {
+    grid-template-columns: 52px minmax(0, 1fr) 46px;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .bone-slider-row.range-has-number {
+    grid-template-columns: 52px minmax(0, 1fr) 72px;
+  }
+
+  .bone-slider-label,
+  .bone-slider-value,
+  .light-label,
+  .light-value,
+  .shadow-label,
+  .shadow-value {
+    font-size: 11px;
+  }
+
+  .morph-slider-row {
+    grid-template-columns: minmax(66px, 40%) minmax(0, 1fr) 40px;
+    gap: 10px;
+    padding: 4px 0;
+  }
+
+  .morph-slider-row label,
+  .morph-slider-row .morph-value {
+    font-size: 11px;
+  }
+
+  .cam-axis-label {
+    min-width: 32px !important;
+    font-size: 11px !important;
+  }
+
+  .range-number-input,
+  .light-select {
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .range-number-input {
+    width: 72px;
+  }
+
+  .light-row,
+  .shadow-row {
+    gap: 8px;
+  }
+
+  .light-row.range-has-number {
+    grid-template-columns: 30% minmax(0, 1fr) 72px;
+  }
+
+  .shadow-controls,
+  .camera-controls,
+  .physics-controls {
+    gap: 8px;
+  }
+
+  .camera-view-buttons {
+    gap: 4px;
+  }
+
+  .camera-view-btn {
+    height: 28px;
+    padding: 0 4px;
+    font-size: 10px;
+  }
+
+  .viewport-empty-state p {
+    font-size: 18px;
+  }
+
+  .hint-text {
+    font-size: 12px;
+  }
+}
+
+@media (min-width: 1600px) and (max-width: 1760px) and (min-height: 900px) {
+  #toolbar {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    gap: 4px;
+  }
+
+  .toolbar-btn {
+    gap: 5px;
+    padding: 6px 9px;
+    font-size: 11px;
+    min-height: 34px;
+  }
+
+  .toolbar-btn--compact {
+    gap: 3px;
+    padding: 5px 6px;
+    font-size: 10px;
+    min-height: 28px;
+  }
+
+  .toolbar-locale-select {
+    min-width: 108px;
+    height: 34px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .perf-badge {
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  .perf-label,
+  .engine-badge {
+    font-size: 9px;
+  }
+
+  .status-badge {
+    gap: 4px;
+    max-width: 84px;
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  .output-export-row {
+    gap: 4px;
+  }
+
+  .output-controls .playback-export-btn {
+    gap: 4px;
+    height: 27px;
+    padding: 0 6px;
+    font-size: 10px;
   }
 }
 

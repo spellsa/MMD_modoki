@@ -42,37 +42,9 @@ const isLocale = (value: string | null | undefined): value is UiLocale => {
         || value === "ko";
 };
 
-const normalizeLocaleTag = (value: string): UiLocale | null => {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return null;
-    if (normalized.startsWith("ja")) return "ja";
-    if (normalized.startsWith("en")) return "en";
-    if (normalized.startsWith("ko")) return "ko";
-    if (!normalized.startsWith("zh")) return null;
-    if (
-        normalized.includes("hant")
-        || normalized.includes("tw")
-        || normalized.includes("hk")
-        || normalized.includes("mo")
-    ) {
-        return "zh-Hant";
-    }
-    if (normalized.includes("hans") || normalized.includes("cn") || normalized.includes("sg")) {
-        return "zh-Hans";
-    }
-    return "zh-Hans";
-};
-
 const resolveLocaleFromEnvironment = (): UiLocale => {
     const stored = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     if (isLocale(stored)) return stored;
-    if (typeof navigator !== "undefined") {
-        const candidates = [...(navigator.languages ?? []), navigator.language].filter(Boolean);
-        for (const candidate of candidates) {
-            const locale = normalizeLocaleTag(candidate);
-            if (locale) return locale;
-        }
-    }
     return DEFAULT_LOCALE;
 };
 

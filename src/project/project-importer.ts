@@ -130,6 +130,56 @@ export async function importProjectState(
         if (!loaded) warnings.push(`Camera VMD load failed: ${data.assets.cameraVmdPath}`);
     }
 
+    if (
+        !restoredEmbeddedCamera &&
+        data.camera &&
+        typeof data.camera === "object" &&
+        data.camera.target &&
+        data.camera.rotation &&
+        Number.isFinite(data.camera.target.x) &&
+        Number.isFinite(data.camera.target.y) &&
+        Number.isFinite(data.camera.target.z) &&
+        Number.isFinite(data.camera.rotation.x) &&
+        Number.isFinite(data.camera.rotation.y) &&
+        Number.isFinite(data.camera.rotation.z)
+    ) {
+        const fallbackDistance = typeof data.camera.distance === "number" && Number.isFinite(data.camera.distance)
+            ? data.camera.distance
+            : (
+                data.camera.position &&
+                Number.isFinite(data.camera.position.x) &&
+                Number.isFinite(data.camera.position.y) &&
+                Number.isFinite(data.camera.position.z)
+            )
+                ? Math.max(
+                    0.1,
+                    Math.hypot(
+                        data.camera.position.x - data.camera.target.x,
+                        data.camera.position.y - data.camera.target.y,
+                        data.camera.position.z - data.camera.target.z,
+                    ),
+                )
+                : host.getCameraDistance();
+        const fallbackFov = typeof data.camera.fov === "number" && Number.isFinite(data.camera.fov)
+            ? data.camera.fov
+            : host.getCameraFov();
+
+        host.applyCameraTrackPose(
+            {
+                x: data.camera.target.x,
+                y: data.camera.target.y,
+                z: data.camera.target.z,
+            },
+            {
+                x: data.camera.rotation.x,
+                y: data.camera.rotation.y,
+                z: data.camera.rotation.z,
+            },
+            fallbackDistance,
+            fallbackFov,
+        );
+    }
+
     if (data.assets.audioPath) {
         const loaded = await host.loadMP3(data.assets.audioPath);
         if (!loaded) warnings.push(`Audio load failed: ${data.assets.audioPath}`);
@@ -454,6 +504,7 @@ export async function importProjectState(
     host.setRenderFpsLimit(host.renderFpsLimit);
     host.seekTo(Math.max(0, Math.floor(data.scene.currentFrame ?? 0)));
     host.setPlaybackSpeed(Math.max(0.01, data.scene.playbackSpeed));
+    host.setTimelineTarget(data.scene.timelineTarget === "camera" ? "camera" : "model");
 
     return { loadedModels, warnings };
 }

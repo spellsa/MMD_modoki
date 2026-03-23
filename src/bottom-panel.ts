@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { MmdManager } from "./mmd-manager";
 import type { BoneControlInfo, ModelInfo, MorphDisplayFrameInfo } from "./types";
 
@@ -69,7 +70,7 @@ export class BottomPanel {
         if (info.boneNames.length === 0) {
             this.currentBoneName = null;
             this.boneSelect.disabled = true;
-            this.boneContainer.innerHTML = '<div class="panel-empty-state">No bones</div>';
+            this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noBones")}</div>`;
             return;
         }
 
@@ -94,14 +95,14 @@ export class BottomPanel {
             ? info.morphDisplayFrames
             : info.morphNames.length > 0
                 ? [{
-                    name: "All",
+                    name: t("option.all"),
                     morphs: info.morphNames.map((name, index) => ({ index, name })),
                 }]
                 : [];
 
         if (this.morphFrames.length === 0) {
             this.morphFrameSelect.disabled = true;
-            this.morphContainer.innerHTML = '<div class="panel-empty-state">No morphs</div>';
+            this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noMorphs")}</div>`;
             return;
         }
 
@@ -138,7 +139,7 @@ export class BottomPanel {
         this.boneControlMap.clear();
         this.boneSelect.innerHTML = '<option value="">-</option>';
         this.boneSelect.disabled = true;
-        this.boneContainer.innerHTML = '<div class="panel-empty-state">No model</div>';
+        this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
     }
 
     clearMorphControls(): void {
@@ -147,7 +148,7 @@ export class BottomPanel {
         this.currentMorphFrameIndex = null;
         this.morphFrameSelect.innerHTML = '<option value="">-</option>';
         this.morphFrameSelect.disabled = true;
-        this.morphContainer.innerHTML = '<div class="panel-empty-state">No model</div>';
+        this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
     }
 
     getSelectedBone(): string | null {
@@ -283,7 +284,7 @@ export class BottomPanel {
         this.boneSliderValues.clear();
 
         if (!this.currentBoneName) {
-            this.boneContainer.innerHTML = '<div class="panel-empty-state">No bone selected</div>';
+            this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noBoneSelected")}</div>`;
             return;
         }
 
@@ -320,27 +321,27 @@ export class BottomPanel {
 
         if (boneControlInfo.movable) {
             sliderDefs.push(
-                { key: "tx", label: "PosX", min: -30, max: 30, step: 0.01, value: transform.position.x },
-                { key: "ty", label: "PosY", min: -30, max: 30, step: 0.01, value: transform.position.y },
-                { key: "tz", label: "PosZ", min: -30, max: 30, step: 0.01, value: transform.position.z },
+                { key: "tx", label: t("slider.posX"), min: -30, max: 30, step: 0.01, value: transform.position.x },
+                { key: "ty", label: t("slider.posY"), min: -30, max: 30, step: 0.01, value: transform.position.y },
+                { key: "tz", label: t("slider.posZ"), min: -30, max: 30, step: 0.01, value: transform.position.z },
             );
         }
         if (boneControlInfo.rotatable) {
             sliderDefs.push(
-                { key: "rx", label: "RotX", min: -180, max: 180, step: 0.1, value: transform.rotation.x },
-                { key: "ry", label: "RotY", min: -180, max: 180, step: 0.1, value: transform.rotation.y },
-                { key: "rz", label: "RotZ", min: -180, max: 180, step: 0.1, value: transform.rotation.z },
+                { key: "rx", label: t("slider.rotX"), min: -180, max: 180, step: 0.1, value: transform.rotation.x },
+                { key: "ry", label: t("slider.rotY"), min: -180, max: 180, step: 0.1, value: transform.rotation.y },
+                { key: "rz", label: t("slider.rotZ"), min: -180, max: 180, step: 0.1, value: transform.rotation.z },
             );
         }
         if (isCameraControl) {
             sliderDefs.push(
-                { key: "camDistance", label: "Dist", min: 0.1, max: 400, step: 0.1, value: this.mmdManager?.getCameraDistance() ?? 45 },
-                { key: "camFov", label: "FoV", min: 10, max: 120, step: 0.1, value: this.mmdManager?.getCameraFov() ?? 30 },
+                { key: "camDistance", label: t("slider.distance"), min: 0.1, max: 400, step: 0.1, value: this.mmdManager?.getCameraDistance() ?? 45 },
+                { key: "camFov", label: t("slider.fov"), min: 10, max: 120, step: 0.1, value: this.mmdManager?.getCameraFov() ?? 30 },
             );
         }
 
         if (sliderDefs.length === 0) {
-            this.boneContainer.innerHTML = '<div class="panel-empty-state">No editable channels</div>';
+            this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noEditableChannels")}</div>`;
             return;
         }
 
@@ -506,12 +507,12 @@ export class BottomPanel {
 
         const frame = this.morphFrames[frameIndex];
         if (!frame) {
-            this.morphContainer.innerHTML = '<div class="panel-empty-state">No frame</div>';
+            this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noFrame")}</div>`;
             return;
         }
 
         if (frame.morphs.length === 0) {
-            this.morphContainer.innerHTML = '<div class="panel-empty-state">No morphs</div>';
+            this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noMorphs")}</div>`;
             return;
         }
 

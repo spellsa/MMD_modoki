@@ -1,7 +1,7 @@
 import type { MmdManager, WgslMaterialShaderPresetId } from "./mmd-manager";
 import type { Timeline } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
-import { getLocale, setLocale, t } from "./i18n";
+import { applyI18nToDom, getLocale, setLocale, t } from "./i18n";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type {
     InterpolationChannelPreview,
@@ -1149,7 +1149,7 @@ export class UIController {
             elEffectDofFocalLength &&
             valEffectDofFocalLength
         ) {
-            const blurLabels = ["Low", "Medium", "High"];
+            const blurLabels = [t("option.low"), t("option.medium"), t("option.high")];
             const autoFocusEnabled = this.mmdManager.dofAutoFocusEnabled;
             const focalLengthLinkedToFov = this.mmdManager.dofFocalLengthLinkedToCameraFov;
             this.dofFocusSlider = elEffectDofFocus;
@@ -1161,12 +1161,12 @@ export class UIController {
             const applyDofEnabled = () => {
                 this.mmdManager.dofEnabled = elEffectDofEnabled.checked;
                 elEffectDofEnabled.checked = this.mmdManager.dofEnabled;
-                valEffectDofEnabled.textContent = this.mmdManager.dofEnabled ? "ON" : "OFF";
+                valEffectDofEnabled.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
             };
             const applyDofQuality = () => {
                 const level = Number(elEffectDofQuality.value);
                 this.mmdManager.dofBlurLevel = level;
-                valEffectDofQuality.textContent = blurLabels[this.mmdManager.dofBlurLevel] ?? "High";
+                valEffectDofQuality.textContent = blurLabels[this.mmdManager.dofBlurLevel] ?? t("option.high");
             };
             const applyDofFocus = () => {
                 if (autoFocusEnabled) {
@@ -1204,7 +1204,7 @@ export class UIController {
             };
             const applyDofFocalInvert = () => {
                 this.mmdManager.dofFocalLengthDistanceInverted = elEffectDofFocalInvert.checked;
-                valEffectDofFocalInvert.textContent = this.mmdManager.dofFocalLengthDistanceInverted ? "ON" : "OFF";
+                valEffectDofFocalInvert.textContent = this.mmdManager.dofFocalLengthDistanceInverted ? t("status.on") : t("status.off");
                 if (focalLengthLinkedToFov) {
                     elEffectDofFocalLength.title = this.mmdManager.dofFocalLengthDistanceInverted
                         ? "Auto focal length (linked to camera FoV, inverted)"
@@ -1319,7 +1319,7 @@ export class UIController {
             const applyFogEnabled = () => {
                 this.mmdManager.postEffectFogEnabled = elEffectFogEnabled.checked;
                 elEffectFogEnabled.checked = this.mmdManager.postEffectFogEnabled;
-                valEffectFogEnabled.textContent = this.mmdManager.postEffectFogEnabled ? "ON" : "OFF";
+                valEffectFogEnabled.textContent = this.mmdManager.postEffectFogEnabled ? t("status.on") : t("status.off");
             };
 
             const applyFogStart = () => {
@@ -1365,7 +1365,7 @@ export class UIController {
                 elEffectFogMode.value = "2";
             }
             if (valEffectFogMode) {
-                valEffectFogMode.textContent = "Exp2";
+                valEffectFogMode.textContent = t("option.fog.exp2");
             }
             elEffectFogStart.value = String(Math.round(this.mmdManager.postEffectFogStart));
             elEffectFogEnd.value = String(Math.round(this.mmdManager.postEffectFogEnd));
@@ -2558,7 +2558,7 @@ export class UIController {
         const labelCounts = new Map<string, number>();
         const importedOptionsHtml = importedEntries
             .map((entry) => {
-                const baseName = entry.displayName || this.getBaseNameForRenderer(entry.sourcePath) || 'Imported LUT';
+                const baseName = entry.displayName || this.getBaseNameForRenderer(entry.sourcePath) || t("shader.group.importedLutFallback");
                 const count = (labelCounts.get(baseName) ?? 0) + 1;
                 labelCounts.set(baseName, count);
                 const label = count === 1 ? baseName : baseName + ' (' + count + ')';
@@ -2570,9 +2570,9 @@ export class UIController {
             .join('');
 
         const importedGroupHtml = importedEntries.length > 0
-            ? '<optgroup label="Imported LUTs">' + importedOptionsHtml + '</optgroup>'
+            ? '<optgroup label="' + this.escapeHtml(t("shader.group.importedLuts")) + '">' + importedOptionsHtml + '</optgroup>'
             : '';
-        const builtInGroupHtml = '<optgroup label="Built-in LUTs">' + builtInOptionsHtml + '</optgroup>';
+        const builtInGroupHtml = '<optgroup label="' + this.escapeHtml(t("shader.group.builtInLuts")) + '">' + builtInOptionsHtml + '</optgroup>';
 
         return importedGroupHtml + builtInGroupHtml;
     }
@@ -4201,7 +4201,7 @@ export class UIController {
             this.shaderApplyButton.disabled = true;
             this.shaderResetButton.disabled = true;
             this.shaderPanelNote.textContent = t("shader.note.wgslUnavailable");
-            this.shaderMaterialList.innerHTML = '<div class="panel-empty-state">WGSL unavailable</div>';
+            this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.wgslUnavailable")}</div>`;
             return;
         }
 
@@ -4212,7 +4212,7 @@ export class UIController {
             this.shaderApplyButton.disabled = true;
             this.shaderResetButton.disabled = true;
             this.shaderPanelNote.textContent = t("shader.note.loadModel");
-            this.shaderMaterialList.innerHTML = '<div class="panel-empty-state">No model</div>';
+            this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
             return;
         }
 
@@ -4235,7 +4235,7 @@ export class UIController {
             this.shaderApplyButton.disabled = true;
             this.shaderResetButton.disabled = true;
             this.shaderPanelNote.textContent = t("shader.note.noMaterial");
-            this.shaderMaterialList.innerHTML = '<div class="panel-empty-state">No material</div>';
+            this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.noMaterial")}</div>`;
             return;
         }
 
@@ -4333,7 +4333,9 @@ export class UIController {
             : t("shader.reset.all");
 
         if (selectedExternalWgslPath) {
-            this.shaderPanelNote.textContent = `External WGSL active: ${this.getBaseNameForRenderer(selectedExternalWgslPath)}`;
+            this.shaderPanelNote.textContent = t("shader.note.externalWgslActive", {
+                name: this.getBaseNameForRenderer(selectedExternalWgslPath),
+            });
         } else if (selectedMaterial) {
             this.shaderPanelNote.textContent = t("shader.note.selectedMaterial", {
                 name: selectedMaterial.name,
@@ -4377,150 +4379,151 @@ export class UIController {
         this.shaderMaterialList.innerHTML = `
             <div class="shader-postfx-controls">
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">Contrast</span>
+                    <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
                     <input data-postfx="contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
                     <span data-postfx-val="contrast" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Gamma</span>
+                    <span class="effect-label" data-i18n="shader.postfx.gamma">Gamma</span>
                     <input data-postfx="gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">Exposure</span>
+                    <span class="effect-label" data-i18n="shader.postfx.exposure">Exposure</span>
                     <input data-postfx="exposure" type="range" class="effect-slider" min="0" max="8" value="1" step="0.01">
                     <span data-postfx-val="exposure" class="effect-value">x1.00</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">Dither</span>
+                    <span class="effect-label" data-i18n="shader.postfx.dithering">Dither</span>
                     <input data-postfx="dithering-intensity" type="range" class="effect-slider" min="0" max="1" value="0" step="0.0001">
-                    <span data-postfx-val="dithering" class="effect-value">OFF</span>
+                    <span data-postfx-val="dithering" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Vignette</span>
+                    <span class="effect-label" data-i18n="shader.postfx.vignette">Vignette</span>
                     <input data-postfx="vignette-weight" type="range" class="effect-slider" min="0" max="4" value="0" step="0.01">
-                    <span data-postfx-val="vignette" class="effect-value">OFF</span>
+                    <span data-postfx-val="vignette" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Chroma</span>
+                    <span class="effect-label" data-i18n="shader.postfx.chroma">Chroma</span>
                     <input data-postfx="chromatic-aberration" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
-                    <span data-postfx-val="chromatic-aberration" class="effect-value">OFF</span>
+                    <span data-postfx-val="chromatic-aberration" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Grain</span>
+                    <span class="effect-label" data-i18n="shader.postfx.grain">Grain</span>
                     <input data-postfx="grain-intensity" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
-                    <span data-postfx-val="grain-intensity" class="effect-value">OFF</span>
+                    <span data-postfx-val="grain-intensity" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Sharpen</span>
+                    <span class="effect-label" data-i18n="shader.postfx.sharpen">Sharpen</span>
                     <input data-postfx="sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
-                    <span data-postfx-val="sharpen-edge" class="effect-value">OFF</span>
+                    <span data-postfx-val="sharpen-edge" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">Curves</span>
+                    <span class="effect-label" data-i18n="shader.postfx.curves">Curves</span>
                     <input data-postfx="color-curves-saturation" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
-                    <span data-postfx-val="color-curves-saturation" class="effect-value">OFF</span>
+                    <span data-postfx-val="color-curves-saturation" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">Glow</span>
+                    <span class="effect-label" data-i18n="shader.postfx.glow">Glow</span>
                     <input data-postfx="glow-intensity" type="range" class="effect-slider" min="0" max="400" value="50" step="1">
-                    <span data-postfx-val="glow-intensity" class="effect-value">OFF</span>
+                    <span data-postfx-val="glow-intensity" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">LUTSrc</span>
+                    <span class="effect-label" data-i18n="shader.postfx.lutSource">LUTSrc</span>
                     <select data-postfx-select="lut-source" class="effect-select">
-                        <option value="builtin">Builtin</option>
-                        <option value="external-absolute">External Abs</option>
-                        <option value="project-relative">Project LUT</option>
+                        <option value="builtin" data-i18n="shader.option.builtin">Builtin</option>
+                        <option value="external-absolute" data-i18n="shader.option.externalAbsolute">External Abs</option>
+                        <option value="project-relative" data-i18n="shader.option.projectLut">Project LUT</option>
                     </select>
-                    <span data-postfx-val="lut-source" class="effect-value">Builtin</span>
+                    <span data-postfx-val="lut-source" class="effect-value" data-i18n="shader.option.builtin">Builtin</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">LUTFile</span>
-                    <button data-postfx-btn="lut-file" type="button" class="effect-button">Load...</button>
-                    <span data-postfx-val="lut-file" class="effect-value">None</span>
+                    <span class="effect-label" data-i18n="shader.postfx.lutFile">LUTFile</span>
+                    <button data-postfx-btn="lut-file" type="button" class="effect-button" data-i18n="button.load">Load...</button>
+                    <span data-postfx-val="lut-file" class="effect-value" data-i18n="option.none">None</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">MBlur</span>
+                    <span class="effect-label" data-i18n="shader.postfx.motionBlur">MBlur</span>
                     <input data-postfx="motion-blur-strength" type="range" class="effect-slider" min="0" max="200" value="50" step="1">
-                    <span data-postfx-val="motion-blur-strength" class="effect-value">OFF</span>
+                    <span data-postfx-val="motion-blur-strength" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">SSR</span>
+                    <span class="effect-label" data-i18n="shader.postfx.ssr">SSR</span>
                     <input data-postfx="ssr-strength" type="range" class="effect-slider" min="0" max="200" value="80" step="1">
-                    <span data-postfx-val="ssr-strength" class="effect-value">OFF</span>
+                    <span data-postfx-val="ssr-strength" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row" style="display:none;">
-                    <span class="effect-label">VLight</span>
+                    <span class="effect-label" data-i18n="shader.postfx.volumetricLight">VLight</span>
                     <input data-postfx="vls-exposure" type="range" class="effect-slider" min="0" max="200" value="30" step="1">
-                    <span data-postfx-val="vls-exposure" class="effect-value">OFF</span>
+                    <span data-postfx-val="vls-exposure" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Distortion</span>
+                    <span class="effect-label" data-i18n="shader.postfx.distortion">Distortion</span>
                     <input data-postfx="distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
                     <span data-postfx-val="distortion-influence" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">EdgeBlur</span>
+                    <span class="effect-label" data-i18n="shader.postfx.edgeBlur">EdgeBlur</span>
                     <input data-postfx="lens-edge-blur" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
                     <span data-postfx-val="lens-edge-blur" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">Edge</span>
+                    <span class="effect-label" data-i18n="shader.postfx.edge">Edge</span>
                     <input data-postfx="edge-width" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="edge-width" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row effect-row-check">
-                    <span class="effect-label">LUT</span>
+                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
                     <label class="effect-check-wrap">
                         <input data-postfx-check="lut" type="checkbox" class="effect-check">
-                        <span>On</span>
+                        <span data-i18n="status.on">On</span>
                     </label>
                     <select data-postfx-select="lut-preset" class="effect-select">
                         ${lutPresetOptionsHtml}
                     </select>
-                    <span data-postfx-val="lut" class="effect-value">OFF</span>
+                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">LUTInt</span>
+                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
                     <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
                     <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
                 </div>
                 <div class="effect-row effect-row-toggle">
-                    <span class="effect-label">Bloom</span>
+                    <span class="effect-label" data-i18n="shader.postfx.bloom">Bloom</span>
                     <label class="effect-check-wrap">
                         <input data-postfx-check="bloom" type="checkbox" class="effect-check">
-                        <span>On</span>
+                        <span data-i18n="status.on">On</span>
                     </label>
-                    <span data-postfx-val="bloom-enabled" class="effect-value">OFF</span>
+                    <span data-postfx-val="bloom-enabled" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="label.bloomStrength">Bloom���x</span>
                     <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
-                    <span data-postfx-val="bloom-weight" class="effect-value">OFF</span>
+                    <span data-postfx-val="bloom-weight" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">BloomTh</span>
+                    <span class="effect-label" data-i18n="shader.postfx.bloomThreshold">BloomTh</span>
                     <input data-postfx="bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="90" step="1">
                     <span data-postfx-val="bloom-threshold" class="effect-value">0.90</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">BloomK</span>
+                    <span class="effect-label" data-i18n="shader.postfx.bloomKernel">BloomK</span>
                     <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="64" step="1">
                     <span data-postfx-val="bloom-kernel" class="effect-value">64</span>
                 </div>
                 <div class="effect-row">
-                    <span class="effect-label">ToneMap</span>
+                    <span class="effect-label" data-i18n="shader.postfx.toneMap">ToneMap</span>
                     <select data-postfx-select="tone-mapping-type" class="effect-select">
-                        <option value="-1">None</option>
-                        <option value="0">Standard</option>
-                        <option value="1">ACES</option>
-                        <option value="2">Neutral</option>
+                        <option value="-1" data-i18n="option.none">None</option>
+                        <option value="0" data-i18n="shader.option.standard">Standard</option>
+                        <option value="1" data-i18n="shader.option.aces">ACES</option>
+                        <option value="2" data-i18n="shader.option.neutral">Neutral</option>
                     </select>
-                    <span data-postfx-val="tone-mapping" class="effect-value">None</span>
+                    <span data-postfx-val="tone-mapping" class="effect-value" data-i18n="option.none">None</span>
                 </div>
             </div>
         `;
+        applyI18nToDom(this.shaderMaterialList);
 
         const postFxControls = this.shaderMaterialList.querySelector<HTMLElement>(".shader-postfx-controls");
         if (postFxControls) {
@@ -4655,11 +4658,11 @@ export class UIController {
         const toneMapTypeToLabel = (value: number): string => {
             switch (value) {
                 case 1:
-                    return "ACES";
+                    return t("shader.option.aces");
                 case 2:
-                    return "Neutral";
+                    return t("shader.option.neutral");
                 default:
-                    return "Standard";
+                    return t("shader.option.standard");
             }
         };
 
@@ -4672,7 +4675,7 @@ export class UIController {
             }
             toneMappingVal.textContent = this.mmdManager.postEffectToneMappingEnabled
                 ? toneMapTypeToLabel(this.mmdManager.postEffectToneMappingType)
-                : "None";
+                : t("option.none");
         };
 
         const applyDithering = (): void => {
@@ -4681,7 +4684,7 @@ export class UIController {
             const effectivePercent = this.mmdManager.postEffectDitheringIntensity * 100;
             ditheringVal.textContent = this.mmdManager.postEffectDitheringEnabled
                 ? `${effectivePercent.toFixed(2)}%`
-                : "OFF";
+                : t("status.off");
         };
 
         const applyVignette = (): void => {
@@ -4689,7 +4692,7 @@ export class UIController {
             this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.000001;
             vignetteVal.textContent = this.mmdManager.postEffectVignetteEnabled
                 ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
-                : "OFF";
+                : t("status.off");
         };
 
         const applyBloom = (): void => {
@@ -4705,7 +4708,7 @@ export class UIController {
 
             bloomWeightVal.textContent = this.mmdManager.postEffectBloomEnabled
                 ? `${Math.round(this.mmdManager.postEffectBloomWeight * 100)}%`
-                : "OFF";
+                : t("status.off");
             bloomThresholdVal.textContent = this.mmdManager.postEffectBloomThreshold.toFixed(2);
             bloomKernelVal.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
         };
@@ -4714,21 +4717,21 @@ export class UIController {
             this.mmdManager.postEffectChromaticAberration = Number(chromaticAberrationInput.value);
             chromaticAberrationVal.textContent = this.mmdManager.postEffectChromaticAberration > 0.000001
                 ? this.mmdManager.postEffectChromaticAberration.toFixed(0)
-                : "OFF";
+                : t("status.off");
         };
 
         const applyGrainIntensity = (): void => {
             this.mmdManager.postEffectGrainIntensity = Number(grainIntensityInput.value);
             grainIntensityVal.textContent = this.mmdManager.postEffectGrainIntensity > 0.000001
                 ? this.mmdManager.postEffectGrainIntensity.toFixed(1)
-                : "OFF";
+                : t("status.off");
         };
 
         const applySharpenEdge = (): void => {
             this.mmdManager.postEffectSharpenEdge = Number(sharpenEdgeInput.value) / 100;
             sharpenEdgeVal.textContent = this.mmdManager.postEffectSharpenEdge > 0.000001
                 ? this.mmdManager.postEffectSharpenEdge.toFixed(2)
-                : "OFF";
+                : t("status.off");
         };
 
         const disableSsao = (): void => {
@@ -4747,7 +4750,7 @@ export class UIController {
 
             colorCurvesSaturationVal.textContent = this.mmdManager.postEffectColorCurvesEnabled
                 ? `${Math.round(this.mmdManager.postEffectColorCurvesSaturation)}`
-                : "OFF";
+                : t("status.off");
         };
 
         const applyGlow = (): void => {
@@ -4757,32 +4760,32 @@ export class UIController {
 
             glowIntensityVal.textContent = this.mmdManager.postEffectGlowEnabled
                 ? this.mmdManager.postEffectGlowIntensity.toFixed(2)
-                : "OFF";
+                : t("status.off");
         };
 
         const lutModeToLabel = (mode: string): string => {
             switch (mode) {
                 case "external-absolute":
-                    return "External";
+                    return t("shader.option.externalAbsolute");
                 case "project-relative":
-                    return "Project";
+                    return t("shader.option.projectLut");
                 default:
-                    return "Builtin";
+                    return t("shader.option.builtin");
             }
         };
 
         const chooseExternalLut = async (): Promise<void> => {
             const lutPath = await window.electronAPI.openFileDialog([
-                { name: "LUT Files", extensions: ["3dl", "cube"] },
-                { name: "All files", extensions: ["*"] },
+                { name: t("shader.group.lutFiles"), extensions: ["3dl", "cube"] },
+                { name: t("option.allFiles"), extensions: ["*"] },
             ]);
             if (!lutPath) return;
 
-            this.setStatus("Loading LUT...", true);
+            this.setStatus(t("status.loadingLut"), true);
             if (await this.importExternalLutFile(lutPath, "dialog")) {
-                this.setStatus("LUT loaded", false);
+                this.setStatus(t("status.lutLoaded"), false);
             } else {
-                this.setStatus("LUT load failed", false);
+                this.setStatus(t("status.lutLoadFailed"), false);
             }
         };
 
@@ -4829,15 +4832,15 @@ export class UIController {
             lutSourceVal.textContent = lutModeToLabel(selectedMode);
             lutFileVal.textContent = this.postFxLutExternalPath
                 ? this.getBaseNameForRenderer(this.postFxLutExternalPath)
-                : "None";
+                : t("option.none");
             lutVal.textContent = this.mmdManager.postEffectLutEnabled
                 ? (selectedImportedEntry
                     ? this.getBaseNameForRenderer(selectedImportedEntry.sourcePath)
                     : this.mmdManager.postEffectLutPreset)
-                : "OFF";
+                : t("status.off");
             lutIntensityVal.textContent = this.mmdManager.postEffectLutEnabled
                 ? this.mmdManager.postEffectLutIntensity.toFixed(2)
-                : "OFF";
+                : t("status.off");
         };
 
         const applyMotionBlur = (): void => {
@@ -4847,14 +4850,14 @@ export class UIController {
 
             motionBlurStrengthVal.textContent = this.mmdManager.postEffectMotionBlurEnabled
                 ? this.mmdManager.postEffectMotionBlurStrength.toFixed(2)
-                : "OFF";
+                : t("status.off");
         };
 
         const applySsr = (): void => {
             this.mmdManager.postEffectSsrStrength = 0;
             this.mmdManager.postEffectSsrStep = 1;
             this.mmdManager.postEffectSsrEnabled = false;
-            ssrStrengthVal.textContent = "OFF";
+            ssrStrengthVal.textContent = t("status.off");
         };
 
         const applyVls = (): void => {
@@ -4866,7 +4869,7 @@ export class UIController {
 
             vlsExposureVal.textContent = this.mmdManager.postEffectVlsEnabled
                 ? this.mmdManager.postEffectVlsExposure.toFixed(2)
-                : "OFF";
+                : t("status.off");
         };
 
         const applyDistortionInfluence = (): void => {
@@ -5279,7 +5282,7 @@ export class UIController {
         const fogEnabledValue = document.getElementById("effect-fog-enabled-val");
         if (fogEnabledInput && fogEnabledValue) {
             fogEnabledInput.checked = this.mmdManager.postEffectFogEnabled;
-            fogEnabledValue.textContent = this.mmdManager.postEffectFogEnabled ? "ON" : "OFF";
+            fogEnabledValue.textContent = this.mmdManager.postEffectFogEnabled ? t("status.on") : t("status.off");
         }
 
         const fogModeSelect = document.getElementById("effect-fog-mode") as HTMLSelectElement | null;
@@ -5287,10 +5290,10 @@ export class UIController {
         if (fogModeSelect && fogModeValue) {
             fogModeSelect.value = String(this.mmdManager.postEffectFogMode);
             fogModeValue.textContent = this.mmdManager.postEffectFogMode === 1
-                ? "Exp"
+                ? t("option.fog.exp")
                 : this.mmdManager.postEffectFogMode === 2
-                    ? "Exp2"
-                    : "Linear";
+                    ? t("option.fog.exp2")
+                    : t("option.fog.linear");
         }
 
         const setFogSliderValue = (sliderId: string, valueId: string, rawValue: number, formatter?: (value: number) => string): void => {
