@@ -3,6 +3,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import { CascadedShadowGenerator } from "@babylonjs/core/Lights/Shadows/cascadedShadowGenerator";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 
 function clamp01(v: number): number {
@@ -21,6 +22,39 @@ function clampShadowEdgeSoftness(v: number): number {
 
 function clampShadowFrustumSize(v: number): number {
     return Math.max(120, Math.min(6000, v));
+}
+
+const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
+const DEFAULT_CSM_SHADOW_MAX_Z = 4800;
+const DEFAULT_CSM_FRUSTUM_SIZE = 960;
+const DEFAULT_CSM_LIGHT_DISTANCE = 220;
+
+function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGenerator {
+    const maxTextureSize = host.engine.getCaps().maxTextureSize ?? 4096;
+    const shadowMapSize = Math.min(8192, maxTextureSize);
+    const camera = host.camera ?? host.scene?.activeCamera ?? null;
+    const shadowGenerator = CascadedShadowGenerator.IsSupported
+        ? new CascadedShadowGenerator(shadowMapSize, dirLight, undefined, camera)
+        : new ShadowGenerator(shadowMapSize, dirLight);
+    if (shadowGenerator instanceof CascadedShadowGenerator) {
+        shadowGenerator.numCascades = 4;
+        shadowGenerator.stabilizeCascades = true;
+        shadowGenerator.lambda = 0.72;
+        shadowGenerator.cascadeBlendPercentage = 0.05;
+        shadowGenerator.autoCalcDepthBounds = true;
+        shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
+    }
+    shadowGenerator.usePercentageCloserFiltering = true;
+    shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
+    shadowGenerator.useContactHardeningShadow = true;
+    shadowGenerator.bias = 0.00015;
+    shadowGenerator.normalBias = 0.0006;
+    shadowGenerator.frustumEdgeFalloff = 0.2;
+    shadowGenerator.transparencyShadow = true;
+    shadowGenerator.enableSoftTransparentShadow = true;
+    shadowGenerator.useOpacityTextureForTransparentShadow = true;
+    shadowGenerator.darkness = host.shadowDarknessValue;
+    return shadowGenerator;
 }
 
 function getEffectiveShadowEdgeSoftness(host: any): number {
@@ -84,7 +118,7 @@ export function initializeLightShadowSystem(host: any): void {
 
     const dirLight = host.dirLight = new DirectionalLight(
         "dirLight",
-        new Vector3(0.5, -1, 1),
+        DEFAULT_LIGHT_DIRECTION.clone(),
         host.scene,
     );
     dirLight.intensity = 1.0;
@@ -97,20 +131,9 @@ export function initializeLightShadowSystem(host: any): void {
     applyShadowFrustumSize(host);
     applyLightColorTemperature(host);
 
-    const maxTextureSize = host.engine.getCaps().maxTextureSize ?? 4096;
-    const shadowMapSize = Math.min(8192, maxTextureSize);
-    host.shadowGenerator = new ShadowGenerator(shadowMapSize, dirLight);
-    host.shadowGenerator.usePercentageCloserFiltering = true;
-    host.shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
-    host.shadowGenerator.useContactHardeningShadow = true;
+    host.shadowGenerator = createShadowGenerator(host, dirLight);
+    applyShadowFrustumSize(host);
     applyShadowEdgeSoftness(host);
-    host.shadowGenerator.bias = 0.00015;
-    host.shadowGenerator.normalBias = 0.0006;
-    host.shadowGenerator.frustumEdgeFalloff = 0.2;
-    host.shadowGenerator.transparencyShadow = true;
-    host.shadowGenerator.enableSoftTransparentShadow = true;
-    host.shadowGenerator.useOpacityTextureForTransparentShadow = true;
-    host.shadowGenerator.darkness = host.shadowDarknessValue;
 }
 
 export function getLightColorTemperature(host: any): number {
@@ -327,14 +350,22 @@ export function applyToonShadowInfluenceToMeshes(host: any, meshes: Mesh[]): voi
 
 export function applyShadowFrustumSize(host: any): void {
     if (!host.dirLight) return;
-    host.dirLight.shadowFrustumSize = host.shadowFrustumSizeValue;
+    const csmEnabled = host.shadowGenerator instanceof CascadedShadowGenerator;
+    host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : host.shadowFrustumSizeValue;
     host.dirLight.shadowMinZ = 1;
-    host.dirLight.shadowMaxZ = Math.max(500, host.shadowFrustumSizeValue * 6);
+    host.dirLight.shadowMaxZ = csmEnabled
+        ? DEFAULT_CSM_SHADOW_MAX_Z
+        : Math.max(500, host.shadowFrustumSizeValue * 6);
+    if (csmEnabled) {
+        host.shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
+    }
 }
 
 export function applyShadowEdgeSoftness(host: any): void {
     if (!host.shadowGenerator) return;
-    host.shadowGenerator.contactHardeningLightSizeUVRatio = getEffectiveShadowEdgeSoftness(host);
+    host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
+        ? Math.max(0.008, Math.min(0.016, getEffectiveShadowEdgeSoftness(host) * 0.25))
+        : getEffectiveShadowEdgeSoftness(host);
     host.constructor.toonSelfShadowBoundarySoftness = host.selfShadowEdgeSoftnessValue;
     host.constructor.toonOcclusionShadowBoundarySoftness = host.occlusionShadowEdgeSoftnessValue;
     applyToonShadowInfluenceToAllModels(host);
@@ -344,16 +375,18 @@ export function setLightDirection(host: any, x: number, y: number, z: number): v
     if (!host.dirLight) return;
 
     const direction = new Vector3(
-        Number.isFinite(x) ? x : 0,
-        Number.isFinite(y) ? y : -1,
-        Number.isFinite(z) ? z : 0.6,
+        Number.isFinite(x) ? x : DEFAULT_LIGHT_DIRECTION.x,
+        Number.isFinite(y) ? y : DEFAULT_LIGHT_DIRECTION.y,
+        Number.isFinite(z) ? z : DEFAULT_LIGHT_DIRECTION.z,
     );
     if (direction.lengthSquared() < 0.0001) {
-        direction.set(0, -1, 0.6);
+        direction.copyFrom(DEFAULT_LIGHT_DIRECTION);
     }
     direction.normalize();
     host.dirLight.direction = direction;
-    const dist = Math.max(90, host.shadowFrustumSizeValue * 0.35);
+    const dist = host.shadowGenerator instanceof CascadedShadowGenerator
+        ? DEFAULT_CSM_LIGHT_DISTANCE
+        : Math.max(90, host.shadowFrustumSizeValue * 0.35);
     host.dirLight.position = new Vector3(
         -direction.x * dist,
         Math.abs(direction.y) * dist + 5,
@@ -369,11 +402,11 @@ export function setLightDirection(host: any, x: number, y: number, z: number): v
 
 export function getLightDirection(host: any): Vector3 {
     if (!host.dirLight || !host.dirLight.direction) {
-        return new Vector3(0, -1, 0.6).normalize();
+        return DEFAULT_LIGHT_DIRECTION.clone();
     }
     const direction = host.dirLight.direction;
     if (direction.lengthSquared() < 0.0001) {
-        return new Vector3(0, -1, 0.6).normalize();
+        return DEFAULT_LIGHT_DIRECTION.clone();
     }
     return direction.clone().normalize();
 }

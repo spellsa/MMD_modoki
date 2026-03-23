@@ -48,13 +48,15 @@ PMX の材質フラグには、影に関するビットがあります。
 
 ## シャドウ生成設定
 
-ディレクショナルライト + `ShadowGenerator` の設定は次の方針です。
+現在の実装は、ディレクショナルライト + `CascadedShadowGenerator` を優先し、
+非対応環境では `ShadowGenerator` へフォールバックする方針です。
+
+共通設定:
 
 - マップ解像度: `min(8192, GPU上限)`
 - フィルタ: `PCF`（`usePercentageCloserFiltering = true`）
 - 品質: `QUALITY_HIGH`
 - 補間: `Contact Hardening`（`useContactHardeningShadow = true`）
-  - `contactHardeningLightSizeUVRatio = 0.035`
 - 接地感調整
   - `bias = 0.00015`
   - `normalBias = 0.0006`
@@ -63,13 +65,40 @@ PMX の材質フラグには、影に関するビットがあります。
   - `transparencyShadow = true`
   - `enableSoftTransparentShadow = true`
   - `useOpacityTextureForTransparentShadow = true`
-- 影の投影範囲（地面全体カバー）
-  - `dirLight.shadowFrustumSize = 220`
+
+`CascadedShadowGenerator` 使用時の設定:
+
+- `numCascades = 4`
+- `stabilizeCascades = true`
+- `lambda = 0.72`
+- `cascadeBlendPercentage = 0.05`
+- `autoCalcDepthBounds = true`
+- `shadowFrustumSize = 960`
+- `shadowMaxZ = 4800`
+- 光源位置距離: `220`
+- フィルタは `PCF + QUALITY_HIGH`
+- `Contact Hardening` は有効
+  - ただし CSM では弱めに使う
+  - `contactHardeningLightSizeUVRatio = max(0.008, min(0.016, effectiveSoftness * 0.25))`
+
+投影範囲の考え方:
+
+- 通常 `ShadowGenerator`:
+  - `dirLight.shadowFrustumSize = shadowFrustumSize`
   - `dirLight.shadowMinZ = 1`
   - `dirLight.shadowMaxZ = max(500, shadowFrustumSize * 6)`
-  - `dirLight.autoUpdateExtends = true`
-  - `dirLight.autoCalcShadowZBounds = true`
-  - 光源位置距離: `setLightDirection` 内 `dist = max(90, shadowFrustumSize * 0.35)`
+- `CascadedShadowGenerator`:
+  - `dirLight.shadowFrustumSize = 960`
+  - `dirLight.shadowMinZ = 1`
+  - `dirLight.shadowMaxZ = 4800`
+- `dirLight.shadowMinZ = 1`
+
+補足:
+
+- 近景キャラと遠景背景で必要な影密度が異なるため、現行実装では `CascadedShadowGenerator` を優先します。
+- UI の `影範囲` は従来 UI 互換のため残しています。
+- ただし `CascadedShadowGenerator` 使用時は、現行仕様では `影範囲` フェーダーを無視します。
+- `影範囲` フェーダーが有効なのは、非対応環境で `ShadowGenerator` にフォールバックした場合のみです。
 
 ## UI との関係
 
@@ -89,10 +118,10 @@ PMX の材質フラグには、影に関するビットがあります。
 
 照明欄の初期値:
 
-- 方位角: `20`
-- 仰角: `-50`
+- 方向X: `0.3`
+- 方向Y: `-0.5`
+- 方向Z: `0.5`
 - 光の強さ: `0.8`
-- 環境光: `0.2`
 - 影の濃さ: `0.0`（UI非表示）
 - 影範囲: `220`
 
@@ -100,6 +129,28 @@ PMX の材質フラグには、影に関するビットがあります。
 
 - `shadowFrustumSize` の UI 上限は `6000`
 - 範囲を広げるほど影密度は下がるため、必要以上に大きくしない方が見た目は安定しやすい
+- 光方向は角度ではなく `X / Y / Z` ベクトルとして扱います
+- `setLightDirection(x, y, z)` ではベクトルを正規化して `DirectionalLight.direction` に適用します
+- `影範囲` フェーダーは現行 CSM 設定には影響しません
+
+半影と境界グラデの扱い:
+
+- 地面に落ちるキャストシャドウには、弱めの半影を入れます
+- モデル表面の遮蔽影には、toon 側の境界グラデを入れます
+- 現在の既定値
+  - `selfShadowEdgeSoftness = 0.045`
+  - `occlusionShadowEdgeSoftness = 0.06`
+
+このため、現行仕様では次の見た目は意図通りです。
+
+- 地面影の縁が少し柔らかい
+- 遮蔽影の境界にわずかなグラデーションが入る
+
+逆に次のような出方は不具合候補です。
+
+- 影の内部に帯状の段差が見える
+- カスケード切替境界が見える
+- カメラ距離で影の濃さが不自然に跳ぶ
 
 ## 既知の制限
 
@@ -112,3 +163,6 @@ PMX の材質フラグには、影に関するビットがあります。
   実用上は材質単位に近い挙動になります。
 - 影範囲を広げるほど、同じ解像度でも 1 ピクセルあたりの密度は下がります。  
   必要に応じて `shadowFrustumSize` と解像度のトレードオフ調整が必要です。
+- `CascadedShadowGenerator` は近景と遠景で影品質を分けられますが、GPU コストは単一シャドウマップより重くなります。
+- 現在の CSM 設定は近景品質と遠景カバーのバランスを優先した固定値です。
+- ステージごとに最適値は異なるため、将来的には CSM 専用パラメータを UI へ分離する余地があります。
