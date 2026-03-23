@@ -237,7 +237,7 @@ export async function importProjectState(
     host.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
 
-    host.setLightDirection(data.lighting.azimuth, data.lighting.elevation);
+    host.setLightDirection(data.lighting.x, data.lighting.y, data.lighting.z);
     host.lightIntensity = data.lighting.intensity;
     host.ambientIntensity = data.lighting.ambientIntensity;
     host.lightColorTemperature = data.lighting.temperatureKelvin;

@@ -68,7 +68,7 @@
             </svg>
             <span id="physics-toggle-text" data-i18n="toolbar.physics.short">PHY</span>
           </button>
-          <button id="btn-toggle-gi" class="toolbar-btn toolbar-btn--compact" title="グローバルイルミネーションの有効/無効を切り替える" data-i18n-title="toolbar.gi.title.off" aria-pressed="false">
+          <button id="btn-toggle-gi" class="toolbar-btn toolbar-btn--compact" title="グローバルイルミネーションの有効/無効を切り替える" data-i18n-title="toolbar.gi.title.off" aria-pressed="false" hidden>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
               <circle cx="8" cy="8" r="3.2" />
               <path d="M8 1.5v2.1M8 12.4v2.1M1.5 8h2.1M12.4 8h2.1M3.1 3.1l1.5 1.5M11.4 11.4l1.5 1.5M12.9 3.1l-1.5 1.5M4.6 11.4l-1.5 1.5" />
@@ -407,6 +407,9 @@
               <button id="btn-cam-left" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.left">左面</button>
               <button id="btn-cam-front" class="camera-view-btn camera-view-btn--active" type="button" aria-pressed="true" data-i18n="camera.view.front">正面</button>
               <button id="btn-cam-right" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.right">右面</button>
+              <button id="btn-cam-top" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.top">上面</button>
+              <button id="btn-cam-back" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.back">背面</button>
+              <button id="btn-cam-bottom" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.bottom">下面</button>
             </div>
             <div class="control-row cam-slider-row dof-row-hidden">
               <label class="cam-axis-label" data-i18n="label.distance">距離</label>
@@ -593,21 +596,26 @@
               <span class="light-value">-</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label" data-i18n="label.azimuth">方位角</span>
-              <input type="range" id="light-azimuth" class="light-slider" min="-180" max="180" value="20" step="1">
-              <span id="light-azimuth-val" class="light-value">20°</span>
+              <span class="light-label" data-i18n="label.lightDirectionX">方向X</span>
+              <input type="range" id="light-direction-x" class="light-slider" min="-1" max="1" value="0.22" step="0.01">
+              <span id="light-direction-x-val" class="light-value">0.22</span>
             </div>
             <div class="light-row light-row--light">
-              <span class="light-label" data-i18n="label.elevation">仰角</span>
-              <input type="range" id="light-elevation" class="light-slider" min="-85" max="-5" value="-50" step="1">
-              <span id="light-elevation-val" class="light-value">-50°</span>
+              <span class="light-label" data-i18n="label.lightDirectionY">方向Y</span>
+              <input type="range" id="light-direction-y" class="light-slider" min="-1" max="1" value="-0.77" step="0.01">
+              <span id="light-direction-y-val" class="light-value">-0.77</span>
+            </div>
+            <div class="light-row light-row--light">
+              <span class="light-label" data-i18n="label.lightDirectionZ">方向Z</span>
+              <input type="range" id="light-direction-z" class="light-slider" min="-1" max="1" value="0.60" step="0.01">
+              <span id="light-direction-z-val" class="light-value">0.60</span>
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowStrength">影の強さ</span>
               <input type="range" id="light-intensity" class="light-slider" min="0" max="200" value="100" step="1">
               <span id="light-intensity-val" class="light-value">1.0</span>
             </div>
-            <div class="light-row light-row--light" hidden>
+            <div class="light-row light-row--light light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.ambientLight">環境光</span>
               <input type="range" id="light-ambient" class="light-slider" min="0" max="200" value="0" step="1">
               <span id="light-ambient-val" class="light-value">0.0</span>

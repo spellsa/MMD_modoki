@@ -219,6 +219,10 @@ body.exporter-mode #bone-overlay-canvas {
   -webkit-app-region: no-drag;
 }
 
+#btn-toggle-gi {
+  display: none !important;
+}
+
 .toolbar-locale-select {
   min-width: 112px;
   padding: 4px 8px;
@@ -1301,8 +1305,8 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 #bone-section { order: 2; }
 #morph-section { order: 3; }
 #lighting-section { order: 4; }
-#camera-section { order: 5; }
-#accessory-section { order: 6; }
+#accessory-section { order: 5; }
+#camera-section { order: 6; }
 #output-section { order: 7; }
 
 /* Display Controls */

@@ -21,7 +21,7 @@ import type {
 } from "./types";
 import { normalizeLutFile } from "./lut-file";
 
-type CameraViewPreset = "left" | "front" | "right";
+type CameraViewPreset = "left" | "front" | "right" | "top" | "back" | "bottom";
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
@@ -247,6 +247,9 @@ export class UIController {
     private camViewLeftBtn: HTMLButtonElement | null = null;
     private camViewFrontBtn: HTMLButtonElement | null = null;
     private camViewRightBtn: HTMLButtonElement | null = null;
+    private camViewTopBtn: HTMLButtonElement | null = null;
+    private camViewBackBtn: HTMLButtonElement | null = null;
+    private camViewBottomBtn: HTMLButtonElement | null = null;
     private btnInfoKeyframe: HTMLButtonElement | null = null;
     private btnInterpolationKeyframe: HTMLButtonElement | null = null;
     private btnBoneKeyframe: HTMLButtonElement | null = null;
@@ -480,7 +483,7 @@ export class UIController {
         this.btnLoadFile.addEventListener("click", () => {
             void this.loadFileFromDialog();
         });
-        this.btnSaveProject.addEventListener("click", () => this.saveProject());
+        this.btnSaveProject.addEventListener("click", () => this.saveProject(true));
         this.btnLoadProject.addEventListener("click", () => this.loadProject());
         this.btnExportPng.addEventListener("click", () => this.exportPNG());
         this.btnExportPngSeq?.addEventListener("click", () => {
@@ -702,11 +705,17 @@ export class UIController {
         const btnCamLeft = document.getElementById("btn-cam-left") as HTMLButtonElement | null;
         const btnCamFront = document.getElementById("btn-cam-front") as HTMLButtonElement | null;
         const btnCamRight = document.getElementById("btn-cam-right") as HTMLButtonElement | null;
+        const btnCamTop = document.getElementById("btn-cam-top") as HTMLButtonElement | null;
+        const btnCamBack = document.getElementById("btn-cam-back") as HTMLButtonElement | null;
+        const btnCamBottom = document.getElementById("btn-cam-bottom") as HTMLButtonElement | null;
         const camDistance = document.getElementById("cam-distance") as HTMLInputElement | null;
         const camDistanceVal = document.getElementById("cam-distance-value");
         this.camViewLeftBtn = btnCamLeft;
         this.camViewFrontBtn = btnCamFront;
         this.camViewRightBtn = btnCamRight;
+        this.camViewTopBtn = btnCamTop;
+        this.camViewBackBtn = btnCamBack;
+        this.camViewBottomBtn = btnCamBottom;
         this.camDistanceSlider = camDistance;
         this.camDistanceValueEl = camDistanceVal;
         const switchCameraView = (view: CameraViewPreset) => {
@@ -719,6 +728,9 @@ export class UIController {
         btnCamLeft?.addEventListener("click", () => switchCameraView("left"));
         btnCamFront?.addEventListener("click", () => switchCameraView("front"));
         btnCamRight?.addEventListener("click", () => switchCameraView("right"));
+        btnCamTop?.addEventListener("click", () => switchCameraView("top"));
+        btnCamBack?.addEventListener("click", () => switchCameraView("back"));
+        btnCamBottom?.addEventListener("click", () => switchCameraView("bottom"));
         if (camDistance && camDistanceVal) {
             camDistance.addEventListener("input", () => {
                 const val = Number(camDistance.value);
@@ -795,8 +807,9 @@ export class UIController {
         this.btnKeyframeNudgeRight.addEventListener("click", () => this.nudgeSelectedKeyframe(1));
 
         // Lighting controls
-        const elAzimuth = document.getElementById("light-azimuth") as HTMLInputElement;
-        const elElevation = document.getElementById("light-elevation") as HTMLInputElement;
+        const elLightDirectionX = document.getElementById("light-direction-x") as HTMLInputElement;
+        const elLightDirectionY = document.getElementById("light-direction-y") as HTMLInputElement;
+        const elLightDirectionZ = document.getElementById("light-direction-z") as HTMLInputElement;
         const elIntensity = document.getElementById("light-intensity") as HTMLInputElement;
         const elAmbient = document.getElementById("light-ambient") as HTMLInputElement;
         const elLightColorR = document.getElementById("light-color-r") as HTMLInputElement;
@@ -813,8 +826,9 @@ export class UIController {
         const elSelfShadowSoftness = document.getElementById("light-self-shadow-softness") as HTMLInputElement;
         const elOcclusionShadowSoftness = document.getElementById("light-occlusion-shadow-softness") as HTMLInputElement;
         const elLightMode = document.getElementById("light-mode-select") as HTMLSelectElement | null;
-        const valAz = document.getElementById("light-azimuth-val")!;
-        const valEl = document.getElementById("light-elevation-val")!;
+        const valLightDirectionX = document.getElementById("light-direction-x-val")!;
+        const valLightDirectionY = document.getElementById("light-direction-y-val")!;
+        const valLightDirectionZ = document.getElementById("light-direction-z-val")!;
         const valInt = document.getElementById("light-intensity-val")!;
         const valAmb = document.getElementById("light-ambient-val")!;
         const valLightColorR = document.getElementById("light-color-r-val")!;
@@ -886,11 +900,13 @@ export class UIController {
         const valEffectEdgeWidth = document.getElementById("effect-edge-width-val");
 
         const updateDir = () => {
-            const az = Number(elAzimuth.value);
-            const el = Number(elElevation.value);
-            valAz.textContent = `${az} deg`;
-            valEl.textContent = `${el} deg`;
-            this.mmdManager.setLightDirection(az, el);
+            const x = Number(elLightDirectionX.value);
+            const y = Number(elLightDirectionY.value);
+            const z = Number(elLightDirectionZ.value);
+            valLightDirectionX.textContent = x.toFixed(2);
+            valLightDirectionY.textContent = y.toFixed(2);
+            valLightDirectionZ.textContent = z.toFixed(2);
+            this.mmdManager.setLightDirection(x, y, z);
         };
 
         const applyLightMode = () => {
@@ -909,8 +925,15 @@ export class UIController {
         }
         applyLightMode();
 
-        elAzimuth.addEventListener("input", updateDir);
-        elElevation.addEventListener("input", updateDir);
+        elLightDirectionX.addEventListener("input", updateDir);
+        elLightDirectionY.addEventListener("input", updateDir);
+        elLightDirectionZ.addEventListener("input", updateDir);
+
+        const initialLightDirection = this.mmdManager.getLightDirection();
+        elLightDirectionX.value = this.formatRangeInputValue(elLightDirectionX, initialLightDirection.x);
+        elLightDirectionY.value = this.formatRangeInputValue(elLightDirectionY, initialLightDirection.y);
+        elLightDirectionZ.value = this.formatRangeInputValue(elLightDirectionZ, initialLightDirection.z);
+        updateDir();
 
         elIntensity.addEventListener("input", () => {
             const v = Number(elIntensity.value) / 100;
@@ -5196,44 +5219,46 @@ export class UIController {
             this.syncRangeNumberInput(slider);
         };
 
-        setSliderValue("light-azimuth", "light-azimuth-value", this.mmdManager.getLightAzimuth(), (value) => `${Math.round(value)} deg`);
-        setSliderValue("light-elevation", "light-elevation-value", this.mmdManager.getLightElevation(), (value) => `${Math.round(value)} deg`);
-        setSliderValue("light-intensity", "light-intensity-value", this.mmdManager.lightIntensity * 100, (value) => (value / 100).toFixed(1));
-        setSliderValue("light-ambient", "light-ambient-value", this.mmdManager.ambientIntensity * 100, (value) => (value / 100).toFixed(1));
+        const lightDirection = this.mmdManager.getLightDirection();
+        setSliderValue("light-direction-x", "light-direction-x-val", lightDirection.x, (value) => value.toFixed(2));
+        setSliderValue("light-direction-y", "light-direction-y-val", lightDirection.y, (value) => value.toFixed(2));
+        setSliderValue("light-direction-z", "light-direction-z-val", lightDirection.z, (value) => value.toFixed(2));
+        setSliderValue("light-intensity", "light-intensity-val", this.mmdManager.lightIntensity * 100, (value) => (value / 100).toFixed(1));
+        setSliderValue("light-ambient", "light-ambient-val", this.mmdManager.ambientIntensity * 100, (value) => (value / 100).toFixed(1));
 
         const lightColor = this.mmdManager.getLightColor();
-        setSliderValue("light-color-r", "light-color-r-value", lightColor.r * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
-        setSliderValue("light-color-g", "light-color-g-value", lightColor.g * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
-        setSliderValue("light-color-b", "light-color-b-value", lightColor.b * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
-        setSliderValue("light-flat-strength", "light-flat-strength-value", this.mmdManager.lightFlatStrength * 100, (value) => `${Math.round(value)}%`);
+        setSliderValue("light-color-r", "light-color-r-val", lightColor.r * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
+        setSliderValue("light-color-g", "light-color-g-val", lightColor.g * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
+        setSliderValue("light-color-b", "light-color-b-val", lightColor.b * 127.5, (value) => `${Math.round((value / 127.5) * 100)}%`);
+        setSliderValue("light-flat-strength", "light-flat-strength-val", this.mmdManager.lightFlatStrength * 100, (value) => `${Math.round(value)}%`);
         setSliderValue(
             "light-flat-color-influence",
-            "light-flat-color-influence-value",
+            "light-flat-color-influence-val",
             this.mmdManager.lightFlatColorInfluence * 100,
             (value) => `${Math.round(value)}%`,
         );
 
         const shadowColor = this.mmdManager.getShadowColor();
-        setSliderValue("shadow-darkness", "shadow-darkness-value", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
-        setSliderValue("shadow-frustum-size", "shadow-frustum-size-value", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
-        setSliderValue("shadow-color-r", "shadow-color-r-value", shadowColor.r * 255, (value) => String(Math.round(value)));
-        setSliderValue("shadow-color-g", "shadow-color-g-value", shadowColor.g * 255, (value) => String(Math.round(value)));
-        setSliderValue("shadow-color-b", "shadow-color-b-value", shadowColor.b * 255, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow", "light-shadow-val", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
+        setSliderValue("light-shadow-frustum-size", "light-shadow-frustum-size-val", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-color-r", "light-shadow-color-r-val", shadowColor.r * 255, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-color-g", "light-shadow-color-g-val", shadowColor.g * 255, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-color-b", "light-shadow-color-b-val", shadowColor.b * 255, (value) => String(Math.round(value)));
         setSliderValue(
-            "toon-shadow-influence",
-            "toon-shadow-influence-value",
+            "light-toon-shadow-influence",
+            "light-toon-shadow-influence-val",
             this.mmdManager.toonShadowInfluence * 100,
             (value) => `${Math.round(value)}%`,
         );
         setSliderValue(
-            "self-shadow-softness",
-            "self-shadow-softness-value",
+            "light-self-shadow-softness",
+            "light-self-shadow-softness-val",
             this.mmdManager.selfShadowEdgeSoftness * 1000,
             (value) => (value / 1000).toFixed(3),
         );
         setSliderValue(
-            "occlusion-shadow-softness",
-            "occlusion-shadow-softness-value",
+            "light-occlusion-shadow-softness",
+            "light-occlusion-shadow-softness-val",
             this.mmdManager.occlusionShadowEdgeSoftness * 1000,
             (value) => (value / 1000).toFixed(3),
         );
@@ -5322,12 +5347,21 @@ export class UIController {
         const left = active === "left";
         const front = active === "front";
         const right = active === "right";
+        const top = active === "top";
+        const back = active === "back";
+        const bottom = active === "bottom";
         this.camViewLeftBtn?.classList.toggle("camera-view-btn--active", left);
         this.camViewFrontBtn?.classList.toggle("camera-view-btn--active", front);
         this.camViewRightBtn?.classList.toggle("camera-view-btn--active", right);
+        this.camViewTopBtn?.classList.toggle("camera-view-btn--active", top);
+        this.camViewBackBtn?.classList.toggle("camera-view-btn--active", back);
+        this.camViewBottomBtn?.classList.toggle("camera-view-btn--active", bottom);
         this.camViewLeftBtn?.setAttribute("aria-pressed", left ? "true" : "false");
         this.camViewFrontBtn?.setAttribute("aria-pressed", front ? "true" : "false");
         this.camViewRightBtn?.setAttribute("aria-pressed", right ? "true" : "false");
+        this.camViewTopBtn?.setAttribute("aria-pressed", top ? "true" : "false");
+        this.camViewBackBtn?.setAttribute("aria-pressed", back ? "true" : "false");
+        this.camViewBottomBtn?.setAttribute("aria-pressed", bottom ? "true" : "false");
     }
 
     private refreshDofAutoFocusReadout(): void {

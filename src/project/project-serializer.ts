@@ -91,8 +91,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             distance: host.getCameraDistance(),
         },
         lighting: {
-            azimuth: host.getLightAzimuth(),
-            elevation: host.getLightElevation(),
+            ...host.getLightDirection(),
             intensity: host.lightIntensity,
             ambientIntensity: host.ambientIntensity,
             temperatureKelvin: host.lightColorTemperature,

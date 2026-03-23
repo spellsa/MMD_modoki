@@ -195,11 +195,10 @@ import {
     getAmbientIntensity as getAmbientIntensityImpl,
     getLightColor as getLightColorImpl,
     getLightColorTemperature as getLightColorTemperatureImpl,
+    getLightDirection as getLightDirectionImpl,
     getLightFlatColorInfluence as getLightFlatColorInfluenceImpl,
     getLightFlatStrength as getLightFlatStrengthImpl,
     getLightIntensity as getLightIntensityImpl,
-    getLightElevation as getLightElevationImpl,
-    getLightAzimuth as getLightAzimuthImpl,
     getOcclusionShadowEdgeSoftness as getOcclusionShadowEdgeSoftnessImpl,
     getSelfShadowEdgeSoftness as getSelfShadowEdgeSoftnessImpl,
     getShadowColor as getShadowColorImpl,
@@ -3952,7 +3951,8 @@ ${beforeFogAppendBlock}
         this.shadowFrustumSizeValue = this.clampShadowFrustumSize(v);
         this.applyShadowFrustumSize();
         if (this.dirLight) {
-            this.setLightDirection(this.getLightAzimuth(), this.getLightElevation());
+            const direction = this.getLightDirection();
+            this.setLightDirection(direction.x, direction.y, direction.z);
         }
     }
 
@@ -4010,23 +4010,14 @@ ${beforeFogAppendBlock}
         return applyShadowEdgeSoftnessImpl(this);
     }
 
-    /**
-     * Set directional light direction from azimuth and elevation angles.
-     * @param azimuthDeg  horizontal rotation in degrees (0=front, 90=right)
-     * @param elevationDeg  vertical angle in degrees (0=horizontal, -90=straight down)
-     */
-    setLightDirection(azimuthDeg: number, elevationDeg: number): void {
-        return setLightDirectionImpl(this, azimuthDeg, elevationDeg);
+    /** Set directional light direction from editor XYZ vector. */
+    setLightDirection(x: number, y: number, z: number): void {
+        return setLightDirectionImpl(this, x, y, z);
     }
 
-    /** Current azimuth of directional light (degrees) */
-    getLightAzimuth(): number {
-        return getLightAzimuthImpl(this);
-    }
-
-    /** Current elevation of directional light (degrees) */
-    getLightElevation(): number {
-        return getLightElevationImpl(this);
+    /** Current normalized directional light vector. */
+    getLightDirection(): Vector3 {
+        return getLightDirectionImpl(this);
     }
 
     applyLightColorTemperature(): void {
@@ -4741,13 +4732,13 @@ ${beforeFogAppendBlock}
         this.syncViewportCameraFromMmdCamera();
     }
 
-    setCameraView(view: "left" | "front" | "right"): void {
+    setCameraView(view: "left" | "front" | "right" | "top" | "back" | "bottom"): void {
         const target = this.camera.target.clone();
         const horizontalDistance = Math.max(
             5,
             Math.hypot(this.camera.position.x - target.x, this.camera.position.z - target.z)
         );
-        const yOffset = Math.max(2, this.camera.position.y - target.y);
+        const yOffset = Math.max(2, Math.abs(this.camera.position.y - target.y));
 
         const nextPosition = target.clone();
         switch (view) {
@@ -4757,12 +4748,23 @@ ${beforeFogAppendBlock}
             case "right":
                 nextPosition.x += horizontalDistance;
                 break;
+            case "back":
+                nextPosition.z += horizontalDistance;
+                break;
+            case "top":
+                nextPosition.y += Math.max(horizontalDistance, yOffset);
+                break;
+            case "bottom":
+                nextPosition.y -= Math.max(horizontalDistance, yOffset);
+                break;
             case "front":
             default:
                 nextPosition.z -= horizontalDistance;
                 break;
         }
-        nextPosition.y += yOffset;
+        if (view !== "top" && view !== "bottom") {
+            nextPosition.y += yOffset;
+        }
 
         this.camera.upVector = new Vector3(0, 1, 0);
         this.camera.setPosition(nextPosition);

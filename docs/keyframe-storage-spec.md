@@ -1,86 +1,181 @@
-# キーフレーム保存仕様（現行）
+# キーフレーム保存仕様
 
-更新日: 2026-02-23
-対象:
-- `src/mmd-manager.ts`
-- `src/types.ts`
+更新日: 2026-03-23
 
-## 1. データ構造
+## この文書の役割
+この文書は、`MMD_modoki` 内で保持するキーフレーム情報の意味を整理する。
 
-### 1-1. トラック単位
-- 型: `KeyframeTrack`
-- `name`: トラック名
-- `category`: `root | camera | semi-standard | bone | morph`
-- `frames`: `Uint32Array`（昇順・重複なし）
+- 何を保存するか
+- その値が何を意味するか
+- editor の表示値と runtime の値がどこで違うか
 
-参照: `src/types.ts:45`
+調査経緯は `docs/keyframe-registration-display-research.md` を参照。
 
-### 1-2. 実ストレージ
-- モデル: `WeakMap<MmdModel, Map<string, Uint32Array>>`
-- カメラ: `cameraKeyframeFrames: Uint32Array`
-- `Map` キーは `createTrackKey(category,name)`（区切りは `\u001f`）
+## 基本方針
 
-参照:
-- `src/mmd-manager.ts:133`
-- `src/mmd-manager.ts:210`
+### 1. track は frame 配列を持つ
+各 track は少なくとも以下を持つ。
 
-## 2. 不変条件
-- `frames` は常に昇順
-- `frames` に重複なし
-- 追加/削除/移動は immutable 風に新配列を生成して差し替える
+- `name`
+- `category`
+- `frames`
 
-参照:
-- `src/mmd-manager.ts:83`
-- `src/mmd-manager.ts:105`
-- `src/mmd-manager.ts:126`
+`frames` は昇順で重複なしを前提とする。
 
-## 3. 操作仕様
+### 2. source animation は editor の保存元
+キーフレームの追加・削除・補間編集は、runtime の一時状態ではなく source animation に対して行う。
 
-### 3-1. has
-- `hasTimelineKeyframe(track, frame)`
-- frameは `Math.floor`, 下限0に正規化
-- cameraカテゴリは `cameraKeyframeFrames` を参照
+### 3. UI 表示値と保存値は一致しない場合がある
+特に camera は一致しない。
 
-参照: `src/mmd-manager.ts:1165`
+## track category
+主な category:
 
-### 3-2. add
-- `addTimelineKeyframe(track, frame)`
-- 既存フレームなら no-op (`false`)
-- 変更時は `emitMergedKeyframeTracks()`
+- `root`
+- `semi-standard`
+- `bone`
+- `morph`
+- `camera`
+- `property`
+- `light`
+- `accessory`
 
-参照: `src/mmd-manager.ts:1179`
+## ボーントラック
 
-### 3-3. remove
-- `removeTimelineKeyframe(track, frame)`
-- 非存在なら no-op (`false`)
-- 変更時は `emitMergedKeyframeTracks()`
+### 保存する値
+- frame
+- position
+- rotation
+- interpolation
 
-参照: `src/mmd-manager.ts:1201`
+### position
+- bone local の移動量
+- editor では runtime-world から復元した値を使う方が安定
 
-### 3-4. move
-- `moveTimelineKeyframe(track, from, to)`
-- 実装は `remove + add`
-- 移動先に既存キーがあっても最終的に重複なし配列へ収束
+### rotation
+- radians
+- editor 側では Euler で扱うが、runtime 側では Quaternion へ変換される
 
-参照: `src/mmd-manager.ts:1223`
+### 補足
+- 保存値
+- sampled source
+- viewport 見た目
 
-## 4. 読み込みからの投入
-- VMD/VPD読み込み時は `buildModelTrackFrameMapFromAnimation()` で再構築
-- `frameOffset` を与えて読み込みフレームへオフセット可能（VPDで使用）
+は別物として扱う。
 
-参照:
-- `src/mmd-manager.ts:3729`
-- `src/mmd-manager.ts:2102`
+## モーフトラック
 
-## 5. トラック再生成
-- 出力トラックは毎回 `getActiveModelTimelineTracks()` / `getCameraTimelineTracks()` で生成する。
-- 表示対象ボーンのみにフィルタされるため、ストレージに残っても非表示化されるケースがある。
+### 保存する値
+- frame
+- weight
+- interpolation
 
-参照:
-- `src/mmd-manager.ts:3765`
-- `src/mmd-manager.ts:3858`
+### weight
+- `0.0 .. 1.0`
 
-## 6. 現状の制約
-- タイムライン管理（`MmdManager`）はフレーム位置中心だが、キー登録時に `UIController` で source animation へ値/補間スナップショットを挿入して同期している。
-- cameraは1行表示だが、編集データは `X/Y/Z/回転/距離/FoV` の6chを保持している。
-- Propertyトラック（表示/IK）は未対応。
+## カメラトラック
+
+camera は最も意味ずれを起こしやすいので、保存値の意味を明示する。
+
+### 保存する値
+- frame
+- target
+- rotation
+- signed distance
+- fov
+- interpolation(6ch)
+
+### `track.positions`
+意味:
+- viewport camera の実位置ではない
+- camera target を表す
+
+単位:
+- world position
+
+### `track.rotations`
+意味:
+- MMD camera rotation
+
+単位:
+- radians
+
+備考:
+- editor 側の回転推定は `MmdCamera` 規約と一致させる必要がある
+
+### `track.distances`
+意味:
+- target から camera までの距離
+
+単位:
+- world distance
+
+符号:
+- 負値で保存する
+
+理由:
+- `babylon-mmd` の MMD camera runtime の期待値に合わせるため
+
+### `track.fovs`
+意味:
+- field of view
+
+単位:
+- degree
+
+理由:
+- `babylon-mmd` runtime が再生時に degree -> rad 変換するため
+
+### editor 側 UI 値との違い
+UI では以下を表示する。
+
+- viewport camera position
+- viewport camera rotation
+- positive distance
+- fov
+
+つまり camera では、UI 値をそのまま track へ保存してはいけない。
+
+## 補間の保存
+
+### 基本
+- 1区間ごとに Bezier 制御点を持つ
+- 値域は `0..127`
+
+### ボーン
+- 4ch
+  - X
+  - Y
+  - Z
+  - Rot
+
+### カメラ
+- 6ch
+  - X
+  - Y
+  - Z
+  - Rot
+  - Dist
+  - FoV
+
+## editor 保存経路の原則
+
+1. 現在の UI / runtime 状態から snapshot を作る
+2. snapshot を track の意味へ正規化する
+3. source animation に書く
+4. 必要なときだけ runtime を再評価する
+
+## 再生・停止中の扱い
+
+### 停止中
+- frame move 時は必要な pose を 1 回だけ反映する
+- 同一フレーム上で毎フレーム再適用しない
+
+### 再生中
+- runtime から viewport への毎フレーム同期を許可する
+- camera play 開始時は current frame を再 seek してから進める
+
+## 今後の改善余地
+- `CameraTrackAdapter` の導入
+- property / light / accessory の保存仕様整理
+- clipboard 保存形式の明文化

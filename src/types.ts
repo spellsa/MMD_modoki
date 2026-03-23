@@ -188,8 +188,9 @@ export interface ProjectRgbColor {
 }
 
 export interface ProjectLightingState {
-    azimuth: number;
-    elevation: number;
+    x: number;
+    y: number;
+    z: number;
     intensity: number;
     ambientIntensity: number;
     temperatureKelvin: number;

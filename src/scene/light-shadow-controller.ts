@@ -224,7 +224,8 @@ export function setShadowFrustumSize(host: any, v: number): void {
     host.shadowFrustumSizeValue = clampShadowFrustumSize(v);
     applyShadowFrustumSize(host);
     if (host.dirLight) {
-        setLightDirection(host, getLightAzimuth(host), getLightElevation(host));
+        const direction = getLightDirection(host);
+        setLightDirection(host, direction.x, direction.y, direction.z);
     }
 }
 
@@ -339,17 +340,25 @@ export function applyShadowEdgeSoftness(host: any): void {
     applyToonShadowInfluenceToAllModels(host);
 }
 
-export function setLightDirection(host: any, azimuthDeg: number, elevationDeg: number): void {
+export function setLightDirection(host: any, x: number, y: number, z: number): void {
     if (!host.dirLight) return;
 
-    const az = (azimuthDeg * Math.PI) / 180;
-    const el = (elevationDeg * Math.PI) / 180;
-    const x = Math.cos(el) * Math.sin(az);
-    const y = Math.sin(el);
-    const z = Math.cos(el) * Math.cos(az);
-    host.dirLight.direction = new Vector3(x, y, z).normalize();
+    const direction = new Vector3(
+        Number.isFinite(x) ? x : 0,
+        Number.isFinite(y) ? y : -1,
+        Number.isFinite(z) ? z : 0.6,
+    );
+    if (direction.lengthSquared() < 0.0001) {
+        direction.set(0, -1, 0.6);
+    }
+    direction.normalize();
+    host.dirLight.direction = direction;
     const dist = Math.max(90, host.shadowFrustumSizeValue * 0.35);
-    host.dirLight.position = new Vector3(-x * dist, Math.abs(y) * dist + 5, -z * dist);
+    host.dirLight.position = new Vector3(
+        -direction.x * dist,
+        Math.abs(direction.y) * dist + 5,
+        -direction.z * dist,
+    );
     if (typeof host.applyVolumetricLightSettings === "function") {
         host.applyVolumetricLightSettings();
     }
@@ -358,16 +367,15 @@ export function setLightDirection(host: any, azimuthDeg: number, elevationDeg: n
     }
 }
 
-export function getLightAzimuth(host: any): number {
-    if (!host.dirLight) return 0;
-    const d = host.dirLight.direction;
-    return (Math.atan2(d.x, d.z) * 180) / Math.PI;
-}
-
-export function getLightElevation(host: any): number {
-    if (!host.dirLight) return 0;
-    const d = host.dirLight.direction;
-    return (Math.asin(d.y) * 180) / Math.PI;
+export function getLightDirection(host: any): Vector3 {
+    if (!host.dirLight || !host.dirLight.direction) {
+        return new Vector3(0, -1, 0.6).normalize();
+    }
+    const direction = host.dirLight.direction;
+    if (direction.lengthSquared() < 0.0001) {
+        return new Vector3(0, -1, 0.6).normalize();
+    }
+    return direction.clone().normalize();
 }
 
 export function applyLightColorTemperature(host: any): void {
