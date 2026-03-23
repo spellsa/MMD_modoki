@@ -2,7 +2,7 @@ import type { MmdManager, WgslMaterialShaderPresetId } from "./mmd-manager";
 import type { Timeline } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
 import { getLocale, setLocale, t } from "./i18n";
-import { Quaternion } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type {
     InterpolationChannelPreview,
     InterpolationCurve,
@@ -29,7 +29,9 @@ type NumericArrayLike = ArrayLike<number> | null | undefined;
 type SelectedBonePoseSnapshot = {
     position: { x: number; y: number; z: number };
     rotation: { x: number; y: number; z: number };
+    target?: { x: number; y: number; z: number };
     distance?: number;
+    fov?: number;
 };
 type OutputSettings = { width: number; height: number; qualityScale: number; fps: number };
 
@@ -771,6 +773,17 @@ export class UIController {
             this.refreshCameraUiFromRuntime();
             this.updateSectionKeyframeButtons();
         };
+        this.mmdManager.onCameraTransformEdited = () => {
+            const cameraSelected = this.bottomPanel.getSelectedBone() === "Camera"
+                || this.mmdManager.getTimelineTarget() === "camera";
+            if (cameraSelected) {
+                this.rememberEditedBonePoseSnapshot("Camera", this.captureCurrentBonePoseSnapshot("Camera"));
+                this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+                this.syncBottomPanelBoneFromEditedPose("Camera");
+            }
+            this.refreshCameraUiFromRuntime();
+            this.updateSectionKeyframeButtons();
+        };
         this.bottomPanel.onMorphValueEdited = (frameIndex) => {
             this.markSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(frameIndex));
             this.updateSectionKeyframeButtons();
@@ -1397,7 +1410,11 @@ export class UIController {
             }
             this.updateTimelineEditState();
             const sourcePose = this.getDisplayBonePoseSnapshot(frame);
-            this.applySelectedBonePoseSnapshotToRuntime(frame, sourcePose);
+            const selectedBone = this.bottomPanel.getSelectedBone();
+            const shouldApplyPoseToRuntime = selectedBone !== "Camera" || frameChanged;
+            if (shouldApplyPoseToRuntime) {
+                this.applySelectedBonePoseSnapshotToRuntime(frame, sourcePose);
+            }
             this.debugKeyframeFlow("display pose", {
                 frame,
                 source: sourcePose ? "snapshot-or-source" : "none",
@@ -3133,6 +3150,8 @@ export class UIController {
         this.bottomPanel.updateBoneControls(cameraInfo);
         this.bottomPanel.updateMorphControls(cameraInfo);
         this.bottomPanel.updateModelInfo(cameraInfo);
+        this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
+        this.refreshCameraUiFromRuntime(true);
         this.mmdManager.setBoneVisualizerSelectedBone(null);
         this.updateInfoActionButtons();
     }
@@ -5501,6 +5520,12 @@ export class UIController {
         if (!button) return;
 
         button.classList.remove("is-none", "is-empty", "is-registered");
+        button.hidden = this.mmdManager.isPlaying;
+        if (this.mmdManager.isPlaying) {
+            button.disabled = true;
+            button.textContent = "";
+            return;
+        }
         button.disabled = state === "none";
         button.textContent = state === "registered" ? "♦" : state === "dirty" ? "♢" : "";
         if (state === "none") {
@@ -5555,7 +5580,9 @@ export class UIController {
             const snapshot = {
                 position: this.mmdManager.getCameraPosition(),
                 rotation: this.mmdManager.getCameraRotation(),
+                target: this.mmdManager.getCameraTarget(),
                 distance: this.mmdManager.getCameraDistance(),
+                fov: this.mmdManager.getCameraFov(),
             };
             this.debugKeyframeFlow("capture camera pose snapshot", {
                 boneName,
@@ -5622,7 +5649,9 @@ export class UIController {
     private formatBonePoseSnapshotForLog(snapshot: SelectedBonePoseSnapshot): {
         position: { x: number; y: number; z: number };
         rotation: { x: number; y: number; z: number };
+        target?: { x: number; y: number; z: number };
         distance?: number;
+        fov?: number;
     } {
         const round = (value: number): number => Math.round(value * 1000) / 1000;
         return {
@@ -5636,7 +5665,15 @@ export class UIController {
                 y: round(snapshot.rotation.y),
                 z: round(snapshot.rotation.z),
             },
+            ...(snapshot.target ? {
+                target: {
+                    x: round(snapshot.target.x),
+                    y: round(snapshot.target.y),
+                    z: round(snapshot.target.z),
+                },
+            } : {}),
             ...(typeof snapshot.distance === "number" ? { distance: round(snapshot.distance) } : {}),
+            ...(typeof snapshot.fov === "number" ? { fov: round(snapshot.fov) } : {}),
         };
     }
 
@@ -5657,6 +5694,9 @@ export class UIController {
         ];
         if (formatted.distance !== undefined) {
             parts.push(`dist=${formatted.distance}`);
+        }
+        if (formatted.fov !== undefined) {
+            parts.push(`fov=${formatted.fov}`);
         }
         return parts.join(" ");
     }
@@ -5684,7 +5724,18 @@ export class UIController {
         if (this.mmdManager.isPlaying) return;
 
         const boneName = this.bottomPanel.getSelectedBone();
-        if (!boneName || boneName === "Camera" || !snapshot) return;
+        if (!boneName || !snapshot) return;
+
+        if (boneName === "Camera") {
+            const target = snapshot.target ?? this.computeCameraTargetFromViewportSnapshot(snapshot);
+            this.mmdManager.applyCameraTrackPose(
+                target,
+                snapshot.rotation,
+                snapshot.distance ?? this.mmdManager.getCameraDistance(),
+                snapshot.fov,
+            );
+            return;
+        }
 
         this.debugKeyframeFlow("apply sampled pose to runtime", {
             boneName,
@@ -5800,6 +5851,29 @@ export class UIController {
         return this.mmdManager.getAnimatedBoneTransform(boneName);
     }
 
+    private computeCameraTargetFromViewportSnapshot(snapshot: SelectedBonePoseSnapshot): Vector3 {
+        const xRad = (snapshot.rotation.x * Math.PI) / 180;
+        const yRad = (snapshot.rotation.y * Math.PI) / 180;
+        const zRad = (snapshot.rotation.z * Math.PI) / 180;
+        const rotation = Matrix.RotationYawPitchRoll(-yRad, -xRad, -zRad);
+        const distance = Math.max(0.0001, snapshot.distance ?? this.mmdManager.getCameraDistance());
+        const offset = Vector3.TransformNormal(new Vector3(0, 0, distance), rotation);
+        return new Vector3(snapshot.position.x, snapshot.position.y, snapshot.position.z).add(offset);
+    }
+
+    private computeViewportCameraPositionFromTrackPose(
+        target: Vector3,
+        rotationDeg: { x: number; y: number; z: number },
+        trackDistance: number,
+    ): Vector3 {
+        const xRad = (rotationDeg.x * Math.PI) / 180;
+        const yRad = (rotationDeg.y * Math.PI) / 180;
+        const zRad = (rotationDeg.z * Math.PI) / 180;
+        const rotation = Matrix.RotationYawPitchRoll(-yRad, -xRad, -zRad);
+        const offset = Vector3.TransformNormal(new Vector3(0, 0, trackDistance), rotation);
+        return target.add(offset);
+    }
+
     private sampleCameraPoseFromTrack(track: RuntimeCameraTrackLike, frame: number): SelectedBonePoseSnapshot | null {
         const frameNumbers = track.frameNumbers;
         if (!frameNumbers || frameNumbers.length === 0) return null;
@@ -5814,14 +5888,20 @@ export class UIController {
             const position = this.readFloatBlock(track.positions, lowerIndex, 3, [0, 0, 0]);
             const rotation = this.readFloatBlock(track.rotations, lowerIndex, 3, [0, 0, 0]);
             const distance = this.readFloatBlock(track.distances, lowerIndex, 1, [this.mmdManager.getCameraDistance()]);
+            const fov = this.readFloatBlock(track.fovs, lowerIndex, 1, [this.mmdManager.getCameraFov()]);
+            const rotationDeg = {
+                x: rotation[0] * (180 / Math.PI),
+                y: rotation[1] * (180 / Math.PI),
+                z: rotation[2] * (180 / Math.PI),
+            };
+            const target = new Vector3(position[0], position[1], position[2]);
+            const viewportPosition = this.computeViewportCameraPositionFromTrackPose(target, rotationDeg, distance[0]);
             return {
-                position: { x: position[0], y: position[1], z: position[2] },
-                rotation: {
-                    x: rotation[0] * (180 / Math.PI),
-                    y: rotation[1] * (180 / Math.PI),
-                    z: rotation[2] * (180 / Math.PI),
-                },
-                distance: distance[0],
+                position: { x: viewportPosition.x, y: viewportPosition.y, z: viewportPosition.z },
+                rotation: rotationDeg,
+                target: { x: target.x, y: target.y, z: target.z },
+                distance: Math.abs(distance[0]),
+                fov: fov[0],
             };
         }
 
@@ -5832,6 +5912,8 @@ export class UIController {
         const rotationB = this.readFloatBlock(track.rotations, upperBoundIndex, 3, rotationA);
         const distanceA = this.readFloatBlock(track.distances, lowerIndex, 1, [this.mmdManager.getCameraDistance()]);
         const distanceB = this.readFloatBlock(track.distances, upperBoundIndex, 1, distanceA);
+        const fovA = this.readFloatBlock(track.fovs, lowerIndex, 1, [this.mmdManager.getCameraFov()]);
+        const fovB = this.readFloatBlock(track.fovs, upperBoundIndex, 1, fovA);
 
         const positionInterpolation = this.readFloatBlock(
             track.positionInterpolations,
@@ -5876,19 +5958,33 @@ export class UIController {
             distanceInterp[3] / 127,
             gradient,
         );
+        const fovInterp = this.readFloatBlock(track.fovInterpolations, upperBoundIndex, 4, [20, 107, 20, 107]);
+        const fovWeight = this.bezierInterpolate(
+            fovInterp[0] / 127,
+            fovInterp[1] / 127,
+            fovInterp[2] / 127,
+            fovInterp[3] / 127,
+            gradient,
+        );
 
+        const target = new Vector3(
+            positionA[0] + (positionB[0] - positionA[0]) * positionWeightX,
+            positionA[1] + (positionB[1] - positionA[1]) * positionWeightY,
+            positionA[2] + (positionB[2] - positionA[2]) * positionWeightZ,
+        );
+        const rotationDeg = {
+            x: (rotationA[0] + (rotationB[0] - rotationA[0]) * rotationWeight) * (180 / Math.PI),
+            y: (rotationA[1] + (rotationB[1] - rotationA[1]) * rotationWeight) * (180 / Math.PI),
+            z: (rotationA[2] + (rotationB[2] - rotationA[2]) * rotationWeight) * (180 / Math.PI),
+        };
+        const trackDistance = distanceA[0] + (distanceB[0] - distanceA[0]) * distanceWeight;
+        const viewportPosition = this.computeViewportCameraPositionFromTrackPose(target, rotationDeg, trackDistance);
         return {
-            position: {
-                x: positionA[0] + (positionB[0] - positionA[0]) * positionWeightX,
-                y: positionA[1] + (positionB[1] - positionA[1]) * positionWeightY,
-                z: positionA[2] + (positionB[2] - positionA[2]) * positionWeightZ,
-            },
-            rotation: {
-                x: (rotationA[0] + (rotationB[0] - rotationA[0]) * rotationWeight) * (180 / Math.PI),
-                y: (rotationA[1] + (rotationB[1] - rotationA[1]) * rotationWeight) * (180 / Math.PI),
-                z: (rotationA[2] + (rotationB[2] - rotationA[2]) * rotationWeight) * (180 / Math.PI),
-            },
-            distance: distanceA[0] + (distanceB[0] - distanceA[0]) * distanceWeight,
+            position: { x: viewportPosition.x, y: viewportPosition.y, z: viewportPosition.z },
+            rotation: rotationDeg,
+            target: { x: target.x, y: target.y, z: target.z },
+            distance: Math.abs(trackDistance),
+            fov: fovA[0] + (fovB[0] - fovA[0]) * fovWeight,
         };
     }
 
@@ -6698,7 +6794,10 @@ export class UIController {
             ?? (track.category === "camera" || this.isBoneTrackForEditor(track)
                 ? this.captureCurrentBonePoseSnapshot(track.name)
                 : null);
-        const shouldRefreshRuntimePreview = this.mmdManager.isPlaying || !this.isBoneTrackForEditor(track) || poseSnapshot === null;
+        const shouldRefreshRuntimePreview =
+            this.mmdManager.isPlaying
+            || !this.isBoneTrackForEditor(track)
+            || poseSnapshot === null;
         this.debugKeyframeFlow("add keyframe request", {
             frame,
             track,
@@ -6902,30 +7001,32 @@ export class UIController {
 
         const cameraPosition = poseSnapshot?.position ?? this.mmdManager.getCameraPosition();
         const cameraRotationDeg = poseSnapshot?.rotation ?? this.mmdManager.getCameraRotation();
-        const cameraDistance = poseSnapshot?.distance ?? this.mmdManager.getCameraDistance();
-        const cameraFovRad = (this.mmdManager.getCameraFov() * Math.PI) / 180;
+        const cameraDistance = Math.max(0.0001, poseSnapshot?.distance ?? this.mmdManager.getCameraDistance());
+        const cameraFovDeg = poseSnapshot?.fov ?? this.mmdManager.getCameraFov();
+        const cameraTarget = poseSnapshot?.target ?? this.mmdManager.getCameraTarget();
         const degToRad = Math.PI / 180;
         this.debugKeyframeFlow("persist camera keyframe", {
             frame,
             poseSnapshot,
             cameraPosition,
+            cameraTarget,
             cameraRotationDeg,
             cameraDistance,
-            cameraFovRad,
+            cameraFovDeg,
         });
 
         track.positions = this.upsertFloatValues(track.positions, 3, frameEdit.index, frameEdit.exists, [
-            cameraPosition.x,
-            cameraPosition.y,
-            cameraPosition.z,
+            cameraTarget.x,
+            cameraTarget.y,
+            cameraTarget.z,
         ]);
         track.rotations = this.upsertFloatValues(track.rotations, 3, frameEdit.index, frameEdit.exists, [
             cameraRotationDeg.x * degToRad,
             cameraRotationDeg.y * degToRad,
             cameraRotationDeg.z * degToRad,
         ]);
-        track.distances = this.upsertFloatValues(track.distances, 1, frameEdit.index, frameEdit.exists, [cameraDistance]);
-        track.fovs = this.upsertFloatValues(track.fovs, 1, frameEdit.index, frameEdit.exists, [cameraFovRad]);
+        track.distances = this.upsertFloatValues(track.distances, 1, frameEdit.index, frameEdit.exists, [-cameraDistance]);
+        track.fovs = this.upsertFloatValues(track.fovs, 1, frameEdit.index, frameEdit.exists, [cameraFovDeg]);
         track.positionInterpolations = this.upsertUint8Values(
             track.positionInterpolations,
             12,

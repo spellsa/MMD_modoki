@@ -422,3 +422,126 @@ type KeySelection = {
   - 本家MMD風 timeline editor と project editor
 
 この方針なら、MMD 互換性の中心を外部基盤に寄せつつ、`MMD_modoki` 独自の editor 体験を育てられます。
+
+## 2026-03-23 追加メモ: カメラキーフレーム実装で見えた設計上の注意点
+
+### 症状
+
+カメラキーフレームの調整では、主に次の問題が出た。
+
+- フェーダーは正しく動くのに、フレーム移動で描画が追従しない
+- 登録とフレーム移動は通るのに、再生でカメラが動かない
+- ダイヤ登録直後に視点が飛び、白画面のように見える
+
+### 問題の本質
+
+カメラはボーンと違って、「UI 上で見えている位置」をそのまま track に保存してよい対象ではなかった。
+
+`babylon-mmd` の `MmdCamera` は
+
+- `target`
+- `rotation`
+- `distance`
+- `fov`
+
+から最終的な camera position を求める。
+
+さらに `MmdCameraAnimationTrack.positions` は viewport camera の実座標ではなく、`MmdCamera.target` に束縛される。
+この意味を外したまま editor 側で「position」として扱うと、保存は通っても runtime で別の意味に解釈される。
+
+### 今回つまずいた点
+
+#### 1. UI の camera position と runtime track の position を同一視した
+
+- UI 上の `PosX / PosY / PosZ` は viewport camera の実位置として見えていた
+- しかし runtime track の `positions` は `camera target`
+- そのまま保存すると、登録直後の refresh や seek で視点が飛ぶ
+
+#### 2. distance の符号を editor 表現と runtime 表現で分けていなかった
+
+- editor では距離は正値の方が自然
+- `MmdCamera` は負距離を前提に position を計算する
+- 符号変換を抜くと、登録後の再評価で camera が逆方向へ飛ぶ
+
+#### 3. 再生条件を `hasCameraMotion` に寄せすぎた
+
+- VMD 読み込み済み camera motion は再生される
+- editor 上で新規作成した camera key だけでは再生対象と見なされない経路が残った
+
+#### 4. runtime handle の更新を `timelineTarget` 依存にしていた
+
+- UI 上の target 選択と、runtime 上の animatable 更新対象を結びつけすぎていた
+- そのため再生前に model か camera のどちらか一方しか handle が更新されない状態が起きた
+
+### 今回の対応
+
+#### Camera の保存値を相互変換するようにした
+
+camera key 保存時は、viewport camera の
+
+- position
+- rotation
+- 正の distance
+- fov
+
+から `camera target` を逆算して `track.positions` に保存するようにした。
+
+同時に `track.distances` には editor 用の正値ではなく、runtime 用の負値を保存するようにした。
+
+逆に camera key 読出し時は、
+
+- track target
+- rotation
+- track distance
+
+から viewport camera の実位置を復元し、UI には正の distance を返すようにした。
+
+#### 停止中の frame move では sampled camera pose を viewport に直接反映した
+
+停止中にフレーム移動したときは、sampled source を viewport camera に直接適用するようにした。
+これにより、フェーダーだけ正しくて描画だけ古い、という状態を避けやすくした。
+
+#### 再生中の camera motion 判定を見直した
+
+camera の再生適用条件は `hasCameraMotion` だけではなく、
+
+- `cameraSourceAnimation`
+- `cameraAnimationHandle`
+- `hasCameraMotion`
+
+のいずれかが有効なら camera animation が存在すると見なすようにした。
+
+#### runtime handle 更新を model / camera で独立させた
+
+`timelineTarget` に応じて排他的に handle を更新するのではなく、
+
+- camera animation があれば camera handle を更新
+- model animation があれば model handle を更新
+
+という形に寄せた。
+
+### 設計メモとして残すべき学び
+
+- camera track は bone track と同じ構造に見えても、意味は同じではない
+- camera では
+  - UI 表示値
+  - viewport camera state
+  - MMD runtime state
+  - animation track 保存値
+  を分けて考える必要がある
+- `timelineTarget` は editor UI の状態であり、runtime 更新対象の唯一の条件には使わない方がよい
+- camera の不具合は
+  - 登録
+  - frame move
+  - 再生
+  を別経路として切り分けないと見落とす
+
+### 今後の方針
+
+Camera 用の `TrackAdapter` は、単なる配列 accessor ではなく、次の変換責務を持つべき。
+
+- viewport camera state
+- editor 用 camera keyframe value
+- MMD camera track value
+
+この変換を adapter に寄せれば、UI 側に camera 固有の意味変換が散らばるのを防ぎやすい。

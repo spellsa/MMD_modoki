@@ -1316,7 +1316,7 @@ ${beforeFogAppendBlock}
     private suspendSceneRenderCount = 0;
 
     private resolveCameraMouseDragMode(event: PointerEvent): "rotate" | "pan" | "zoom" | null {
-        if (this.hasCameraMotion && this._isPlaying) {
+        if (this.hasActiveCameraAnimation() && this._isPlaying) {
             return null;
         }
         if (event.button === 1) {
@@ -1381,14 +1381,19 @@ ${beforeFogAppendBlock}
 
         this.syncCameraRotationFromCurrentView();
         this.syncMmdCameraFromViewportCamera();
+        this.onCameraTransformEdited?.();
+    }
+
+    private hasActiveCameraAnimation(): boolean {
+        return this.cameraSourceAnimation !== null || this.cameraAnimationHandle !== null || this.hasCameraMotion;
     }
 
     private shouldApplyCameraMotionToViewport(): boolean {
-        return this.hasCameraMotion && (this._isPlaying || this.timelineTarget === "camera");
+        return this.hasActiveCameraAnimation() && this._isPlaying;
     }
 
     private shouldSyncViewportCameraToMmdCamera(): boolean {
-        if (!this.hasCameraMotion) return true;
+        if (!this.hasActiveCameraAnimation()) return true;
         if (this._isPlaying) return false;
         return this.timelineTarget === "camera";
     }
@@ -1411,6 +1416,7 @@ ${beforeFogAppendBlock}
     public onPhysicsStateChanged: ((enabled: boolean, available: boolean) => void) | null = null;
     public onBoneVisualizerBonePicked: ((boneName: string) => void) | null = null;
     public onBoneTransformEdited: ((boneName: string) => void) | null = null;
+    public onCameraTransformEdited: (() => void) | null = null;
     public onMaterialShaderStateChanged: (() => void) | null = null;
     public onGlobalIlluminationStateChanged: ((enabled: boolean) => void) | null = null;
 
@@ -1625,7 +1631,7 @@ ${beforeFogAppendBlock}
 
     public setTimelineTarget(target: "model" | "camera"): void {
         this.timelineTarget = target;
-        if (target === "camera" && this.hasCameraMotion && !this._isPlaying) {
+        if (target === "camera" && this.hasActiveCameraAnimation() && !this._isPlaying) {
             this.syncViewportCameraFromMmdCamera();
         }
         this.syncBoneVisualizerVisibility();
@@ -2753,10 +2759,10 @@ ${beforeFogAppendBlock}
         this._isPlaying = true;
         this.manualPlaybackWithoutAudio = this.audioPlayer === null;
         this.refreshActiveRuntimeAnimationHandles();
+        this.mmdRuntime.seekAnimation(this._currentFrame, true);
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
             this.mmdRuntime.pauseAnimation();
-            this.mmdRuntime.seekAnimation(this._currentFrame, true);
         } else {
             this.mmdRuntime.playAnimation();
         }
@@ -2815,9 +2821,7 @@ ${beforeFogAppendBlock}
     }
 
     private refreshActiveRuntimeAnimationHandles(): void {
-        if (this.timelineTarget === "camera") {
-            if (!this.cameraSourceAnimation) return;
-
+        if (this.cameraSourceAnimation) {
             if (this.cameraAnimationHandle !== null) {
                 this.mmdCamera.destroyRuntimeAnimation(this.cameraAnimationHandle);
                 this.cameraAnimationHandle = null;
@@ -2828,7 +2832,6 @@ ${beforeFogAppendBlock}
             );
             this.mmdCamera.setRuntimeAnimation(handle);
             this.cameraAnimationHandle = handle;
-            return;
         }
 
         if (!this.currentModel) return;
@@ -4665,6 +4668,11 @@ ${beforeFogAppendBlock}
         return { x: pos.x, y: pos.y, z: pos.z };
     }
 
+    getCameraTarget(): { x: number; y: number; z: number } {
+        const target = this.camera.target;
+        return { x: target.x, y: target.y, z: target.z };
+    }
+
     setCameraPosition(x: number, y: number, z: number): void {
         this.camera.setPosition(new Vector3(x, y, z));
         this.applyCameraRotationFromEuler();
@@ -4712,6 +4720,25 @@ ${beforeFogAppendBlock}
         this.camera.fov = (degrees * Math.PI) / 180;
         this.syncMmdCameraFromViewportCamera();
             this.updateEditorDofFocusAndFStop();
+    }
+
+    applyCameraTrackPose(
+        target: { x: number; y: number; z: number },
+        rotationDeg: { x: number; y: number; z: number },
+        distance: number,
+        fovDeg?: number,
+    ): void {
+        this.mmdCamera.target.set(target.x, target.y, target.z);
+        this.mmdCamera.rotation.set(
+            (rotationDeg.x * Math.PI) / 180,
+            (rotationDeg.y * Math.PI) / 180,
+            (rotationDeg.z * Math.PI) / 180,
+        );
+        this.mmdCamera.distance = -Math.abs(distance);
+        if (typeof fovDeg === "number") {
+            this.mmdCamera.fov = (fovDeg * Math.PI) / 180;
+        }
+        this.syncViewportCameraFromMmdCamera();
     }
 
     setCameraView(view: "left" | "front" | "right"): void {
@@ -4768,26 +4795,23 @@ ${beforeFogAppendBlock}
         const xRad = (this.cameraRotationEulerDeg.x * Math.PI) / 180;
         const yRad = (this.cameraRotationEulerDeg.y * Math.PI) / 180;
         const zRad = (this.cameraRotationEulerDeg.z * Math.PI) / 180;
-        const rot = Matrix.RotationYawPitchRoll(yRad, xRad, zRad);
-
-        const forward = Vector3.TransformNormal(new Vector3(0, 0, 1), rot).normalize();
+        const rot = Matrix.RotationYawPitchRoll(-yRad, -xRad, -zRad);
+        const forwardOffset = Vector3.TransformNormal(new Vector3(0, 0, 1), rot).normalize();
         const up = Vector3.TransformNormal(new Vector3(0, 1, 0), rot).normalize();
         const distance = Math.max(this.camera.radius, this.camera.lowerRadiusLimit ?? 2);
-        const target = this.camera.position.add(forward.scale(distance));
+        const target = this.camera.position.add(forwardOffset.scale(distance));
 
         this.camera.upVector = up;
         this.camera.target = target;
     }
 
     private syncCameraRotationFromCurrentView(): void {
-        const forward = this.camera.target.subtract(this.camera.position);
-        if (forward.lengthSquared() < 1e-8) return;
+        const toPosition = this.camera.position.subtract(this.camera.target);
+        if (toPosition.lengthSquared() < 1e-8) return;
 
-        forward.normalize();
-        const yaw = Math.atan2(forward.x, forward.z);
-        const pitch = Math.atan2(-forward.y, Math.sqrt(forward.x * forward.x + forward.z * forward.z));
-        this.cameraRotationEulerDeg.x = (pitch * 180) / Math.PI;
-        this.cameraRotationEulerDeg.y = (yaw * 180) / Math.PI;
+        toPosition.normalize();
+        this.cameraRotationEulerDeg.x = (Math.asin(-toPosition.y) * 180) / Math.PI;
+        this.cameraRotationEulerDeg.y = (Math.atan2(toPosition.x, -toPosition.z) * 180) / Math.PI;
         this.cameraRotationEulerDeg.z = 0;
     }
 

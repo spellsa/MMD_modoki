@@ -6,6 +6,7 @@ type BonePoseSnapshot = {
     position: { x: number; y: number; z: number };
     rotation: { x: number; y: number; z: number };
     distance?: number;
+    fov?: number;
 };
 
 export class BottomPanel {
@@ -178,6 +179,8 @@ export class BottomPanel {
                     y: rotation.y,
                     z: rotation.z,
                 },
+                distance: this.mmdManager?.getCameraDistance() ?? 45,
+                fov: this.mmdManager?.getCameraFov() ?? 30,
             };
         }
 
@@ -391,6 +394,7 @@ export class BottomPanel {
                 position: this.mmdManager.getCameraPosition(),
                 rotation: this.mmdManager.getCameraRotation(),
                 distance: this.mmdManager.getCameraDistance(),
+                fov: this.mmdManager.getCameraFov(),
             }, force);
             return;
         }
@@ -444,6 +448,9 @@ export class BottomPanel {
         updateSlider("rz", snapshot.rotation.z);
         if (typeof snapshot.distance === "number") {
             updateSlider("camDistance", snapshot.distance);
+        }
+        if (typeof snapshot.fov === "number") {
+            updateSlider("camFov", snapshot.fov);
         }
     }
 
