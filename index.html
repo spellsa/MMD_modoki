@@ -296,6 +296,7 @@
               <path d="M7 4v1M7 6.5v4" />
             </svg>
             <span data-i18n="section.info">情報</span>
+            <button id="btn-info-keyframe" class="section-kf-btn" type="button" aria-label="情報欄のキーフレーム登録"> </button>
           </div>
           <div id="model-info" class="model-info">
             <div class="info-compact-top">
@@ -332,6 +333,7 @@
               <circle cx="11.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
             </svg>
             <span data-i18n="section.interpolation">補間</span>
+            <button id="btn-interpolation-keyframe" class="section-kf-btn" type="button" aria-label="補間欄のキーフレーム登録"> </button>
           </div>
           <div class="model-info interpolation-info">
             <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.target">対象</span><span id="interp-track-name" class="info-value">-</span></div>
@@ -358,6 +360,7 @@
               <path d="M3 4.5a1.5 1.5 0 1 1 3 0v1.2h2V4.5a1.5 1.5 0 1 1 3 0V9a1.5 1.5 0 1 1-3 0V7.9H6V9a1.5 1.5 0 1 1-3 0V4.5z" />
             </svg>
             <span data-i18n="section.bone">ボーン</span>
+            <button id="btn-bone-keyframe" class="section-kf-btn" type="button" aria-label="ボーン欄のキーフレーム登録"> </button>
           </div>
           <div class="panel-select-row">
             <span class="panel-select-label" data-i18n="label.target">対象</span>
@@ -378,6 +381,7 @@
               <path d="M2 12c0-2.5 2.2-4 5-4s5 1.5 5 4" />
             </svg>
             <span data-i18n="section.morph">モーフ</span>
+            <button id="btn-morph-keyframe" class="section-kf-btn" type="button" aria-label="モーフ欄のキーフレーム登録"> </button>
           </div>
           <div class="panel-select-row">
             <span class="panel-select-label" data-i18n="label.displayFrame">表示枠</span>
@@ -390,24 +394,19 @@
           </div>
         </section>
 
-        <!-- 5: Camera Controls -->
+        <!-- 5: Display Controls -->
         <section id="camera-section" class="bottom-section">
           <div class="section-header">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
               <path d="M2 3h7v8H2V3zm8 1l3-2v10l-3-2V4z" />
             </svg>
-            <span data-i18n="section.camera">カメラ</span>
+            <span data-i18n="section.camera">表示欄</span>
           </div>
           <div id="camera-controls" class="camera-controls">
             <div class="camera-view-buttons" role="group" aria-label="カメラ視点" data-i18n-aria-label="label.cameraView">
               <button id="btn-cam-left" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.left">左面</button>
               <button id="btn-cam-front" class="camera-view-btn camera-view-btn--active" type="button" aria-pressed="true" data-i18n="camera.view.front">正面</button>
               <button id="btn-cam-right" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.right">右面</button>
-            </div>
-            <div class="control-row cam-slider-row cam-fov-row">
-              <label class="cam-axis-label">FOV</label>
-              <input type="range" id="cam-fov" class="cam-slider" min="10" max="120" value="30">
-              <span id="cam-fov-value" class="value-display">30°</span>
             </div>
             <div class="control-row cam-slider-row dof-row-hidden">
               <label class="cam-axis-label" data-i18n="label.distance">距離</label>
@@ -689,6 +688,7 @@
               <path d="M4.4 7.5h5.2M4.4 9.2h3.2" stroke="currentColor" stroke-width="1.1" />
             </svg>
             <span data-i18n="section.accessory">アクセサリー</span>
+            <button id="btn-accessory-keyframe" class="section-kf-btn" type="button" aria-label="アクセサリー欄のキーフレーム登録"> </button>
           </div>
           <div id="accessory-controls" class="accessory-controls">
             <div class="panel-select-row">

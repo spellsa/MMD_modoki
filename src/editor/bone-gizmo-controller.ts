@@ -18,6 +18,10 @@ function disableBoneGizmo(host: any): void {
     host.boneGizmoProxyNode?.setEnabled(false);
 }
 
+export function resetBoneGizmoInteraction(host: any): void {
+    disableBoneGizmo(host);
+}
+
 function syncBoneGizmoProxyToRuntimeBone(host: any, runtimeBone: any): void {
     const proxyNode = host.boneGizmoProxyNode;
     if (!proxyNode) return;
@@ -184,7 +188,7 @@ export function updateBoneGizmoTarget(host: any): void {
     gizmoManager.attachToNode(proxyNode);
 
     host.boneGizmoRuntimeBone = runtimeBone;
-    host.invalidateBoneVisualizerPose(runtimeBone);
+    host.invalidateBoneVisualizerPose(runtimeBone, false);
 }
 
 export function handleBoneGizmoBeforeRender(host: any): void {

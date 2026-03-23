@@ -1,4 +1,4 @@
-import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectKeyframeBundle } from "../types";
+import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectKeyframeBundle, ProjectSerializedAccessoryTransformTrack } from "../types";
 import { serializeCameraTrack, serializeModelAnimation } from "./project-codec";
 
 type ProjectExportAccessory = {
@@ -16,6 +16,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             scale: number;
         } | null;
         getAccessoryParent?: (index: number) => { modelIndex: number | null; boneName: string | null } | null;
+        getAccessoryTransformKeyframes?: (index: number) => ProjectSerializedAccessoryTransformTrack | null;
     };
 
     const models = host.sceneModels.map((entry: any) => ({
@@ -48,6 +49,12 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
         })),
         cameraAnimation: serializeCameraTrack(host.cameraSourceAnimation?.cameraTrack),
     };
+
+    const accessoryTransformAnimations = (accessoryExtension.getLoadedAccessories?.() ?? [])
+        .map((entry) => accessoryExtension.getAccessoryTransformKeyframes?.(entry.index) ?? null);
+    if (accessoryTransformAnimations.length > 0) {
+        keyframes.accessoryTransformAnimations = accessoryTransformAnimations;
+    }
 
     return {
         format: "mmd_modoki_project",

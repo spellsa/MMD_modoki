@@ -308,6 +308,13 @@ export interface ProjectAccessoryState {
     parentBoneName?: string | null;
 }
 
+export interface ProjectSerializedAccessoryTransformTrack {
+    frameNumbers: ProjectNumberArray;
+    positions: ProjectNumberArray;
+    rotations: ProjectNumberArray;
+    scales: ProjectNumberArray;
+}
+
 export interface ProjectSerializedBoneTrack {
     name: string;
     frameNumbers: ProjectNumberArray;
@@ -375,6 +382,7 @@ export interface ProjectKeyframeModelAnimation {
 export interface ProjectKeyframeBundle {
     modelAnimations: ProjectKeyframeModelAnimation[];
     cameraAnimation: ProjectSerializedCameraTrack | null;
+    accessoryTransformAnimations?: Array<ProjectSerializedAccessoryTransformTrack | null>;
 }
 
 export interface MmdModokiProjectFileV1 {

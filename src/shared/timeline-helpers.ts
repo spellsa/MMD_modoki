@@ -4,9 +4,13 @@ const EMPTY_KEYFRAME_FRAMES = new Uint32Array(0);
 const TRACK_KEY_SEPARATOR = "\u001f";
 
 export function classifyBone(name: string): TrackCategory {
-    if (name.startsWith("センター") || name.startsWith("center")) return "root";
-    if (/^(左|右|L|R)/i.test(name) || /[足腕指]|bone/i.test(name)) return "bone";
-    if (name.includes("モーフ") || name.includes("morph")) return "morph";
+    if (
+        name.startsWith("\u30bb\u30f3\u30bf\u30fc")
+        || name.startsWith("center")
+        || name === "\u5168\u3066\u306e\u89aa"
+    ) return "root";
+    if (/^(左|右|L|R)/i.test(name) || /bone/i.test(name)) return "bone";
+    if (name.includes("\u30e2\u30fc\u30d5") || name.includes("morph")) return "morph";
     return "bone";
 }
 

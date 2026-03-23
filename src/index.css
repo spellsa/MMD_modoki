@@ -1058,6 +1058,50 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   flex-shrink: 0;
 }
 
+.section-kf-btn {
+  margin-left: auto;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.section-kf-btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.section-kf-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.16);
+}
+
+.section-kf-btn.is-empty {
+  color: var(--text-tertiary);
+}
+
+.section-kf-btn.is-registered {
+  color: #f7f7f7;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.section-kf-btn.is-none {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Bone + Morph Controls */
 #bone-section,
 #morph-section {
@@ -1261,7 +1305,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 #accessory-section { order: 6; }
 #output-section { order: 7; }
 
-/* Camera Controls */
+/* Display Controls */
 .camera-controls {
   padding: 8px;
   display: flex;
@@ -1388,10 +1432,6 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-color: var(--camera-blue);
   background: rgba(96, 165, 250, 0.14);
   color: #bfdbfe;
-}
-
-.cam-fov-row {
-  margin-top: 2px;
 }
 
 .control-row label {

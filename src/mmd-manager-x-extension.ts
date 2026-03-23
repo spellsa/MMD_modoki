@@ -5,6 +5,8 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MmdManager } from "./mmd-manager";
 import { loadXIntoScene } from "./x-file-loader";
+import type { ProjectSerializedAccessoryTransformTrack } from "./types";
+import { copyProjectArrayToFloat32, copyProjectArrayToUint32, packFloat32Array, packFrameNumbers } from "./project/project-codec";
 
 export type AccessoryState = {
     index: number;
@@ -25,6 +27,13 @@ export type AccessoryParentState = {
     boneName: string | null;
 };
 
+type AccessoryTransformKeyframeState = {
+    frameNumbers: Uint32Array;
+    positions: Float32Array;
+    rotations: Float32Array;
+    scales: Float32Array;
+};
+
 declare module "./mmd-manager" {
     interface MmdManager {
         loadX(filePath: string): Promise<boolean>;
@@ -37,6 +46,10 @@ declare module "./mmd-manager" {
         setAccessoryTransform(index: number, transform: Partial<AccessoryTransformState>): boolean;
         getAccessoryParent(index: number): AccessoryParentState | null;
         setAccessoryParent(index: number, modelIndex: number | null, boneName: string | null): boolean;
+        hasAccessoryTransformKeyframe(index: number, frame: number): boolean;
+        addAccessoryTransformKeyframe(index: number, frame: number): boolean;
+        getAccessoryTransformKeyframes(index: number): ProjectSerializedAccessoryTransformTrack | null;
+        setAccessoryTransformKeyframes(index: number, track: ProjectSerializedAccessoryTransformTrack | null): boolean;
         getModelBoneNames(modelIndex: number): string[];
     }
 }
@@ -57,6 +70,7 @@ type AccessoryEntry = {
     parentModelName: string | null;
     parentBoneName: string | null;
     parentBoneUseMeshWorldMatrix: boolean;
+    transformKeyframes: AccessoryTransformKeyframeState;
 };
 
 const accessoryStore = new WeakMap<object, AccessoryEntry[]>();
@@ -77,6 +91,101 @@ function getAccessoryEntries(host: object): AccessoryEntry[] {
         accessoryStore.set(host, entries);
     }
     return entries;
+}
+
+function createEmptyAccessoryTransformKeyframes(): AccessoryTransformKeyframeState {
+    return {
+        frameNumbers: new Uint32Array(0),
+        positions: new Float32Array(0),
+        rotations: new Float32Array(0),
+        scales: new Float32Array(0),
+    };
+}
+
+function findFrameInsertionIndex(frames: Uint32Array, frame: number): { index: number; exists: boolean } {
+    const normalizedFrame = Math.max(0, Math.floor(frame));
+    let lo = 0;
+    let hi = frames.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (frames[mid] < normalizedFrame) lo = mid + 1;
+        else hi = mid;
+    }
+    return { index: lo, exists: lo < frames.length && frames[lo] === normalizedFrame };
+}
+
+function insertFrameNumbers(frames: Uint32Array, frame: number): { frames: Uint32Array; index: number; exists: boolean } {
+    const { index, exists } = findFrameInsertionIndex(frames, frame);
+    const normalizedFrame = Math.max(0, Math.floor(frame));
+    if (exists) {
+        return { frames, index, exists: true };
+    }
+
+    const next = new Uint32Array(frames.length + 1);
+    next.set(frames.subarray(0, index), 0);
+    next[index] = normalizedFrame;
+    next.set(frames.subarray(index), index + 1);
+    return { frames: next, index, exists: false };
+}
+
+function insertFloatValues(
+    values: Float32Array,
+    stride: number,
+    frameIndex: number,
+    exists: boolean,
+    block: readonly number[],
+): Float32Array {
+    const sourceFrameCount = Math.floor(values.length / stride);
+    const targetFrameCount = sourceFrameCount + (exists ? 0 : 1);
+    const next = new Float32Array(targetFrameCount * stride);
+
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        const targetFrameIndex = !exists && sourceFrameIndex >= frameIndex ? sourceFrameIndex + 1 : sourceFrameIndex;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        next.set(values.subarray(sourceOffset, sourceOffset + stride), targetOffset);
+    }
+
+    const writeOffset = frameIndex * stride;
+    for (let i = 0; i < stride; i += 1) {
+        next[writeOffset + i] = Number.isFinite(block[i]) ? Number(block[i]) : 0;
+    }
+
+    return next;
+}
+
+function upsertAccessoryTransformKeyframes(
+    entry: AccessoryEntry,
+    frame: number,
+): boolean {
+    const transform = {
+        position: {
+            x: entry.offset.position.x,
+            y: entry.offset.position.y,
+            z: entry.offset.position.z,
+        },
+        rotationDeg: {
+            x: toDegrees(entry.offset.rotationQuaternion ? entry.offset.rotationQuaternion.toEulerAngles().x : entry.offset.rotation.x),
+            y: toDegrees(entry.offset.rotationQuaternion ? entry.offset.rotationQuaternion.toEulerAngles().y : entry.offset.rotation.y),
+            z: toDegrees(entry.offset.rotationQuaternion ? entry.offset.rotationQuaternion.toEulerAngles().z : entry.offset.rotation.z),
+        },
+        scale: (entry.offset.scaling.x + entry.offset.scaling.y + entry.offset.scaling.z) / 3,
+    };
+    const frameEdit = insertFrameNumbers(entry.transformKeyframes.frameNumbers, frame);
+
+    entry.transformKeyframes.frameNumbers = frameEdit.frames;
+    entry.transformKeyframes.positions = insertFloatValues(entry.transformKeyframes.positions, 3, frameEdit.index, frameEdit.exists, [
+        transform.position.x,
+        transform.position.y,
+        transform.position.z,
+    ]);
+    entry.transformKeyframes.rotations = insertFloatValues(entry.transformKeyframes.rotations, 3, frameEdit.index, frameEdit.exists, [
+        transform.rotationDeg.x,
+        transform.rotationDeg.y,
+        transform.rotationDeg.z,
+    ]);
+    entry.transformKeyframes.scales = insertFloatValues(entry.transformKeyframes.scales, 1, frameEdit.index, frameEdit.exists, [transform.scale]);
+    return true;
 }
 
 function getSceneModels(host: object): Array<{ model: object; mesh: AbstractMesh; info?: { name?: string; boneNames?: string[] } }> {
@@ -258,6 +367,10 @@ const mmdManagerProto = MmdManager.prototype as unknown as {
     setAccessoryTransform?: (index: number, transform: Partial<AccessoryTransformState>) => boolean;
     getAccessoryParent?: (index: number) => AccessoryParentState | null;
     setAccessoryParent?: (index: number, modelIndex: number | null, boneName: string | null) => boolean;
+    hasAccessoryTransformKeyframe?: (index: number, frame: number) => boolean;
+    addAccessoryTransformKeyframe?: (index: number, frame: number) => boolean;
+    getAccessoryTransformKeyframes?: (index: number) => ProjectSerializedAccessoryTransformTrack | null;
+    setAccessoryTransformKeyframes?: (index: number, track: ProjectSerializedAccessoryTransformTrack | null) => boolean;
     getModelBoneNames?: (modelIndex: number) => string[];
 };
 
@@ -326,6 +439,7 @@ if (!mmdManagerProto.loadX) {
                 parentModelName: null,
                 parentBoneName: null,
                 parentBoneUseMeshWorldMatrix: false,
+                transformKeyframes: createEmptyAccessoryTransformKeyframes(),
             });
 
             ensureAccessoryUpdateObserver(host as XLoadHost & object);
@@ -514,6 +628,66 @@ if (!mmdManagerProto.setAccessoryParent) {
         entry.parentBoneName = null;
         entry.parentBoneUseMeshWorldMatrix = false;
         syncAccessoryAttachment(host, entry);
+        return true;
+    };
+}
+
+if (!mmdManagerProto.hasAccessoryTransformKeyframe) {
+    mmdManagerProto.hasAccessoryTransformKeyframe = function(index: number, frame: number): boolean {
+        const entries = getAccessoryEntries(this as unknown as object);
+        const entry = entries[index];
+        if (!entry) return false;
+        return entry.transformKeyframes.frameNumbers.includes(Math.max(0, Math.floor(frame)));
+    };
+}
+
+if (!mmdManagerProto.addAccessoryTransformKeyframe) {
+    mmdManagerProto.addAccessoryTransformKeyframe = function(index: number, frame: number): boolean {
+        const entries = getAccessoryEntries(this as unknown as object);
+        const entry = entries[index];
+        if (!entry) return false;
+        return upsertAccessoryTransformKeyframes(entry, frame);
+    };
+}
+
+if (!mmdManagerProto.getAccessoryTransformKeyframes) {
+    mmdManagerProto.getAccessoryTransformKeyframes = function(index: number): ProjectSerializedAccessoryTransformTrack | null {
+        const entries = getAccessoryEntries(this as unknown as object);
+        const entry = entries[index];
+        if (!entry) return null;
+        return {
+            frameNumbers: packFrameNumbers(entry.transformKeyframes.frameNumbers),
+            positions: packFloat32Array(entry.transformKeyframes.positions),
+            rotations: packFloat32Array(entry.transformKeyframes.rotations),
+            scales: packFloat32Array(entry.transformKeyframes.scales),
+        };
+    };
+}
+
+if (!mmdManagerProto.setAccessoryTransformKeyframes) {
+    mmdManagerProto.setAccessoryTransformKeyframes = function(
+        index: number,
+        track: ProjectSerializedAccessoryTransformTrack | null,
+    ): boolean {
+        const entries = getAccessoryEntries(this as unknown as object);
+        const entry = entries[index];
+        if (!entry) return false;
+        if (!track) {
+            entry.transformKeyframes = createEmptyAccessoryTransformKeyframes();
+            return true;
+        }
+
+        const frameCount = Math.max(0, Math.floor(track.frameNumbers.length ?? 0));
+        entry.transformKeyframes = {
+            frameNumbers: new Uint32Array(frameCount),
+            positions: new Float32Array(frameCount * 3),
+            rotations: new Float32Array(frameCount * 3),
+            scales: new Float32Array(frameCount),
+        };
+        copyProjectArrayToUint32(track.frameNumbers, entry.transformKeyframes.frameNumbers);
+        copyProjectArrayToFloat32(track.positions, entry.transformKeyframes.positions);
+        copyProjectArrayToFloat32(track.rotations, entry.transformKeyframes.rotations);
+        copyProjectArrayToFloat32(track.scales, entry.transformKeyframes.scales);
         return true;
     };
 }

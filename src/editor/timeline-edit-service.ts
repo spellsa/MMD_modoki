@@ -4,6 +4,21 @@ import type { KeyframeTrack, TrackCategory } from "../types";
 import { addFrameNumber, classifyBone, createTrackKey, hasFrameNumber, mergeFrameNumbers, moveFrameNumber, parseTrackKey, removeFrameNumber } from "../shared/timeline-helpers";
 
 const EMPTY_KEYFRAME_FRAMES = new Uint32Array(0);
+const DEFAULT_EDIT_TIMELINE_FRAMES = 300;
+
+type RuntimePropertyTrackLike = {
+    frameNumbers: ArrayLike<number>;
+    visibles: Uint8Array;
+    ikBoneNames: readonly string[];
+    getIkState: (index: number) => Uint8Array;
+};
+
+type RuntimePropertyTrackMutable = {
+    frameNumbers: Uint32Array;
+    visibles: Uint8Array;
+    ikBoneNames: readonly string[];
+    getIkState: (index: number) => Uint8Array;
+};
 
 export function getOrCreateModelTrackFrameMap(host: any, model: any): Map<string, Uint32Array> {
     let frameMap = host.modelKeyframeTracksByModel.get(model);
@@ -14,8 +29,19 @@ export function getOrCreateModelTrackFrameMap(host: any, model: any): Map<string
     return frameMap;
 }
 
+function getCurrentModelAnimation(host: any): MmdAnimation | null {
+    if (!host.currentModel) return null;
+    return host.modelSourceAnimationsByModel.get(host.currentModel) ?? null;
+}
+
 function createCameraAnimationFromTrack(cameraTrack: MmdCameraAnimationTrack, name: string): MmdAnimation {
     const propertyTrack = new MmdPropertyAnimationTrack(0, []);
+    return new MmdAnimation(name, [], [], [], propertyTrack, cameraTrack);
+}
+
+function createModelAnimationForEditing(name: string): MmdAnimation {
+    const propertyTrack = new MmdPropertyAnimationTrack(0, []);
+    const cameraTrack = new MmdCameraAnimationTrack(0);
     return new MmdAnimation(name, [], [], [], propertyTrack, cameraTrack);
 }
 
@@ -70,6 +96,17 @@ export function getRegisteredKeyframeStats(host: any): { hasAnyKeyframe: boolean
             if (trackMaxFrame > maxFrame) {
                 maxFrame = trackMaxFrame;
             }
+        }
+    }
+
+    for (const sceneModel of host.sceneModels) {
+        const animation = host.modelSourceAnimationsByModel.get(sceneModel.model);
+        const propertyFrames = animation?.propertyTrack?.frameNumbers;
+        if (!propertyFrames || propertyFrames.length === 0) continue;
+        hasAnyKeyframe = true;
+        const trackMaxFrame = propertyFrames[propertyFrames.length - 1];
+        if (trackMaxFrame > maxFrame) {
+            maxFrame = trackMaxFrame;
         }
     }
 
@@ -166,9 +203,9 @@ export function refreshTotalFramesFromContent(host: any): void {
     const runtimeDurationFrame = Math.max(0, Math.floor(host.mmdRuntime.animationFrameTimeDuration));
     const { hasAnyKeyframe, maxFrame } = getRegisteredKeyframeStats(host);
     const hasAudio = host.audioPlayer !== null;
-    const nextTotalFrames = hasAnyKeyframe && !hasAudio
-        ? Math.max(maxFrame, 1)
-        : Math.max(runtimeDurationFrame, maxFrame, hasAnyKeyframe ? 0 : 300);
+    const nextTotalFrames = hasAudio
+        ? Math.max(runtimeDurationFrame, maxFrame, host._totalFrames, hasAnyKeyframe ? 0 : DEFAULT_EDIT_TIMELINE_FRAMES)
+        : Math.max(runtimeDurationFrame, maxFrame, host._totalFrames, DEFAULT_EDIT_TIMELINE_FRAMES, hasAnyKeyframe ? 1 : 0);
     if (nextTotalFrames === host._totalFrames) return;
 
     host._totalFrames = nextTotalFrames;
@@ -208,6 +245,13 @@ export function hasTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name"
     return hasFrameNumber(frames, normalized);
 }
 
+export function hasInfoKeyframe(host: any, frame: number): boolean {
+    const animation = getCurrentModelAnimation(host);
+    if (!animation) return false;
+    const normalized = Math.max(0, Math.floor(frame));
+    return hasFrameNumber(animation.propertyTrack.frameNumbers, normalized);
+}
+
 export function addTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
@@ -231,6 +275,122 @@ export function addTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name"
     return true;
 }
 
+function findInsertIndex(frames: ArrayLike<number>, frame: number): number {
+    let lo = 0;
+    let hi = frames?.length ?? 0;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if ((frames[mid] ?? 0) < frame) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+function resolveInsertReferenceIndex(frames: ArrayLike<number>, frame: number): number {
+    const normalized = Math.max(0, Math.floor(frame));
+    const insertIndex = findInsertIndex(frames, normalized);
+    if (insertIndex < (frames?.length ?? 0) && (frames[insertIndex] ?? 0) === normalized) {
+        return insertIndex;
+    }
+    return insertIndex > 0 ? insertIndex - 1 : -1;
+}
+
+function upsertUint8Values(
+    values: ArrayLike<number>,
+    stride: number,
+    frameIndex: number,
+    exists: boolean,
+    block: readonly number[],
+): Uint8Array {
+    const sourceFrameCount = Math.floor((values?.length ?? 0) / stride);
+    const targetFrameCount = sourceFrameCount + (exists ? 0 : 1);
+    const target = new Uint8Array(targetFrameCount * stride);
+
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        const targetFrameIndex = !exists && sourceFrameIndex >= frameIndex
+            ? sourceFrameIndex + 1
+            : sourceFrameIndex;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        for (let i = 0; i < stride; i += 1) {
+            const value = values[sourceOffset + i];
+            const normalized = Number.isFinite(value) ? Math.round(value) : 0;
+            target[targetOffset + i] = Math.max(0, Math.min(255, normalized));
+        }
+    }
+
+    const writeOffset = frameIndex * stride;
+    for (let i = 0; i < stride; i += 1) {
+        const value = block[i] ?? 0;
+        const normalized = Number.isFinite(value) ? Math.round(value) : 0;
+        target[writeOffset + i] = Math.max(0, Math.min(255, normalized));
+    }
+
+    return target;
+}
+
+function readUint8Block(
+    values: ArrayLike<number>,
+    frameIndex: number,
+    stride: number,
+    fallback: readonly number[],
+): number[] {
+    const block = new Array<number>(stride);
+    for (let i = 0; i < stride; i += 1) {
+        block[i] = Number.isFinite(fallback[i]) ? Math.round(fallback[i]) : 0;
+    }
+    if (frameIndex < 0) return block;
+
+    const offset = frameIndex * stride;
+    for (let i = 0; i < stride; i += 1) {
+        const value = values[offset + i];
+        if (!Number.isFinite(value)) continue;
+        block[i] = Math.max(0, Math.min(255, Math.round(value)));
+    }
+    return block;
+}
+
+export function addInfoKeyframe(host: any, frame: number): boolean {
+    const animation = getCurrentModelAnimation(host);
+    if (!animation) return false;
+
+    const normalizedFrame = Math.max(0, Math.floor(frame));
+    const propertyTrack = animation.propertyTrack as RuntimePropertyTrackMutable & RuntimePropertyTrackLike;
+    const insertIndex = findInsertIndex(propertyTrack.frameNumbers, normalizedFrame);
+    const exists = insertIndex < propertyTrack.frameNumbers.length && (propertyTrack.frameNumbers[insertIndex] ?? 0) === normalizedFrame;
+    const referenceIndex = resolveInsertReferenceIndex(propertyTrack.frameNumbers, normalizedFrame);
+    const visibleValue = host.getActiveModelVisibility?.() ? 1 : 0;
+
+    const nextTrack = new MmdPropertyAnimationTrack(
+        propertyTrack.frameNumbers.length + (exists ? 0 : 1),
+        propertyTrack.ikBoneNames,
+    );
+    const nextFrameNumbers = exists
+        ? new Uint32Array(propertyTrack.frameNumbers)
+        : (() => {
+            const next = new Uint32Array(propertyTrack.frameNumbers.length + 1);
+            for (let i = 0; i < insertIndex; i += 1) next[i] = Math.max(0, Math.floor(propertyTrack.frameNumbers[i] ?? 0));
+            next[insertIndex] = normalizedFrame;
+            for (let i = insertIndex; i < propertyTrack.frameNumbers.length; i += 1) {
+                next[i + 1] = Math.max(0, Math.floor(propertyTrack.frameNumbers[i] ?? 0));
+            }
+            return next;
+        })();
+
+    nextTrack.frameNumbers.set(nextFrameNumbers);
+    nextTrack.visibles.set(upsertUint8Values(propertyTrack.visibles, 1, insertIndex, exists, [visibleValue]));
+
+    for (let i = 0; i < propertyTrack.ikBoneNames.length; i += 1) {
+        const currentIkState = propertyTrack.getIkState(i);
+        const fallback = readUint8Block(currentIkState, referenceIndex, 1, [0]);
+        nextTrack.getIkState(i).set(upsertUint8Values(currentIkState, 1, insertIndex, exists, fallback));
+    }
+
+    (animation as unknown as { propertyTrack: MmdPropertyAnimationTrack }).propertyTrack = nextTrack;
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
 export function ensureCameraAnimationForEditing(host: any): boolean {
     if (host.cameraSourceAnimation) return true;
 
@@ -238,6 +398,40 @@ export function ensureCameraAnimationForEditing(host: any): boolean {
     host.cameraSourceAnimation = createCameraAnimationFromTrack(cameraTrack, "editorCamera");
     host.cameraMotionPath = null;
     host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
+    return true;
+}
+
+export function ensureModelAnimationForEditing(host: any, track: Pick<KeyframeTrack, "name" | "category">): boolean {
+    if (!host.currentModel) return false;
+
+    let animation = getCurrentModelAnimation(host);
+    if (!animation) {
+        const modelName = typeof host.currentModel?.name === "string" && host.currentModel.name.length > 0
+            ? `${host.currentModel.name}@editor`
+            : "editorModel";
+        animation = createModelAnimationForEditing(modelName);
+        host.modelSourceAnimationsByModel.set(host.currentModel, animation);
+    }
+
+    const animationMutable = animation as unknown as {
+        boneTracks: MmdBoneAnimationTrack[];
+        movableBoneTracks: MmdMovableBoneAnimationTrack[];
+        morphTracks: MmdMorphAnimationTrack[];
+    };
+
+    if (track.category === "morph") {
+        if (!animationMutable.morphTracks.some((candidate) => candidate.name === track.name)) {
+            animationMutable.morphTracks.push(new MmdMorphAnimationTrack(track.name, 0));
+        }
+        return true;
+    }
+
+    const hasExistingBoneTrack = animationMutable.boneTracks.some((candidate) => candidate.name === track.name);
+    const hasExistingMovableTrack = animationMutable.movableBoneTracks.some((candidate) => candidate.name === track.name);
+    if (!hasExistingBoneTrack && !hasExistingMovableTrack) {
+        animationMutable.movableBoneTracks.push(new MmdMovableBoneAnimationTrack(track.name, 0));
+    }
+
     return true;
 }
 

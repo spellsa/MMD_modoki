@@ -52,6 +52,39 @@ function hasFrame(a: Uint32Array, v: number): boolean {
     return i < a.length && a[i] === v;
 }
 
+function drawDiamondMarker(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    fillStyle: string,
+    strokeStyle: string | null = null,
+    lineWidth = 1
+): void {
+    const half = size / 2;
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.moveTo(x, y - half);
+    ctx.lineTo(x + half, y);
+    ctx.lineTo(x, y + half);
+    ctx.lineTo(x - half, y);
+    ctx.closePath();
+    ctx.fill();
+
+    if (!strokeStyle) return;
+    ctx.save();
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, y - half);
+    ctx.lineTo(x + half, y);
+    ctx.lineTo(x, y + half);
+    ctx.lineTo(x - half, y);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+}
+
 export class Timeline {
     // DOM
     private staticCanvas: HTMLCanvasElement;
@@ -372,29 +405,21 @@ export class Timeline {
             ctx.fillStyle = "rgba(255,255,255,0.04)";
             ctx.fillRect(0, ry + ROW_H - 1, w, 1);
 
-            // Keyframe dots (binary search)
+            // Keyframe markers (binary search)
             const frames = track.frames;
             const lo = lowerBound(frames, visStart);
             const hi = upperBound(frames, visEnd);
-            const dotR = track.category === "root" ? 4 : track.category === "camera" ? 3.5 : 2.5;
+            const markerSize = track.category === "root" ? 9 : track.category === "camera" ? 8 : 6;
             const midY = ry + ROW_H / 2;
 
-            ctx.fillStyle = col.kf;
             for (let k = lo; k <= hi && k < frames.length; k++) {
                 const sx = frames[k] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
-                if (sx < -dotR * 2 || sx > w + dotR * 2) continue;
-                ctx.beginPath();
-                ctx.arc(sx, midY, dotR, 0, Math.PI * 2);
-                ctx.fill();
+                if (sx < -markerSize || sx > w + markerSize) continue;
+                drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
 
                 if (isSelectedRow && this.selectedFrame !== null && frames[k] === this.selectedFrame) {
-                    ctx.save();
-                    ctx.strokeStyle = "#ffffff";
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    ctx.arc(sx, midY, dotR + 2, 0, Math.PI * 2);
-                    ctx.stroke();
-                    ctx.restore();
+                    drawDiamondMarker(ctx, sx, midY, markerSize + 4, "rgba(255,255,255,0.12)", "#ffffff", 1.5);
+                    drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
                 }
             }
         }
@@ -603,8 +628,11 @@ export class Timeline {
             );
             if (nextIndex >= 0) {
                 this.selectedTrackIndex = nextIndex;
-            } else if (this.selectedTrackIndex < 0 || this.selectedTrackIndex >= this.tracks.length) {
-                this.selectedTrackIndex = 0;
+            } else {
+                this.selectedTrackIndex = -1;
+                this.selectedFrame = null;
+                this.emitSelectionChanged();
+                return;
             }
         } else if (this.selectedTrackIndex < 0 || this.selectedTrackIndex >= this.tracks.length) {
             this.selectedTrackIndex = 0;

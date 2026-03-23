@@ -3,6 +3,7 @@ import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { WebGPUTintWASM } from "@babylonjs/core/Engines/WebGPU/webgpuTintWASM";
 import { Scene } from "@babylonjs/core/scene";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
@@ -42,6 +43,7 @@ import type {
     ProjectModelMaterialShaderState,
     KeyframeTrack,
 } from "./types";
+import type { IMmdBindableCameraAnimation } from "babylon-mmd/esm/Runtime/Animation/IMmdBindableAnimation";
 import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
 import { exportProjectState as exportProjectStateImpl } from "./project/project-serializer";
 import { importProjectState as importProjectStateImpl } from "./project/project-importer";
@@ -227,13 +229,16 @@ import { GlobalIlluminationController } from "./render/global-illumination-contr
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
     buildModelTrackFrameMapFromAnimation as buildModelTrackFrameMapFromAnimationImpl,
+    addInfoKeyframe as addInfoKeyframeImpl,
     emitMergedKeyframeTracks as emitMergedKeyframeTracksImpl,
     createOffsetModelAnimation as createOffsetModelAnimationImpl,
     ensureCameraAnimationForEditing as ensureCameraAnimationForEditingImpl,
+    ensureModelAnimationForEditing as ensureModelAnimationForEditingImpl,
     getActiveModelTimelineTracks as getActiveModelTimelineTracksImpl,
     getCameraTimelineTracks as getCameraTimelineTracksImpl,
     getOrCreateModelTrackFrameMap as getOrCreateModelTrackFrameMapImpl,
     getRegisteredKeyframeStats as getRegisteredKeyframeStatsImpl,
+    hasInfoKeyframe as hasInfoKeyframeImpl,
     hasTimelineKeyframe as hasTimelineKeyframeImpl,
     moveTimelineKeyframe as moveTimelineKeyframeImpl,
     mergeModelAnimations as mergeModelAnimationsImpl,
@@ -244,6 +249,7 @@ import {
     disposeBoneGizmoSystem as disposeBoneGizmoSystemImpl,
     handleBoneGizmoBeforeRender as handleBoneGizmoBeforeRenderImpl,
     initializeBoneGizmoSystem as initializeBoneGizmoSystemImpl,
+    resetBoneGizmoInteraction as resetBoneGizmoInteractionImpl,
     updateBoneGizmoTarget as updateBoneGizmoTargetImpl,
 } from "./editor/bone-gizmo-controller";
 import {
@@ -261,6 +267,7 @@ import {
 type EditorRuntimeBone = IMmdRuntimeBone & {
     getAnimationPositionOffsetToRef(target: Vector3): Vector3;
     getAnimatedRotationToRef(target: Quaternion): Quaternion;
+    getWorldMatrixToRef(target: Matrix): Matrix;
 };
 
 type PhysicsSimulationRateHz = 30 | 60 | 120;
@@ -1403,6 +1410,7 @@ ${beforeFogAppendBlock}
     public onAudioLoaded: ((name: string) => void) | null = null;
     public onPhysicsStateChanged: ((enabled: boolean, available: boolean) => void) | null = null;
     public onBoneVisualizerBonePicked: ((boneName: string) => void) | null = null;
+    public onBoneTransformEdited: ((boneName: string) => void) | null = null;
     public onMaterialShaderStateChanged: (() => void) | null = null;
     public onGlobalIlluminationStateChanged: ((enabled: boolean) => void) | null = null;
 
@@ -1665,6 +1673,10 @@ ${beforeFogAppendBlock}
         return updateBoneGizmoTargetImpl(this);
     }
 
+    private resetBoneGizmoInteraction(): void {
+        return resetBoneGizmoInteractionImpl(this);
+    }
+
     private initializeBoneGizmoSystem(): void {
         return initializeBoneGizmoSystemImpl(this);
     }
@@ -1812,11 +1824,25 @@ ${beforeFogAppendBlock}
     }
 
     public addTimelineKeyframe(track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
-        return addTimelineKeyframeImpl(this, track, frame);
+        const result = addTimelineKeyframeImpl(this, track, frame);
+        return result;
+    }
+
+    public hasInfoKeyframe(frame: number): boolean {
+        return hasInfoKeyframeImpl(this, frame);
+    }
+
+    public addInfoKeyframe(frame: number): boolean {
+        const result = addInfoKeyframeImpl(this, frame);
+        return result;
     }
 
     public ensureCameraAnimationForEditing(): boolean {
         return ensureCameraAnimationForEditingImpl(this);
+    }
+
+    public ensureModelAnimationForEditing(track: Pick<KeyframeTrack, "name" | "category">): boolean {
+        return ensureModelAnimationForEditingImpl(this, track);
     }
 
     public removeTimelineKeyframe(track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
@@ -2726,6 +2752,7 @@ ${beforeFogAppendBlock}
         if (!this.currentModel) return;
         this._isPlaying = true;
         this.manualPlaybackWithoutAudio = this.audioPlayer === null;
+        this.refreshActiveRuntimeAnimationHandles();
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
             this.mmdRuntime.pauseAnimation();
@@ -2752,6 +2779,7 @@ ${beforeFogAppendBlock}
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.mmdRuntime.pauseAnimation();
+        this.refreshActiveRuntimeAnimationHandles();
         this.mmdRuntime.seekAnimation(0, true);
         this._currentFrame = 0;
         this.onFrameUpdate?.(0, this._totalFrames);
@@ -2776,12 +2804,44 @@ ${beforeFogAppendBlock}
             this.pause();
         }
 
+        this.resetBoneGizmoInteraction();
         this.seekTo(frame);
         this.stabilizePhysicsAfterHardSeek();
+        this.updateBoneGizmoTarget();
 
         if (wasPlaying) {
             this.play();
         }
+    }
+
+    private refreshActiveRuntimeAnimationHandles(): void {
+        if (this.timelineTarget === "camera") {
+            if (!this.cameraSourceAnimation) return;
+
+            if (this.cameraAnimationHandle !== null) {
+                this.mmdCamera.destroyRuntimeAnimation(this.cameraAnimationHandle);
+                this.cameraAnimationHandle = null;
+            }
+
+            const handle = this.mmdCamera.createRuntimeAnimation(
+                this.cameraSourceAnimation as unknown as IMmdBindableCameraAnimation,
+            );
+            this.mmdCamera.setRuntimeAnimation(handle);
+            this.cameraAnimationHandle = handle;
+            return;
+        }
+
+        if (!this.currentModel) return;
+        const animation = this.modelSourceAnimationsByModel.get(this.currentModel);
+        if (!animation) return;
+
+        const existingHandles = Array.from(this.currentModel.runtimeAnimations.keys());
+        for (const handle of existingHandles) {
+            this.currentModel.destroyRuntimeAnimation(handle);
+        }
+
+        const handle = this.currentModel.createRuntimeAnimation(animation);
+        this.currentModel.setRuntimeAnimation(handle);
     }
 
     private stabilizePhysicsAfterHardSeek(): void {
@@ -4455,14 +4515,60 @@ ${beforeFogAppendBlock}
         const runtimeBone = this.getRuntimeBoneByName(boneName);
         if (!runtimeBone) return null;
 
+        const linkedBone = runtimeBone.linkedBone as
+            | (TransformNode & {
+                getRestMatrix?: () => Matrix;
+                rotationQuaternion?: Quaternion | null;
+            })
+            | undefined;
+
+        if (linkedBone) {
+            const worldMatrix = Matrix.Identity();
+            const localMatrix = Matrix.Identity();
+            const parentWorldMatrix = Matrix.Identity();
+            const parentWorldInverseMatrix = Matrix.Identity();
+            const localScaling = Vector3.Zero();
+            const localRotation = Quaternion.Identity();
+            const localPosition = Vector3.Zero();
+            const restPosition = Vector3.Zero();
+
+            runtimeBone.getWorldMatrixToRef(worldMatrix);
+
+            if (runtimeBone.parentBone) {
+                runtimeBone.parentBone.getWorldMatrixToRef(parentWorldMatrix);
+                parentWorldMatrix.invertToRef(parentWorldInverseMatrix);
+                worldMatrix.multiplyToRef(parentWorldInverseMatrix, localMatrix);
+            } else {
+                localMatrix.copyFrom(worldMatrix);
+            }
+
+            localMatrix.decompose(localScaling, localRotation, localPosition);
+            linkedBone.getRestMatrix?.().getTranslationToRef(restPosition);
+
+            const rotationEuler = localRotation.toEulerAngles();
+            const radToDeg = 180 / Math.PI;
+            const snapshot = {
+                position: {
+                    x: localPosition.x - restPosition.x,
+                    y: localPosition.y - restPosition.y,
+                    z: localPosition.z - restPosition.z,
+                },
+                rotation: {
+                    x: rotationEuler.x * radToDeg,
+                    y: rotationEuler.y * radToDeg,
+                    z: rotationEuler.z * radToDeg,
+                },
+            };
+            return snapshot;
+        }
+
         const positionOffset = new Vector3();
         runtimeBone.getAnimationPositionOffsetToRef(positionOffset);
-
         const rotationQuaternion = runtimeBone.getAnimatedRotationToRef(Quaternion.Identity());
         const rotationEuler = rotationQuaternion.toEulerAngles();
         const radToDeg = 180 / Math.PI;
 
-        return {
+        const snapshot = {
             position: {
                 x: positionOffset.x,
                 y: positionOffset.y,
@@ -4474,9 +4580,34 @@ ${beforeFogAppendBlock}
                 z: rotationEuler.z * radToDeg,
             },
         };
+        return snapshot;
     }
 
-    setBoneTranslation(boneName: string, x: number, y: number, z: number): void {
+    getAnimatedBoneTransform(boneName: string): { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } | null {
+        const runtimeBone = this.getRuntimeBoneByName(boneName);
+        if (!runtimeBone) return null;
+
+        const positionOffset = new Vector3();
+        runtimeBone.getAnimationPositionOffsetToRef(positionOffset);
+        const rotationQuaternion = runtimeBone.getAnimatedRotationToRef(Quaternion.Identity());
+        const rotationEuler = rotationQuaternion.toEulerAngles();
+        const radToDeg = 180 / Math.PI;
+        const snapshot = {
+            position: {
+                x: positionOffset.x,
+                y: positionOffset.y,
+                z: positionOffset.z,
+            },
+            rotation: {
+                x: rotationEuler.x * radToDeg,
+                y: rotationEuler.y * radToDeg,
+                z: rotationEuler.z * radToDeg,
+            },
+        };
+        return snapshot;
+    }
+
+    setBoneTranslation(boneName: string, x: number, y: number, z: number, notifyEdited = true): void {
         const runtimeBone = this.getRuntimeBoneByName(boneName);
         if (!runtimeBone) return;
 
@@ -4485,11 +4616,11 @@ ${beforeFogAppendBlock}
         const restY = restMatrix.m[13];
         const restZ = restMatrix.m[14];
 
-        runtimeBone.linkedBone.position.set(restX + x, restY + y, restZ + z);
-        this.invalidateBoneVisualizerPose(runtimeBone);
+        runtimeBone.linkedBone.position = new Vector3(restX + x, restY + y, restZ + z);
+        this.invalidateBoneVisualizerPose(runtimeBone, notifyEdited);
     }
 
-    setBoneRotation(boneName: string, xDeg: number, yDeg: number, zDeg: number): void {
+    setBoneRotation(boneName: string, xDeg: number, yDeg: number, zDeg: number, notifyEdited = true): void {
         const runtimeBone = this.getRuntimeBoneByName(boneName);
         if (!runtimeBone) return;
 
@@ -4498,19 +4629,36 @@ ${beforeFogAppendBlock}
         const zRad = (zDeg * Math.PI) / 180;
         const rotation = Quaternion.RotationYawPitchRoll(yRad, xRad, zRad);
 
-        runtimeBone.linkedBone.rotationQuaternion.copyFrom(rotation);
-        this.invalidateBoneVisualizerPose(runtimeBone);
+        runtimeBone.linkedBone.setRotationQuaternion(rotation, Space.LOCAL);
+        this.invalidateBoneVisualizerPose(runtimeBone, notifyEdited);
     }
 
-    private invalidateBoneVisualizerPose(runtimeBone: EditorRuntimeBone): void {
+    private recomputeCurrentModelPoseAfterManualEdit(): void {
+        const currentModel = this.currentModel as
+            | ({
+                beforePhysics?: (frameTime: number | null) => void;
+                afterPhysics?: () => void;
+            } & object)
+            | null;
+        if (!currentModel) return;
+
+        currentModel.beforePhysics?.(null);
+        currentModel.afterPhysics?.();
+    }
+
+    private invalidateBoneVisualizerPose(runtimeBone: EditorRuntimeBone, notifyEdited = true): void {
         const linkedBone = runtimeBone.linkedBone;
         const linkedBoneInternal = linkedBone as unknown as {
             markAsDirty?: () => void;
             getSkeleton?: () => Skeleton;
         };
         linkedBoneInternal.markAsDirty?.();
+        this.recomputeCurrentModelPoseAfterManualEdit();
         linkedBoneInternal.getSkeleton?.()?.computeAbsoluteMatrices(true);
         this.boneVisualizerTarget?.skeleton?.computeAbsoluteMatrices(true);
+        if (notifyEdited) {
+            this.onBoneTransformEdited?.(runtimeBone.name);
+        }
     }
     getCameraPosition(): { x: number; y: number; z: number } {
         const pos = this.camera.position;

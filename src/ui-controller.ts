@@ -23,7 +23,14 @@ import { normalizeLutFile } from "./lut-file";
 
 type CameraViewPreset = "left" | "front" | "right";
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
+type SectionKeyframeButtonState = "none" | "dirty" | "registered";
+type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
 type NumericArrayLike = ArrayLike<number> | null | undefined;
+type SelectedBonePoseSnapshot = {
+    position: { x: number; y: number; z: number };
+    rotation: { x: number; y: number; z: number };
+    distance?: number;
+};
 type OutputSettings = { width: number; height: number; qualityScale: number; fps: number };
 
 type RuntimeMovableBoneTrackLike = {
@@ -136,6 +143,7 @@ type ImportedLutRegistryEntry = {
 
 export class UIController {
     private static readonly CAMERA_SELECT_VALUE = "__camera__";
+    private static readonly DEBUG_KEYFRAME_FLOW = false;
     private static readonly MIN_TIMELINE_WIDTH = 160;
     private static readonly MIN_SHADER_PANEL_WIDTH = 220;
     private static readonly MIN_VIEWPORT_WIDTH = 360;
@@ -230,8 +238,6 @@ export class UIController {
     private isTimelineResizing = false;
     private isShaderResizing = false;
     private isBottomPanelResizing = false;
-    private camFovSlider: HTMLInputElement | null = null;
-    private camFovValueEl: HTMLElement | null = null;
     private camDistanceSlider: HTMLInputElement | null = null;
     private camDistanceValueEl: HTMLElement | null = null;
     private cameraControlsEl: HTMLElement | null = null;
@@ -239,6 +245,11 @@ export class UIController {
     private camViewLeftBtn: HTMLButtonElement | null = null;
     private camViewFrontBtn: HTMLButtonElement | null = null;
     private camViewRightBtn: HTMLButtonElement | null = null;
+    private btnInfoKeyframe: HTMLButtonElement | null = null;
+    private btnInterpolationKeyframe: HTMLButtonElement | null = null;
+    private btnBoneKeyframe: HTMLButtonElement | null = null;
+    private btnMorphKeyframe: HTMLButtonElement | null = null;
+    private btnAccessoryKeyframe: HTMLButtonElement | null = null;
     private physicsGravityAccelSlider: HTMLInputElement | null = null;
     private physicsGravityDirXSlider: HTMLInputElement | null = null;
     private physicsGravityDirYSlider: HTMLInputElement | null = null;
@@ -266,8 +277,17 @@ export class UIController {
     private isSyncingAccessoryParentUi = false;
     private syncingBoneSelection = false;
     private selectedBoneTrackCategory: TrackCategory | null = null;
+    private readonly sectionKeyframeDirtyKeys: Record<SectionKeyframeSection, Set<string>> = {
+        info: new Set<string>(),
+        interpolation: new Set<string>(),
+        bone: new Set<string>(),
+        morph: new Set<string>(),
+        accessory: new Set<string>(),
+    };
+    private readonly pendingBonePoseSnapshots = new Map<string, { frame: number; snapshot: SelectedBonePoseSnapshot }>();
     private readonly interpolationChannelBindings = new Map<string, InterpolationChannelBinding>();
     private interpolationDragState: InterpolationDragState | null = null;
+    private lastObservedFrame: number | null = null;
     private appRootEl: HTMLElement;
     private busyOverlayEl: HTMLElement | null = null;
     private busyTextEl: HTMLElement | null = null;
@@ -299,6 +319,15 @@ export class UIController {
         this.applyLocalizedUiState();
         this.refreshShaderPanel();
     };
+
+    private debugKeyframeFlow(message: string, payload?: unknown): void {
+        if (!UIController.DEBUG_KEYFRAME_FLOW) return;
+        if (payload === undefined) {
+            console.info(`[KeyframeFlow] ${message}`);
+            return;
+        }
+        console.info(`[KeyframeFlow] ${message}`, payload);
+    }
 
     constructor(mmdManager: MmdManager, timeline: Timeline, bottomPanel: BottomPanel) {
         this.mmdManager = mmdManager;
@@ -620,7 +649,9 @@ export class UIController {
         this.btnModelVisibility.addEventListener("click", () => {
             if (this.mmdManager.getTimelineTarget() !== "model") return;
             const visible = this.mmdManager.toggleActiveModelVisibility();
+            this.markSectionKeyframeDirty("info", this.getInfoKeyframeContextKey());
             this.updateInfoActionButtons();
+            this.updateSectionKeyframeButtons();
             this.showToast(visible ? "Model visible" : "Model hidden", "info");
         });
 
@@ -654,48 +685,51 @@ export class UIController {
             void this.applyShaderPresetFromPanel(true);
         });
 
+        this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
+        this.btnInterpolationKeyframe = document.getElementById("btn-interpolation-keyframe") as HTMLButtonElement | null;
+        this.btnBoneKeyframe = document.getElementById("btn-bone-keyframe") as HTMLButtonElement | null;
+        this.btnMorphKeyframe = document.getElementById("btn-morph-keyframe") as HTMLButtonElement | null;
+        this.btnAccessoryKeyframe = document.getElementById("btn-accessory-keyframe") as HTMLButtonElement | null;
+        this.btnInfoKeyframe?.addEventListener("click", () => this.registerInfoKeyframe());
+        this.btnInterpolationKeyframe?.addEventListener("click", () => this.addKeyframeAtCurrentFrame());
+        this.btnBoneKeyframe?.addEventListener("click", () => this.registerBoneKeyframeAtCurrentFrame());
+        this.btnMorphKeyframe?.addEventListener("click", () => this.registerMorphKeyframesAtCurrentFrame());
+        this.btnAccessoryKeyframe?.addEventListener("click", () => this.registerAccessoryTransformKeyframe());
+
         // Camera controls
         const btnCamLeft = document.getElementById("btn-cam-left") as HTMLButtonElement | null;
         const btnCamFront = document.getElementById("btn-cam-front") as HTMLButtonElement | null;
         const btnCamRight = document.getElementById("btn-cam-right") as HTMLButtonElement | null;
-        const camFov = document.getElementById("cam-fov") as HTMLInputElement;
         const camDistance = document.getElementById("cam-distance") as HTMLInputElement | null;
-        const camFovVal = document.getElementById("cam-fov-value")!;
         const camDistanceVal = document.getElementById("cam-distance-value");
         this.camViewLeftBtn = btnCamLeft;
         this.camViewFrontBtn = btnCamFront;
         this.camViewRightBtn = btnCamRight;
-        this.camFovSlider = camFov;
-        this.camFovValueEl = camFovVal;
         this.camDistanceSlider = camDistance;
         this.camDistanceValueEl = camDistanceVal;
         const switchCameraView = (view: CameraViewPreset) => {
             this.mmdManager.setCameraView(view);
             this.updateCameraViewButtons(view);
+            this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
+            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+            this.updateSectionKeyframeButtons();
         };
         btnCamLeft?.addEventListener("click", () => switchCameraView("left"));
         btnCamFront?.addEventListener("click", () => switchCameraView("front"));
         btnCamRight?.addEventListener("click", () => switchCameraView("right"));
-        camFov.addEventListener("input", () => {
-            const val = Number(camFov.value);
-            camFovVal.textContent = `${Math.round(val)} deg`;
-            this.mmdManager.setCameraFov(val);
-            this.refreshDofAutoFocusReadout();
-            this.refreshLensDistortionAutoReadout();
-        });
         if (camDistance && camDistanceVal) {
             camDistance.addEventListener("input", () => {
                 const val = Number(camDistance.value);
                 this.mmdManager.setCameraDistance(val);
                 camDistanceVal.textContent = `${this.mmdManager.getCameraDistance().toFixed(1)}m`;
+                this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
+                this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+                this.updateSectionKeyframeButtons();
                 this.refreshDofAutoFocusReadout();
             });
         }
         // Initialize camera UI from runtime values
         this.updateCameraViewButtons("front");
-        const initialFov = this.mmdManager.getCameraFov();
-        camFov.value = String(Math.round(initialFov));
-        camFovVal.textContent = `${Math.round(initialFov)} deg`;
         if (camDistance && camDistanceVal) {
             const initialDistance = this.mmdManager.getCameraDistance();
             const min = Number(camDistance.min);
@@ -707,15 +741,39 @@ export class UIController {
 
         // Timeline seek
         this.timeline.onSeek = (frame) => {
-            this.mmdManager.seekTo(frame);
+            this.mmdManager.seekToBoundary(frame);
+            this.updateSectionKeyframeButtons();
         };
         this.timeline.onSelectionChanged = (track) => {
             this.syncBoneVisualizerSelection(track);
             this.syncBottomBoneSelectionFromTimeline(track);
             this.updateTimelineEditState();
+            this.updateSectionKeyframeButtons();
         };
         this.bottomPanel.onBoneSelectionChanged = (boneName) => {
             this.syncTimelineBoneSelectionFromBottomPanel(boneName);
+            this.updateSectionKeyframeButtons();
+        };
+        this.bottomPanel.onMorphFrameSelectionChanged = () => {
+            this.updateSectionKeyframeButtons();
+        };
+        this.bottomPanel.onBoneTransformEdited = (boneName) => {
+            this.rememberEditedBonePoseSnapshot(boneName, this.bottomPanel.getSelectedBoneTransformSnapshot());
+            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
+            this.syncBottomPanelBoneFromEditedPose(boneName);
+            this.refreshCameraUiFromRuntime();
+            this.updateSectionKeyframeButtons();
+        };
+        this.mmdManager.onBoneTransformEdited = (boneName) => {
+            this.rememberEditedBonePoseSnapshot(boneName, this.mmdManager.getBoneTransform(boneName));
+            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
+            this.syncBottomPanelBoneFromEditedPose(boneName);
+            this.refreshCameraUiFromRuntime();
+            this.updateSectionKeyframeButtons();
+        };
+        this.bottomPanel.onMorphValueEdited = (frameIndex) => {
+            this.markSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(frameIndex));
+            this.updateSectionKeyframeButtons();
         };
 
         this.btnKeyframeAdd.addEventListener("click", () => this.addKeyframeAtCurrentFrame());
@@ -1322,19 +1380,38 @@ export class UIController {
             this.totalFramesEl.textContent = String(total);
             this.timeline.setTotalFrames(total);
             this.timeline.setCurrentFrame(frame);
-            this.updateTimelineEditState();
-            this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
-
-            // Reflect runtime camera FOV (e.g. camera VMD playback) in the camera panel.
-            if (this.camFovSlider && this.camFovValueEl && !this.isRangeInputEditing(this.camFovSlider)) {
-                const fovDeg = this.mmdManager.getCameraFov();
-                const clamped = Math.max(Number(this.camFovSlider.min), Math.min(Number(this.camFovSlider.max), fovDeg));
-                this.camFovSlider.value = String(Math.round(clamped));
-                this.camFovValueEl.textContent = `${Math.round(fovDeg)} deg`;
-                this.syncRangeNumberInput(this.camFovSlider);
+            const frameChanged = this.lastObservedFrame !== frame;
+            this.lastObservedFrame = frame;
+            this.debugKeyframeFlow("frame update", {
+                frame,
+                total,
+                frameChanged,
+                selectedBone: this.bottomPanel.getSelectedBone(),
+                selectedTrack: this.getSelectedTimelineTrack()?.name ?? null,
+            });
+            if (frameChanged) {
+                this.clearTransientEditingStateForFrameChange();
+                if (this.timeline.getSelectedFrame() !== null) {
+                    this.timeline.setSelectedFrame(null);
+                }
             }
-            if (this.camDistanceSlider && this.camDistanceValueEl && !this.isRangeInputEditing(this.camDistanceSlider)) {
-                const distance = this.mmdManager.getCameraDistance();
+            this.updateTimelineEditState();
+            const sourcePose = this.getDisplayBonePoseSnapshot(frame);
+            this.applySelectedBonePoseSnapshotToRuntime(frame, sourcePose);
+            this.debugKeyframeFlow("display pose", {
+                frame,
+                source: sourcePose ? "snapshot-or-source" : "none",
+                pose: sourcePose,
+            });
+            if (sourcePose) {
+                this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(sourcePose, true);
+            } else {
+                this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
+            }
+            this.bottomPanel.syncSelectedMorphFrameSlidersFromRuntime(true);
+
+            if (this.camDistanceSlider && this.camDistanceValueEl) {
+                const distance = sourcePose?.distance ?? this.mmdManager.getCameraDistance();
                 const clamped = Math.max(Number(this.camDistanceSlider.min), Math.min(Number(this.camDistanceSlider.max), distance));
                 this.camDistanceSlider.value = String(Math.round(clamped));
                 this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
@@ -1392,6 +1469,14 @@ export class UIController {
         // Keyframe data loaded
         this.mmdManager.onKeyframesLoaded = (tracks) => {
             this.timeline.setKeyframeTracks(tracks);
+            if (this.mmdManager.getTimelineTarget() === "model") {
+                const selectedBone = this.bottomPanel.getSelectedBone();
+                if (selectedBone) {
+                    this.syncTimelineBoneSelectionFromBottomPanel(selectedBone);
+                }
+            } else {
+                this.timeline.selectTrackByNameAndCategory("Camera", ["camera"]);
+            }
             this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
             this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
             this.updateTimelineEditState();
@@ -1808,10 +1893,10 @@ export class UIController {
                     this.mmdManager.seekToBoundary(this.mmdManager.totalFrames);
                     break;
                 case "ArrowLeft":
-                    this.mmdManager.seekTo(this.mmdManager.currentFrame - (e.shiftKey ? 10 : 1));
+                    this.mmdManager.seekToBoundary(this.mmdManager.currentFrame - (e.shiftKey ? 10 : 1));
                     break;
                 case "ArrowRight":
-                    this.mmdManager.seekTo(this.mmdManager.currentFrame + (e.shiftKey ? 10 : 1));
+                    this.mmdManager.seekToBoundary(this.mmdManager.currentFrame + (e.shiftKey ? 10 : 1));
                     break;
             }
 
@@ -1918,7 +2003,7 @@ export class UIController {
         }
 
         if (targetFrame === null) return;
-        this.mmdManager.seekTo(targetFrame);
+        this.mmdManager.seekToBoundary(targetFrame);
         this.timeline.setSelectedFrame(targetFrame);
         this.updateTimelineEditState();
     }
@@ -3075,11 +3160,13 @@ export class UIController {
 
         if (!enabled) {
             this.btnModelVisibility.textContent = "Hide";
+            this.updateSectionKeyframeButtons();
             return;
         }
 
         const visible = this.mmdManager.getActiveModelVisibility();
         this.btnModelVisibility.textContent = visible ? "Hide" : "Show";
+        this.updateSectionKeyframeButtons();
     }
 
     private refreshModelSelector(): void {
@@ -3200,6 +3287,8 @@ export class UIController {
                     rotationDeg,
                     scale: scalePercent / 100,
                 });
+                this.markSectionKeyframeDirty("accessory", this.getAccessoryKeyframeContextKey(selectedIndex));
+                this.updateSectionKeyframeButtons();
             });
         };
 
@@ -3215,6 +3304,7 @@ export class UIController {
             this.syncAccessoryTransformSlidersFromSelection();
             this.syncAccessoryParentControlsFromSelection();
             this.updateAccessoryActionButtons();
+            this.updateSectionKeyframeButtons();
         });
 
         parentModelSelect?.addEventListener("change", () => {
@@ -3275,6 +3365,7 @@ export class UIController {
         this.setAccessoryTransformControlsEnabled(false);
         this.setAccessoryParentControlsEnabled(false);
         this.updateAccessoryActionButtons();
+        this.updateSectionKeyframeButtons();
     }
 
     private refreshAccessoryPanel(): void {
@@ -3310,6 +3401,7 @@ export class UIController {
         this.syncAccessoryParentControlsFromSelection();
         this.syncAccessoryTransformSlidersFromSelection();
         this.updateAccessoryActionButtons();
+        this.updateSectionKeyframeButtons();
     }
 
     private getSelectedAccessoryIndex(): number | null {
@@ -5128,21 +5220,15 @@ export class UIController {
         );
     }
 
-    private refreshCameraUiFromRuntime(): void {
-        if (this.camFovSlider && this.camFovValueEl) {
-            const fovDeg = this.mmdManager.getCameraFov();
-            const clamped = this.normalizeRangeInputValue(this.camFovSlider, fovDeg);
-            this.camFovSlider.value = this.formatRangeInputValue(this.camFovSlider, clamped);
-            this.camFovValueEl.textContent = `${Math.round(fovDeg)} deg`;
-            this.syncRangeNumberInput(this.camFovSlider);
-        }
-
+    private refreshCameraUiFromRuntime(force = false): void {
         if (this.camDistanceSlider && this.camDistanceValueEl) {
             const distance = this.mmdManager.getCameraDistance();
-            const clamped = this.normalizeRangeInputValue(this.camDistanceSlider, distance);
-            this.camDistanceSlider.value = this.formatRangeInputValue(this.camDistanceSlider, clamped);
-            this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
-            this.syncRangeNumberInput(this.camDistanceSlider);
+            if (force || !this.isRangeInputEditing(this.camDistanceSlider)) {
+                const clamped = this.normalizeRangeInputValue(this.camDistanceSlider, distance);
+                this.camDistanceSlider.value = this.formatRangeInputValue(this.camDistanceSlider, clamped);
+                this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
+                this.syncRangeNumberInput(this.camDistanceSlider);
+            }
         }
 
         const fogEnabledInput = document.getElementById("effect-fog-enabled") as HTMLInputElement | null;
@@ -5301,7 +5387,7 @@ export class UIController {
 
     private isBoneTrackForEditor(track: KeyframeTrack | null): track is KeyframeTrack {
         if (!track) return false;
-        return track.category === "root" || track.category === "semi-standard" || track.category === "bone";
+        return track.category === "root" || track.category === "semi-standard" || track.category === "bone" || track.category === "camera";
     }
 
     private syncBottomBoneSelectionFromTimeline(track: KeyframeTrack | null): void {
@@ -5330,14 +5416,15 @@ export class UIController {
         this.mmdManager.setBoneVisualizerSelectedBone(boneName);
         this.syncingBoneSelection = true;
         try {
+            const fallbackCategories: TrackCategory[] = boneName === "Camera"
+                ? ["camera", "bone", "semi-standard", "root"]
+                : ["bone", "semi-standard", "root"];
             const preferredCategories: TrackCategory[] = this.selectedBoneTrackCategory
                 ? [
                     this.selectedBoneTrackCategory,
-                    ...(["bone", "semi-standard", "root"] as TrackCategory[]).filter(
-                        (category) => category !== this.selectedBoneTrackCategory
-                    ),
+                    ...fallbackCategories.filter((category) => category !== this.selectedBoneTrackCategory),
                 ]
-                : ["bone", "semi-standard", "root"];
+                : fallbackCategories;
             if (this.timeline.selectTrackByNameAndCategory(boneName, preferredCategories)) {
                 const selectedTrack = this.timeline.getSelectedTrack();
                 this.selectedBoneTrackCategory = this.isBoneTrackForEditor(selectedTrack) ? selectedTrack.category : null;
@@ -5380,6 +5467,7 @@ export class UIController {
             this.btnKeyframeDelete.disabled = true;
             this.btnKeyframeNudgeLeft.disabled = false;
             this.btnKeyframeNudgeRight.disabled = false;
+            this.updateSectionKeyframeButtons();
             return;
         }
 
@@ -5398,6 +5486,626 @@ export class UIController {
 
         this.btnKeyframeNudgeLeft.disabled = false;
         this.btnKeyframeNudgeRight.disabled = false;
+        this.updateSectionKeyframeButtons();
+    }
+
+    private updateSectionKeyframeButtons(): void {
+        this.setSectionKeyframeButtonState(this.btnInfoKeyframe, this.getInfoKeyframeButtonState());
+        this.setSectionKeyframeButtonState(this.btnInterpolationKeyframe, this.getInterpolationKeyframeButtonState());
+        this.setSectionKeyframeButtonState(this.btnBoneKeyframe, this.getBoneKeyframeButtonState());
+        this.setSectionKeyframeButtonState(this.btnMorphKeyframe, this.getMorphKeyframeButtonState());
+        this.setSectionKeyframeButtonState(this.btnAccessoryKeyframe, this.getAccessoryKeyframeButtonState());
+    }
+
+    private setSectionKeyframeButtonState(button: HTMLButtonElement | null, state: SectionKeyframeButtonState): void {
+        if (!button) return;
+
+        button.classList.remove("is-none", "is-empty", "is-registered");
+        button.disabled = state === "none";
+        button.textContent = state === "registered" ? "♦" : state === "dirty" ? "♢" : "";
+        if (state === "none") {
+            button.classList.add("is-none");
+        } else if (state === "dirty") {
+            button.classList.add("is-empty");
+        } else {
+            button.classList.add("is-registered");
+        }
+    }
+
+    private markSectionKeyframeDirty(section: SectionKeyframeSection, contextKey: string | null): void {
+        if (!contextKey) return;
+        this.sectionKeyframeDirtyKeys[section].add(contextKey);
+    }
+
+    private clearSectionKeyframeDirty(section: SectionKeyframeSection, contextKey: string | null): void {
+        if (!contextKey) return;
+        this.sectionKeyframeDirtyKeys[section].delete(contextKey);
+    }
+
+    private clearTransientEditingStateForFrameChange(): void {
+        for (const section of Object.keys(this.sectionKeyframeDirtyKeys) as SectionKeyframeSection[]) {
+            this.sectionKeyframeDirtyKeys[section].clear();
+        }
+        this.pendingBonePoseSnapshots.clear();
+        this.debugKeyframeFlow("cleared transient editing state for frame change");
+        this.updateSectionKeyframeButtons();
+    }
+
+    private rememberEditedBonePoseSnapshot(
+        boneName: string | null,
+        snapshotOverride: SelectedBonePoseSnapshot | null = null,
+    ): void {
+        if (!boneName) return;
+        const snapshot = snapshotOverride ?? this.captureCurrentBonePoseSnapshot(boneName);
+        if (!snapshot) return;
+        this.pendingBonePoseSnapshots.set(boneName, {
+            frame: this.mmdManager.currentFrame,
+            snapshot,
+        });
+        this.debugKeyframeFlow("remember edited bone pose", {
+            boneName,
+            frame: this.mmdManager.currentFrame,
+            snapshot,
+            snapshotText: this.formatPoseSnapshotText(snapshot),
+        });
+    }
+
+    private captureCurrentBonePoseSnapshot(boneName: string): SelectedBonePoseSnapshot | null {
+        if (boneName === "Camera") {
+            const snapshot = {
+                position: this.mmdManager.getCameraPosition(),
+                rotation: this.mmdManager.getCameraRotation(),
+                distance: this.mmdManager.getCameraDistance(),
+            };
+            this.debugKeyframeFlow("capture camera pose snapshot", {
+                boneName,
+                snapshot: this.formatBonePoseSnapshotForLog(snapshot),
+            });
+            return snapshot;
+        }
+
+        const pendingSnapshot = this.getPendingBonePoseSnapshot(boneName);
+        if (pendingSnapshot) {
+            this.debugKeyframeFlow("capture bone pose snapshot from pending", {
+                boneName,
+                snapshot: this.formatBonePoseSnapshotForLog(pendingSnapshot),
+            });
+            return pendingSnapshot;
+        }
+
+        const panelSnapshot = this.bottomPanel.getSelectedBoneTransformSnapshot();
+        if (panelSnapshot && this.bottomPanel.getSelectedBone() === boneName) {
+            this.debugKeyframeFlow("capture bone pose snapshot from panel", {
+                boneName,
+                snapshot: this.formatBonePoseSnapshotForLog(panelSnapshot),
+            });
+            return panelSnapshot;
+        }
+
+        const managerSnapshot = this.mmdManager.getBoneTransform(boneName);
+        if (managerSnapshot) {
+            this.debugKeyframeFlow("capture bone pose snapshot from manager", {
+                boneName,
+                snapshot: this.formatBonePoseSnapshotForLog(managerSnapshot),
+            });
+            return managerSnapshot;
+        }
+
+        return null;
+    }
+
+    private getPendingBonePoseSnapshot(boneName: string | null, frame = this.mmdManager.currentFrame): SelectedBonePoseSnapshot | null {
+        if (!boneName) return null;
+        const entry = this.pendingBonePoseSnapshots.get(boneName);
+        if (!entry) return null;
+        const normalizedFrame = Math.max(0, Math.floor(frame));
+        if (entry.frame !== normalizedFrame) {
+            this.debugKeyframeFlow("pending bone pose miss by frame", { boneName, frame: normalizedFrame, pendingFrame: entry.frame });
+            return null;
+        }
+        this.debugKeyframeFlow("pending bone pose hit", { boneName, frame: normalizedFrame, snapshot: entry.snapshot });
+        return entry.snapshot;
+    }
+
+    private syncBottomPanelBoneFromEditedPose(boneName: string | null): void {
+        if (!boneName) return;
+        const snapshot = this.getPendingBonePoseSnapshot(boneName);
+        if (snapshot) {
+            this.debugKeyframeFlow("sync bottom panel from edited pose", { boneName, snapshot });
+            this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(snapshot, true);
+            return;
+        }
+        this.debugKeyframeFlow("sync bottom panel from runtime pose", { boneName });
+        this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
+    }
+
+    private formatBonePoseSnapshotForLog(snapshot: SelectedBonePoseSnapshot): {
+        position: { x: number; y: number; z: number };
+        rotation: { x: number; y: number; z: number };
+        distance?: number;
+    } {
+        const round = (value: number): number => Math.round(value * 1000) / 1000;
+        return {
+            position: {
+                x: round(snapshot.position.x),
+                y: round(snapshot.position.y),
+                z: round(snapshot.position.z),
+            },
+            rotation: {
+                x: round(snapshot.rotation.x),
+                y: round(snapshot.rotation.y),
+                z: round(snapshot.rotation.z),
+            },
+            ...(typeof snapshot.distance === "number" ? { distance: round(snapshot.distance) } : {}),
+        };
+    }
+
+    private formatNumberBlockForLog(values: ArrayLike<number> | readonly number[], precision = 3): string {
+        const factor = 10 ** precision;
+        return `[${Array.from(values, (value) => {
+            const normalized = Number.isFinite(value) ? value : 0;
+            return Math.round(normalized * factor) / factor;
+        }).join(", ")}]`;
+    }
+
+    private formatPoseSnapshotText(snapshot: SelectedBonePoseSnapshot | null): string | null {
+        if (!snapshot) return null;
+        const formatted = this.formatBonePoseSnapshotForLog(snapshot);
+        const parts = [
+            `pos=${this.formatNumberBlockForLog([formatted.position.x, formatted.position.y, formatted.position.z])}`,
+            `rot=${this.formatNumberBlockForLog([formatted.rotation.x, formatted.rotation.y, formatted.rotation.z])}`,
+        ];
+        if (formatted.distance !== undefined) {
+            parts.push(`dist=${formatted.distance}`);
+        }
+        return parts.join(" ");
+    }
+
+    private getDisplayBonePoseSnapshot(frame: number): SelectedBonePoseSnapshot | null {
+        const boneName = this.bottomPanel.getSelectedBone();
+        if (!boneName) {
+            const source = this.getSelectedBonePoseSnapshotFromSource(frame);
+            this.debugKeyframeFlow("display pose from source (no selected bone)", { frame, source });
+            return source;
+        }
+
+        const pendingSnapshot = this.getPendingBonePoseSnapshot(boneName, frame);
+        if (pendingSnapshot) {
+            this.debugKeyframeFlow("display pose from pending snapshot", { boneName, frame, snapshot: pendingSnapshot });
+            return pendingSnapshot;
+        }
+
+        const source = this.getSelectedBonePoseSnapshotFromSource(frame);
+        this.debugKeyframeFlow("display pose from source", { boneName, frame, source });
+        return source;
+    }
+
+    private applySelectedBonePoseSnapshotToRuntime(frame: number, snapshot: SelectedBonePoseSnapshot | null): void {
+        if (this.mmdManager.isPlaying) return;
+
+        const boneName = this.bottomPanel.getSelectedBone();
+        if (!boneName || boneName === "Camera" || !snapshot) return;
+
+        this.debugKeyframeFlow("apply sampled pose to runtime", {
+            boneName,
+            frame,
+            snapshot,
+            snapshotText: this.formatPoseSnapshotText(snapshot),
+        });
+        this.mmdManager.setBoneTranslation(
+            boneName,
+            snapshot.position.x,
+            snapshot.position.y,
+            snapshot.position.z,
+            false,
+        );
+        this.mmdManager.setBoneRotation(
+            boneName,
+            snapshot.rotation.x,
+            snapshot.rotation.y,
+            snapshot.rotation.z,
+            false,
+        );
+    }
+
+    private getSectionKeyframeContextPrefix(section: SectionKeyframeSection): string {
+        return section;
+    }
+
+    private getInfoKeyframeContextKey(): string | null {
+        if (this.mmdManager.getTimelineTarget() !== "model") return null;
+        const model = this.mmdManager.getLoadedModels().find((item) => item.active) ?? null;
+        if (!model) return null;
+        const modelKey = model.path || model.name || String(model.index);
+        return `${this.getSectionKeyframeContextPrefix("info")}:${modelKey}:frame:${this.mmdManager.currentFrame}`;
+    }
+
+    private getInterpolationKeyframeContextKey(track: KeyframeTrack | null = null): string | null {
+        const selectedTrack = track ?? this.getSelectedTimelineTrack();
+        if (!selectedTrack) return null;
+        if (selectedTrack.category === "morph") return null;
+        return `${this.getSectionKeyframeContextPrefix("interpolation")}:${selectedTrack.category}:${selectedTrack.name}:frame:${this.mmdManager.currentFrame}`;
+    }
+
+    private getBoneKeyframeContextKey(boneName: string | null = this.bottomPanel.getSelectedBone()): string | null {
+        if (!boneName) return null;
+        return `${this.getSectionKeyframeContextPrefix("bone")}:${boneName}:frame:${this.mmdManager.currentFrame}`;
+    }
+
+    private getMorphKeyframeContextKey(frameIndex: number | null = this.bottomPanel.getSelectedMorphFrameIndex()): string | null {
+        if (frameIndex === null || frameIndex < 0) return null;
+        return `${this.getSectionKeyframeContextPrefix("morph")}:frame:${frameIndex}:key:${this.mmdManager.currentFrame}`;
+    }
+
+    private getAccessoryKeyframeContextKey(accessoryIndex: number | null = this.getSelectedAccessoryIndex()): string | null {
+        if (accessoryIndex === null || accessoryIndex < 0) return null;
+        return `${this.getSectionKeyframeContextPrefix("accessory")}:${accessoryIndex}:frame:${this.mmdManager.currentFrame}`;
+    }
+
+    private getSelectedBonePoseSnapshotFromSource(frame: number): SelectedBonePoseSnapshot | null {
+        const boneName = this.bottomPanel.getSelectedBone();
+        if (!boneName) return null;
+
+        const normalizedFrame = Math.max(0, Math.floor(frame));
+        const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
+
+        if (boneName === "Camera") {
+            const cameraTrack = managerInternal.cameraSourceAnimation?.cameraTrack;
+            if (!cameraTrack) return null;
+            return this.sampleCameraPoseFromTrack(cameraTrack, normalizedFrame);
+        }
+
+        const currentModel = managerInternal.currentModel;
+        if (!currentModel) return null;
+
+        const modelAnimation = managerInternal.modelSourceAnimationsByModel?.get(currentModel as object);
+        if (!modelAnimation) {
+            this.debugKeyframeFlow("source pose fallback to animated runtime (no model animation)", { boneName, frame });
+            return this.mmdManager.getAnimatedBoneTransform(boneName);
+        }
+
+        const movableTrack = modelAnimation.movableBoneTracks.find((track) => track.name === boneName) ?? null;
+        if (movableTrack) {
+            const sampled = this.sampleMovableBonePoseFromTrack(movableTrack, normalizedFrame);
+            if (sampled) {
+                this.debugKeyframeFlow("source pose sampled from movable track", {
+                    boneName,
+                    frame: normalizedFrame,
+                    trackFrameNumbers: Array.from(movableTrack.frameNumbers),
+                    trackFrameNumbersText: this.formatNumberBlockForLog(movableTrack.frameNumbers, 0),
+                    sampled: this.formatBonePoseSnapshotForLog(sampled),
+                    sampledText: this.formatPoseSnapshotText(sampled),
+                });
+                return sampled;
+            }
+        }
+
+        const boneTrack = modelAnimation.boneTracks.find((track) => track.name === boneName) ?? null;
+        if (boneTrack) {
+            const sampled = this.sampleBonePoseFromTrack(boneTrack, normalizedFrame);
+            if (sampled) {
+                this.debugKeyframeFlow("source pose sampled from bone track", {
+                    boneName,
+                    frame: normalizedFrame,
+                    trackFrameNumbers: Array.from(boneTrack.frameNumbers),
+                    trackFrameNumbersText: this.formatNumberBlockForLog(boneTrack.frameNumbers, 0),
+                    sampled: this.formatBonePoseSnapshotForLog(sampled),
+                    sampledText: this.formatPoseSnapshotText(sampled),
+                });
+                return sampled;
+            }
+        }
+
+        this.debugKeyframeFlow("source pose fallback to animated runtime", { boneName, frame });
+        return this.mmdManager.getAnimatedBoneTransform(boneName);
+    }
+
+    private sampleCameraPoseFromTrack(track: RuntimeCameraTrackLike, frame: number): SelectedBonePoseSnapshot | null {
+        const frameNumbers = track.frameNumbers;
+        if (!frameNumbers || frameNumbers.length === 0) return null;
+
+        const clampedFrame = this.clampFrameToTrackRange(frame, frameNumbers);
+        const upperBoundIndex = this.findUpperBoundFrameIndex(frameNumbers, clampedFrame);
+        const lowerIndex = Math.max(0, upperBoundIndex - 1);
+
+        const lowerFrame = frameNumbers[lowerIndex] ?? frameNumbers[0] ?? clampedFrame;
+        const upperFrame = frameNumbers[upperBoundIndex];
+        if (upperFrame === undefined || lowerFrame + 1 === upperFrame) {
+            const position = this.readFloatBlock(track.positions, lowerIndex, 3, [0, 0, 0]);
+            const rotation = this.readFloatBlock(track.rotations, lowerIndex, 3, [0, 0, 0]);
+            const distance = this.readFloatBlock(track.distances, lowerIndex, 1, [this.mmdManager.getCameraDistance()]);
+            return {
+                position: { x: position[0], y: position[1], z: position[2] },
+                rotation: {
+                    x: rotation[0] * (180 / Math.PI),
+                    y: rotation[1] * (180 / Math.PI),
+                    z: rotation[2] * (180 / Math.PI),
+                },
+                distance: distance[0],
+            };
+        }
+
+        const gradient = (clampedFrame - lowerFrame) / (upperFrame - lowerFrame);
+        const positionA = this.readFloatBlock(track.positions, lowerIndex, 3, [0, 0, 0]);
+        const positionB = this.readFloatBlock(track.positions, upperBoundIndex, 3, positionA);
+        const rotationA = this.readFloatBlock(track.rotations, lowerIndex, 3, [0, 0, 0]);
+        const rotationB = this.readFloatBlock(track.rotations, upperBoundIndex, 3, rotationA);
+        const distanceA = this.readFloatBlock(track.distances, lowerIndex, 1, [this.mmdManager.getCameraDistance()]);
+        const distanceB = this.readFloatBlock(track.distances, upperBoundIndex, 1, distanceA);
+
+        const positionInterpolation = this.readFloatBlock(
+            track.positionInterpolations,
+            upperBoundIndex,
+            12,
+            [20, 107, 20, 107, 20, 107, 20, 107, 20, 107, 20, 107],
+        );
+        const positionWeightX = this.bezierInterpolate(
+            positionInterpolation[0] / 127,
+            positionInterpolation[1] / 127,
+            positionInterpolation[2] / 127,
+            positionInterpolation[3] / 127,
+            gradient,
+        );
+        const positionWeightY = this.bezierInterpolate(
+            positionInterpolation[4] / 127,
+            positionInterpolation[5] / 127,
+            positionInterpolation[6] / 127,
+            positionInterpolation[7] / 127,
+            gradient,
+        );
+        const positionWeightZ = this.bezierInterpolate(
+            positionInterpolation[8] / 127,
+            positionInterpolation[9] / 127,
+            positionInterpolation[10] / 127,
+            positionInterpolation[11] / 127,
+            gradient,
+        );
+        const rotationInterp = this.readFloatBlock(track.rotationInterpolations, upperBoundIndex, 4, [20, 107, 20, 107]);
+        const rotationWeight = this.bezierInterpolate(
+            rotationInterp[0] / 127,
+            rotationInterp[1] / 127,
+            rotationInterp[2] / 127,
+            rotationInterp[3] / 127,
+            gradient,
+        );
+        const distanceInterp = this.readFloatBlock(track.distanceInterpolations, upperBoundIndex, 4, [20, 107, 20, 107]);
+        const distanceWeight = this.bezierInterpolate(
+            distanceInterp[0] / 127,
+            distanceInterp[1] / 127,
+            distanceInterp[2] / 127,
+            distanceInterp[3] / 127,
+            gradient,
+        );
+
+        return {
+            position: {
+                x: positionA[0] + (positionB[0] - positionA[0]) * positionWeightX,
+                y: positionA[1] + (positionB[1] - positionA[1]) * positionWeightY,
+                z: positionA[2] + (positionB[2] - positionA[2]) * positionWeightZ,
+            },
+            rotation: {
+                x: (rotationA[0] + (rotationB[0] - rotationA[0]) * rotationWeight) * (180 / Math.PI),
+                y: (rotationA[1] + (rotationB[1] - rotationA[1]) * rotationWeight) * (180 / Math.PI),
+                z: (rotationA[2] + (rotationB[2] - rotationA[2]) * rotationWeight) * (180 / Math.PI),
+            },
+            distance: distanceA[0] + (distanceB[0] - distanceA[0]) * distanceWeight,
+        };
+    }
+
+    private sampleMovableBonePoseFromTrack(track: RuntimeMovableBoneTrackLike, frame: number): SelectedBonePoseSnapshot | null {
+        const frameNumbers = track.frameNumbers;
+        if (!frameNumbers || frameNumbers.length === 0) return null;
+
+        const clampedFrame = this.clampFrameToTrackRange(frame, frameNumbers);
+        const upperBoundIndex = this.findUpperBoundFrameIndex(frameNumbers, clampedFrame);
+        const lowerIndex = Math.max(0, upperBoundIndex - 1);
+        const lowerFrame = frameNumbers[lowerIndex] ?? frameNumbers[0] ?? clampedFrame;
+        const upperFrame = frameNumbers[upperBoundIndex];
+
+        if (upperFrame === undefined || lowerFrame + 1 === upperFrame) {
+            const position = this.readFloatBlock(track.positions, lowerIndex, 3, [0, 0, 0]);
+            const rotationQuaternion = Quaternion.FromArray(this.readFloatBlock(track.rotations, lowerIndex, 4, [0, 0, 0, 1]));
+            const rotationEuler = rotationQuaternion.toEulerAngles();
+            return {
+                position: { x: position[0], y: position[1], z: position[2] },
+                rotation: {
+                    x: rotationEuler.x * (180 / Math.PI),
+                    y: rotationEuler.y * (180 / Math.PI),
+                    z: rotationEuler.z * (180 / Math.PI),
+                },
+            };
+        }
+
+        const gradient = (clampedFrame - lowerFrame) / (upperFrame - lowerFrame);
+        const positionA = this.readFloatBlock(track.positions, lowerIndex, 3, [0, 0, 0]);
+        const positionB = this.readFloatBlock(track.positions, upperBoundIndex, 3, positionA);
+        const rotationA = Quaternion.FromArray(this.readFloatBlock(track.rotations, lowerIndex, 4, [0, 0, 0, 1]));
+        const rotationB = Quaternion.FromArray(this.readFloatBlock(track.rotations, upperBoundIndex, 4, [0, 0, 0, 1]));
+        const positionInterpolation = this.readFloatBlock(track.positionInterpolations, upperBoundIndex, 12, [20, 107, 20, 107, 20, 107, 20, 107, 20, 107, 20, 107]);
+        const rotationInterpolation = this.readFloatBlock(track.rotationInterpolations, upperBoundIndex, 4, [20, 107, 20, 107]);
+
+        const positionWeightX = this.bezierInterpolate(positionInterpolation[0] / 127, positionInterpolation[1] / 127, positionInterpolation[2] / 127, positionInterpolation[3] / 127, gradient);
+        const positionWeightY = this.bezierInterpolate(positionInterpolation[4] / 127, positionInterpolation[5] / 127, positionInterpolation[6] / 127, positionInterpolation[7] / 127, gradient);
+        const positionWeightZ = this.bezierInterpolate(positionInterpolation[8] / 127, positionInterpolation[9] / 127, positionInterpolation[10] / 127, positionInterpolation[11] / 127, gradient);
+        const rotationWeight = this.bezierInterpolate(rotationInterpolation[0] / 127, rotationInterpolation[1] / 127, rotationInterpolation[2] / 127, rotationInterpolation[3] / 127, gradient);
+
+        Quaternion.SlerpToRef(rotationA, rotationB, rotationWeight, rotationA);
+        const rotation = rotationA.toEulerAngles();
+        return {
+            position: {
+                x: positionA[0] + (positionB[0] - positionA[0]) * positionWeightX,
+                y: positionA[1] + (positionB[1] - positionA[1]) * positionWeightY,
+                z: positionA[2] + (positionB[2] - positionA[2]) * positionWeightZ,
+            },
+            rotation: {
+                x: rotation.x * (180 / Math.PI),
+                y: rotation.y * (180 / Math.PI),
+                z: rotation.z * (180 / Math.PI),
+            },
+        };
+    }
+
+    private sampleBonePoseFromTrack(track: RuntimeBoneTrackLike, frame: number): SelectedBonePoseSnapshot | null {
+        const frameNumbers = track.frameNumbers;
+        if (!frameNumbers || frameNumbers.length === 0) return null;
+
+        const clampedFrame = this.clampFrameToTrackRange(frame, frameNumbers);
+        const upperBoundIndex = this.findUpperBoundFrameIndex(frameNumbers, clampedFrame);
+        const lowerIndex = Math.max(0, upperBoundIndex - 1);
+        const lowerFrame = frameNumbers[lowerIndex] ?? frameNumbers[0] ?? clampedFrame;
+        const upperFrame = frameNumbers[upperBoundIndex];
+
+        if (upperFrame === undefined || lowerFrame + 1 === upperFrame) {
+            const rotationQuaternion = Quaternion.FromArray(this.readFloatBlock(track.rotations, lowerIndex, 4, [0, 0, 0, 1]));
+            const rotationEuler = rotationQuaternion.toEulerAngles();
+            return {
+                position: { x: 0, y: 0, z: 0 },
+                rotation: {
+                    x: rotationEuler.x * (180 / Math.PI),
+                    y: rotationEuler.y * (180 / Math.PI),
+                    z: rotationEuler.z * (180 / Math.PI),
+                },
+            };
+        }
+
+        const rotationA = Quaternion.FromArray(this.readFloatBlock(track.rotations, lowerIndex, 4, [0, 0, 0, 1]));
+        const rotationB = Quaternion.FromArray(this.readFloatBlock(track.rotations, upperBoundIndex, 4, [0, 0, 0, 1]));
+        const rotationInterpolation = this.readFloatBlock(track.rotationInterpolations, upperBoundIndex, 4, [20, 107, 20, 107]);
+        const rotationWeight = this.bezierInterpolate(rotationInterpolation[0] / 127, rotationInterpolation[1] / 127, rotationInterpolation[2] / 127, rotationInterpolation[3] / 127, (clampedFrame - lowerFrame) / (upperFrame - lowerFrame));
+        Quaternion.SlerpToRef(rotationA, rotationB, rotationWeight, rotationA);
+        const rotation = rotationA.toEulerAngles();
+        return {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: {
+                x: rotation.x * (180 / Math.PI),
+                y: rotation.y * (180 / Math.PI),
+                z: rotation.z * (180 / Math.PI),
+            },
+        };
+    }
+
+    private clampFrameToTrackRange(frame: number, frames: NumericArrayLike): number {
+        const normalizedFrame = Math.max(0, Math.floor(frame));
+        if (!frames || frames.length === 0) return normalizedFrame;
+        const first = frames[0] ?? normalizedFrame;
+        const last = frames[frames.length - 1] ?? first;
+        return Math.max(first, Math.min(last, normalizedFrame));
+    }
+
+    private findUpperBoundFrameIndex(frames: NumericArrayLike, frame: number): number {
+        if (!frames || frames.length === 0) return 0;
+        let lo = 0;
+        let hi = frames.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (frames[mid] <= frame) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    private bezierInterpolate(x1: number, x2: number, y1: number, y2: number, x: number): number {
+        let c = 0.5;
+        let t = c;
+        let s = 1.0 - t;
+        const loop = 15;
+        const eps = 1e-5;
+        let sst3 = 0;
+        let stt3 = 0;
+        let ttt = 0;
+        for (let i = 0; i < loop; ++i) {
+            sst3 = 3.0 * s * s * t;
+            stt3 = 3.0 * s * t * t;
+            ttt = t * t * t;
+            const ft = (sst3 * x1) + (stt3 * x2) + ttt - x;
+            if (Math.abs(ft) < eps) break;
+            c *= 0.5;
+            t += ft < 0 ? c : -c;
+            s = 1.0 - t;
+        }
+        return (sst3 * y1) + (stt3 * y2) + ttt;
+    }
+
+    private hasAccessoryTransformKeyframe(accessoryIndex: number, frame: number): boolean {
+        const manager = this.mmdManager as unknown as {
+            hasAccessoryTransformKeyframe?: (index: number, frame: number) => boolean;
+        };
+        return manager.hasAccessoryTransformKeyframe?.(accessoryIndex, frame) ?? false;
+    }
+
+    private addAccessoryTransformKeyframe(accessoryIndex: number, frame: number): boolean {
+        const manager = this.mmdManager as unknown as {
+            addAccessoryTransformKeyframe?: (index: number, frame: number) => boolean;
+        };
+        return manager.addAccessoryTransformKeyframe?.(accessoryIndex, frame) ?? false;
+    }
+
+    private getInfoKeyframeButtonState(): SectionKeyframeButtonState {
+        const contextKey = this.getInfoKeyframeContextKey();
+        if (!contextKey) return "none";
+        if (this.sectionKeyframeDirtyKeys.info.has(contextKey)) return "dirty";
+        return this.mmdManager.hasInfoKeyframe(this.mmdManager.currentFrame) ? "registered" : "none";
+    }
+
+    private getInterpolationKeyframeButtonState(): SectionKeyframeButtonState {
+        const track = this.getSelectedTimelineTrack();
+        const contextKey = this.getInterpolationKeyframeContextKey(track);
+        if (!track || !contextKey) return "none";
+        if (this.sectionKeyframeDirtyKeys.interpolation.has(contextKey)) return "dirty";
+        if (this.mmdManager.hasTimelineKeyframe(track, this.mmdManager.currentFrame)) return "registered";
+        return "none";
+    }
+
+    private getBoneKeyframeButtonState(): SectionKeyframeButtonState {
+        const boneName = this.bottomPanel.getSelectedBone();
+        const contextKey = this.getBoneKeyframeContextKey(boneName);
+        if (!boneName || !contextKey) return "none";
+
+        if (this.sectionKeyframeDirtyKeys.bone.has(contextKey)) return "dirty";
+
+        if (boneName === "Camera") {
+            return this.mmdManager.hasTimelineKeyframe({ name: boneName, category: "camera" }, this.mmdManager.currentFrame)
+                ? "registered"
+                : "none";
+        }
+
+        const track = this.getSelectedTimelineTrack();
+        if (track && this.isBoneTrackForEditor(track) && track.name === boneName) {
+            if (this.mmdManager.hasTimelineKeyframe(track, this.mmdManager.currentFrame)) return "registered";
+            return "none";
+        }
+
+        if (this.selectedBoneTrackCategory) {
+            const fallbackTrack = { name: boneName, category: this.selectedBoneTrackCategory };
+            if (this.mmdManager.hasTimelineKeyframe(fallbackTrack, this.mmdManager.currentFrame)) return "registered";
+        }
+        return "none";
+    }
+
+    private getMorphKeyframeButtonState(): SectionKeyframeButtonState {
+        const frameIndex = this.bottomPanel.getSelectedMorphFrameIndex();
+        const contextKey = this.getMorphKeyframeContextKey(frameIndex);
+        if (frameIndex === null || !contextKey) return "none";
+
+        if (this.sectionKeyframeDirtyKeys.morph.has(contextKey)) return "dirty";
+
+        const snapshot = this.bottomPanel.getSelectedMorphFrameSnapshot();
+        if (!snapshot) return "none";
+        if (snapshot.morphs.length === 0) return "none";
+        const hasRegisteredMorphKeyframes = snapshot.morphs.every((morph) =>
+            this.mmdManager.hasTimelineKeyframe({ name: morph.name, category: "morph" }, this.mmdManager.currentFrame)
+        );
+        return hasRegisteredMorphKeyframes ? "registered" : "none";
+    }
+
+    private getAccessoryKeyframeButtonState(): SectionKeyframeButtonState {
+        const accessoryIndex = this.getSelectedAccessoryIndex();
+        const contextKey = this.getAccessoryKeyframeContextKey(accessoryIndex);
+        if (accessoryIndex === null || !contextKey) return "none";
+
+        if (this.sectionKeyframeDirtyKeys.accessory.has(contextKey)) return "dirty";
+        if (this.hasAccessoryTransformKeyframe(accessoryIndex, this.mmdManager.currentFrame)) return "registered";
+        return "none";
     }
 
     private updateInterpolationPreview(track: KeyframeTrack, frame: number): void {
@@ -5659,6 +6367,8 @@ export class UIController {
         }
 
         dragState.changed = true;
+        this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
+        this.updateSectionKeyframeButtons();
         this.updateTimelineEditState();
     }
 
@@ -5678,7 +6388,7 @@ export class UIController {
             const handle = mmdCamera.createRuntimeAnimation(animation as unknown);
             mmdCamera.setRuntimeAnimation(handle);
             managerInternal.cameraAnimationHandle = handle;
-            this.mmdManager.seekTo(this.mmdManager.currentFrame);
+            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
             return;
         }
 
@@ -5687,7 +6397,7 @@ export class UIController {
         if (!currentModel || !animation) return;
         const handle = currentModel.createRuntimeAnimation(animation);
         currentModel.setRuntimeAnimation(handle);
-        this.mmdManager.seekTo(this.mmdManager.currentFrame);
+        this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
     }
 
     private clampInterpolationValue(value: number, fallback: number): number {
@@ -5967,7 +6677,7 @@ export class UIController {
         };
     }
 
-    private addKeyframeAtCurrentFrame(): void {
+    private addKeyframeAtCurrentFrame(poseSnapshotOverride: SelectedBonePoseSnapshot | null = null): void {
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
@@ -5978,16 +6688,39 @@ export class UIController {
             this.showToast("Failed to prepare camera keyframe track", "error");
             return;
         }
+        if (track.category !== "camera" && !this.mmdManager.ensureModelAnimationForEditing(track)) {
+            this.showToast("Failed to prepare model keyframe track", "error");
+            return;
+        }
 
         const frame = this.mmdManager.currentFrame;
+        const poseSnapshot = poseSnapshotOverride
+            ?? (track.category === "camera" || this.isBoneTrackForEditor(track)
+                ? this.captureCurrentBonePoseSnapshot(track.name)
+                : null);
+        const shouldRefreshRuntimePreview = this.mmdManager.isPlaying || !this.isBoneTrackForEditor(track) || poseSnapshot === null;
+        this.debugKeyframeFlow("add keyframe request", {
+            frame,
+            track,
+            poseSnapshotOverride,
+            poseSnapshot,
+            shouldRefreshRuntimePreview,
+        });
         const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
         const created = this.mmdManager.addTimelineKeyframe(track, frame);
         if (!created) {
-            const overwritten = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot);
+            const overwritten = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
             if (overwritten) {
-                this.refreshRuntimeAnimationFromInterpolationEdit();
+                if (shouldRefreshRuntimePreview) {
+                    this.refreshRuntimeAnimationFromInterpolationEdit();
+                }
                 this.timeline.setSelectedFrame(null);
+                this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
+                if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
+                    this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
+                }
                 this.updateTimelineEditState();
+                this.updateSectionKeyframeButtons();
                 this.showToast(`Frame ${frame} keyframe updated`, "success");
                 return;
             }
@@ -5995,14 +6728,106 @@ export class UIController {
             return;
         }
 
-        const persistedInterpolation = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot);
-        if (persistedInterpolation) {
+        const persistedInterpolation = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
+        if (persistedInterpolation && shouldRefreshRuntimePreview) {
             this.refreshRuntimeAnimationFromInterpolationEdit();
         }
 
         this.timeline.setSelectedFrame(null);
+        this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
+        if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
+        }
         this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
         this.showToast(`Frame ${frame}: keyframe added`, "success");
+    }
+
+    private registerInfoKeyframe(): void {
+        const contextKey = this.getInfoKeyframeContextKey();
+        if (!contextKey) return;
+        if (!this.mmdManager.addInfoKeyframe(this.mmdManager.currentFrame)) {
+            this.showToast("Please select a model", "error");
+            return;
+        }
+        this.clearSectionKeyframeDirty("info", contextKey);
+        this.updateSectionKeyframeButtons();
+        this.updateTimelineEditState();
+        this.showToast(`Frame ${this.mmdManager.currentFrame}: info keyframe saved`, "success");
+    }
+
+    private registerBoneKeyframeAtCurrentFrame(): void {
+        const boneName = this.bottomPanel.getSelectedBone();
+        if (!boneName) {
+            this.showToast("Please select a bone", "error");
+            return;
+        }
+
+        const poseSnapshot = this.captureCurrentBonePoseSnapshot(boneName);
+
+        const preferredCategories: TrackCategory[] = boneName === "Camera"
+            ? ["camera", "bone", "semi-standard", "root"]
+            : this.selectedBoneTrackCategory
+                ? [
+                    this.selectedBoneTrackCategory,
+                    ...(["bone", "semi-standard", "root"] as TrackCategory[]).filter(
+                        (category) => category !== this.selectedBoneTrackCategory,
+                    ),
+                ]
+                : ["bone", "semi-standard", "root"];
+
+        if (!this.timeline.selectTrackByNameAndCategory(boneName, preferredCategories)) {
+            this.showToast(`No timeline track available for ${boneName}`, "error");
+            return;
+        }
+
+        this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
+        this.addKeyframeAtCurrentFrame(poseSnapshot);
+    }
+
+    private registerMorphKeyframesAtCurrentFrame(): void {
+        const snapshot = this.bottomPanel.getSelectedMorphFrameSnapshot();
+        if (!snapshot) {
+            this.showToast("Please select a morph frame", "error");
+            return;
+        }
+
+        const frame = this.mmdManager.currentFrame;
+        let touched = false;
+        for (const morph of snapshot.morphs) {
+            touched = this.mmdManager.addTimelineKeyframe({ name: morph.name, category: "morph" }, frame) || touched;
+        }
+
+        if (snapshot.morphs.length > 0) {
+            this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(snapshot.frameIndex));
+            this.updateSectionKeyframeButtons();
+            this.timeline.setSelectedFrame(null);
+            this.updateTimelineEditState();
+            this.showToast(
+                touched ? `Frame ${frame}: morph keyframes added` : `Frame ${frame}: morph keyframes already registered`,
+                "success",
+            );
+            return;
+        }
+
+        this.showToast("No morphs in the selected frame", "error");
+    }
+
+    private registerAccessoryTransformKeyframe(): void {
+        const accessoryIndex = this.getSelectedAccessoryIndex();
+        if (accessoryIndex === null) {
+            this.showToast("Please select an accessory", "error");
+            return;
+        }
+
+        const frame = this.mmdManager.currentFrame;
+        const created = this.addAccessoryTransformKeyframe(accessoryIndex, frame);
+        this.clearSectionKeyframeDirty("accessory", this.getAccessoryKeyframeContextKey(accessoryIndex));
+        this.updateSectionKeyframeButtons();
+        this.showToast(
+            created ? `Frame ${frame}: accessory keyframe added` : `Frame ${frame}: accessory keyframe already registered`,
+            "success",
+        );
     }
 
     private captureInterpolationCurveSnapshot(track: KeyframeTrack, frame: number): Map<string, InterpolationCurve> {
@@ -6018,6 +6843,7 @@ export class UIController {
         track: KeyframeTrack,
         frame: number,
         curves: ReadonlyMap<string, InterpolationCurve>,
+        poseSnapshot: SelectedBonePoseSnapshot | null = null,
     ): boolean {
         if (track.category === "morph") return false;
 
@@ -6031,6 +6857,7 @@ export class UIController {
                 cameraTrackLike as RuntimeCameraTrackLike & RuntimeCameraTrackMutable,
                 normalizedFrame,
                 curves,
+                poseSnapshot,
             );
         }
 
@@ -6046,6 +6873,7 @@ export class UIController {
                 movableTrackLike as RuntimeMovableBoneTrackLike & RuntimeMovableBoneTrackMutable,
                 normalizedFrame,
                 curves,
+                poseSnapshot,
             );
         }
 
@@ -6056,6 +6884,7 @@ export class UIController {
                 boneTrackLike as RuntimeBoneTrackLike & RuntimeBoneTrackMutable,
                 normalizedFrame,
                 curves,
+                poseSnapshot,
             );
         }
 
@@ -6066,15 +6895,24 @@ export class UIController {
         track: RuntimeCameraTrackMutable,
         frame: number,
         curves: ReadonlyMap<string, InterpolationCurve>,
+        poseSnapshot: SelectedBonePoseSnapshot | null = null,
     ): boolean {
         const frameEdit = this.upsertFrameNumber(track.frameNumbers, frame);
         track.frameNumbers = frameEdit.frames;
 
-        const cameraPosition = this.mmdManager.getCameraPosition();
-        const cameraRotationDeg = this.mmdManager.getCameraRotation();
-        const cameraDistance = this.mmdManager.getCameraDistance();
+        const cameraPosition = poseSnapshot?.position ?? this.mmdManager.getCameraPosition();
+        const cameraRotationDeg = poseSnapshot?.rotation ?? this.mmdManager.getCameraRotation();
+        const cameraDistance = poseSnapshot?.distance ?? this.mmdManager.getCameraDistance();
         const cameraFovRad = (this.mmdManager.getCameraFov() * Math.PI) / 180;
         const degToRad = Math.PI / 180;
+        this.debugKeyframeFlow("persist camera keyframe", {
+            frame,
+            poseSnapshot,
+            cameraPosition,
+            cameraRotationDeg,
+            cameraDistance,
+            cameraFovRad,
+        });
 
         track.positions = this.upsertFloatValues(track.positions, 3, frameEdit.index, frameEdit.exists, [
             cameraPosition.x,
@@ -6124,23 +6962,41 @@ export class UIController {
         track: RuntimeMovableBoneTrackMutable,
         frame: number,
         curves: ReadonlyMap<string, InterpolationCurve>,
+        poseSnapshot: SelectedBonePoseSnapshot | null = null,
     ): boolean {
         const frameEdit = this.upsertFrameNumber(track.frameNumbers, frame);
         const referenceIndex = this.resolveInsertReferenceIndex(track.frameNumbers, frame);
         track.frameNumbers = frameEdit.frames;
 
-        const transform = this.mmdManager.getBoneTransform(boneName);
+        const transform = poseSnapshot ?? this.getPendingBonePoseSnapshot(boneName, frame) ?? this.mmdManager.getBoneTransform(boneName);
         const fallbackPosition = this.readFloatBlock(track.positions, referenceIndex, 3, [0, 0, 0]);
         const fallbackRotation = this.readFloatBlock(track.rotations, referenceIndex, 4, [0, 0, 0, 1]);
         const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [0]);
-
         const positionBlock = transform
             ? [transform.position.x, transform.position.y, transform.position.z]
             : fallbackPosition;
-
         const rotationBlock = transform
             ? this.rotationDegreesToQuaternionBlock(transform.rotation.x, transform.rotation.y, transform.rotation.z)
             : fallbackRotation;
+        this.debugKeyframeFlow("persist movable bone keyframe", {
+            boneName,
+            frame,
+            poseSnapshot,
+            poseSnapshotText: this.formatPoseSnapshotText(poseSnapshot),
+            resolvedTransform: transform,
+            resolvedTransformText: this.formatPoseSnapshotText(transform),
+            position: transform ? this.formatBonePoseSnapshotForLog(transform).position : null,
+            rotation: transform ? this.formatBonePoseSnapshotForLog(transform).rotation : null,
+            positionBlock: positionBlock.map((value) => Math.round(value * 1000) / 1000),
+            rotationBlock: rotationBlock.map((value) => Math.round(value * 1000) / 1000),
+            positionBlockText: this.formatNumberBlockForLog(positionBlock),
+            rotationBlockText: this.formatNumberBlockForLog(rotationBlock),
+            fallbackPosition,
+            fallbackRotation,
+            fallbackPositionText: this.formatNumberBlockForLog(fallbackPosition),
+            fallbackRotationText: this.formatNumberBlockForLog(fallbackRotation),
+            fallbackPhysicsToggle,
+        });
 
         track.positions = this.upsertFloatValues(track.positions, 3, frameEdit.index, frameEdit.exists, positionBlock);
         track.rotations = this.upsertFloatValues(track.rotations, 4, frameEdit.index, frameEdit.exists, rotationBlock);
@@ -6173,17 +7029,32 @@ export class UIController {
         track: RuntimeBoneTrackMutable,
         frame: number,
         curves: ReadonlyMap<string, InterpolationCurve>,
+        poseSnapshot: SelectedBonePoseSnapshot | null = null,
     ): boolean {
         const frameEdit = this.upsertFrameNumber(track.frameNumbers, frame);
         const referenceIndex = this.resolveInsertReferenceIndex(track.frameNumbers, frame);
         track.frameNumbers = frameEdit.frames;
 
-        const transform = this.mmdManager.getBoneTransform(boneName);
+        const transform = poseSnapshot ?? this.getPendingBonePoseSnapshot(boneName, frame) ?? this.mmdManager.getBoneTransform(boneName);
         const fallbackRotation = this.readFloatBlock(track.rotations, referenceIndex, 4, [0, 0, 0, 1]);
         const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [0]);
         const rotationBlock = transform
             ? this.rotationDegreesToQuaternionBlock(transform.rotation.x, transform.rotation.y, transform.rotation.z)
             : fallbackRotation;
+        this.debugKeyframeFlow("persist bone keyframe", {
+            boneName,
+            frame,
+            poseSnapshot,
+            poseSnapshotText: this.formatPoseSnapshotText(poseSnapshot),
+            resolvedTransform: transform,
+            resolvedTransformText: this.formatPoseSnapshotText(transform),
+            rotation: transform ? this.formatBonePoseSnapshotForLog(transform).rotation : null,
+            rotationBlock: rotationBlock.map((value) => Math.round(value * 1000) / 1000),
+            rotationBlockText: this.formatNumberBlockForLog(rotationBlock),
+            fallbackRotation,
+            fallbackRotationText: this.formatNumberBlockForLog(fallbackRotation),
+            fallbackPhysicsToggle,
+        });
 
         track.rotations = this.upsertFloatValues(track.rotations, 4, frameEdit.index, frameEdit.exists, rotationBlock);
         track.physicsToggles = this.upsertUint8Values(
@@ -6405,7 +7276,7 @@ export class UIController {
     private nudgeSelectedKeyframe(deltaFrame: number): void {
         const seekByDelta = (): void => {
             const toFrame = Math.max(0, this.mmdManager.currentFrame + deltaFrame);
-            this.mmdManager.seekTo(toFrame);
+            this.mmdManager.seekToBoundary(toFrame);
             this.updateTimelineEditState();
         };
 
@@ -6424,7 +7295,7 @@ export class UIController {
         }
 
         this.timeline.setSelectedFrame(toFrame);
-        this.mmdManager.seekTo(toFrame);
+        this.mmdManager.seekToBoundary(toFrame);
         this.updateTimelineEditState();
         this.showToast(`Key moved: ${fromFrame} -> ${toFrame}`, "success");
     }

@@ -87,7 +87,7 @@
     "section.interpolation":  "Interpolation",
     "section.bone":  "Bone",
     "section.morph":  "Morph",
-    "section.camera":  "Camera",
+    "section.camera":  "Display",
     "section.physics":  "Physics",
     "section.lighting":  "Lighting",
     "section.accessory":  "Accessory",

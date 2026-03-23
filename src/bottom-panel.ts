@@ -2,6 +2,11 @@ import type { MmdManager } from "./mmd-manager";
 import type { BoneControlInfo, ModelInfo, MorphDisplayFrameInfo } from "./types";
 
 type BoneSliderKey = "tx" | "ty" | "tz" | "rx" | "ry" | "rz" | "camDistance" | "camFov";
+type BonePoseSnapshot = {
+    position: { x: number; y: number; z: number };
+    rotation: { x: number; y: number; z: number };
+    distance?: number;
+};
 
 export class BottomPanel {
     private static readonly CAMERA_CONTROL_NAME = "Camera";
@@ -15,8 +20,12 @@ export class BottomPanel {
     private morphFrames: MorphDisplayFrameInfo[] = [];
     private boneControlMap: Map<string, BoneControlInfo> = new Map();
     private currentBoneName: string | null = null;
+    private currentMorphFrameIndex: number | null = null;
     private mmdManager: MmdManager | null = null;
     public onBoneSelectionChanged: ((boneName: string | null) => void) | null = null;
+    public onMorphFrameSelectionChanged: ((frameIndex: number | null) => void) | null = null;
+    public onBoneTransformEdited: ((boneName: string | null) => void) | null = null;
+    public onMorphValueEdited: ((frameIndex: number | null) => void) | null = null;
     public onRangeInputsRendered: ((root: ParentNode) => void) | null = null;
     public onRangeSliderSynced: ((slider: HTMLInputElement) => void) | null = null;
 
@@ -34,7 +43,10 @@ export class BottomPanel {
 
         this.morphFrameSelect.addEventListener("change", () => {
             const selectedIndex = Number.parseInt(this.morphFrameSelect.value, 10);
-            this.renderMorphFrame(Number.isNaN(selectedIndex) ? -1 : selectedIndex);
+            const normalizedIndex = Number.isNaN(selectedIndex) ? -1 : selectedIndex;
+            this.renderMorphFrame(normalizedIndex);
+            this.currentMorphFrameIndex = normalizedIndex >= 0 ? normalizedIndex : null;
+            this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
         });
     }
 
@@ -101,7 +113,9 @@ export class BottomPanel {
 
         this.morphFrameSelect.disabled = this.morphFrames.length <= 1;
         this.morphFrameSelect.value = "0";
+        this.currentMorphFrameIndex = 0;
         this.renderMorphFrame(0);
+        this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
     }
 
     updateModelInfo(info: ModelInfo): void {
@@ -129,6 +143,7 @@ export class BottomPanel {
     clearMorphControls(): void {
         this.morphFrames = [];
         this.morphSliders.clear();
+        this.currentMorphFrameIndex = null;
         this.morphFrameSelect.innerHTML = '<option value="">-</option>';
         this.morphFrameSelect.disabled = true;
         this.morphContainer.innerHTML = '<div class="panel-empty-state">No model</div>';
@@ -136,6 +151,93 @@ export class BottomPanel {
 
     getSelectedBone(): string | null {
         return this.currentBoneName;
+    }
+
+    getSelectedMorphFrameIndex(): number | null {
+        return this.currentMorphFrameIndex;
+    }
+
+    getSelectedBoneTransformSnapshot(): {
+        position: { x: number; y: number; z: number };
+        rotation: { x: number; y: number; z: number };
+    } | null {
+        if (!this.currentBoneName || this.boneSliders.size === 0) return null;
+
+        const isCameraControl = this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME;
+        if (isCameraControl) {
+            const position = this.mmdManager?.getCameraPosition() ?? { x: 0, y: 0, z: 0 };
+            const rotation = this.mmdManager?.getCameraRotation() ?? { x: 0, y: 0, z: 0 };
+            return {
+                position: {
+                    x: position.x,
+                    y: position.y,
+                    z: position.z,
+                },
+                rotation: {
+                    x: rotation.x,
+                    y: rotation.y,
+                    z: rotation.z,
+                },
+            };
+        }
+
+        return {
+            position: {
+                x: this.getBoneSliderNumber("tx"),
+                y: this.getBoneSliderNumber("ty"),
+                z: this.getBoneSliderNumber("tz"),
+            },
+            rotation: {
+                x: this.getBoneSliderNumber("rx"),
+                y: this.getBoneSliderNumber("ry"),
+                z: this.getBoneSliderNumber("rz"),
+            },
+        };
+    }
+
+    getSelectedMorphFrameSnapshot(): { frameIndex: number; morphs: Array<{ index: number; name: string; value: number }> } | null {
+        if (this.currentMorphFrameIndex === null) return null;
+        const frame = this.morphFrames[this.currentMorphFrameIndex];
+        if (!frame) return null;
+
+        return {
+            frameIndex: this.currentMorphFrameIndex,
+            morphs: frame.morphs.map((morph) => {
+                const slider = this.morphSliders.get(`${morph.index}:${morph.name}`);
+                const rawValue = slider ? Number.parseFloat(slider.value) : 0;
+                return {
+                    index: morph.index,
+                    name: morph.name,
+                    value: Number.isFinite(rawValue) ? rawValue : 0,
+                };
+            }),
+        };
+    }
+
+    syncSelectedMorphFrameSlidersFromRuntime(force = false): void {
+        if (!this.mmdManager || this.currentMorphFrameIndex === null) return;
+        const frame = this.morphFrames[this.currentMorphFrameIndex];
+        if (!frame) return;
+
+        for (const morphInfo of frame.morphs) {
+            const slider = this.morphSliders.get(`${morphInfo.index}:${morphInfo.name}`);
+            if (!slider) continue;
+            if (!force && this.isSliderEditing(slider)) continue;
+
+            const rawValue = morphInfo.index >= 0
+                ? this.mmdManager.getMorphWeightByIndex(morphInfo.index)
+                : this.mmdManager.getMorphWeight(morphInfo.name);
+            const normalized = Number.isFinite(rawValue) ? rawValue : 0;
+            const nextValue = normalized.toFixed(2);
+            if (slider.value !== nextValue) {
+                slider.value = nextValue;
+            }
+
+            const valueDisplay = slider.parentElement?.querySelector(".morph-value") as HTMLElement | null;
+            if (valueDisplay) {
+                valueDisplay.textContent = nextValue;
+            }
+        }
     }
 
     clearSelectedBone(forceRender = false): boolean {
@@ -263,6 +365,9 @@ export class BottomPanel {
                 const value = Number(slider.value);
                 valueDisplay.textContent = this.formatSliderValue(value, def.step);
                 this.applyBoneTransformFromSliders();
+                if (this.currentBoneName) {
+                    this.onBoneTransformEdited?.(this.currentBoneName);
+                }
             });
 
             this.boneSliders.set(def.key, slider);
@@ -277,61 +382,38 @@ export class BottomPanel {
         this.onRangeInputsRendered?.(this.boneContainer);
     }
 
-    syncSelectedBoneSlidersFromRuntime(): void {
+    syncSelectedBoneSlidersFromRuntime(force = false): void {
         if (!this.mmdManager || !this.currentBoneName) return;
         if (this.boneSliders.size === 0) return;
 
         if (this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME) {
-            const position = this.mmdManager.getCameraPosition();
-            const rotation = this.mmdManager.getCameraRotation();
-            const distance = this.mmdManager.getCameraDistance();
-            const fov = this.mmdManager.getCameraFov();
-
-            const updateSlider = (key: BoneSliderKey, rawValue: number): void => {
-                const slider = this.boneSliders.get(key);
-                if (!slider) return;
-                if (this.isSliderEditing(slider)) return;
-
-                const min = Number.parseFloat(slider.min);
-                const max = Number.parseFloat(slider.max);
-                const step = Number.parseFloat(slider.step || "1");
-                const safeValue = this.clamp(
-                    rawValue,
-                    Number.isFinite(min) ? min : rawValue,
-                    Number.isFinite(max) ? max : rawValue,
-                );
-                const digits = step < 1 ? 2 : 0;
-                const nextValue = safeValue.toFixed(digits);
-                if (slider.value !== nextValue) {
-                    slider.value = nextValue;
-                }
-
-                const valueEl = this.boneSliderValues.get(key);
-                if (valueEl) {
-                    valueEl.textContent = this.formatSliderValue(Number(nextValue), step);
-                }
-                this.onRangeSliderSynced?.(slider);
-            };
-
-            updateSlider("tx", position.x);
-            updateSlider("ty", position.y);
-            updateSlider("tz", position.z);
-            updateSlider("rx", rotation.x);
-            updateSlider("ry", rotation.y);
-            updateSlider("rz", rotation.z);
-            updateSlider("camDistance", distance);
-            updateSlider("camFov", fov);
+            this.syncSelectedBoneSlidersFromSnapshot({
+                position: this.mmdManager.getCameraPosition(),
+                rotation: this.mmdManager.getCameraRotation(),
+                distance: this.mmdManager.getCameraDistance(),
+            }, force);
             return;
         }
 
-        const transform = this.mmdManager.getBoneTransform(this.currentBoneName);
+        const transform = this.mmdManager.getAnimatedBoneTransform?.(this.currentBoneName)
+            ?? this.mmdManager.getBoneTransform(this.currentBoneName);
         if (!transform) return;
 
+        this.syncSelectedBoneSlidersFromSnapshot(transform, force);
+    }
+
+    syncSelectedBoneSlidersFromSnapshot(snapshot: BonePoseSnapshot | null, force = false): void {
+        if (!this.mmdManager || !this.currentBoneName) return;
+        if (this.boneSliders.size === 0) return;
+        if (!snapshot) return;
+        this.syncSelectedBoneSlidersFromSnapshotValues(snapshot, force);
+    }
+
+    private syncSelectedBoneSlidersFromSnapshotValues(snapshot: BonePoseSnapshot, force = false): void {
         const updateSlider = (key: BoneSliderKey, rawValue: number): void => {
             const slider = this.boneSliders.get(key);
             if (!slider) return;
-            // While dragging/focusing this slider, don't override user's input.
-            if (this.isSliderEditing(slider)) return;
+            if (!force && this.isSliderEditing(slider)) return;
 
             const min = Number.parseFloat(slider.min);
             const max = Number.parseFloat(slider.max);
@@ -354,12 +436,15 @@ export class BottomPanel {
             this.onRangeSliderSynced?.(slider);
         };
 
-        updateSlider("tx", transform.position.x);
-        updateSlider("ty", transform.position.y);
-        updateSlider("tz", transform.position.z);
-        updateSlider("rx", transform.rotation.x);
-        updateSlider("ry", transform.rotation.y);
-        updateSlider("rz", transform.rotation.z);
+        updateSlider("tx", snapshot.position.x);
+        updateSlider("ty", snapshot.position.y);
+        updateSlider("tz", snapshot.position.z);
+        updateSlider("rx", snapshot.rotation.x);
+        updateSlider("ry", snapshot.rotation.y);
+        updateSlider("rz", snapshot.rotation.z);
+        if (typeof snapshot.distance === "number") {
+            updateSlider("camDistance", snapshot.distance);
+        }
     }
 
     private applyBoneTransformFromSliders(): void {
@@ -458,6 +543,7 @@ export class BottomPanel {
                 } else {
                     this.mmdManager.setMorphWeight(morphName, val);
                 }
+                this.onMorphValueEdited?.(this.currentMorphFrameIndex);
             });
 
             this.morphSliders.set(`${morphIndex}:${morphName}`, slider);

@@ -1,4 +1,4 @@
-import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectSerializedModelAnimation } from "../types";
+import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectSerializedAccessoryTransformTrack, ProjectSerializedModelAnimation } from "../types";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { createCameraAnimationFromTrack, deserializeCameraTrack, deserializeModelAnimation } from "./project-codec";
 
@@ -156,8 +156,12 @@ export async function importProjectState(
             transform: Partial<NonNullable<ProjectAccessoryState["transform"]>>,
         ) => boolean;
         setAccessoryParent?: (index: number, modelIndex: number | null, boneName: string | null) => boolean;
+        setAccessoryTransformKeyframes?: (index: number, track: ProjectSerializedAccessoryTransformTrack | null) => boolean;
     };
     const accessories = Array.isArray(data.accessories) ? data.accessories : [];
+    const accessoryKeyframeTracks = Array.isArray(data.keyframes?.accessoryTransformAnimations)
+        ? data.keyframes.accessoryTransformAnimations
+        : [];
     if (accessories.length > 0) {
         if (typeof accessoryExtension.loadX !== "function") {
             warnings.push("Accessory restore skipped: accessory loader is unavailable");
@@ -220,6 +224,11 @@ export async function importProjectState(
                         ? accessoryState.parentBoneName
                         : null,
                 );
+
+                const keyframeTrack = accessoryKeyframeTracks[accessoryIndex] ?? null;
+                if (accessoryExtension.setAccessoryTransformKeyframes && keyframeTrack) {
+                    accessoryExtension.setAccessoryTransformKeyframes(restoredAccessoryIndex, keyframeTrack);
+                }
             }
         }
     }
