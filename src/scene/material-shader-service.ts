@@ -40,11 +40,11 @@ type MaterialShaderDefaults = {
 };
 
 const DEFAULT_WGSL_MATERIAL_SHADER_PRESET = "wgsl-mmd-standard";
-const AUTO_LUMINOUS_BLOOM_WEIGHT = 0.68;
-const AUTO_LUMINOUS_BLOOM_THRESHOLD = 0.68;
-const AUTO_LUMINOUS_BLOOM_KERNEL = 76;
-const AUTO_LUMINOUS_BASE_LEVEL = 0.96;
-const AUTO_LUMINOUS_BRIGHTNESS_BIAS = 0.28;
+const AUTO_LUMINOUS_BLOOM_WEIGHT = 0.42;
+const AUTO_LUMINOUS_BLOOM_THRESHOLD = 1.05;
+const AUTO_LUMINOUS_BLOOM_KERNEL = 64;
+const AUTO_LUMINOUS_BASE_LEVEL = 1.28;
+const AUTO_LUMINOUS_BRIGHTNESS_BIAS = 0.14;
 const AUTO_LUMINOUS_TINT_STRENGTH = 0.72;
 
 function getPresetCatalog(host: any): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
@@ -167,15 +167,20 @@ export function syncLuminousGlowLayer(host: any): void {
     const requestedBloomThreshold = host.postEffectBloomThresholdValue ?? 2;
     const requestedBloomKernel = host.postEffectBloomKernelValue ?? 0;
 
-    pipeline.bloomWeight = hasLuminousMaterials
-        ? Math.max(requestedBloomWeight, AUTO_LUMINOUS_BLOOM_WEIGHT)
-        : requestedBloomWeight;
-    pipeline.bloomThreshold = hasLuminousMaterials
-        ? Math.min(requestedBloomThreshold, AUTO_LUMINOUS_BLOOM_THRESHOLD)
-        : requestedBloomThreshold;
-    pipeline.bloomKernel = hasLuminousMaterials
-        ? Math.max(requestedBloomKernel, AUTO_LUMINOUS_BLOOM_KERNEL)
-        : requestedBloomKernel;
+    if (manualBloom) {
+        pipeline.bloomWeight = requestedBloomWeight;
+        pipeline.bloomThreshold = requestedBloomThreshold;
+        pipeline.bloomKernel = requestedBloomKernel;
+    } else if (hasLuminousMaterials) {
+        // Keep the auto Luminous bloom selective so unrelated bright materials do not start glowing.
+        pipeline.bloomWeight = AUTO_LUMINOUS_BLOOM_WEIGHT;
+        pipeline.bloomThreshold = AUTO_LUMINOUS_BLOOM_THRESHOLD;
+        pipeline.bloomKernel = AUTO_LUMINOUS_BLOOM_KERNEL;
+    } else {
+        pipeline.bloomWeight = requestedBloomWeight;
+        pipeline.bloomThreshold = requestedBloomThreshold;
+        pipeline.bloomKernel = requestedBloomKernel;
+    }
 }
 
 export function ensureMaterialShaderDefaults(host: any, material: any): MaterialShaderDefaults {
