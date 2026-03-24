@@ -487,6 +487,63 @@ ipcMain.handle('file:getInfo', async (_event, filePath: string) => {
   }
 });
 
+function findNearbyFileSync(baseDirectoryPath: string, targetPath: string, maxDepth = 2): string | null {
+  const safeBaseDirectoryPath = path.resolve(baseDirectoryPath);
+  if (!fs.existsSync(safeBaseDirectoryPath) || !fs.statSync(safeBaseDirectoryPath).isDirectory()) {
+    return null;
+  }
+
+  const normalizedTargetPath = targetPath.replace(/[\\/]+/g, path.sep).trim();
+  if (!normalizedTargetPath) {
+    return null;
+  }
+
+  const exactCandidate = path.resolve(safeBaseDirectoryPath, normalizedTargetPath);
+  if (fs.existsSync(exactCandidate) && fs.statSync(exactCandidate).isFile()) {
+    return exactCandidate;
+  }
+
+  const targetBaseName = path.basename(normalizedTargetPath).toLowerCase();
+  const queue: Array<{ dir: string; depth: number }> = [{ dir: safeBaseDirectoryPath, depth: 0 }];
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    const currentDir = path.resolve(current.dir);
+    if (visited.has(currentDir)) continue;
+    visited.add(currentDir);
+
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isFile() && entry.name.toLowerCase() === targetBaseName) {
+        return fullPath;
+      }
+      if (entry.isDirectory() && current.depth < maxDepth) {
+        queue.push({ dir: fullPath, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return null;
+}
+
+ipcMain.handle('file:findNearby', async (_event, baseDirectoryPath: string, targetPath: string) => {
+  try {
+    return findNearbyFileSync(baseDirectoryPath, targetPath);
+  } catch (err) {
+    console.error('Failed to find nearby file:', err);
+    return null;
+  }
+});
+
 ipcMain.handle('file:readText', async (_event, filePath: string) => {
   try {
     return fs.readFileSync(filePath, 'utf-8');

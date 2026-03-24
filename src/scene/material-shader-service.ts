@@ -1,6 +1,4 @@
 // eslint-disable-next-line import/no-unresolved
-import luminousWgslText from "../../wgsl/luminous.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
 import debugWhiteWgslText from "../../wgsl/toon_debug_white_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import fullLightWgslText from "../../wgsl/full_light.wgsl?raw";
@@ -10,6 +8,7 @@ import fullLightAddWgslText from "../../wgsl/full_light_add.wgsl?raw";
 import fullShadowWgslText from "../../wgsl/full_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import lightAndShadowWgslText from "../../wgsl/light_and_shadow.wgsl?raw";
+import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import type { ProjectModelMaterialShaderState } from "../types";
 
@@ -21,6 +20,7 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-debug-white"
     | "wgsl-full-light"
     | "wgsl-full-light-add"
+    | "wgsl-full-alpha-test"
     | "wgsl-full-shadow"
     | "wgsl-light-and-shadow"
     | "wgsl-specular"
@@ -32,9 +32,20 @@ type MaterialShaderDefaults = {
     disableLighting: boolean | null;
     specularPower: number | null;
     emissiveColor: Color3 | null;
+    transparencyMode: number | null;
+    alphaCutOff: number | null;
+    forceDepthWrite: boolean | null;
+    useAlphaFromDiffuseTexture: boolean | null;
+    useAlphaFromAlbedoTexture: boolean | null;
 };
 
 const DEFAULT_WGSL_MATERIAL_SHADER_PRESET = "wgsl-mmd-standard";
+const AUTO_LUMINOUS_BLOOM_WEIGHT = 0.68;
+const AUTO_LUMINOUS_BLOOM_THRESHOLD = 0.68;
+const AUTO_LUMINOUS_BLOOM_KERNEL = 76;
+const AUTO_LUMINOUS_BASE_LEVEL = 0.96;
+const AUTO_LUMINOUS_BRIGHTNESS_BIAS = 0.28;
+const AUTO_LUMINOUS_TINT_STRENGTH = 0.72;
 
 function getPresetCatalog(host: any): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
     return host.constructor.WGSL_MATERIAL_SHADER_PRESETS ?? [];
@@ -69,12 +80,35 @@ function setMaterialColorProperty(material: any, propertyName: string, color: Co
     material[propertyName] = new Color3(color.r, color.g, color.b);
 }
 
+function getTextureSourceName(texture: any): string | null {
+    if (!texture || typeof texture !== "object") return null;
+
+    const candidates = [texture.name, texture.url];
+    for (const candidate of candidates) {
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function isAlphaCapableTextureName(textureName: string | null): boolean {
+    if (!textureName) return false;
+
+    const normalized = textureName.split(/[?#]/, 1)[0].toLowerCase();
+    return normalized.endsWith(".png")
+        || normalized.endsWith(".bmp")
+        || normalized.endsWith(".tga")
+        || normalized.endsWith(".webp");
+}
+
 function markMaterialShaderDirty(material: any): void {
     if (!material || typeof material !== "object") return;
 
     if (typeof material.markAsDirty === "function") {
         try {
-            material.markAsDirty(1);
+            material.markAsDirty(Material.AllDirtyFlag);
             return;
         } catch {
             try {
@@ -91,6 +125,59 @@ function markMaterialShaderDirty(material: any): void {
     }
 }
 
+function collectLuminousMaterials(host: any): Set<object> {
+    const luminousMaterials = new Set<object>();
+    for (const entry of host.sceneModels ?? []) {
+        for (const materialEntry of entry.materials ?? []) {
+            if (getWgslMaterialShaderPresetForMaterial(host, materialEntry.material) !== "wgsl-autoluminous") {
+                continue;
+            }
+            luminousMaterials.add(materialEntry.material as object);
+        }
+    }
+    return luminousMaterials;
+}
+
+export function syncLuminousGlowLayer(host: any): void {
+    const luminousMaterials = collectLuminousMaterials(host);
+    const hasLuminousMaterials = luminousMaterials.size > 0;
+
+    const pipeline = host.defaultRenderingPipeline;
+    if (!pipeline) {
+        return;
+    }
+
+    const manualGlow = Boolean(host.postEffectGlowEnabledValue);
+    const manualBloom = Boolean(host.postEffectBloomEnabledValue);
+    const shouldEnableBloom = manualBloom || hasLuminousMaterials;
+
+    pipeline.glowLayerEnabled = manualGlow;
+    const glowLayer = pipeline.glowLayer;
+    if (glowLayer) {
+        glowLayer.customEmissiveColorSelector = null;
+        glowLayer.customEmissiveTextureSelector = null;
+        if (manualGlow) {
+            glowLayer.intensity = host.postEffectGlowIntensityValue;
+            glowLayer.blurKernelSize = host.postEffectGlowKernelValue;
+        }
+    }
+
+    pipeline.bloomEnabled = shouldEnableBloom;
+    const requestedBloomWeight = host.postEffectBloomWeightValue ?? 0;
+    const requestedBloomThreshold = host.postEffectBloomThresholdValue ?? 2;
+    const requestedBloomKernel = host.postEffectBloomKernelValue ?? 0;
+
+    pipeline.bloomWeight = hasLuminousMaterials
+        ? Math.max(requestedBloomWeight, AUTO_LUMINOUS_BLOOM_WEIGHT)
+        : requestedBloomWeight;
+    pipeline.bloomThreshold = hasLuminousMaterials
+        ? Math.min(requestedBloomThreshold, AUTO_LUMINOUS_BLOOM_THRESHOLD)
+        : requestedBloomThreshold;
+    pipeline.bloomKernel = hasLuminousMaterials
+        ? Math.max(requestedBloomKernel, AUTO_LUMINOUS_BLOOM_KERNEL)
+        : requestedBloomKernel;
+}
+
 export function ensureMaterialShaderDefaults(host: any, material: any): MaterialShaderDefaults {
     let defaults = host.materialShaderDefaultsByMaterial.get(material as object);
     if (!defaults) {
@@ -100,6 +187,19 @@ export function ensureMaterialShaderDefaults(host: any, material: any): Material
                 ? Number(material.specularPower)
                 : null,
             emissiveColor: cloneColor3OrNull(material.emissiveColor),
+            transparencyMode: "transparencyMode" in material && typeof material.transparencyMode === "number"
+                ? material.transparencyMode
+                : null,
+            alphaCutOff: "alphaCutOff" in material && Number.isFinite(Number(material.alphaCutOff))
+                ? Number(material.alphaCutOff)
+                : null,
+            forceDepthWrite: "forceDepthWrite" in material ? Boolean(material.forceDepthWrite) : null,
+            useAlphaFromDiffuseTexture: "useAlphaFromDiffuseTexture" in material
+                ? Boolean(material.useAlphaFromDiffuseTexture)
+                : null,
+            useAlphaFromAlbedoTexture: "useAlphaFromAlbedoTexture" in material
+                ? Boolean(material.useAlphaFromAlbedoTexture)
+                : null,
         };
         host.materialShaderDefaultsByMaterial.set(material as object, defaults);
     }
@@ -116,6 +216,26 @@ function restoreMaterialShaderDefaults(host: any, material: any, defaults: Mater
 
     if (defaults.specularPower !== null && "specularPower" in material) {
         material.specularPower = defaults.specularPower;
+    }
+
+    if ("transparencyMode" in material) {
+        material.transparencyMode = defaults.transparencyMode;
+    }
+
+    if (defaults.alphaCutOff !== null && "alphaCutOff" in material) {
+        material.alphaCutOff = defaults.alphaCutOff;
+    }
+
+    if (defaults.forceDepthWrite !== null && "forceDepthWrite" in material) {
+        material.forceDepthWrite = defaults.forceDepthWrite;
+    }
+
+    if (defaults.useAlphaFromDiffuseTexture !== null && "useAlphaFromDiffuseTexture" in material) {
+        material.useAlphaFromDiffuseTexture = defaults.useAlphaFromDiffuseTexture;
+    }
+
+    if (defaults.useAlphaFromAlbedoTexture !== null && "useAlphaFromAlbedoTexture" in material) {
+        material.useAlphaFromAlbedoTexture = defaults.useAlphaFromAlbedoTexture;
     }
 
     if (defaults.emissiveColor) {
@@ -183,16 +303,28 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
             }
             const baseEmissive = defaults.emissiveColor ?? new Color3(0, 0, 0);
             const diffuse = cloneColor3OrNull(material.diffuseColor) ?? new Color3(0, 0, 0);
+            const luminance = Math.max(0, diffuse.r * 0.299 + diffuse.g * 0.587 + diffuse.b * 0.114);
+            const maxChannel = Math.max(0.0001, diffuse.r, diffuse.g, diffuse.b);
+            const normalizedTint = new Color3(
+                diffuse.r / maxChannel,
+                diffuse.g / maxChannel,
+                diffuse.b / maxChannel,
+            );
+            const balancedTint = new Color3(
+                normalizedTint.r * AUTO_LUMINOUS_TINT_STRENGTH + diffuse.r * (1 - AUTO_LUMINOUS_TINT_STRENGTH),
+                normalizedTint.g * AUTO_LUMINOUS_TINT_STRENGTH + diffuse.g * (1 - AUTO_LUMINOUS_TINT_STRENGTH),
+                normalizedTint.b * AUTO_LUMINOUS_TINT_STRENGTH + diffuse.b * (1 - AUTO_LUMINOUS_TINT_STRENGTH),
+            );
+            const glowLevel = AUTO_LUMINOUS_BASE_LEVEL + luminance * AUTO_LUMINOUS_BRIGHTNESS_BIAS;
             setMaterialColorProperty(
                 material,
                 "emissiveColor",
                 new Color3(
-                    Math.min(1, baseEmissive.r + diffuse.r * 0.82),
-                    Math.min(1, baseEmissive.g + diffuse.g * 0.82),
-                    Math.min(1, baseEmissive.b + diffuse.b * 0.82),
+                    baseEmissive.r + balancedTint.r * glowLevel,
+                    baseEmissive.g + balancedTint.g * glowLevel,
+                    baseEmissive.b + balancedTint.b * glowLevel,
                 ),
             );
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, luminousWgslText);
             break;
         }
         case "wgsl-debug-white": {
@@ -256,6 +388,37 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 ),
             );
             host.constructor.externalWgslToonFragmentByMaterial.set(material as object, fullLightAddWgslText);
+            break;
+        }
+        case "wgsl-full-alpha-test": {
+            const preferredAlphaCutOff = defaults.alphaCutOff !== null
+                ? Math.min(defaults.alphaCutOff, 0.28)
+                : 0.28;
+            const diffuseTextureName = getTextureSourceName(material.diffuseTexture);
+            if (material.diffuseTexture && isAlphaCapableTextureName(diffuseTextureName)) {
+                material.diffuseTexture.hasAlpha = true;
+            }
+            if ("useAlphaFromDiffuseTexture" in material && material.diffuseTexture?.hasAlpha) {
+                material.useAlphaFromDiffuseTexture = true;
+            }
+
+            const albedoTextureName = getTextureSourceName(material.albedoTexture);
+            if (material.albedoTexture && isAlphaCapableTextureName(albedoTextureName)) {
+                material.albedoTexture.hasAlpha = true;
+            }
+            if ("useAlphaFromAlbedoTexture" in material && material.albedoTexture?.hasAlpha) {
+                material.useAlphaFromAlbedoTexture = true;
+            }
+
+            if ("alphaCutOff" in material) {
+                material.alphaCutOff = preferredAlphaCutOff;
+            }
+            if ("forceDepthWrite" in material) {
+                material.forceDepthWrite = false;
+            }
+            if ("transparencyMode" in material) {
+                material.transparencyMode = Material.MATERIAL_ALPHATEST;
+            }
             break;
         }
         case "wgsl-full-shadow": {
@@ -487,6 +650,8 @@ export function setWgslMaterialShaderPreset(
         applyWgslShaderPresetToMaterial(host, target.material, presetId);
     }
 
+    syncLuminousGlowLayer(host);
+    host.engine.releaseEffects?.();
     host.onMaterialShaderStateChanged?.();
     return true;
 }

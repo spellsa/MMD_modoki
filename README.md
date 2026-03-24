@@ -1,14 +1,26 @@
 # MMD modoki
 
-MMD modoki is a local editing tool inspired by MMD, built on top of Babylon.js Editor and `babylon-mmd`.
+MMD modoki is a local editing tool inspired by MMD, built on Babylon.js Editor and `babylon-mmd`.
 
-MMD modoki is under active development with the goal of becoming an alternative tool for environments where the original MMD cannot run.
-Builds for Windows, Linux, and macOS are being verified incrementally.
-Support is planned for English, Japanese, Traditional Chinese, Simplified Chinese, and Korean.
+Current public builds can:
+
+- Load PMX/PMD models, `.x` accessories, VMD motion, camera VMD, and audio
+- Edit bones, morphs, camera, lighting, post effects, and accessory transforms on a timeline
+- Import built-in and external LUT files (`.3dl`, `.cube`)
+- Export still images, numbered PNG sequences, and WebM videos
+- Switch the UI language between English, Japanese, Traditional Chinese, Simplified Chinese, and Korean
 
 ## Release
 
 - Releases: https://github.com/togechiyo/MMD_modoki/releases
+
+## Supported UI Languages
+
+- English
+- Japanese
+- Traditional Chinese
+- Simplified Chinese
+- Korean
 
 Read the full README in your preferred language:
 

@@ -318,6 +318,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             info: modelInfo,
             materials: sceneMaterials,
         });
+        host.syncLuminousGlowLayer?.();
         host.syncGlobalIlluminationSceneModels?.();
 
         const activateAsCurrent = host.shouldActivateAsCurrent(modelInfo);

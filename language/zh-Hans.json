@@ -141,7 +141,7 @@
     "label.lightDirectionZ":  "Dir Z",
     "label.azimuth":  "Azimuth",
     "label.elevation":  "Elevation",
-    "label.shadowStrength":  "Shadow strength",
+    "label.shadowStrength":  "Intensity",
     "label.ambientLight":  "Ambient light",
     "label.lightColorR":  "Light color R",
     "label.lightColorG":  "Light color G",

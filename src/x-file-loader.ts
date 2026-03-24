@@ -13,6 +13,7 @@ import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
+import { Material } from "@babylonjs/core/Materials/material";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -468,6 +469,14 @@ function textureUrl(rootUrl: string, name: string): string {
     }
 }
 
+function isAlphaCapableTextureUrl(url: string): boolean {
+    const normalized = url.split(/[?#]/, 1)[0]?.toLowerCase() ?? "";
+    return normalized.endsWith(".png")
+        || normalized.endsWith(".bmp")
+        || normalized.endsWith(".tga")
+        || normalized.endsWith(".webp");
+}
+
 function fileUrlToLocalPath(url: string): string | null {
     try {
         const parsed = new URL(url);
@@ -535,15 +544,26 @@ async function resolveSingleTextureUrl(rootUrl: string, rawName: string): Promis
     const fileInfoApi = (typeof window !== "undefined" && window.electronAPI?.getFileInfo)
         ? window.electronAPI.getFileInfo
         : null;
+    const nearbyFileApi = (typeof window !== "undefined" && window.electronAPI?.findNearbyFile)
+        ? window.electronAPI.findNearbyFile
+        : null;
 
     if (fileInfoApi) {
         const candidates = texturePathCandidates(original);
+        const rootDirectoryPath = fileUrlToLocalPath(rootUrl);
         for (const candidate of candidates) {
             const url = textureUrl(rootUrl, candidate);
             const localPath = fileUrlToLocalPath(url);
             if (!localPath) continue;
             const info = await fileInfoApi(localPath);
             if (info) return localPathToFileUrl(localPath);
+
+            if (nearbyFileApi && rootDirectoryPath) {
+                const nearbyPath = await nearbyFileApi(rootDirectoryPath, candidate);
+                if (nearbyPath) {
+                    return localPathToFileUrl(nearbyPath);
+                }
+            }
         }
         return null;
     }
@@ -614,7 +634,18 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, StandardMaterial>): St
     mat.specularColor = m.specular.clone();
     mat.emissiveColor = m.emissive.clone();
     mat.backFaceCulling = false;
-    if (m.textureUrl) mat.diffuseTexture = new Texture(m.textureUrl, scene, false, true);
+    if (m.textureUrl) {
+        const diffuseTexture = new Texture(m.textureUrl, scene, false, true);
+        mat.diffuseTexture = diffuseTexture;
+
+        // .x accessories bypass babylon-mmd's PMX alpha evaluation path, so
+        // enable alpha usage explicitly for common alpha-capable texture formats.
+        if (isAlphaCapableTextureUrl(m.textureUrl)) {
+            diffuseTexture.hasAlpha = true;
+            mat.useAlphaFromDiffuseTexture = true;
+            mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+        }
+    }
     if (m.sphereTextureUrl) {
         // Approximate MMD sphere maps on .x accessories with Babylon's spherical reflection.
         const sphereTex = new Texture(m.sphereTextureUrl, scene, false, true);

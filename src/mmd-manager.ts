@@ -7,6 +7,7 @@ import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
+import { Material } from "@babylonjs/core/Materials/material";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
@@ -69,6 +70,7 @@ import {
     setExternalWgslToonShader as setExternalWgslToonShaderImpl,
     setExternalWgslToonShaderForModel as setExternalWgslToonShaderForModelImpl,
     setWgslMaterialShaderPreset as setWgslMaterialShaderPresetImpl,
+    syncLuminousGlowLayer as syncLuminousGlowLayerImpl,
 } from "./scene/material-shader-service";
 import {
     getAntialiasEnabled as getAntialiasEnabledImpl,
@@ -417,6 +419,7 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-debug-white"
     | "wgsl-full-light"
     | "wgsl-full-light-add"
+    | "wgsl-full-alpha-test"
     | "wgsl-full-shadow"
     | "wgsl-light-and-shadow"
     | "wgsl-specular"
@@ -499,9 +502,14 @@ export class MmdManager {
             description: "Softer highlights with gentle emissive lift",
         },
         {
+            id: "wgsl-full-alpha-test",
+            label: "AlphaCutOff",
+            description: "Convert semi-transparent layers into softer alpha-cutoff rendering with more preserved edge coverage",
+        },
+        {
             id: "wgsl-autoluminous",
             label: "Luminous",
-            description: "Material-color neon lift with stronger emissive boost and reduced shadowing",
+            description: "Bloom-based emissive halo that respects final scene occlusion better",
         },
         {
             id: "wgsl-debug-white",
@@ -1119,9 +1127,9 @@ ${beforeFogAppendBlock}
     private postEffectVignetteEnabledValue = false;
     private postEffectVignetteWeightValue = 0.3;
     private postEffectBloomEnabledValue = false;
-    private postEffectBloomWeightValue = 0;
-    private postEffectBloomThresholdValue = 0.9;
-    private postEffectBloomKernelValue = 64;
+    private postEffectBloomWeightValue = 1;
+    private postEffectBloomThresholdValue = 1;
+    private postEffectBloomKernelValue = 100;
     private postEffectChromaticAberrationValue = 0;
     private postEffectGrainIntensityValue = 0;
     private postEffectSharpenEdgeValue = 0;
@@ -1209,10 +1217,10 @@ ${beforeFogAppendBlock}
     private readonly dofLensDistortionMinTeleFovDeg = 10;
     private readonly dofLensDistortionMaxWideFovDeg = 120;
     private dofLensDistortionInfluenceValue = 0;
-    private readonly dofLensHighlightsBaseGain = 0.8;
-    private readonly dofLensHighlightsGainRange = 6.2;
-    private readonly dofLensHighlightsBaseThreshold = 0.92;
-    private readonly dofLensHighlightsThresholdRange = 0.87;
+    private readonly dofLensHighlightsBaseGain = 1.1;
+    private readonly dofLensHighlightsGainRange = 8.0;
+    private readonly dofLensHighlightsBaseThreshold = 0.88;
+    private readonly dofLensHighlightsThresholdRange = 0.92;
     private dofLensSizeValue = 30;
     private dofFocalLengthValue = 50;
     private readonly dofFocalLengthFollowsCameraFov = true;
@@ -1494,6 +1502,10 @@ ${beforeFogAppendBlock}
         return setWgslMaterialShaderPresetImpl(this, modelIndex, materialKey, presetId);
     }
 
+    private syncLuminousGlowLayer(): void {
+        return syncLuminousGlowLayerImpl(this);
+    }
+
     private markMaterialShaderDirty(material: any): void {
         if (!material || typeof material !== "object") return;
 
@@ -1596,6 +1608,7 @@ ${beforeFogAppendBlock}
         this.modelMotionImportsByModel.delete(removed.model);
         removed.mesh.dispose();
         this.sceneModels.splice(removeIndex, 1);
+        this.syncLuminousGlowLayer();
 
         if (this.sceneModels.length === 0) {
             this.currentMesh = null;
@@ -2063,7 +2076,7 @@ ${beforeFogAppendBlock}
         this.camera.minZ = 0.1;
         this.camera.maxZ = 100000;
         this.camera.lowerRadiusLimit = 2;
-        this.camera.upperRadiusLimit = 100;
+        this.camera.upperRadiusLimit = null;
         this.camera.wheelDeltaPercentage = 0.01;
         this.camera.attachControl(canvas, true);
         this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
@@ -2186,7 +2199,7 @@ ${beforeFogAppendBlock}
         this.ground.receiveShadows = true;
 
         this.skydome = CreateSphere("skydome", {
-            diameter: 320,
+            diameter: 1200,
             segments: 24,
             updatable: false,
         }, this.scene);
@@ -2409,6 +2422,34 @@ ${beforeFogAppendBlock}
         physicsEngine.setGravity(gravity);
     }
 
+    private static getTextureSourceName(texture: unknown): string | null {
+        if (!texture || typeof texture !== "object") {
+            return null;
+        }
+
+        const textureCandidate = texture as { name?: unknown; url?: unknown };
+        const candidates = [textureCandidate.name, textureCandidate.url];
+        for (const candidate of candidates) {
+            if (typeof candidate === "string" && candidate.trim().length > 0) {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static isAlphaCapableTextureName(textureName: string | null): boolean {
+        if (!textureName) {
+            return false;
+        }
+
+        const normalized = textureName.split(/[?#]/, 1)[0].toLowerCase();
+        return normalized.endsWith(".png")
+            || normalized.endsWith(".bmp")
+            || normalized.endsWith(".tga")
+            || normalized.endsWith(".webp");
+    }
+
     private applyMmdMaterialCompatibilityFixes(material: any): boolean {
         if (!material || typeof material !== "object") {
             return false;
@@ -2416,11 +2457,42 @@ ${beforeFogAppendBlock}
 
         // Some loaders leave opaque materials at alpha=0, but restoring alpha on
         // texture-driven transparent materials can break face/eyelash draw order.
-        const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
-        const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+        let diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
+        let albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
         const hasOpacityTexture = Boolean(material.opacityTexture);
-        const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
-        const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
+        let usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
+        let isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
+
+        // babylon-mmd usually evaluates embedded texture alpha, but some PMX
+        // assets still reach us with alpha-capable diffuse textures flagged as
+        // opaque. Fall back to extension-based alpha usage so cutout textures do
+        // not become solid layers after load.
+        const diffuseTextureName = MmdManager.getTextureSourceName(material.diffuseTexture);
+        if (!diffuseTextureHasAlpha
+            && !material.useAlphaFromDiffuseTexture
+            && MmdManager.isAlphaCapableTextureName(diffuseTextureName)
+            && material.diffuseTexture) {
+            material.diffuseTexture.hasAlpha = true;
+            material.useAlphaFromDiffuseTexture = true;
+            material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+            diffuseTextureHasAlpha = true;
+            usesTextureAlpha = true;
+            isTransparencyModeEnabled = true;
+        }
+
+        const albedoTextureName = MmdManager.getTextureSourceName(material.albedoTexture);
+        if (!albedoTextureHasAlpha
+            && !material.useAlphaFromAlbedoTexture
+            && MmdManager.isAlphaCapableTextureName(albedoTextureName)
+            && material.albedoTexture) {
+            material.albedoTexture.hasAlpha = true;
+            material.useAlphaFromAlbedoTexture = true;
+            material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+            albedoTextureHasAlpha = true;
+            usesTextureAlpha = true;
+            isTransparencyModeEnabled = true;
+        }
+
         const hasTransparentTexturePath = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled;
 
         if (material.alpha === 0) {
@@ -3095,6 +3167,7 @@ ${beforeFogAppendBlock}
         }
 
         this.sceneModels = [];
+        this.syncLuminousGlowLayer();
         this.currentMesh = null;
         this.currentModel = null;
         this.activeModelInfo = null;
@@ -4716,7 +4789,7 @@ ${beforeFogAppendBlock}
 
     setCameraDistance(distance: number): void {
         const min = Math.max(0.1, this.camera.lowerRadiusLimit ?? this.camera.minZ);
-        const max = this.camera.upperRadiusLimit ?? 1000000;
+        const max = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
         this.camera.radius = Math.max(min, Math.min(max, distance));
         this.syncCameraRotationFromCurrentView();
         this.syncMmdCameraFromViewportCamera();

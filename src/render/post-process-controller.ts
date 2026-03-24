@@ -714,6 +714,8 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
         configureDofDepthRenderer(host);
         applyEditorDofSettings(host);
     }
+
+    host.syncLuminousGlowLayer?.();
 }
 
 export function applySsrSettings(host: any): void {
@@ -807,14 +809,14 @@ export function applyDofLensBlurSettings(host: any): void {
     }
 
     const focusDistance = Math.max(0.1, host.dofFocusDistanceMmValue / 1000);
-    const boostedStrength = Math.pow(strength, 0.7);
+    const boostedStrength = Math.pow(strength, 0.58);
     const highlightsGain = host.dofLensHighlightsBaseGain + boostedStrength * host.dofLensHighlightsGainRange;
     const highlightsThreshold = Math.max(
         0.08,
         host.dofLensHighlightsBaseThreshold - boostedStrength * host.dofLensHighlightsThresholdRange
     );
 
-    const aperture = Math.max(0.35, 0.55 + boostedStrength * 1.1);
+    const aperture = Math.max(0.45, 0.7 + boostedStrength * 1.35);
     host.lensRenderingPipeline.setFocusDistance(focusDistance);
     host.lensRenderingPipeline.setAperture(aperture);
     host.lensRenderingPipeline.setHighlightsGain(highlightsGain);

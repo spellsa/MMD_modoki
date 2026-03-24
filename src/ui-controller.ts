@@ -4498,18 +4498,18 @@ export class UIController {
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="label.bloomStrength">Bloom���x</span>
-                    <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
+                    <input data-postfx="bloom-weight" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
                     <span data-postfx-val="bloom-weight" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.bloomThreshold">BloomTh</span>
-                    <input data-postfx="bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="90" step="1">
-                    <span data-postfx-val="bloom-threshold" class="effect-value">0.90</span>
+                    <input data-postfx="bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                    <span data-postfx-val="bloom-threshold" class="effect-value">1.00</span>
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.bloomKernel">BloomK</span>
-                    <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="64" step="1">
-                    <span data-postfx-val="bloom-kernel" class="effect-value">64</span>
+                    <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="100" step="1">
+                    <span data-postfx-val="bloom-kernel" class="effect-value">100</span>
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.toneMap">ToneMap</span>

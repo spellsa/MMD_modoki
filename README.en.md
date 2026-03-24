@@ -1,11 +1,8 @@
 # MMD modoki
 
-MMD modoki is a local editing tool inspired by MMD, built on top of Babylon.js Editor and `babylon-mmd`.  
-It can load PMX/PMD models, accessories, VMD motion data, camera VMD data, and audio files for timeline editing, preview, and PNG export.
+MMD modoki is a local editing tool inspired by MMD, built on top of Babylon.js Editor and `babylon-mmd`.
 
-MMD modoki is under active development with the goal of becoming an alternative tool for environments where the original MMD cannot run.  
-Builds for Windows, Linux, and macOS are being verified incrementally.  
-Support is planned for English, Japanese, Traditional Chinese, Simplified Chinese, and Korean.
+It is being developed as a practical alternative for environments where the original MMD is hard to use. Public builds for Windows, Linux, and macOS are being verified incrementally, and the UI can be switched between English, Japanese, Traditional Chinese, Simplified Chinese, and Korean.
 
 ## Download
 
@@ -17,42 +14,59 @@ Distributed builds are provided as zip archives for each OS.
 - `mmd-modoki-macos-x64-zip.zip`
 - `mmd-modoki-linux-x64-zip.zip`
 
+## Supported UI Languages
+
+- English
+- Japanese
+- Traditional Chinese
+- Simplified Chinese
+- Korean
+
 ## Launch
 
 1. Download the zip file for your OS from `Releases`.
 2. Extract the zip file.
-3. Launch the application in the extracted folder.
+3. Launch the application from the extracted folder.
 
 Windows:
+
 - `MMD modoki.exe`
 
 macOS:
+
 - `MMD modoki.app`
 
 Linux:
+
 - Depending on your environment, the Linux build may need to be launched with `--no-sandbox`.
-- This is a temporary workaround to avoid startup failures related to `chrome-sandbox`.
-- Launch the executable directly from the extracted folder.
+- This is a temporary workaround for some `chrome-sandbox` startup failures.
 
 ## First Launch Notes
 
 - The macOS build is unsigned, so Gatekeeper warnings may appear.
+- If macOS blocks the app at launch, you can temporarily open it from `System Settings > Privacy & Security > Open Anyway`.
+- This is a temporary workaround while signed distribution is not yet available.
 - The Linux build may require additional libraries depending on the environment.
-- As this is still an early version, the save format and UI may change.
+- The project file format and UI are still evolving.
 
 ## Features
 
 - Load PMX/PMD models
 - Load `.x` accessories
-- Load VMD motions and camera VMD data
-- Load MP3/WAV audio
-- Edit on a timeline
-- Adjust bones, morphs, camera, and lighting
-- Save PNG images and numbered PNG sequences
-- Adjust post effects such as DoF, Bloom, and LUT
+- Load VMD motions, camera VMD data, and VPD poses
+- Load MP3/WAV audio for timeline preview
+- Edit bones, morphs, camera, lighting, post effects, and accessory transforms on a timeline
+- Save and reload project files
+- Import built-in and external LUT files (`.3dl`, `.cube`) from the LUT picker or by drag and drop
+- Adjust post effects such as DoF, Bloom, LUT, SSR, fog, and lens distortion
+- Use material shader presets including `AlphaCutOff` and `Luminous`
+- Export PNG images, numbered PNG sequences, and WebM videos
 
 Notes:
-- SSAO is currently always disabled in public builds to reduce load.
+
+- `.vmd` files are routed as model motion or camera motion depending on their contents.
+- `.x` files are expected to be text-format DirectX X files.
+- SSAO is currently kept disabled in public builds to reduce load.
 - Anti-aliasing uses `MSAA x4 + FXAA`.
 
 ## Supported File Types
@@ -68,12 +82,9 @@ Available through normal open operations or drag and drop:
 Available from dedicated UI:
 
 - Project: `.json` (default file name pattern: `*.modoki.json`)
-- LUT: `.3dl` `.cube` (load from the LUT picker or by drag and drop)
-
-Notes:
-
-- `.vmd` files are loaded either as model motion or camera motion depending on their contents.
-- `.x` files are expected to be text-format DirectX X files.
+- LUT: `.3dl` `.cube`
+- Image output: `.png`
+- Video output: `.webm`
 
 ## Basic Controls
 
@@ -88,6 +99,7 @@ Notes:
 - `Delete`: Delete selected keyframes
 
 Mouse:
+
 - Middle-button drag: Move view
 - Right drag: Rotate
 - Wheel: Zoom
@@ -95,6 +107,7 @@ Mouse:
 ## Development
 
 Requirements:
+
 - Node.js 18 or later
 - npm
 

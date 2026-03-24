@@ -312,7 +312,9 @@ export async function importProjectState(
     host.toonShadowInfluence = typeof data.lighting.toonShadowInfluence === "number" && Number.isFinite(data.lighting.toonShadowInfluence)
         ? data.lighting.toonShadowInfluence
         : 1;
-    host.shadowDarkness = data.lighting.shadowDarkness;
+    host.shadowDarkness = typeof data.lighting.shadowDarkness === "number" && Number.isFinite(data.lighting.shadowDarkness)
+        ? data.lighting.shadowDarkness
+        : 0;
     host.shadowFrustumSize = typeof data.lighting.shadowFrustumSize === "number" && Number.isFinite(data.lighting.shadowFrustumSize)
         ? data.lighting.shadowFrustumSize
         : host.shadowFrustumSizeValue;
@@ -384,13 +386,13 @@ export async function importProjectState(
             : false);
     host.postEffectBloomWeight = typeof data.effects.bloomWeight === "number" && Number.isFinite(data.effects.bloomWeight)
         ? data.effects.bloomWeight
-        : 0;
+        : 1;
     host.postEffectBloomThreshold = typeof data.effects.bloomThreshold === "number" && Number.isFinite(data.effects.bloomThreshold)
         ? data.effects.bloomThreshold
-        : 0.9;
+        : 1;
     host.postEffectBloomKernel = typeof data.effects.bloomKernel === "number" && Number.isFinite(data.effects.bloomKernel)
         ? data.effects.bloomKernel
-        : 64;
+        : 100;
     host.postEffectChromaticAberration = typeof data.effects.chromaticAberration === "number" && Number.isFinite(data.effects.chromaticAberration)
         ? data.effects.chromaticAberration
         : 0;
