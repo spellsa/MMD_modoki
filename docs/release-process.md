@@ -1,6 +1,6 @@
 # リリース手順メモ
 
-更新日: 2026-03-13
+更新日: 2026-03-24
 
 ## 目的
 
@@ -17,8 +17,8 @@
 5. tag を作成して push する。
 
 ```bash
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
 6. GitHub Actions の `Build Zip Packages` が成功することを確認する。
