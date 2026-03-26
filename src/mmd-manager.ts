@@ -7,7 +7,6 @@ import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
-import { Material } from "@babylonjs/core/Materials/material";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
@@ -2048,6 +2047,7 @@ ${beforeFogAppendBlock}
 
         // Create engine (WebGPU preferred path is handled by MmdManager.create)
         this.engine = engine ?? MmdManager.createWebGlEngine(canvas);
+        this.configureMmdTextureLoaderForWebGpu();
         this.resizeToCanvasClientSize();
         this.ensureBoneOverlayCanvas();
 
@@ -2422,34 +2422,6 @@ ${beforeFogAppendBlock}
         physicsEngine.setGravity(gravity);
     }
 
-    private static getTextureSourceName(texture: unknown): string | null {
-        if (!texture || typeof texture !== "object") {
-            return null;
-        }
-
-        const textureCandidate = texture as { name?: unknown; url?: unknown };
-        const candidates = [textureCandidate.name, textureCandidate.url];
-        for (const candidate of candidates) {
-            if (typeof candidate === "string" && candidate.trim().length > 0) {
-                return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static isAlphaCapableTextureName(textureName: string | null): boolean {
-        if (!textureName) {
-            return false;
-        }
-
-        const normalized = textureName.split(/[?#]/, 1)[0].toLowerCase();
-        return normalized.endsWith(".png")
-            || normalized.endsWith(".bmp")
-            || normalized.endsWith(".tga")
-            || normalized.endsWith(".webp");
-    }
-
     private applyMmdMaterialCompatibilityFixes(material: any): boolean {
         if (!material || typeof material !== "object") {
             return false;
@@ -2457,46 +2429,19 @@ ${beforeFogAppendBlock}
 
         // Some loaders leave opaque materials at alpha=0, but restoring alpha on
         // texture-driven transparent materials can break face/eyelash draw order.
-        let diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
-        let albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+        const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
+        const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
         const hasOpacityTexture = Boolean(material.opacityTexture);
-        let usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
-        let isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
+        const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
+        const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
 
-        // babylon-mmd usually evaluates embedded texture alpha, but some PMX
-        // assets still reach us with alpha-capable diffuse textures flagged as
-        // opaque. Fall back to extension-based alpha usage so cutout textures do
-        // not become solid layers after load.
-        const diffuseTextureName = MmdManager.getTextureSourceName(material.diffuseTexture);
-        if (!diffuseTextureHasAlpha
-            && !material.useAlphaFromDiffuseTexture
-            && MmdManager.isAlphaCapableTextureName(diffuseTextureName)
-            && material.diffuseTexture) {
-            material.diffuseTexture.hasAlpha = true;
-            material.useAlphaFromDiffuseTexture = true;
-            material.transparencyMode = Material.MATERIAL_ALPHABLEND;
-            diffuseTextureHasAlpha = true;
-            usesTextureAlpha = true;
-            isTransparencyModeEnabled = true;
-        }
-
-        const albedoTextureName = MmdManager.getTextureSourceName(material.albedoTexture);
-        if (!albedoTextureHasAlpha
-            && !material.useAlphaFromAlbedoTexture
-            && MmdManager.isAlphaCapableTextureName(albedoTextureName)
-            && material.albedoTexture) {
-            material.albedoTexture.hasAlpha = true;
-            material.useAlphaFromAlbedoTexture = true;
-            material.transparencyMode = Material.MATERIAL_ALPHABLEND;
-            albedoTextureHasAlpha = true;
-            usesTextureAlpha = true;
-            isTransparencyModeEnabled = true;
-        }
-
+        // babylon-mmd already evaluates PMX transparency using actual texture
+        // contents. Keep that result intact here so we do not accidentally force
+        // opaque PNG textures into the transparent queue.
         const hasTransparentTexturePath = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled;
 
         if (material.alpha === 0) {
-            if (!hasTransparentTexturePath && (material.diffuseTexture || material.albedoTexture)) {
+            if (!hasTransparentTexturePath && !isTransparencyModeEnabled && (material.diffuseTexture || material.albedoTexture)) {
                 material.alpha = 1;
             }
         }
@@ -3210,6 +3155,64 @@ ${beforeFogAppendBlock}
 
     private isWebGpuEngine(): boolean {
         return this.engine instanceof WebGPUEngine;
+    }
+
+    private configureMmdTextureLoaderForWebGpu(): void {
+        if (!this.isWebGpuEngine()) {
+            return;
+        }
+
+        // WebGPU in Babylon 8.45.3 can mis-handle some non-square MMD textures
+        // when mipmaps are generated, so force no-mipmap uploads for this path.
+        const sharedBuilder = MmdModelLoader.SharedMaterialBuilder;
+        if (!(sharedBuilder instanceof MmdStandardMaterialBuilder)) {
+            return;
+        }
+
+        const textureLoader = ((sharedBuilder as unknown as { [key: string]: unknown })._textureLoader as {
+            __mmdModokiNoMipmapPatched?: boolean;
+            loadTextureAsync?: (...args: any[]) => any;
+            loadTextureFromBufferAsync?: (...args: any[]) => any;
+        } | undefined);
+        if (!textureLoader || textureLoader.__mmdModokiNoMipmapPatched) {
+            return;
+        }
+
+        const wrapTextureOptions = <T extends { noMipmap?: boolean; samplingMode?: number }>(options: T | undefined): T => ({
+            ...(options ?? {} as T),
+            noMipmap: true,
+        });
+
+        const originalLoadTextureAsync = textureLoader.loadTextureAsync?.bind(textureLoader);
+        if (originalLoadTextureAsync) {
+            textureLoader.loadTextureAsync = ((uniqueId, rootUrl, relativeTexturePathOrIndex, scene, assetContainer, options) => {
+                return originalLoadTextureAsync(
+                    uniqueId,
+                    rootUrl,
+                    relativeTexturePathOrIndex,
+                    scene,
+                    assetContainer,
+                    wrapTextureOptions(options),
+                );
+            }) as typeof textureLoader.loadTextureAsync;
+        }
+
+        const originalLoadTextureFromBufferAsync = textureLoader.loadTextureFromBufferAsync?.bind(textureLoader);
+        if (originalLoadTextureFromBufferAsync) {
+            textureLoader.loadTextureFromBufferAsync = ((uniqueId, textureName, arrayBufferOrBlob, scene, assetContainer, options, applyPathNormalization = true) => {
+                return originalLoadTextureFromBufferAsync(
+                    uniqueId,
+                    textureName,
+                    arrayBufferOrBlob,
+                    scene,
+                    assetContainer,
+                    wrapTextureOptions(options),
+                    applyPathNormalization,
+                );
+            }) as typeof textureLoader.loadTextureFromBufferAsync;
+        }
+
+        textureLoader.__mmdModokiNoMipmapPatched = true;
     }
 
     private hasPrePassRendererSupport(): boolean {
@@ -5444,5 +5447,3 @@ ${beforeFogAppendBlock}
         this.globalIlluminationController?.resize();
     }
 }
-
-

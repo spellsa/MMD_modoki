@@ -29,27 +29,137 @@ type SceneModelMaterialEntry = {
     key: string;
     name: string;
     material: any;
+    meshNames: string[];
 };
+
+function getTextureDebugSource(texture: any): string | null {
+    if (!texture || typeof texture !== "object") return null;
+
+    for (const candidate of [texture.name, texture.url]) {
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function getTextureDebugSummary(texture: any): string {
+    if (!texture || typeof texture !== "object") {
+        return "null";
+    }
+
+    const source = getTextureDebugSource(texture) ?? "unknown";
+    const hasAlpha = typeof texture.hasAlpha === "boolean" ? String(texture.hasAlpha) : "unknown";
+    const ready = typeof texture.isReady === "function" ? String(Boolean(texture.isReady())) : "unknown";
+    const size = typeof texture.getSize === "function" ? texture.getSize() : null;
+    const sizeLabel = size && typeof size.width === "number" && typeof size.height === "number"
+        ? `${size.width}x${size.height}`
+        : "unknown";
+    const format = typeof texture.format === "number" ? String(texture.format) : "unknown";
+    const type = typeof texture.type === "number" ? String(texture.type) : "unknown";
+
+    return `${source} [ready=${ready}, hasAlpha=${hasAlpha}, size=${sizeLabel}, format=${format}, type=${type}]`;
+}
+
+function isFaceRelatedMaterialName(materialName: string): boolean {
+    return /(?:顔|ヘッド|まぶた|まつ毛|眉|目|瞳|口|歯|舌|髪|前髪|後髪|耳|頬|頬紅|アイシャドウ|黒目|白目)/.test(materialName);
+}
+
+function getTransparencyModeLabel(mode: unknown): string {
+    switch (mode) {
+        case 0:
+            return "opaque";
+        case 1:
+            return "alpha-test";
+        case 2:
+            return "alpha-blend";
+        default:
+            return "unset";
+    }
+}
+
+function buildPmxMaterialTransparencyDebugRow(entry: SceneModelMaterialEntry, pmxFlags: number | null): Record<string, unknown> {
+    const material = entry.material ?? {};
+    const diffuseTexture = material.diffuseTexture ?? null;
+    const albedoTexture = material.albedoTexture ?? null;
+    const opacityTexture = material.opacityTexture ?? null;
+
+    return {
+        material: entry.name,
+        meshNames: entry.meshNames,
+        pmxFlags: pmxFlags === null ? null : `0x${pmxFlags.toString(16)}`,
+        alpha: Number(material.alpha ?? 1),
+        transparencyMode: getTransparencyModeLabel(material.transparencyMode),
+        useAlphaFromDiffuseTexture: Boolean(material.useAlphaFromDiffuseTexture),
+        useAlphaFromAlbedoTexture: Boolean(material.useAlphaFromAlbedoTexture),
+        diffuseHasAlpha: Boolean(diffuseTexture?.hasAlpha),
+        albedoHasAlpha: Boolean(albedoTexture?.hasAlpha),
+        hasOpacityTexture: Boolean(opacityTexture),
+        forceDepthWrite: Boolean(material.forceDepthWrite),
+        alphaCutOff: typeof material.alphaCutOff === "number" ? material.alphaCutOff : null,
+        diffuseTexture: getTextureDebugSummary(diffuseTexture),
+        albedoTexture: getTextureDebugSummary(albedoTexture),
+        opacityTexture: getTextureDebugSummary(opacityTexture),
+    };
+}
+
+function logPmxMaterialTransparencyDebug(fileName: string, sceneMaterials: SceneModelMaterialEntry[], materialFlagMap: WeakMap<object, number>): void {
+    if (sceneMaterials.length === 0) {
+        return;
+    }
+
+    const rows = sceneMaterials.map((entry) => buildPmxMaterialTransparencyDebugRow(entry, materialFlagMap.get(entry.material as object) ?? null));
+    const transparentLikeCount = rows.filter((row) => {
+        const alpha = typeof row.alpha === "number" ? row.alpha : 1;
+        return alpha < 0.999
+            || row.transparencyMode !== "opaque"
+            || Boolean(row.useAlphaFromDiffuseTexture)
+            || Boolean(row.useAlphaFromAlbedoTexture)
+            || Boolean(row.diffuseHasAlpha)
+            || Boolean(row.albedoHasAlpha)
+            || Boolean(row.hasOpacityTexture);
+    }).length;
+
+    console.log(`[PMX] Transparency debug for ${fileName}: ${rows.length} materials (${transparentLikeCount} transparent-like)`);
+    for (const row of rows) {
+        console.log(`[PMX][transparency] ${JSON.stringify(row)}`);
+    }
+
+    for (const row of rows) {
+        if (typeof row.material !== "string" || !isFaceRelatedMaterialName(row.material)) {
+            continue;
+        }
+        console.log(`[PMX][face] ${JSON.stringify(row)}`);
+    }
+}
 
 function collectSceneModelMaterials(host: any, meshes: Mesh[]): SceneModelMaterialEntry[] {
     const materialMap = new Map<object, SceneModelMaterialEntry>();
     let materialIndex = 0;
 
-    const registerMaterial = (material: any, fallbackName: string): void => {
+    const registerMaterial = (material: any, fallbackName: string, meshName: string): void => {
         if (!material || typeof material !== "object") return;
-        if (materialMap.has(material as object)) return;
-
         const materialName = typeof material.name === "string" && material.name.trim().length > 0
             ? material.name
             : fallbackName;
-        const key = String(materialIndex) + ":" + materialName;
-        materialIndex += 1;
 
-        materialMap.set(material as object, {
-            key,
-            name: materialName,
-            material,
-        });
+        let entry = materialMap.get(material as object);
+        if (!entry) {
+            const key = String(materialIndex) + ":" + materialName;
+            materialIndex += 1;
+            entry = {
+                key,
+                name: materialName,
+                material,
+                meshNames: [],
+            };
+            materialMap.set(material as object, entry);
+        }
+
+        if (!entry.meshNames.includes(meshName)) {
+            entry.meshNames.push(meshName);
+        }
 
         ensureMaterialShaderDefaults(host, material);
         if (!host.materialShaderPresetByMaterial.has(material as object)) {
@@ -67,10 +177,10 @@ function collectSceneModelMaterials(host: any, meshes: Mesh[]): SceneModelMateri
         if (Array.isArray(material.subMaterials)) {
             for (let subIndex = 0; subIndex < material.subMaterials.length; subIndex += 1) {
                 const subMaterial = material.subMaterials[subIndex];
-                registerMaterial(subMaterial, (mesh.name || "mesh") + "#" + String(subIndex + 1));
+                registerMaterial(subMaterial, (mesh.name || "mesh") + "#" + String(subIndex + 1), mesh.name || "mesh");
             }
         } else {
-            registerMaterial(material, mesh.name || ("material_" + String(materialIndex)));
+            registerMaterial(material, mesh.name || ("material_" + String(materialIndex)), mesh.name || "mesh");
         }
     }
 
@@ -154,11 +264,8 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             }
 
             if (mesh.material) {
-                const isTransparentLike = host.applyMmdMaterialCompatibilityFixes(mesh.material as any);
+                host.applyMmdMaterialCompatibilityFixes(mesh.material as any);
                 mesh.alphaIndex = materialOrder;
-                if (isTransparentLike) {
-                    mesh.alphaIndex = materialOrder;
-                }
                 materialOrder += 1;
             }
         }
@@ -166,6 +273,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         host.applyModelEdgeToMeshes(result.meshes as Mesh[]);
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
+        logPmxMaterialTransparencyDebug(fileName, sceneMaterials, materialFlagMap);
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
             materialProxyConstructor: MmdStandardMaterialProxy,

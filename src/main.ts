@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, session } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import started from 'electron-squirrel-startup';
 import type {
@@ -333,6 +334,19 @@ const configureSessionSecurity = (): void => {
     callback({ cancel: true });
   });
 
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['file://*/*'] }, (details, callback) => {
+    try {
+      const redirectUrl = resolveNearbyFileUrl(details.url);
+      if (redirectUrl && redirectUrl !== details.url) {
+        callback({ redirectURL: redirectUrl });
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to resolve file request:', err);
+    }
+    callback({});
+  });
+
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
   });
@@ -530,6 +544,42 @@ function findNearbyFileSync(baseDirectoryPath: string, targetPath: string, maxDe
         queue.push({ dir: fullPath, depth: current.depth + 1 });
       }
     }
+  }
+
+  return null;
+}
+
+function resolveNearbyFileUrl(requestUrl: string, maxAncestorDepth = 4, maxSearchDepth = 2): string | null {
+  let requestPath: string;
+
+  try {
+    const parsed = new URL(requestUrl);
+    if (parsed.protocol !== 'file:') {
+      return null;
+    }
+    requestPath = fileURLToPath(parsed);
+  } catch {
+    return null;
+  }
+
+  if (fs.existsSync(requestPath)) {
+    return null;
+  }
+
+  const targetBaseName = path.basename(requestPath);
+  let searchDir = path.dirname(requestPath);
+
+  for (let ancestorDepth = 0; ancestorDepth <= maxAncestorDepth; ancestorDepth += 1) {
+    const found = findNearbyFileSync(searchDir, targetBaseName, maxSearchDepth);
+    if (found) {
+      return pathToFileURL(found).toString();
+    }
+
+    const parentDir = path.dirname(searchDir);
+    if (parentDir === searchDir) {
+      break;
+    }
+    searchDir = parentDir;
   }
 
   return null;
