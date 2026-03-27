@@ -1084,6 +1084,7 @@ ${beforeFogAppendBlock}
     private hasCameraMotion = false;
     private readonly modelKeyframeTracksByModel = new WeakMap<MmdModel, Map<string, Uint32Array>>();
     private readonly modelSourceAnimationsByModel = new WeakMap<MmdModel, MmdAnimation>();
+    private readonly physicsAfterPhysicsPatchedModels = new WeakSet<object>();
     private cameraSourceAnimation: MmdAnimation | null = null;
     private readonly modelMotionImportsByModel = new WeakMap<MmdModel, ProjectMotionImport[]>();
     private cameraMotionPath: string | null = null;
@@ -1981,15 +1982,21 @@ ${beforeFogAppendBlock}
         return this.physicsAvailable && this.physicsEnabled;
     }
 
+    private syncScenePhysicsSimulationState(): void {
+        this.scene.physicsEnabled = this.getPhysicsEnabled() && this._isPlaying;
+    }
+
     public setPhysicsEnabled(enabled: boolean): boolean {
         if (!this.physicsAvailable) {
             this.physicsEnabled = false;
+            this.syncScenePhysicsSimulationState();
             this.onPhysicsStateChanged?.(false, false);
             return false;
         }
 
         this.physicsEnabled = enabled;
         this.applyPhysicsStateToAllModels();
+        this.syncScenePhysicsSimulationState();
         this.onPhysicsStateChanged?.(this.physicsEnabled, true);
         return this.physicsEnabled;
     }
@@ -2367,6 +2374,7 @@ ${beforeFogAppendBlock}
                 this.physicsAvailable = false;
                 this.physicsEnabled = false;
                 this.physicsBackend = "none";
+                this.syncScenePhysicsSimulationState();
                 this.onPhysicsStateChanged?.(false, false);
                 this.onError?.(`Physics init warning: Bullet=${bulletMessage}; Ammo=${ammoMessage}`);
                 return false;
@@ -2376,6 +2384,7 @@ ${beforeFogAppendBlock}
         this.physicsAvailable = true;
         this.applyPhysicsGravity();
         this.applyPhysicsStateToAllModels();
+        this.syncScenePhysicsSimulationState();
         this.onPhysicsStateChanged?.(this.physicsEnabled, true);
         return true;
     }
@@ -2446,10 +2455,218 @@ ${beforeFogAppendBlock}
     private applyPhysicsStateToModel(model: MmdModel): void {
         if (model.rigidBodyStates.length === 0) return;
 
-        model.rigidBodyStates.fill(this.getPhysicsEnabled() ? 1 : 0);
-        if (this.getPhysicsEnabled()) {
+        const shouldSimulatePhysics = this.getPhysicsEnabled() && this._isPlaying;
+        model.rigidBodyStates.fill(shouldSimulatePhysics ? 1 : 0);
+        if (shouldSimulatePhysics) {
             this.mmdRuntime.initializeMmdModelPhysics(model);
         }
+    }
+
+    private patchModelAfterPhysicsForPausedState(model: MmdModel): void {
+        const modelObject = model as unknown as object;
+        if (this.physicsAfterPhysicsPatchedModels.has(modelObject)) {
+            return;
+        }
+
+        const modelInternal = model as unknown as {
+            afterPhysics?: () => void;
+            _physicsModel?: { syncBones?: () => void } | null;
+            _update?: (afterPhysicsStage: boolean) => void;
+            mesh?: { metadata?: { skeleton?: { _markAsDirty?: () => void } } };
+        };
+
+        if (typeof modelInternal.afterPhysics !== "function" || typeof modelInternal._update !== "function") {
+            return;
+        }
+
+        modelInternal.afterPhysics = () => {
+            if (this.getPhysicsEnabled() && this._isPlaying) {
+                modelInternal._physicsModel?.syncBones?.();
+            }
+            modelInternal._update?.(true);
+            modelInternal.mesh?.metadata?.skeleton?._markAsDirty?.();
+        };
+
+        this.physicsAfterPhysicsPatchedModels.add(modelObject);
+    }
+
+    private normalizeRuntimeBoneTransformStages(model: MmdModel): void {
+        const runtimeBones = (model as unknown as {
+            runtimeBones?: Array<{
+                name?: string;
+                parentBone?: object | null;
+                childBones?: unknown[];
+                transformAfterPhysics?: boolean;
+            }>;
+        }).runtimeBones;
+        if (!Array.isArray(runtimeBones) || runtimeBones.length === 0) {
+            return;
+        }
+
+        let adjustedBoneCount = 0;
+        const adjustedBoneNames: string[] = [];
+        const visited = new Set<object>();
+
+        const propagateAfterPhysicsStage = (bone: {
+            name?: string;
+            childBones?: unknown[];
+            transformAfterPhysics?: boolean;
+        }): void => {
+            const boneObject = bone as unknown as object;
+            if (visited.has(boneObject)) {
+                return;
+            }
+            visited.add(boneObject);
+
+            const childBones = Array.isArray(bone.childBones) ? bone.childBones : [];
+            for (const child of childBones) {
+                if (!child || typeof child !== "object") {
+                    continue;
+                }
+
+                const childBone = child as {
+                    name?: string;
+                    childBones?: unknown[];
+                    transformAfterPhysics?: boolean;
+                };
+                if (childBone.transformAfterPhysics !== true) {
+                    childBone.transformAfterPhysics = true;
+                    adjustedBoneCount += 1;
+                    if (typeof childBone.name === "string") {
+                        adjustedBoneNames.push(childBone.name);
+                    }
+                }
+                propagateAfterPhysicsStage(childBone);
+            }
+        };
+
+        for (const runtimeBone of runtimeBones) {
+            if (!runtimeBone || runtimeBone.transformAfterPhysics !== true) {
+                continue;
+            }
+            propagateAfterPhysicsStage(runtimeBone);
+        }
+
+        if (adjustedBoneCount === 0) {
+            return;
+        }
+
+        const modelName = typeof model.mesh?.name === "string" ? model.mesh.name : "model";
+        console.warn(`[PMX] Normalized runtime bone transform stages for after-physics parent chains. ${modelName}: ${adjustedBoneCount} bone(s).`, {
+            model: modelName,
+            adjustedBoneCount,
+            adjustedBoneNames,
+        });
+        this.addRuntimeDiagnostic(`Normalized after-physics bone stages: ${modelName} (${adjustedBoneCount} bone(s))`);
+    }
+
+    private normalizeRuntimeBoneEvaluationOrder(model: MmdModel): void {
+        const modelInternal = model as unknown as {
+            _sortedRuntimeBones?: Array<{
+                name?: string;
+                parentBone?: object | null;
+                transformAfterPhysics?: boolean;
+            }>;
+        };
+
+        const sortedRuntimeBones = modelInternal._sortedRuntimeBones;
+        if (!Array.isArray(sortedRuntimeBones) || sortedRuntimeBones.length === 0) {
+            return;
+        }
+
+        const originalOrderIndex = new Map<object, number>();
+        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
+            originalOrderIndex.set(sortedRuntimeBones[index] as unknown as object, index);
+        }
+
+        const sortGroupParentFirst = (afterPhysicsStage: boolean): Array<{
+            name?: string;
+            parentBone?: object | null;
+            transformAfterPhysics?: boolean;
+        }> => {
+            const groupBones = sortedRuntimeBones.filter((bone) => bone.transformAfterPhysics === afterPhysicsStage);
+            if (groupBones.length <= 1) {
+                return groupBones;
+            }
+
+            const groupSet = new Set<object>(groupBones.map((bone) => bone as unknown as object));
+            const indegree = new Map<object, number>();
+            const childMap = new Map<object, Array<{
+                name?: string;
+                parentBone?: object | null;
+                transformAfterPhysics?: boolean;
+            }>>();
+            for (const bone of groupBones) {
+                const boneObject = bone as unknown as object;
+                indegree.set(boneObject, 0);
+                childMap.set(boneObject, []);
+            }
+
+            for (const bone of groupBones) {
+                const parentBone = bone.parentBone;
+                if (!parentBone || !groupSet.has(parentBone as object)) {
+                    continue;
+                }
+                const boneObject = bone as unknown as object;
+                indegree.set(boneObject, (indegree.get(boneObject) ?? 0) + 1);
+                childMap.get(parentBone as object)?.push(bone);
+            }
+
+            const available = groupBones
+                .filter((bone) => (indegree.get(bone as unknown as object) ?? 0) === 0)
+                .sort((a, b) => (originalOrderIndex.get(a as unknown as object) ?? 0) - (originalOrderIndex.get(b as unknown as object) ?? 0));
+            const reorderedGroup: typeof groupBones = [];
+            const enqueueAvailable = (bone: typeof groupBones[number]): void => {
+                available.push(bone);
+                available.sort((a, b) => (originalOrderIndex.get(a as unknown as object) ?? 0) - (originalOrderIndex.get(b as unknown as object) ?? 0));
+            };
+
+            while (available.length > 0) {
+                const bone = available.shift();
+                if (!bone) {
+                    break;
+                }
+                reorderedGroup.push(bone);
+
+                for (const childBone of childMap.get(bone as unknown as object) ?? []) {
+                    const childObject = childBone as unknown as object;
+                    const nextIndegree = (indegree.get(childObject) ?? 0) - 1;
+                    indegree.set(childObject, nextIndegree);
+                    if (nextIndegree === 0) {
+                        enqueueAvailable(childBone);
+                    }
+                }
+            }
+
+            if (reorderedGroup.length !== groupBones.length) {
+                return groupBones;
+            }
+            return reorderedGroup;
+        };
+
+        const reorderedBones = [
+            ...sortGroupParentFirst(false),
+            ...sortGroupParentFirst(true),
+        ];
+
+        let changed = false;
+        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
+            if (sortedRuntimeBones[index] !== reorderedBones[index]) {
+                changed = true;
+                break;
+            }
+        }
+        if (!changed) {
+            return;
+        }
+
+        sortedRuntimeBones.splice(0, sortedRuntimeBones.length, ...reorderedBones);
+        const modelName = typeof model.mesh?.name === "string" ? model.mesh.name : "model";
+        console.warn(`[PMX] Normalized runtime bone evaluation order for parent-first traversal. ${modelName}.`, {
+            model: modelName,
+            runtimeBoneCount: sortedRuntimeBones.length,
+        });
+        this.addRuntimeDiagnostic(`Normalized runtime bone evaluation order: ${modelName} (${sortedRuntimeBones.length} bone(s))`);
     }
 
     private applyPhysicsStateToAllModels(): void {
@@ -2648,6 +2865,42 @@ ${beforeFogAppendBlock}
             engine: this.getEngineType(),
         });
         this.addRuntimeDiagnostic(`CPU skinning fallback: ${modelLabel} (${maxBones} bones, safe threshold ${safeBoneThreshold}, hard limit ${hardBoneLimit})`);
+    }
+
+    private applyCpuSkinningFallbackForWebGpuSdefMeshes(
+        modelLabel: string,
+        meshes: readonly Mesh[],
+    ): void {
+        if (!this.isWebGpuEngine()) {
+            return;
+        }
+
+        let affectedMeshCount = 0;
+        for (const mesh of meshes) {
+            if (!mesh.useBones || mesh.numBoneInfluencers <= 0) {
+                continue;
+            }
+            if (!mesh.skeleton) {
+                continue;
+            }
+            if (!mesh.isVerticesDataPresent("matricesSdefC")) {
+                continue;
+            }
+
+            mesh.computeBonesUsingShaders = false;
+            affectedMeshCount += 1;
+        }
+
+        if (affectedMeshCount === 0) {
+            return;
+        }
+
+        console.warn(`[PMX] CPU skinning fallback enabled for WebGPU SDEF meshes. ${modelLabel}: ${affectedMeshCount} mesh(es).`, {
+            model: modelLabel,
+            affectedMeshCount,
+            engine: this.getEngineType(),
+        });
+        this.addRuntimeDiagnostic(`CPU skinning fallback for WebGPU SDEF: ${modelLabel} (${affectedMeshCount} mesh(es))`);
     }
 
     private suspendSceneRendering(): void {
@@ -2897,6 +3150,8 @@ ${beforeFogAppendBlock}
         this.manualPlaybackWithoutAudio = this.audioPlayer === null;
         this.refreshActiveRuntimeAnimationHandles();
         this.mmdRuntime.seekAnimation(this._currentFrame, true);
+        this.applyPhysicsStateToAllModels();
+        this.syncScenePhysicsSimulationState();
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
             this.mmdRuntime.pauseAnimation();
@@ -2912,6 +3167,7 @@ ${beforeFogAppendBlock}
         this.manualPlaybackWithoutAudio = false;
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
+        this.syncScenePhysicsSimulationState();
         this.mmdRuntime.pauseAnimation();
     }
 
@@ -2921,9 +3177,11 @@ ${beforeFogAppendBlock}
         this.manualPlaybackFrameCursor = 0;
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
+        this.syncScenePhysicsSimulationState();
         this.mmdRuntime.pauseAnimation();
         this.refreshActiveRuntimeAnimationHandles();
         this.mmdRuntime.seekAnimation(0, true);
+        this.applyPhysicsStateToAllModels();
         this._currentFrame = 0;
         this.onFrameUpdate?.(0, this._totalFrames);
     }
@@ -2935,6 +3193,9 @@ ${beforeFogAppendBlock}
         }
         this._currentFrame = targetFrame;
         this.mmdRuntime.seekAnimation(this._currentFrame, true);
+        if (!this._isPlaying && this.getPhysicsEnabled()) {
+            this.applyPhysicsStateToAllModels();
+        }
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
         }

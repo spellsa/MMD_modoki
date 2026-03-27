@@ -1,5 +1,6 @@
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import type { BoneControlInfo, ModelInfo } from "../types";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
@@ -76,6 +77,239 @@ function getTransparencyModeLabel(mode: unknown): string {
             return "alpha-blend";
         default:
             return "unset";
+    }
+}
+
+const PROBLEMATIC_BONE_DEBUG_PATTERN = /肩|腕|ひじ|手首|捩|IK|リボン|^[FSR][0-9]+$|^SR[0-9]+$/;
+
+function roundDebugValue(value: number): number {
+    return Number(value.toFixed(4));
+}
+
+function toRoundedVector(value: { x: number; y: number; z: number }): [number, number, number] {
+    return [
+        roundDebugValue(value.x),
+        roundDebugValue(value.y),
+        roundDebugValue(value.z),
+    ];
+}
+
+function toRoundedMetadataVector(value: unknown): [number, number, number] | null {
+    if (Array.isArray(value) && value.length >= 3) {
+        const [x, y, z] = value;
+        if ([x, y, z].every((component) => typeof component === "number" && Number.isFinite(component))) {
+            return [roundDebugValue(x), roundDebugValue(y), roundDebugValue(z)];
+        }
+    }
+
+    if (value && typeof value === "object") {
+        const vector = value as { x?: unknown; y?: unknown; z?: unknown };
+        if (
+            typeof vector.x === "number" && Number.isFinite(vector.x) &&
+            typeof vector.y === "number" && Number.isFinite(vector.y) &&
+            typeof vector.z === "number" && Number.isFinite(vector.z)
+        ) {
+            return [
+                roundDebugValue(vector.x),
+                roundDebugValue(vector.y),
+                roundDebugValue(vector.z),
+            ];
+        }
+    }
+
+    return null;
+}
+
+function subtractRoundedVectors(
+    a: readonly [number, number, number] | null,
+    b: readonly [number, number, number] | null,
+): [number, number, number] | null {
+    if (!a || !b) {
+        return null;
+    }
+
+    return [
+        roundDebugValue(a[0] - b[0]),
+        roundDebugValue(a[1] - b[1]),
+        roundDebugValue(a[2] - b[2]),
+    ];
+}
+
+function buildBoneInfluenceSummary(meshes: readonly Mesh[]): Map<number, { vertices: number; totalWeight: number }> {
+    const summary = new Map<number, { vertices: number; totalWeight: number }>();
+    const addInfluence = (boneIndex: number, weight: number): void => {
+        if (boneIndex < 0 || !Number.isFinite(weight) || weight <= 0) return;
+        const current = summary.get(boneIndex) ?? { vertices: 0, totalWeight: 0 };
+        current.vertices += 1;
+        current.totalWeight += weight;
+        summary.set(boneIndex, current);
+    };
+
+    for (const mesh of meshes) {
+        const matricesIndices = mesh.getVerticesData("matricesIndices");
+        const matricesWeights = mesh.getVerticesData("matricesWeights");
+        if (!matricesIndices || !matricesWeights) continue;
+
+        const matricesIndicesExtra = mesh.getVerticesData("matricesIndicesExtra");
+        const matricesWeightsExtra = mesh.getVerticesData("matricesWeightsExtra");
+        for (let i = 0; i < matricesIndices.length; i += 4) {
+            addInfluence(Math.floor(matricesIndices[i + 0] ?? -1), matricesWeights[i + 0] ?? 0);
+            addInfluence(Math.floor(matricesIndices[i + 1] ?? -1), matricesWeights[i + 1] ?? 0);
+            addInfluence(Math.floor(matricesIndices[i + 2] ?? -1), matricesWeights[i + 2] ?? 0);
+            addInfluence(Math.floor(matricesIndices[i + 3] ?? -1), matricesWeights[i + 3] ?? 0);
+
+            if (!matricesIndicesExtra || !matricesWeightsExtra) {
+                continue;
+            }
+
+            addInfluence(Math.floor(matricesIndicesExtra[i + 0] ?? -1), matricesWeightsExtra[i + 0] ?? 0);
+            addInfluence(Math.floor(matricesIndicesExtra[i + 1] ?? -1), matricesWeightsExtra[i + 1] ?? 0);
+            addInfluence(Math.floor(matricesIndicesExtra[i + 2] ?? -1), matricesWeightsExtra[i + 2] ?? 0);
+            addInfluence(Math.floor(matricesIndicesExtra[i + 3] ?? -1), matricesWeightsExtra[i + 3] ?? 0);
+        }
+    }
+
+    return summary;
+}
+
+function logProblematicBoneDiagnostics(
+    fileName: string,
+    meshes: readonly Mesh[],
+    metadataBones: readonly {
+        name: string;
+        parentBoneIndex: number;
+        position: readonly [number, number, number];
+        flag: number;
+        appendTransform?: { parentIndex: number; ratio: number };
+    }[],
+    model: any,
+): void {
+    try {
+        const runtimeBones = model?.runtimeBones as Array<{
+            name: string;
+            linkedBone?: {
+                getParent?: () => { name?: string } | null;
+                getRestMatrix?: () => { getTranslationToRef: (target: Vector3) => Vector3 };
+                position?: { x: number; y: number; z: number };
+            };
+            parentBone?: { name: string } | null;
+            rigidBodyIndices?: readonly number[];
+            transformOrder?: number;
+            transformAfterPhysics?: boolean;
+            getWorldTranslationToRef?: (target: Vector3) => Vector3;
+        }> | undefined;
+        console.log(`[PMX][BoneDebug] start: ${fileName}`, {
+            metadataBoneCount: metadataBones.length,
+            runtimeBoneCount: runtimeBones?.length ?? 0,
+            meshCount: meshes.length,
+        });
+
+        if (!runtimeBones || runtimeBones.length === 0) {
+            console.warn(`[PMX][BoneDebug] runtime bones unavailable: ${fileName}`, {
+                metadataBoneCount: metadataBones.length,
+                runtimeBoneCount: runtimeBones?.length ?? 0,
+            });
+            return;
+        }
+
+        model.beforePhysics?.(null);
+        model.afterPhysics?.();
+
+        const influenceSummary = buildBoneInfluenceSummary(meshes);
+        const restPosition = new Vector3();
+        const runtimeWorldPosition = new Vector3();
+        const parentRuntimeWorldPosition = new Vector3();
+        const suspectRows: Array<Record<string, unknown>> = [];
+        const matchedBoneNames: string[] = [];
+        const sortedRuntimeBones = Array.isArray((model as { sortedRuntimeBones?: unknown }).sortedRuntimeBones)
+            ? ((model as { sortedRuntimeBones?: unknown }).sortedRuntimeBones as readonly unknown[])
+            : [];
+        const sortedBoneIndexMap = new Map<object, number>();
+        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
+            const sortedRuntimeBone = sortedRuntimeBones[index];
+            if (sortedRuntimeBone && typeof sortedRuntimeBone === "object") {
+                sortedBoneIndexMap.set(sortedRuntimeBone, index);
+            }
+        }
+
+        for (let boneIndex = 0; boneIndex < metadataBones.length; boneIndex += 1) {
+            const metadataBone = metadataBones[boneIndex];
+            if (!metadataBone || !PROBLEMATIC_BONE_DEBUG_PATTERN.test(metadataBone.name)) {
+                continue;
+            }
+            matchedBoneNames.push(metadataBone.name);
+
+            const runtimeBone = runtimeBones[boneIndex];
+            const linkedBone = runtimeBone?.linkedBone;
+            const linkedBoneLocalPosition = linkedBone?.position
+                ? toRoundedVector(linkedBone.position)
+                : null;
+            const linkedBoneRestPosition = linkedBone?.getRestMatrix
+                ? toRoundedVector(linkedBone.getRestMatrix().getTranslationToRef(restPosition))
+                : null;
+            const runtimeWorld = runtimeBone?.getWorldTranslationToRef
+                ? toRoundedVector(runtimeBone.getWorldTranslationToRef(runtimeWorldPosition))
+                : null;
+            const parentRuntimeWorld = runtimeBone?.parentBone && typeof (runtimeBone.parentBone as {
+                getWorldTranslationToRef?: (target: Vector3) => Vector3;
+            }).getWorldTranslationToRef === "function"
+                ? toRoundedVector((runtimeBone.parentBone as {
+                    getWorldTranslationToRef: (target: Vector3) => Vector3;
+                }).getWorldTranslationToRef(parentRuntimeWorldPosition))
+                : null;
+            const metadataPosition = toRoundedMetadataVector(metadataBone.position);
+            const influence = influenceSummary.get(boneIndex);
+            const parentIndex = typeof metadataBone.parentBoneIndex === "number" ? metadataBone.parentBoneIndex : -1;
+
+            suspectRows.push({
+                index: boneIndex,
+                name: metadataBone.name,
+                sortedIndex: runtimeBone ? sortedBoneIndexMap.get(runtimeBone as unknown as object) ?? null : null,
+                parentIndex,
+                parentName: parentIndex >= 0 ? metadataBones[parentIndex]?.name ?? null : null,
+                parentSortedIndex: runtimeBone?.parentBone ? sortedBoneIndexMap.get(runtimeBone.parentBone as unknown as object) ?? null : null,
+                runtimeParentName: runtimeBone?.parentBone?.name ?? null,
+                linkedBoneParentName: runtimeBone?.linkedBone?.getParent?.()?.name ?? null,
+                metadataPosition,
+                linkedBoneRestPosition,
+                linkedBoneLocalPosition,
+                runtimeWorld,
+                parentRuntimeWorld,
+                metadataToRestDelta: subtractRoundedVectors(linkedBoneRestPosition, metadataPosition),
+                metadataToLocalDelta: subtractRoundedVectors(linkedBoneLocalPosition, metadataPosition),
+                transformOrder: runtimeBone?.transformOrder ?? null,
+                transformAfterPhysics: runtimeBone?.transformAfterPhysics ?? null,
+                appendParentIndex: metadataBone.appendTransform?.parentIndex ?? null,
+                appendParentName: metadataBone.appendTransform ? metadataBones[metadataBone.appendTransform.parentIndex]?.name ?? null : null,
+                appendRatio: metadataBone.appendTransform?.ratio ?? null,
+                rigidBodyCount: runtimeBone?.rigidBodyIndices?.length ?? 0,
+                influencedVertices: influence?.vertices ?? 0,
+                totalWeight: influence ? roundDebugValue(influence.totalWeight) : 0,
+            });
+        }
+
+        if (suspectRows.length === 0) {
+            console.warn(`[PMX][BoneDebug] no suspect rows collected: ${fileName}`, {
+                matchedBoneNames,
+                metadataBoneCount: metadataBones.length,
+                runtimeBoneCount: runtimeBones.length,
+            });
+            return;
+        }
+
+        console.log(`[PMX][BoneDebug][JSON] suspect bone state: ${fileName} ${JSON.stringify(suspectRows)}`);
+
+        const focusBoneNames = new Set([
+            "左肩P", "左肩C", "左肩", "左腕", "左腕捩", "左ひじIK親", "左ひじ", "左手捩", "左手首",
+            "S0", "S1", "S2", "S3", "S4", "S5", "F0", "F1", "F2", "F3", "F4", "F5",
+            "右肩P", "右肩C", "右肩", "右腕", "右腕捩", "右ひじIK親", "右ひじ", "右手捩", "右手首",
+            "R0", "R1", "R2", "R3", "R4", "R5", "R6", "SR0", "SR1", "SR2",
+        ]);
+        const focusRows = suspectRows.filter((row) => focusBoneNames.has(String(row.name ?? "")));
+        console.log(`[PMX][BoneDebug][JSON][focus] ${fileName} ${JSON.stringify(focusRows)}`);
+        console.log(`[PMX][BoneDebug] suspect bone state: ${fileName}`, suspectRows);
+    } catch (error) {
+        console.error(`[PMX][BoneDebug] failed: ${fileName}`, error);
     }
 }
 
@@ -253,6 +487,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         }
         const uniqueSkeletons = Array.from(new Set(skeletonPool));
         host.applyCpuSkinningFallbackForOversizedSkeletons(fileName, result.meshes as Mesh[], uniqueSkeletons);
+        host.applyCpuSkinningFallbackForWebGpuSdefMeshes?.(fileName, result.meshes as Mesh[]);
 
         mmdMesh.setEnabled(true);
         mmdMesh.isVisible = true;
@@ -270,6 +505,12 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             bones?: readonly {
                 name: string;
                 flag: number;
+                parentBoneIndex: number;
+                position: readonly [number, number, number];
+                appendTransform?: {
+                    parentIndex: number;
+                    ratio: number;
+                };
                 ik?: {
                     target?: number;
                     links: readonly { target?: number }[];
@@ -310,6 +551,9 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
                 ? { disableOffsetForConstraintFrame: true }
                 : false,
         });
+        host.normalizeRuntimeBoneTransformStages?.(mmdModel);
+        host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
+        host.patchModelAfterPhysicsForPausedState?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);
         host.modelKeyframeTracksByModel.set(mmdModel, new Map());
         host.modelSourceAnimationsByModel.delete(mmdModel);
@@ -348,6 +592,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         const boneControlInfos: BoneControlInfo[] = [];
         const metadataBones = Array.isArray(mmdMetadata.bones) ? mmdMetadata.bones : [];
         const metadataRigidBodies = Array.isArray(mmdMetadata.rigidBodies) ? mmdMetadata.rigidBodies : [];
+        // logProblematicBoneDiagnostics(fileName, result.meshes as Mesh[], metadataBones, mmdModel as any);
         const physicsBoneIndices = new Set<number>();
         for (const rigidBody of metadataRigidBodies) {
             if (!rigidBody) continue;
