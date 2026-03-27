@@ -477,11 +477,13 @@ export class MmdManager {
     private static readonly RENDER_ENGINE_OPTIONS = {
         preserveDrawingBuffer: false,
         stencil: true,
-        antialias: false,
+        antialias: true,
         alpha: false,
         premultipliedAlpha: false,
         desynchronized: false,
+        adaptToDeviceRatio: false,
     };
+    private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.5;
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
@@ -573,8 +575,8 @@ export class MmdManager {
         "teal-orange": tealOrangeLutText,
     };
     private static toonLightSeparationShaderPatched = false;
-    private static toonSelfShadowBoundarySoftness = 0.045;
-    private static toonOcclusionShadowBoundarySoftness = 0.06;
+    private static toonSelfShadowBoundarySoftness = 0.055;
+    private static toonOcclusionShadowBoundarySoftness = 0.075;
     private static toonFlatLightColorInfluence = 0.35;
     private static toonContactAoEnabled = false;
     private static toonContactAoStrength = 0;
@@ -2048,6 +2050,7 @@ ${beforeFogAppendBlock}
         // Create engine (WebGPU preferred path is handled by MmdManager.create)
         this.engine = engine ?? MmdManager.createWebGlEngine(canvas);
         this.configureMmdTextureLoaderForWebGpu();
+        this.engine.setHardwareScalingLevel(MmdManager.RENDER_HARDWARE_SCALING_LEVEL);
         this.resizeToCanvasClientSize();
         this.ensureBoneOverlayCanvas();
 
@@ -2128,9 +2131,9 @@ ${beforeFogAppendBlock}
         if (shadowGenerator instanceof CascadedShadowGenerator) {
             shadowGenerator.numCascades = 4;
             shadowGenerator.stabilizeCascades = true;
-            shadowGenerator.lambda = 0.72;
+            shadowGenerator.lambda = 0.82;
             shadowGenerator.cascadeBlendPercentage = 0.05;
-            shadowGenerator.autoCalcDepthBounds = true;
+            shadowGenerator.autoCalcDepthBounds = false;
             shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
             dirLight.shadowFrustumSize = DEFAULT_CSM_FRUSTUM_SIZE;
             dirLight.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
@@ -2764,6 +2767,51 @@ ${beforeFogAppendBlock}
         this.applyToonShadowInfluenceToMeshes(meshes);
     }
 
+    private applyAnisotropicFilteringToMeshes(meshes: Mesh[]): void {
+        const maxAnisotropy = Math.min(16, this.engine.getCaps().maxAnisotropy ?? 1);
+        if (maxAnisotropy <= 1) {
+            return;
+        }
+
+        const textures = new Set<{ anisotropicFilteringLevel?: number }>();
+        const textureKeys = [
+            "diffuseTexture",
+            "albedoTexture",
+            "opacityTexture",
+            "bumpTexture",
+            "normalTexture",
+            "emissiveTexture",
+            "ambientTexture",
+            "specularTexture",
+            "reflectionTexture",
+            "refractionTexture",
+            "lightmapTexture",
+            "metallicTexture",
+            "microSurfaceTexture",
+            "toonTexture",
+        ] as const;
+
+        for (const mesh of meshes) {
+            const material = mesh.material as any;
+            if (!material) continue;
+
+            const materials = Array.isArray(material.subMaterials) ? material.subMaterials : [material];
+            for (const subMaterial of materials) {
+                if (!subMaterial || typeof subMaterial !== "object") continue;
+                for (const key of textureKeys) {
+                    const texture = (subMaterial as Record<string, unknown>)[key] as { anisotropicFilteringLevel?: number } | undefined;
+                    if (texture && typeof texture === "object" && "anisotropicFilteringLevel" in texture) {
+                        textures.add(texture);
+                    }
+                }
+            }
+        }
+
+        for (const texture of textures) {
+            texture.anisotropicFilteringLevel = maxAnisotropy;
+        }
+    }
+
     async loadVMD(filePath: string): Promise<MotionInfo | null> {
         return loadVMDImpl(this, filePath);
     }
@@ -3170,26 +3218,19 @@ ${beforeFogAppendBlock}
             return;
         }
 
-        // WebGPU in Babylon 8.45.3 can mis-handle some non-square MMD textures
-        // when mipmaps are generated, so force no-mipmap uploads for this path.
+        // Try allowing mipmaps for WebGPU as well; this can reduce moire on fine textures.
         const sharedBuilder = MmdModelLoader.SharedMaterialBuilder;
         if (!(sharedBuilder instanceof MmdStandardMaterialBuilder)) {
             return;
         }
 
         const textureLoader = ((sharedBuilder as unknown as { [key: string]: unknown })._textureLoader as {
-            __mmdModokiNoMipmapPatched?: boolean;
             loadTextureAsync?: (...args: any[]) => any;
             loadTextureFromBufferAsync?: (...args: any[]) => any;
         } | undefined);
-        if (!textureLoader || textureLoader.__mmdModokiNoMipmapPatched) {
+        if (!textureLoader) {
             return;
         }
-
-        const wrapTextureOptions = <T extends { noMipmap?: boolean; samplingMode?: number }>(options: T | undefined): T => ({
-            ...(options ?? {} as T),
-            noMipmap: true,
-        });
 
         const originalLoadTextureAsync = textureLoader.loadTextureAsync?.bind(textureLoader);
         if (originalLoadTextureAsync) {
@@ -3200,7 +3241,7 @@ ${beforeFogAppendBlock}
                     relativeTexturePathOrIndex,
                     scene,
                     assetContainer,
-                    wrapTextureOptions(options),
+                    options,
                 );
             }) as typeof textureLoader.loadTextureAsync;
         }
@@ -3214,13 +3255,11 @@ ${beforeFogAppendBlock}
                     arrayBufferOrBlob,
                     scene,
                     assetContainer,
-                    wrapTextureOptions(options),
+                    options,
                     applyPathNormalization,
                 );
             }) as typeof textureLoader.loadTextureFromBufferAsync;
         }
-
-        textureLoader.__mmdModokiNoMipmapPatched = true;
     }
 
     private hasPrePassRendererSupport(): boolean {
@@ -5429,7 +5468,7 @@ ${beforeFogAppendBlock}
 
         this.resizeBoneOverlayCanvas();
 
-        // Keep drawing buffer aligned to CSS pixel size to avoid edge tearing artifacts.
+        // Keep the canvas sized from CSS pixels; the engine applies the render scale internally.
         if (this.engine.getRenderWidth() !== width || this.engine.getRenderHeight() !== height) {
             this.engine.setSize(width, height);
             this.resizeGlobalIllumination();

@@ -272,6 +272,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
 
         host.applyModelEdgeToMeshes(result.meshes as Mesh[]);
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
+        host.applyAnisotropicFilteringToMeshes?.(result.meshes as Mesh[]);
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
         logPmxMaterialTransparencyDebug(fileName, sceneMaterials, materialFlagMap);
 

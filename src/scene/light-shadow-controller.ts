@@ -39,9 +39,9 @@ function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGen
     if (shadowGenerator instanceof CascadedShadowGenerator) {
         shadowGenerator.numCascades = 4;
         shadowGenerator.stabilizeCascades = true;
-        shadowGenerator.lambda = 0.72;
+        shadowGenerator.lambda = 0.82;
         shadowGenerator.cascadeBlendPercentage = 0.05;
-        shadowGenerator.autoCalcDepthBounds = true;
+        shadowGenerator.autoCalcDepthBounds = false;
         shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
     }
     shadowGenerator.usePercentageCloserFiltering = true;

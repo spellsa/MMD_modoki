@@ -57,8 +57,6 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
-
-    console.log("MMD modoki initialized");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("Failed to initialize MMD modoki:", message);
