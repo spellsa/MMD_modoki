@@ -46,10 +46,10 @@ function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGen
     }
     shadowGenerator.usePercentageCloserFiltering = true;
     shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
-    shadowGenerator.useContactHardeningShadow = true;
+    shadowGenerator.useContactHardeningShadow = false;
     shadowGenerator.bias = 0.00015;
     shadowGenerator.normalBias = 0.0006;
-    shadowGenerator.frustumEdgeFalloff = 0.2;
+    shadowGenerator.frustumEdgeFalloff = 0.26;
     shadowGenerator.transparencyShadow = true;
     shadowGenerator.enableSoftTransparentShadow = true;
     shadowGenerator.useOpacityTextureForTransparentShadow = true;

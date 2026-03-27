@@ -651,7 +651,7 @@ toonRaw.r=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.r)).r;
 toonRaw.g=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.g)).g;
 toonRaw.b=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.b)).b;
 let selfMask=smoothstep(${selfMaskMin},${selfMaskMax},clamp(info.ndl,0.0,1.0));
-let occlusionMask=smoothstep(${occlusionMaskMin},${occlusionMaskMax},clamp(shadow,0.0,1.0));
+let occlusionMask=clamp(shadow,0.0,1.0);
 let toneBandLuma=clamp(dot(toonRaw,vec3f(0.299,0.587,0.114)),0.0,1.0);
 let geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
 let litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,${toonBandAlignment.toFixed(6)}),0.0,1.0);
@@ -679,7 +679,7 @@ toonRaw.r=texture2D(toonSampler,vec2(0.5,toonRaw.r)).r;
 toonRaw.g=texture2D(toonSampler,vec2(0.5,toonRaw.g)).g;
 toonRaw.b=texture2D(toonSampler,vec2(0.5,toonRaw.b)).b;
 float selfMask=smoothstep(${selfMaskMin},${selfMaskMax},clamp(info.ndl,0.0,1.0));
-float occlusionMask=smoothstep(${occlusionMaskMin},${occlusionMaskMax},clamp(shadow,0.0,1.0));
+float occlusionMask=clamp(shadow,0.0,1.0);
 float toneBandLuma=clamp(dot(toonRaw,vec3(0.299,0.587,0.114)),0.0,1.0);
 float geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
 float litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,${toonBandAlignment.toFixed(6)}),0.0,1.0);
@@ -2073,9 +2073,9 @@ ${beforeFogAppendBlock}
             this.scene
         );
         this.camera.fov = (30 * Math.PI) / 180;
-        this.camera.minZ = 0.1;
+        this.camera.minZ = 0.15;
         this.camera.maxZ = 100000;
-        this.camera.lowerRadiusLimit = 2;
+        this.camera.lowerRadiusLimit = 3;
         this.camera.upperRadiusLimit = null;
         this.camera.wheelDeltaPercentage = 0.01;
         this.camera.attachControl(canvas, true);
@@ -2137,10 +2137,10 @@ ${beforeFogAppendBlock}
         }
         shadowGenerator.usePercentageCloserFiltering = true;
         shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
-        shadowGenerator.useContactHardeningShadow = true;
+        shadowGenerator.useContactHardeningShadow = false;
         shadowGenerator.bias = 0.00015;
         shadowGenerator.normalBias = 0.0006;
-        shadowGenerator.frustumEdgeFalloff = 0.2;
+        shadowGenerator.frustumEdgeFalloff = 0.26;
         shadowGenerator.transparencyShadow = true;
         shadowGenerator.enableSoftTransparentShadow = true;
         shadowGenerator.useOpacityTextureForTransparentShadow = true;
@@ -2161,6 +2161,7 @@ ${beforeFogAppendBlock}
         groundMat.ambientColor = new Color3(1, 1, 1);
         groundMat.specularColor = new Color3(0, 0, 0);
         groundMat.alpha = 1.0;
+        groundMat.useLogarithmicDepth = true;
 
         const gridTextureSize = 512;
         const gridCell = 64;
@@ -2210,6 +2211,7 @@ ${beforeFogAppendBlock}
         skydomeMat.specularColor = new Color3(0, 0, 0);
         skydomeMat.disableLighting = true;
         skydomeMat.backFaceCulling = false;
+        skydomeMat.useLogarithmicDepth = true;
         this.skydome.material = skydomeMat;
         this.skydome.infiniteDistance = true;
         this.skydome.isPickable = false;
@@ -2451,6 +2453,12 @@ ${beforeFogAppendBlock}
         // half-transparent rendering and sphere-material ordering on other models.
         material.zOffset = 0;
         material.zOffsetUnits = 0;
+
+        // Logarithmic depth keeps close-up models stable without forcing the
+        // near plane to stay overly small for the whole scene.
+        if ("useLogarithmicDepth" in material) {
+            material.useLogarithmicDepth = true;
+        }
 
         // Preserve the loader's culling decision. Forcing double-sided rendering on
         // every PMX material tends to reveal inner mouth/face polygons on some models.
@@ -4880,9 +4888,9 @@ ${beforeFogAppendBlock}
         this.camera.setPosition(this.mmdCamera.position);
         this.camera.setTarget(this.mmdCamera.target);
         this.camera.fov = this.mmdCamera.fov;
-        this.updateDofFocalLengthFromCameraFov();
         this.camera.upVector.copyFrom(this.mmdCamera.upVector);
         this.syncCameraRotationFromCurrentView();
+        this.updateDofFocalLengthFromCameraFov();
     }
 
     private applyCameraRotationFromEuler(): void {
