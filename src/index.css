@@ -3466,3 +3466,138 @@ body.bottom-panel-resizing {
     display: none;
   }
 }
+
+@media (max-height: 1120px) {
+  :root {
+    --bottom-panel-height: 152px;
+  }
+
+  #bottom-panel .section-header {
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 9px;
+    letter-spacing: 0.03em;
+  }
+
+  #bottom-panel .section-header svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .output-controls,
+  .camera-controls,
+  .bone-controls,
+  .morph-controls {
+    gap: 3px;
+    padding: 4px 5px;
+  }
+
+  .panel-select-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 3px;
+    padding: 3px 5px;
+  }
+
+  .panel-select-label,
+  .bone-slider-label,
+  .bone-slider-value,
+  .morph-slider-row label,
+  .morph-slider-row .morph-value,
+  .output-label,
+  .output-dim-sep,
+  .output-toggle-label,
+  .control-row label,
+  .camera-view-btn,
+  .panel-empty-state {
+    font-size: 9px;
+  }
+
+  .panel-select,
+  #bone-select,
+  .output-select,
+  .output-number {
+    font-size: 9px;
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
+
+  #bone-select {
+    line-height: 1.2;
+  }
+
+  .bone-slider-row {
+    grid-template-columns: 32px minmax(0, 1fr) 30px;
+    gap: 3px;
+    padding: 2px 0;
+  }
+
+  .bone-slider-row.range-has-number {
+    grid-template-columns: 32px minmax(0, 1fr) 48px;
+  }
+
+  .morph-slider-row {
+    grid-template-columns: minmax(40px, 34%) minmax(0, 1fr) 30px;
+    gap: 5px;
+    padding: 2px 0;
+  }
+
+  .morph-slider-row.range-has-number {
+    grid-template-columns: minmax(40px, 34%) minmax(0, 1fr) 48px;
+  }
+
+  .camera-view-buttons {
+    gap: 3px;
+  }
+
+  .camera-view-btn {
+    height: 22px;
+    padding: 0 3px;
+  }
+
+  .control-row {
+    gap: 3px;
+  }
+
+  .control-row label {
+    min-width: 18px;
+  }
+
+  .range-number-input {
+    width: 44px;
+    height: 18px;
+    padding: 0 3px;
+    font-size: 8px;
+  }
+
+  .control-row.range-has-number .range-number-input {
+    flex-basis: 44px;
+  }
+
+  .output-row {
+    gap: 3px;
+  }
+
+  .output-inline-controls {
+    gap: 4px;
+  }
+
+  .output-select-fps {
+    width: 50px;
+    flex-basis: 50px;
+  }
+
+  .output-select-codec {
+    width: 60px;
+    flex-basis: 60px;
+  }
+
+  .output-export-row {
+    gap: 3px;
+  }
+
+  .output-controls .playback-export-btn {
+    height: 24px;
+    padding: 0 5px;
+    font-size: 8px;
+  }
+}
