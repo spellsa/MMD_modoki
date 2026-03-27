@@ -79,16 +79,44 @@ function getTransparencyModeLabel(mode: unknown): string {
     }
 }
 
+function decodePmxMaterialFlags(flag: number | null): string[] {
+    if (flag === null || !Number.isFinite(flag)) {
+        return [];
+    }
+
+    const decoded: string[] = [];
+    if ((flag & 0x1) !== 0) decoded.push("doubleSided");
+    if ((flag & 0x2) !== 0) decoded.push("groundShadow");
+    if ((flag & 0x4) !== 0) decoded.push("drawShadow");
+    if ((flag & 0x8) !== 0) decoded.push("receiveShadow");
+    if ((flag & 0x10) !== 0) decoded.push("toonEdge");
+    if ((flag & 0x20) !== 0) decoded.push("vertexColor");
+    if ((flag & 0x40) !== 0) decoded.push("pointDraw");
+    if ((flag & 0x80) !== 0) decoded.push("lineDraw");
+    return decoded;
+}
+
 function buildPmxMaterialTransparencyDebugRow(entry: SceneModelMaterialEntry, pmxFlags: number | null): Record<string, unknown> {
     const material = entry.material ?? {};
     const diffuseTexture = material.diffuseTexture ?? null;
     const albedoTexture = material.albedoTexture ?? null;
     const opacityTexture = material.opacityTexture ?? null;
+    const diffuseColor = material.diffuseColor ?? null;
+    const diffuseRgba = diffuseColor && typeof diffuseColor === "object"
+        ? [
+            Number(diffuseColor.r ?? 0),
+            Number(diffuseColor.g ?? 0),
+            Number(diffuseColor.b ?? 0),
+            Number(material.alpha ?? 1),
+        ]
+        : null;
 
     return {
         material: entry.name,
         meshNames: entry.meshNames,
         pmxFlags: pmxFlags === null ? null : `0x${pmxFlags.toString(16)}`,
+        pmxFlagsDecoded: decodePmxMaterialFlags(pmxFlags),
+        diffuseRGBA: diffuseRgba,
         alpha: Number(material.alpha ?? 1),
         transparencyMode: getTransparencyModeLabel(material.transparencyMode),
         useAlphaFromDiffuseTexture: Boolean(material.useAlphaFromDiffuseTexture),
@@ -274,7 +302,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
         host.applyAnisotropicFilteringToMeshes?.(result.meshes as Mesh[]);
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
-        logPmxMaterialTransparencyDebug(fileName, sceneMaterials, materialFlagMap);
+        // logPmxMaterialTransparencyDebug(fileName, sceneMaterials, materialFlagMap);
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
             materialProxyConstructor: MmdStandardMaterialProxy,

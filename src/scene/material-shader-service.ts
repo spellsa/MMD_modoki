@@ -21,6 +21,10 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-full-light"
     | "wgsl-full-light-add"
     | "wgsl-full-alpha-test"
+    | "wgsl-full-alpha-test-hard"
+    | "wgsl-alpha-mask"
+    | "wgsl-white-key-cutout"
+    | "wgsl-black-key-cutout"
     | "wgsl-full-shadow"
     | "wgsl-light-and-shadow"
     | "wgsl-specular"
@@ -80,27 +84,60 @@ function setMaterialColorProperty(material: any, propertyName: string, color: Co
     material[propertyName] = new Color3(color.r, color.g, color.b);
 }
 
-function getTextureSourceName(texture: any): string | null {
-    if (!texture || typeof texture !== "object") return null;
-
-    const candidates = [texture.name, texture.url];
-    for (const candidate of candidates) {
-        if (typeof candidate === "string" && candidate.trim().length > 0) {
-            return candidate;
-        }
+function applyAlphaCutoutPreset(material: any, alphaCutOff: number): void {
+    const hasAlphaTexture = hasActualAlphaTextureSource(material);
+    if (!hasAlphaTexture) {
+        return;
     }
-
-    return null;
+    if ("alphaCutOff" in material) {
+        material.alphaCutOff = alphaCutOff;
+    }
+    if ("forceDepthWrite" in material) {
+        material.forceDepthWrite = false;
+    }
+    if ("transparencyMode" in material) {
+        material.transparencyMode = Material.MATERIAL_ALPHATEST;
+    }
 }
 
-function isAlphaCapableTextureName(textureName: string | null): boolean {
-    if (!textureName) return false;
+function applyAlphaBlendCutoutPreset(material: any): void {
+    const hasAlphaTexture = hasActualAlphaTextureSource(material);
+    if (!hasAlphaTexture) {
+        const materialName = typeof material?.name === "string" ? material.name : "material";
+        console.warn(`[MaterialShader] Alpha Mask skipped for ${materialName}: source texture has no alpha channel.`);
+        return;
+    }
+    if ("disableLighting" in material) {
+        material.disableLighting = false;
+    }
+    if ("specularPower" in material) {
+        material.specularPower = 0;
+    }
+    enableAlphaTextureFlags(material);
+    if ("forceDepthWrite" in material) {
+        material.forceDepthWrite = false;
+    }
+    if ("transparencyMode" in material) {
+        material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+    }
+}
 
-    const normalized = textureName.split(/[?#]/, 1)[0].toLowerCase();
-    return normalized.endsWith(".png")
-        || normalized.endsWith(".bmp")
-        || normalized.endsWith(".tga")
-        || normalized.endsWith(".webp");
+function enableAlphaTextureFlags(material: any): void {
+    const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
+    if ("useAlphaFromDiffuseTexture" in material && diffuseTextureHasAlpha) {
+        material.useAlphaFromDiffuseTexture = true;
+    }
+
+    const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+    if ("useAlphaFromAlbedoTexture" in material && albedoTextureHasAlpha) {
+        material.useAlphaFromAlbedoTexture = true;
+    }
+}
+
+function hasActualAlphaTextureSource(material: any): boolean {
+    return Boolean(material?.diffuseTexture?.hasAlpha)
+        || Boolean(material?.albedoTexture?.hasAlpha)
+        || Boolean(material?.opacityTexture);
 }
 
 function markMaterialShaderDirty(material: any): void {
@@ -399,31 +436,28 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
             const preferredAlphaCutOff = defaults.alphaCutOff !== null
                 ? Math.min(defaults.alphaCutOff, 0.28)
                 : 0.28;
-            const diffuseTextureName = getTextureSourceName(material.diffuseTexture);
-            if (material.diffuseTexture && isAlphaCapableTextureName(diffuseTextureName)) {
-                material.diffuseTexture.hasAlpha = true;
-            }
-            if ("useAlphaFromDiffuseTexture" in material && material.diffuseTexture?.hasAlpha) {
-                material.useAlphaFromDiffuseTexture = true;
-            }
-
-            const albedoTextureName = getTextureSourceName(material.albedoTexture);
-            if (material.albedoTexture && isAlphaCapableTextureName(albedoTextureName)) {
-                material.albedoTexture.hasAlpha = true;
-            }
-            if ("useAlphaFromAlbedoTexture" in material && material.albedoTexture?.hasAlpha) {
-                material.useAlphaFromAlbedoTexture = true;
-            }
-
-            if ("alphaCutOff" in material) {
-                material.alphaCutOff = preferredAlphaCutOff;
-            }
-            if ("forceDepthWrite" in material) {
-                material.forceDepthWrite = false;
-            }
-            if ("transparencyMode" in material) {
-                material.transparencyMode = Material.MATERIAL_ALPHATEST;
-            }
+            enableAlphaTextureFlags(material);
+            applyAlphaCutoutPreset(material, preferredAlphaCutOff);
+            break;
+        }
+        case "wgsl-full-alpha-test-hard": {
+            const preferredAlphaCutOff = defaults.alphaCutOff !== null
+                ? Math.max(defaults.alphaCutOff, 0.56)
+                : 0.56;
+            enableAlphaTextureFlags(material);
+            applyAlphaCutoutPreset(material, preferredAlphaCutOff);
+            break;
+        }
+        case "wgsl-alpha-mask": {
+            applyAlphaBlendCutoutPreset(material);
+            break;
+        }
+        case "wgsl-white-key-cutout": {
+            applyAlphaBlendCutoutPreset(material);
+            break;
+        }
+        case "wgsl-black-key-cutout": {
+            applyAlphaBlendCutoutPreset(material);
             break;
         }
         case "wgsl-full-shadow": {

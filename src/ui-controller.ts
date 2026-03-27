@@ -160,6 +160,9 @@ export class UIController {
         "wgsl-rim-lift",
         "wgsl-mono-flat",
         "wgsl-full-light-add",
+        "wgsl-full-alpha-test-hard",
+        "wgsl-white-key-cutout",
+        "wgsl-black-key-cutout",
     ]);
 
     private mmdManager: MmdManager;

@@ -71,3 +71,17 @@
 
 ## GI
 - [Babylon RSM GI メモ](./babylon-rsm-gi-notes.md)
+
+## 追加ドキュメント
+この節には、もともとの index に入っていなかった文書をまとめる。
+
+- [依存関係ブートストラップメモ](./dependency-bootstrap-2026-03-13.md)
+- [ライト / フェイス回りの調査メモ](./full-light-face-investigation-2026-03-13.md)
+- [重いモデルの読み込みメモ](./heavy-model-loading.md)
+- [キー登録表示の調査メモ](./keyframe-registration-display-research.md)
+- [モデル透過の調査メモ](./model-transparency-investigation.md)
+- [MMD キーフレーム機能の整理メモ](./mmd-keyframe-features-survey.md)
+- [MMD Manager 分割計画](./mmd-manager-split-plan.md)
+- [セルフ影の横縞メモ](./self-shadow-horizontal-banding-note.md)
+- [影品質の調査メモ](./shadow-quality-investigation.md)
+- [Viewport 見た目調整メモ](./viewport-visual-polish-2026-03-13.md)

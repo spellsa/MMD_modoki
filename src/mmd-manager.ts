@@ -370,6 +370,7 @@ import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderB
 import { MmdPluginMaterial as MmdStandardShaderPluginGLSL } from "babylon-mmd/esm/Loader/Shaders/mmdStandard";
 import { MmdPluginMaterial as MmdStandardShaderPluginWGSL } from "babylon-mmd/esm/Loader/ShadersWGSL/mmdStandard";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
+import { PathNormalize } from "babylon-mmd/esm/Loader/Util/pathNormalize";
 import { SdefInjector } from "babylon-mmd/esm/Loader/sdefInjector";
 import { StreamAudioPlayer } from "babylon-mmd/esm/Runtime/Audio/streamAudioPlayer";
 import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
@@ -419,6 +420,10 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-full-light"
     | "wgsl-full-light-add"
     | "wgsl-full-alpha-test"
+    | "wgsl-full-alpha-test-hard"
+    | "wgsl-alpha-mask"
+    | "wgsl-white-key-cutout"
+    | "wgsl-black-key-cutout"
     | "wgsl-full-shadow"
     | "wgsl-light-and-shadow"
     | "wgsl-specular"
@@ -506,6 +511,26 @@ export class MmdManager {
             id: "wgsl-full-alpha-test",
             label: "AlphaCutOff",
             description: "Convert semi-transparent layers into softer alpha-cutoff rendering with more preserved edge coverage",
+        },
+        {
+            id: "wgsl-full-alpha-test-hard",
+            label: "AlphaCutOff Hard",
+            description: "Stronger alpha-cutoff rendering for textures that need a firmer transparency mask",
+        },
+        {
+            id: "wgsl-alpha-mask",
+            label: "Alpha Mask",
+            description: "Use the source texture alpha directly for transparency",
+        },
+        {
+            id: "wgsl-white-key-cutout",
+            label: "White Key Cutout",
+            description: "Cut out bright backgrounds by keying on luminance instead of texture alpha",
+        },
+        {
+            id: "wgsl-black-key-cutout",
+            label: "Black Key Cutout",
+            description: "Cut out dark backgrounds by keying on luminance instead of texture alpha",
         },
         {
             id: "wgsl-autoluminous",
@@ -1023,6 +1048,7 @@ ${beforeFogAppendBlock}
     private readonly renderingCanvas: HTMLCanvasElement;
     private engine: Engine | WebGPUEngine;
     private readonly runtimeDiagnostics = new Set<string>();
+    private readonly webGpuTextureMipmapDecisionCache = new Map<string, Promise<boolean>>();
     private scene: Scene;
     private camera: ArcRotateCamera;
     private mmdCamera: MmdCamera;
@@ -2050,6 +2076,7 @@ ${beforeFogAppendBlock}
         // Create engine (WebGPU preferred path is handled by MmdManager.create)
         this.engine = engine ?? MmdManager.createWebGlEngine(canvas);
         this.configureMmdTextureLoaderForWebGpu();
+        this.configureWebGpuRawTextureUploadForNonPOT();
         this.engine.setHardwareScalingLevel(MmdManager.RENDER_HARDWARE_SCALING_LEVEL);
         this.resizeToCanvasClientSize();
         this.ensureBoneOverlayCanvas();
@@ -3213,12 +3240,89 @@ ${beforeFogAppendBlock}
         return this.engine instanceof WebGPUEngine;
     }
 
+    private isPowerOfTwo(value: number): boolean {
+        return value > 0 && (value & (value - 1)) === 0;
+    }
+
+    private async inspectImageDimensionsFromUrl(url: string): Promise<{ width: number; height: number } | null> {
+        return await new Promise((resolve) => {
+            const image = new Image();
+            image.onload = () => {
+                resolve({
+                    width: image.naturalWidth || image.width,
+                    height: image.naturalHeight || image.height,
+                });
+            };
+            image.onerror = () => resolve(null);
+            image.src = url;
+        });
+    }
+
+    private async inspectImageDimensionsFromBuffer(arrayBufferOrBlob: ArrayBuffer | Blob): Promise<{ width: number; height: number } | null> {
+        const blob = arrayBufferOrBlob instanceof Blob ? arrayBufferOrBlob : new Blob([arrayBufferOrBlob]);
+
+        if (typeof createImageBitmap === "function") {
+            try {
+                const bitmap = await createImageBitmap(blob);
+                try {
+                    return { width: bitmap.width, height: bitmap.height };
+                } finally {
+                    bitmap.close();
+                }
+            } catch {
+                // Fallback to a regular image element below.
+            }
+        }
+
+        const objectUrl = URL.createObjectURL(blob);
+        try {
+            return await this.inspectImageDimensionsFromUrl(objectUrl);
+        } finally {
+            URL.revokeObjectURL(objectUrl);
+        }
+    }
+
+    private async shouldGenerateMipmapsForWebGpuTextureUrl(url: string): Promise<boolean> {
+        const cacheKey = `url:${url}`;
+        const cached = this.webGpuTextureMipmapDecisionCache.get(cacheKey);
+        if (cached) {
+            return await cached;
+        }
+
+        const promise = (async () => {
+            const dimensions = await this.inspectImageDimensionsFromUrl(url);
+            if (!dimensions) {
+                return false;
+            }
+            return this.isPowerOfTwo(dimensions.width) && this.isPowerOfTwo(dimensions.height);
+        })();
+        this.webGpuTextureMipmapDecisionCache.set(cacheKey, promise);
+        return await promise;
+    }
+
+    private async shouldGenerateMipmapsForWebGpuTextureBuffer(key: string, arrayBufferOrBlob: ArrayBuffer | Blob): Promise<boolean> {
+        const cacheKey = `buffer:${key}`;
+        const cached = this.webGpuTextureMipmapDecisionCache.get(cacheKey);
+        if (cached) {
+            return await cached;
+        }
+
+        const promise = (async () => {
+            const dimensions = await this.inspectImageDimensionsFromBuffer(arrayBufferOrBlob);
+            if (!dimensions) {
+                return false;
+            }
+            return this.isPowerOfTwo(dimensions.width) && this.isPowerOfTwo(dimensions.height);
+        })();
+        this.webGpuTextureMipmapDecisionCache.set(cacheKey, promise);
+        return await promise;
+    }
+
     private configureMmdTextureLoaderForWebGpu(): void {
         if (!this.isWebGpuEngine()) {
             return;
         }
 
-        // Try allowing mipmaps for WebGPU as well; this can reduce moire on fine textures.
         const sharedBuilder = MmdModelLoader.SharedMaterialBuilder;
         if (!(sharedBuilder instanceof MmdStandardMaterialBuilder)) {
             return;
@@ -3234,32 +3338,88 @@ ${beforeFogAppendBlock}
 
         const originalLoadTextureAsync = textureLoader.loadTextureAsync?.bind(textureLoader);
         if (originalLoadTextureAsync) {
-            textureLoader.loadTextureAsync = ((uniqueId, rootUrl, relativeTexturePathOrIndex, scene, assetContainer, options) => {
-                return originalLoadTextureAsync(
+            textureLoader.loadTextureAsync = (async (uniqueId, rootUrl, relativeTexturePathOrIndex, scene, assetContainer, options) => {
+                const textureOptions = { ...options };
+                if (!textureOptions.noMipmap) {
+                    if (typeof relativeTexturePathOrIndex === "number") {
+                        textureOptions.noMipmap = true;
+                    } else {
+                        const textureUrl = PathNormalize(rootUrl + relativeTexturePathOrIndex);
+                        textureOptions.noMipmap = !(await this.shouldGenerateMipmapsForWebGpuTextureUrl(textureUrl));
+                    }
+                }
+
+                return await originalLoadTextureAsync(
                     uniqueId,
                     rootUrl,
                     relativeTexturePathOrIndex,
                     scene,
                     assetContainer,
-                    options,
+                    textureOptions,
                 );
             }) as typeof textureLoader.loadTextureAsync;
         }
 
         const originalLoadTextureFromBufferAsync = textureLoader.loadTextureFromBufferAsync?.bind(textureLoader);
         if (originalLoadTextureFromBufferAsync) {
-            textureLoader.loadTextureFromBufferAsync = ((uniqueId, textureName, arrayBufferOrBlob, scene, assetContainer, options, applyPathNormalization = true) => {
-                return originalLoadTextureFromBufferAsync(
+            textureLoader.loadTextureFromBufferAsync = (async (uniqueId, textureName, arrayBufferOrBlob, scene, assetContainer, options, applyPathNormalization = true) => {
+                const textureOptions = { ...options };
+                if (!textureOptions.noMipmap) {
+                    const cacheKey = applyPathNormalization ? PathNormalize(textureName) : textureName;
+                    textureOptions.noMipmap = !(await this.shouldGenerateMipmapsForWebGpuTextureBuffer(cacheKey, arrayBufferOrBlob));
+                }
+
+                return await originalLoadTextureFromBufferAsync(
                     uniqueId,
                     textureName,
                     arrayBufferOrBlob,
                     scene,
                     assetContainer,
-                    options,
+                    textureOptions,
                     applyPathNormalization,
                 );
             }) as typeof textureLoader.loadTextureFromBufferAsync;
         }
+    }
+
+    private configureWebGpuRawTextureUploadForNonPOT(): void {
+        if (!this.isWebGpuEngine()) {
+            return;
+        }
+
+        const engine = this.engine as WebGPUEngine & {
+            _uploadDataToTextureDirectly?: (...args: any[]) => any;
+        };
+        const originalUploadDataToTextureDirectly = engine._uploadDataToTextureDirectly?.bind(engine);
+        if (!originalUploadDataToTextureDirectly) {
+            return;
+        }
+
+        engine._uploadDataToTextureDirectly = ((
+            texture,
+            imageData,
+            faceIndex = 0,
+            lod = 0,
+            babylonInternalFormat,
+            useTextureWidthAndHeight = false,
+        ) => {
+            if (!useTextureWidthAndHeight) {
+                const textureWidth = typeof texture?.width === "number" ? texture.width : 0;
+                const textureHeight = typeof texture?.height === "number" ? texture.height : 0;
+                if (textureWidth > 0 && textureHeight > 0 && (!this.isPowerOfTwo(textureWidth) || !this.isPowerOfTwo(textureHeight))) {
+                    useTextureWidthAndHeight = true;
+                }
+            }
+
+            return originalUploadDataToTextureDirectly(
+                texture,
+                imageData,
+                faceIndex,
+                lod,
+                babylonInternalFormat,
+                useTextureWidthAndHeight,
+            );
+        }) as typeof engine._uploadDataToTextureDirectly;
     }
 
     private hasPrePassRendererSupport(): boolean {
