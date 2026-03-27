@@ -141,10 +141,11 @@ export const setLocale = (
 };
 
 export const initializeI18n = (root: ParentNode = document): UiLocale => {
+    const storedLocale = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
     const initialLocale = resolveLocaleFromEnvironment();
     ensureI18nInitialized(initialLocale);
     setLocale(initialLocale, {
-        persist: false,
+        persist: !isLocale(storedLocale),
         applyToDom: true,
         root,
         emitEvent: false,
