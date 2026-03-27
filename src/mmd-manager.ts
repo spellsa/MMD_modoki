@@ -1264,8 +1264,29 @@ ${beforeFogAppendBlock}
     private readonly onWindowResize = () => {
         this.resize();
     };
+    private isBoneGizmoPointerInteractionActive(clientX?: number, clientY?: number): boolean {
+        const gizmoManager = this.boneGizmoManager;
+        if (!gizmoManager) return false;
+        if (gizmoManager.isDragging || gizmoManager.isHovered) return true;
+        if (clientX === undefined || clientY === undefined) return false;
+
+        const utilityLayerScene = gizmoManager.utilityLayer.utilityLayerScene;
+        const canvasRect = this.renderingCanvas.getBoundingClientRect();
+        const pickX = clientX - canvasRect.left;
+        const pickY = clientY - canvasRect.top;
+        if (pickX < 0 || pickY < 0 || pickX > canvasRect.width || pickY > canvasRect.height) {
+            return false;
+        }
+
+        const pickInfo = utilityLayerScene.pick(pickX, pickY);
+        return pickInfo?.hit === true && pickInfo.pickedMesh !== null;
+    }
     private readonly onCanvasPointerDown = (event: PointerEvent) => {
         if (event.button === 0) {
+            if (this.isBoneGizmoPointerInteractionActive(event.clientX, event.clientY)) {
+                this.bonePickPointerDown = null;
+                return;
+            }
             this.bonePickPointerDown = {
                 pointerId: event.pointerId,
                 clientX: event.clientX,
@@ -1310,6 +1331,7 @@ ${beforeFogAppendBlock}
             const pointerDown = this.bonePickPointerDown;
             this.bonePickPointerDown = null;
             if (!pointerDown || pointerDown.pointerId !== event.pointerId) return;
+            if (this.isBoneGizmoPointerInteractionActive(event.clientX, event.clientY)) return;
 
             const movedDistance = Math.hypot(event.clientX - pointerDown.clientX, event.clientY - pointerDown.clientY);
             if (movedDistance > 6) return;
@@ -5628,9 +5650,13 @@ ${beforeFogAppendBlock}
 
         this.resizeBoneOverlayCanvas();
 
-        // Keep the canvas sized from CSS pixels; the engine applies the render scale internally.
-        if (this.engine.getRenderWidth() !== width || this.engine.getRenderHeight() !== height) {
-            this.engine.setSize(width, height);
+        // Babylon's picking path applies hardwareScalingLevel to pointer coordinates,
+        // so the drawing buffer must stay in scaled render pixels, not raw CSS pixels.
+        const hardwareScalingLevel = Math.max(0.0001, this.engine.getHardwareScalingLevel());
+        const renderWidth = Math.max(1, Math.round(width / hardwareScalingLevel));
+        const renderHeight = Math.max(1, Math.round(height / hardwareScalingLevel));
+        if (this.engine.getRenderWidth() !== renderWidth || this.engine.getRenderHeight() !== renderHeight) {
+            this.engine.setSize(renderWidth, renderHeight);
             this.resizeGlobalIllumination();
             if (this.ssaoDepthRenderer) {
                 this.disposeSsaoDepthRenderer();
