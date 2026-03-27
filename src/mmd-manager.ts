@@ -2876,6 +2876,7 @@ ${beforeFogAppendBlock}
         }
 
         let affectedMeshCount = 0;
+        let skippedPositionMorphMeshCount = 0;
         for (const mesh of meshes) {
             if (!mesh.useBones || mesh.numBoneInfluencers <= 0) {
                 continue;
@@ -2886,21 +2887,26 @@ ${beforeFogAppendBlock}
             if (!mesh.isVerticesDataPresent("matricesSdefC")) {
                 continue;
             }
+            if (mesh.morphTargetManager?.hasPositions) {
+                skippedPositionMorphMeshCount += 1;
+                continue;
+            }
 
             mesh.computeBonesUsingShaders = false;
             affectedMeshCount += 1;
         }
 
-        if (affectedMeshCount === 0) {
+        if (affectedMeshCount === 0 && skippedPositionMorphMeshCount === 0) {
             return;
         }
 
-        console.warn(`[PMX] CPU skinning fallback enabled for WebGPU SDEF meshes. ${modelLabel}: ${affectedMeshCount} mesh(es).`, {
+        console.warn(`[PMX] CPU skinning fallback evaluated for WebGPU SDEF meshes. ${modelLabel}: ${affectedMeshCount} fallback mesh(es), ${skippedPositionMorphMeshCount} position-morph mesh(es) kept on GPU.`, {
             model: modelLabel,
             affectedMeshCount,
+            skippedPositionMorphMeshCount,
             engine: this.getEngineType(),
         });
-        this.addRuntimeDiagnostic(`CPU skinning fallback for WebGPU SDEF: ${modelLabel} (${affectedMeshCount} mesh(es))`);
+        this.addRuntimeDiagnostic(`CPU skinning fallback for WebGPU SDEF: ${modelLabel} (${affectedMeshCount} fallback, ${skippedPositionMorphMeshCount} morph-preserved)`);
     }
 
     private suspendSceneRendering(): void {
