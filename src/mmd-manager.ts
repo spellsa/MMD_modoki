@@ -264,6 +264,12 @@ import {
     tryPickBoneVisualizerAtClientPosition as tryPickBoneVisualizerAtClientPositionImpl,
     updateBoneVisualizer as updateBoneVisualizerImpl,
 } from "./editor/bone-visualizer-controller";
+import {
+    disposeRigidBodyVisualizer as disposeRigidBodyVisualizerImpl,
+    refreshRigidBodyVisualizerTarget as refreshRigidBodyVisualizerTargetImpl,
+    syncRigidBodyVisualizerVisibility as syncRigidBodyVisualizerVisibilityImpl,
+    updateRigidBodyVisualizer as updateRigidBodyVisualizerImpl,
+} from "./editor/rigid-body-visualizer-controller";
 
 type EditorRuntimeBone = IMmdRuntimeBone & {
     getAnimationPositionOffsetToRef(target: Vector3): Vector3;
@@ -458,11 +464,20 @@ type SceneModelMaterialEntry = {
     material: any;
 };
 
+type SceneModelRigidBodyEntry = {
+    name: string;
+    boneIndex: number;
+    shapeType: number;
+    shapeSize: [number, number, number];
+    physicsMode: number;
+};
+
 type SceneModelEntry = {
     mesh: MmdMesh;
     model: MmdModel;
     info: ModelInfo;
     materials: SceneModelMaterialEntry[];
+    rigidBodies: SceneModelRigidBodyEntry[];
 };
 
 type MaterialShaderDefaults = {
@@ -1103,6 +1118,19 @@ ${beforeFogAppendBlock}
     private boneVisualizerSelectedBoneName: string | null = null;
     private boneVisualizerPickPoints: { boneName: string; x: number; y: number }[] = [];
     private bonePickPointerDown: { pointerId: number; clientX: number; clientY: number } | null = null;
+    private rigidBodyVisualizerEnabled = false;
+    private rigidBodyVisualizerTargets: {
+        sceneModel: SceneModelEntry;
+        backend: "ammo" | "bullet";
+        physicsModel: any;
+        rigidBodies: SceneModelRigidBodyEntry[];
+        meshes: Mesh[];
+    }[] = [];
+    private readonly rigidBodyVisualizerTempMatrix = Matrix.Identity();
+    private readonly rigidBodyVisualizerTempScaling = new Vector3(1, 1, 1);
+    private readonly rigidBodyVisualizerTempPosition = new Vector3();
+    private readonly rigidBodyVisualizerTempRotation = Quaternion.Identity();
+    private readonly rigidBodyVisualizerMaterials = new Map<number, StandardMaterial>();
     private cameraMouseDragState: {
         pointerId: number;
         mode: "rotate" | "pan" | "zoom";
@@ -1618,6 +1646,7 @@ ${beforeFogAppendBlock}
         this.applySceneMeshVisibility(this.currentMesh, visible);
 
         this.syncBoneVisualizerVisibility();
+        this.syncRigidBodyVisualizerVisibility();
         this.updateBoneGizmoTarget();
         return visible;
     }
@@ -1675,6 +1704,7 @@ ${beforeFogAppendBlock}
         }
 
         this.refreshBoneVisualizerTarget();
+        this.refreshRigidBodyVisualizerTarget();
         this.updateBoneGizmoTarget();
         this.emitMergedKeyframeTracks();
         return true;
@@ -1688,6 +1718,7 @@ ${beforeFogAppendBlock}
         this.activeModelInfo = target.info;
         this.timelineTarget = "model";
         this.refreshBoneVisualizerTarget();
+        this.refreshRigidBodyVisualizerTarget();
         this.updateBoneGizmoTarget();
         this.onModelLoaded?.(target.info);
         this.emitMergedKeyframeTracks();
@@ -1700,6 +1731,7 @@ ${beforeFogAppendBlock}
             this.syncViewportCameraFromMmdCamera();
         }
         this.syncBoneVisualizerVisibility();
+        this.syncRigidBodyVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.emitMergedKeyframeTracks();
     }
@@ -1766,6 +1798,22 @@ ${beforeFogAppendBlock}
 
     private updateBoneVisualizer(): void {
         return updateBoneVisualizerImpl(this);
+    }
+
+    private refreshRigidBodyVisualizerTarget(): void {
+        return refreshRigidBodyVisualizerTargetImpl(this);
+    }
+
+    private syncRigidBodyVisualizerVisibility(): void {
+        return syncRigidBodyVisualizerVisibilityImpl(this);
+    }
+
+    private updateRigidBodyVisualizer(): void {
+        return updateRigidBodyVisualizerImpl(this);
+    }
+
+    private disposeRigidBodyVisualizer(): void {
+        return disposeRigidBodyVisualizerImpl(this);
     }
 
     private tryPickBoneVisualizerAtClientPosition(clientX: number, clientY: number): void {
@@ -1974,6 +2022,31 @@ ${beforeFogAppendBlock}
         this.setSkydomeVisible(next);
         return next;
     }
+
+    public isRigidBodyVisualizerEnabled(): boolean {
+        return this.rigidBodyVisualizerEnabled;
+    }
+
+    public isRigidBodyVisualizerAvailable(): boolean {
+        return this.sceneModels.some((sceneModel) => {
+            const model = sceneModel.model as { _physicsModel?: unknown } | null;
+            return Boolean(model?._physicsModel && sceneModel.rigidBodies.length > 0);
+        });
+    }
+
+    public setRigidBodyVisualizerEnabled(enabled: boolean): boolean {
+        this.rigidBodyVisualizerEnabled = Boolean(enabled);
+        this.syncRigidBodyVisualizerVisibility();
+        if (this.rigidBodyVisualizerEnabled) {
+            this.updateRigidBodyVisualizer();
+        }
+        return this.rigidBodyVisualizerEnabled;
+    }
+
+    public toggleRigidBodyVisualizerEnabled(): boolean {
+        return this.setRigidBodyVisualizerEnabled(!this.rigidBodyVisualizerEnabled);
+    }
+
     public isPhysicsAvailable(): boolean {
         return this.physicsAvailable;
     }
@@ -2302,6 +2375,7 @@ ${beforeFogAppendBlock}
             }
             this.handleBoneGizmoBeforeRender();
             this.updateBoneVisualizer();
+            this.updateRigidBodyVisualizer();
             this.updateEditorDofFocusAndFStop();
         });
 
@@ -3499,6 +3573,7 @@ ${beforeFogAppendBlock}
         this.mmdRuntime.seekAnimation(0, true);
 
         this.refreshBoneVisualizerTarget();
+        this.refreshRigidBodyVisualizerTarget();
         this.updateBoneGizmoTarget();
         this.emitMergedKeyframeTracks();
         this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
@@ -5803,6 +5878,7 @@ ${beforeFogAppendBlock}
         }
         this.sceneModels = [];
         this.disposeBoneVisualizer();
+        this.disposeRigidBodyVisualizer();
         if (this.boneOverlayCanvas) {
             this.boneOverlayCanvas.remove();
             this.boneOverlayCanvas = null;

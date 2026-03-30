@@ -193,6 +193,8 @@ export class UIController {
     private skydomeToggleText: HTMLElement;
     private btnTogglePhysics: HTMLElement;
     private physicsToggleText: HTMLElement;
+    private btnToggleRigidBodies: HTMLElement;
+    private rigidBodiesToggleText: HTMLElement;
     private btnToggleGi: HTMLElement;
     private giToggleText: HTMLElement;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
@@ -366,6 +368,8 @@ export class UIController {
         this.skydomeToggleText = document.getElementById("skydome-toggle-text")!;
         this.btnTogglePhysics = document.getElementById("btn-toggle-physics")!;
         this.physicsToggleText = document.getElementById("physics-toggle-text")!;
+        this.btnToggleRigidBodies = document.getElementById("btn-toggle-rigid-bodies")!;
+        this.rigidBodiesToggleText = document.getElementById("rigid-bodies-toggle-text")!;
         this.btnToggleGi = document.getElementById("btn-toggle-gi")!;
         this.giToggleText = document.getElementById("gi-toggle-text")!;
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
@@ -441,6 +445,7 @@ export class UIController {
             this.mmdManager.getPhysicsEnabled(),
             this.mmdManager.isPhysicsAvailable()
         );
+        this.updateRigidBodyToggleButton();
         this.updateGiToggleButton();
         this.updateInfoActionButtons();
         this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
@@ -537,6 +542,17 @@ export class UIController {
             const enabled = this.mmdManager.togglePhysicsEnabled();
             this.updatePhysicsToggleButton(enabled, true);
             this.showToast(enabled ? t("toast.physics.on") : t("toast.physics.off"), "info");
+        });
+        this.btnToggleRigidBodies.addEventListener("click", () => {
+            if (!this.mmdManager.isRigidBodyVisualizerAvailable()) {
+                this.updateRigidBodyToggleButton();
+                this.showToast(t("toast.rigidBodies.unavailable"), "error");
+                return;
+            }
+
+            const enabled = this.mmdManager.toggleRigidBodyVisualizerEnabled();
+            this.updateRigidBodyToggleButton();
+            this.showToast(enabled ? t("toast.rigidBodies.on") : t("toast.rigidBodies.off"), "info");
         });
         this.btnToggleGi.addEventListener("click", () => {
             const wasEnabled = this.mmdManager.isGlobalIlluminationEnabled();
@@ -659,6 +675,7 @@ export class UIController {
             const visible = this.mmdManager.toggleActiveModelVisibility();
             this.markSectionKeyframeDirty("info", this.getInfoKeyframeContextKey());
             this.updateInfoActionButtons();
+            this.updateRigidBodyToggleButton();
             this.updateSectionKeyframeButtons();
             this.showToast(visible ? "Model visible" : "Model hidden", "info");
         });
@@ -1479,6 +1496,7 @@ export class UIController {
             }
             this.refreshModelSelector();
             this.refreshShaderPanel();
+            this.updateRigidBodyToggleButton();
         };
 
         // Any model loaded into scene
@@ -1490,6 +1508,7 @@ export class UIController {
             }
             this.refreshModelSelector();
             this.refreshShaderPanel();
+            this.updateRigidBodyToggleButton();
             const activeLabel = active ? " [active]" : "";
             this.showToast(`Loaded model: ${info.name} (${totalCount})${activeLabel}`, "success");
         };
@@ -1539,6 +1558,7 @@ export class UIController {
 
         this.mmdManager.onPhysicsStateChanged = (enabled: boolean, available: boolean) => {
             this.updatePhysicsToggleButton(enabled, available);
+            this.updateRigidBodyToggleButton();
         };
 
         this.mmdManager.onGlobalIlluminationStateChanged = () => {
@@ -3204,13 +3224,13 @@ export class UIController {
         this.btnModelDelete.disabled = !enabled;
 
         if (!enabled) {
-            this.btnModelVisibility.textContent = "Hide";
+            this.btnModelVisibility.textContent = t("button.hide");
             this.updateSectionKeyframeButtons();
             return;
         }
 
         const visible = this.mmdManager.getActiveModelVisibility();
-        this.btnModelVisibility.textContent = visible ? "Hide" : "Show";
+        this.btnModelVisibility.textContent = visible ? t("button.hide") : t("button.show");
         this.updateSectionKeyframeButtons();
     }
 
@@ -3249,6 +3269,7 @@ export class UIController {
         this.modelSelect.disabled = models.length === 0;
         this.syncShaderModelSelectorFromInfo();
         this.updateInfoActionButtons();
+        this.updateRigidBodyToggleButton();
         this.refreshAccessoryPanel();
     }
 
@@ -5117,8 +5138,10 @@ export class UIController {
             this.mmdManager.getPhysicsEnabled(),
             this.mmdManager.isPhysicsAvailable()
         );
+        this.updateRigidBodyToggleButton();
         this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
         this.updateFullscreenUiToggleButton(this.isUiFullscreenActive);
+        this.updateInfoActionButtons();
         this.syncToolbarLocaleSelect();
     }
 
@@ -5179,6 +5202,18 @@ export class UIController {
         if (this.physicsGravityDirZSlider) this.physicsGravityDirZSlider.disabled = !available;
         if (this.physicsSimulationRateSelect) this.physicsSimulationRateSelect.disabled = !available;
         this.refreshPhysicsSimulationRateUi();
+    }
+
+    private updateRigidBodyToggleButton(): void {
+        const available = this.mmdManager.isRigidBodyVisualizerAvailable();
+        const active = available && this.mmdManager.isRigidBodyVisualizerEnabled();
+        this.rigidBodiesToggleText.textContent = t("button.rigidBodies");
+        this.btnToggleRigidBodies.setAttribute("aria-pressed", active ? "true" : "false");
+        this.btnToggleRigidBodies.classList.toggle("camera-view-btn--active", active);
+        (this.btnToggleRigidBodies as HTMLButtonElement).disabled = !available;
+        this.btnToggleRigidBodies.title = available
+            ? (active ? t("button.rigidBodies.title.on") : t("button.rigidBodies.title.off"))
+            : t("button.rigidBodies.title.unavailable");
     }
 
     private updateGiToggleButton(): void {

@@ -411,6 +411,19 @@
               <button id="btn-cam-back" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.back">背面</button>
               <button id="btn-cam-bottom" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.bottom">下面</button>
             </div>
+            <div class="camera-view-buttons" role="group" aria-label="表示オプション">
+              <button
+                id="btn-toggle-rigid-bodies"
+                class="camera-view-btn"
+                type="button"
+                disabled
+                aria-pressed="false"
+                title="全モデル剛体表示: OFF"
+                data-i18n-title="button.rigidBodies.title.off"
+              >
+                <span id="rigid-bodies-toggle-text" data-i18n="button.rigidBodies">剛体</span>
+              </button>
+            </div>
             <div class="control-row cam-slider-row dof-row-hidden">
               <label class="cam-axis-label" data-i18n="label.distance">距離</label>
               <input type="range" id="cam-distance" class="cam-slider" min="5" max="400" value="50" step="1">

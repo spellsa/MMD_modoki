@@ -517,6 +517,9 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
                 };
             }[];
             rigidBodies?: readonly {
+                name?: string;
+                shapeType?: number;
+                shapeSize?: readonly [number, number, number];
                 physicsMode?: number;
                 boneIndex?: number;
             }[];
@@ -592,6 +595,20 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         const boneControlInfos: BoneControlInfo[] = [];
         const metadataBones = Array.isArray(mmdMetadata.bones) ? mmdMetadata.bones : [];
         const metadataRigidBodies = Array.isArray(mmdMetadata.rigidBodies) ? mmdMetadata.rigidBodies : [];
+        const sceneRigidBodies = metadataRigidBodies.map((rigidBody, index) => {
+            const rawShapeSize = Array.isArray(rigidBody?.shapeSize) ? rigidBody.shapeSize : [0.5, 0.5, 0.5];
+            return {
+                name: rigidBody?.name || `RigidBody ${index + 1}`,
+                boneIndex: typeof rigidBody?.boneIndex === "number" ? rigidBody.boneIndex : -1,
+                shapeType: typeof rigidBody?.shapeType === "number" ? rigidBody.shapeType : 0,
+                shapeSize: [
+                    Number(rawShapeSize[0] ?? 0.5),
+                    Number(rawShapeSize[1] ?? rawShapeSize[0] ?? 0.5),
+                    Number(rawShapeSize[2] ?? rawShapeSize[0] ?? 0.5),
+                ] as [number, number, number],
+                physicsMode: typeof rigidBody?.physicsMode === "number" ? rigidBody.physicsMode : 0,
+            };
+        });
         // logProblematicBoneDiagnostics(fileName, result.meshes as Mesh[], metadataBones, mmdModel as any);
         const physicsBoneIndices = new Set<number>();
         for (const rigidBody of metadataRigidBodies) {
@@ -699,7 +716,9 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             model: mmdModel,
             info: modelInfo,
             materials: sceneMaterials,
+            rigidBodies: sceneRigidBodies,
         });
+        host.refreshRigidBodyVisualizerTarget();
         host.syncLuminousGlowLayer?.();
         host.syncGlobalIlluminationSceneModels?.();
 
