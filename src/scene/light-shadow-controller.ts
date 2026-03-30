@@ -24,10 +24,26 @@ function clampShadowFrustumSize(v: number): number {
     return Math.max(120, Math.min(6000, v));
 }
 
+function clampShadowBias(v: number): number {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(0.01, v));
+}
+
+function clampShadowNormalBias(v: number): number {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(0.02, v));
+}
+
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
 const DEFAULT_CSM_SHADOW_MAX_Z = 4800;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const DEFAULT_CSM_LIGHT_DISTANCE = 220;
+
+function applyShadowBiasSettings(host: any): void {
+    if (!host.shadowGenerator) return;
+    host.shadowGenerator.bias = clampShadowBias(host.shadowBiasValue);
+    host.shadowGenerator.normalBias = clampShadowNormalBias(host.shadowNormalBiasValue);
+}
 
 function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGenerator {
     const maxTextureSize = host.engine.getCaps().maxTextureSize ?? 4096;
@@ -47,13 +63,13 @@ function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGen
     shadowGenerator.usePercentageCloserFiltering = true;
     shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
     shadowGenerator.useContactHardeningShadow = false;
-    shadowGenerator.bias = 0.00015;
-    shadowGenerator.normalBias = 0.0006;
     shadowGenerator.frustumEdgeFalloff = 0.26;
     shadowGenerator.transparencyShadow = true;
     shadowGenerator.enableSoftTransparentShadow = true;
     shadowGenerator.useOpacityTextureForTransparentShadow = true;
     shadowGenerator.darkness = host.shadowDarknessValue;
+    host.shadowGenerator = shadowGenerator;
+    applyShadowBiasSettings(host);
     return shadowGenerator;
 }
 
@@ -250,6 +266,24 @@ export function setShadowFrustumSize(host: any, v: number): void {
         const direction = getLightDirection(host);
         setLightDirection(host, direction.x, direction.y, direction.z);
     }
+}
+
+export function getShadowBias(host: any): number {
+    return clampShadowBias(host.shadowBiasValue);
+}
+
+export function setShadowBias(host: any, v: number): void {
+    host.shadowBiasValue = clampShadowBias(v);
+    applyShadowBiasSettings(host);
+}
+
+export function getShadowNormalBias(host: any): number {
+    return clampShadowNormalBias(host.shadowNormalBiasValue);
+}
+
+export function setShadowNormalBias(host: any, v: number): void {
+    host.shadowNormalBiasValue = clampShadowNormalBias(v);
+    applyShadowBiasSettings(host);
 }
 
 export function getShadowEnabled(host: any): boolean {

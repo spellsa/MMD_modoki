@@ -669,6 +669,16 @@
               <span id="light-shadow-frustum-size-val" class="light-value">220</span>
             </div>
             <div class="light-row light-row--shadow">
+              <span class="light-label" data-i18n="label.shadowBias">Shadow Bias</span>
+              <input type="range" id="light-shadow-bias" class="light-slider" min="0" max="10000" value="1500" step="1">
+              <span id="light-shadow-bias-val" class="light-value">0.00150</span>
+            </div>
+            <div class="light-row light-row--shadow">
+              <span class="light-label" data-i18n="label.shadowNormalBias">Normal Bias</span>
+              <input type="range" id="light-shadow-normal-bias" class="light-slider" min="0" max="2000" value="800" step="1">
+              <span id="light-shadow-normal-bias-val" class="light-value">0.00800</span>
+            </div>
+            <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowColorR">影色R</span>
               <input type="range" id="light-shadow-color-r" class="light-slider" min="0" max="255" value="38" step="1">
               <span id="light-shadow-color-r-val" class="light-value">38</span>
@@ -690,13 +700,13 @@
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.selfShadowEdge">セルフ影境界</span>
-              <input type="range" id="light-self-shadow-softness" class="light-slider" min="5" max="120" value="35" step="1">
-              <span id="light-self-shadow-softness-val" class="light-value">0.035</span>
+              <input type="range" id="light-self-shadow-softness" class="light-slider" min="5" max="120" value="40" step="1">
+              <span id="light-self-shadow-softness-val" class="light-value">0.040</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.occlusionShadowEdge">遮蔽影境界</span>
-              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="35" step="1">
-              <span id="light-occlusion-shadow-softness-val" class="light-value">0.035</span>
+              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="45" step="1">
+              <span id="light-occlusion-shadow-softness-val" class="light-value">0.045</span>
             </div>
           </div>
         </section>

@@ -154,6 +154,8 @@
     "label.azimuth":  "Azimuth",
     "label.elevation":  "Elevation",
     "label.shadowStrength":  "Intensity",
+    "label.shadowBias":  "Shadow Bias",
+    "label.shadowNormalBias":  "Normal Bias",
     "label.ambientLight":  "Ambient light",
     "label.lightColorR":  "Light color R",
     "label.lightColorG":  "Light color G",

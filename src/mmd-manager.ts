@@ -207,7 +207,9 @@ import {
     getShadowDarkness as getShadowDarknessImpl,
     getShadowEdgeSoftness as getShadowEdgeSoftnessImpl,
     getShadowEnabled as getShadowEnabledImpl,
+    getShadowBias as getShadowBiasImpl,
     getShadowFrustumSize as getShadowFrustumSizeImpl,
+    getShadowNormalBias as getShadowNormalBiasImpl,
     getToonShadowInfluence as getToonShadowInfluenceImpl,
     initializeLightShadowSystem as initializeLightShadowSystemImpl,
     setAmbientIntensity as setAmbientIntensityImpl,
@@ -223,7 +225,9 @@ import {
     setShadowDarkness as setShadowDarknessImpl,
     setShadowEdgeSoftness as setShadowEdgeSoftnessImpl,
     setShadowEnabled as setShadowEnabledImpl,
+    setShadowBias as setShadowBiasImpl,
     setShadowFrustumSize as setShadowFrustumSizeImpl,
+    setShadowNormalBias as setShadowNormalBiasImpl,
     setToonShadowInfluence as setToonShadowInfluenceImpl,
 } from "./scene/light-shadow-controller";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
@@ -1164,8 +1168,10 @@ ${beforeFogAppendBlock}
     private shadowEnabled = true;
     private shadowDarknessValue = 0.0;
     private shadowFrustumSizeValue = 220;
-    private selfShadowEdgeSoftnessValue = 0.045;
-    private occlusionShadowEdgeSoftnessValue = 0.06;
+    private shadowBiasValue = 0.0015;
+    private shadowNormalBiasValue = 0.008;
+    private selfShadowEdgeSoftnessValue = 0.04;
+    private occlusionShadowEdgeSoftnessValue = 0.045;
     private toonShadowInfluenceValue = 1;
 
     private lightColorTemperatureKelvin = 6500;
@@ -4617,6 +4623,20 @@ ${beforeFogAppendBlock}
             const direction = this.getLightDirection();
             this.setLightDirection(direction.x, direction.y, direction.z);
         }
+    }
+
+    get shadowBias(): number {
+        return getShadowBiasImpl(this);
+    }
+    set shadowBias(v: number) {
+        setShadowBiasImpl(this, v);
+    }
+
+    get shadowNormalBias(): number {
+        return getShadowNormalBiasImpl(this);
+    }
+    set shadowNormalBias(v: number) {
+        setShadowNormalBiasImpl(this, v);
     }
 
     getShadowEnabled(): boolean {

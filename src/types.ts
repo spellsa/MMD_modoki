@@ -203,6 +203,8 @@ export interface ProjectLightingState {
     shadowEnabled: boolean;
     shadowDarkness: number;
     shadowFrustumSize?: number;
+    shadowBias?: number;
+    shadowNormalBias?: number;
     shadowEdgeSoftness?: number;
     selfShadowEdgeSoftness?: number;
     occlusionShadowEdgeSoftness?: number;

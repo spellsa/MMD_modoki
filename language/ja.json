@@ -154,6 +154,8 @@
     "label.azimuth":  "方位角",
     "label.elevation":  "仰角",
     "label.shadowStrength":  "照度",
+    "label.shadowBias":  "Shadow Bias",
+    "label.shadowNormalBias":  "Normal Bias",
     "label.ambientLight":  "環境光",
     "label.lightColorR":  "光色R",
     "label.lightColorG":  "光色G",

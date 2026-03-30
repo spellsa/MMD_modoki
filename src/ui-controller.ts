@@ -839,6 +839,8 @@ export class UIController {
         const elLightFlatColorInfluence = document.getElementById("light-flat-color-influence") as HTMLInputElement;
         const elShadow = document.getElementById("light-shadow") as HTMLInputElement;
         const elShadowFrustumSize = document.getElementById("light-shadow-frustum-size") as HTMLInputElement;
+        const elShadowBias = document.getElementById("light-shadow-bias") as HTMLInputElement;
+        const elShadowNormalBias = document.getElementById("light-shadow-normal-bias") as HTMLInputElement;
         const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
         const elShadowColorG = document.getElementById("light-shadow-color-g") as HTMLInputElement;
         const elShadowColorB = document.getElementById("light-shadow-color-b") as HTMLInputElement;
@@ -858,6 +860,8 @@ export class UIController {
         const valLightFlatColorInfluence = document.getElementById("light-flat-color-influence-val")!;
         const valSh = document.getElementById("light-shadow-val")!;
         const valShadowFrustumSize = document.getElementById("light-shadow-frustum-size-val")!;
+        const valShadowBias = document.getElementById("light-shadow-bias-val")!;
+        const valShadowNormalBias = document.getElementById("light-shadow-normal-bias-val")!;
         const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
         const valShadowColorG = document.getElementById("light-shadow-color-g-val")!;
         const valShadowColorB = document.getElementById("light-shadow-color-b-val")!;
@@ -1015,6 +1019,16 @@ export class UIController {
             valShadowFrustumSize.textContent = String(Math.round(v));
             this.mmdManager.shadowFrustumSize = v;
         });
+        elShadowBias.addEventListener("input", () => {
+            const v = Number(elShadowBias.value) / 1_000_000;
+            valShadowBias.textContent = v.toFixed(5);
+            this.mmdManager.shadowBias = v;
+        });
+        elShadowNormalBias.addEventListener("input", () => {
+            const v = Number(elShadowNormalBias.value) / 100_000;
+            valShadowNormalBias.textContent = v.toFixed(5);
+            this.mmdManager.shadowNormalBias = v;
+        });
         const applyShadowColor = () => {
             const r = Number(elShadowColorR.value) / 255;
             const g = Number(elShadowColorG.value) / 255;
@@ -1050,6 +1064,10 @@ export class UIController {
         valSh.textContent = this.mmdManager.shadowDarkness.toFixed(2);
         elShadowFrustumSize.value = String(Math.round(this.mmdManager.shadowFrustumSize));
         valShadowFrustumSize.textContent = String(Math.round(this.mmdManager.shadowFrustumSize));
+        elShadowBias.value = String(Math.round(this.mmdManager.shadowBias * 1_000_000));
+        valShadowBias.textContent = this.mmdManager.shadowBias.toFixed(5);
+        elShadowNormalBias.value = String(Math.round(this.mmdManager.shadowNormalBias * 100_000));
+        valShadowNormalBias.textContent = this.mmdManager.shadowNormalBias.toFixed(5);
         const initialShadowColor = this.mmdManager.getShadowColor();
         elShadowColorR.value = String(Math.round(initialShadowColor.r * 255));
         elShadowColorG.value = String(Math.round(initialShadowColor.g * 255));
@@ -5282,6 +5300,8 @@ export class UIController {
         const shadowColor = this.mmdManager.getShadowColor();
         setSliderValue("light-shadow", "light-shadow-val", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
         setSliderValue("light-shadow-frustum-size", "light-shadow-frustum-size-val", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-bias", "light-shadow-bias-val", this.mmdManager.shadowBias * 1_000_000, (value) => (value / 1_000_000).toFixed(5));
+        setSliderValue("light-shadow-normal-bias", "light-shadow-normal-bias-val", this.mmdManager.shadowNormalBias * 100_000, (value) => (value / 100_000).toFixed(5));
         setSliderValue("light-shadow-color-r", "light-shadow-color-r-val", shadowColor.r * 255, (value) => String(Math.round(value)));
         setSliderValue("light-shadow-color-g", "light-shadow-color-g-val", shadowColor.g * 255, (value) => String(Math.round(value)));
         setSliderValue("light-shadow-color-b", "light-shadow-color-b-val", shadowColor.b * 255, (value) => String(Math.round(value)));

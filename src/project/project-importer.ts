@@ -318,6 +318,12 @@ export async function importProjectState(
     host.shadowFrustumSize = typeof data.lighting.shadowFrustumSize === "number" && Number.isFinite(data.lighting.shadowFrustumSize)
         ? data.lighting.shadowFrustumSize
         : host.shadowFrustumSizeValue;
+    host.shadowBias = typeof data.lighting.shadowBias === "number" && Number.isFinite(data.lighting.shadowBias)
+        ? data.lighting.shadowBias
+        : host.shadowBiasValue;
+    host.shadowNormalBias = typeof data.lighting.shadowNormalBias === "number" && Number.isFinite(data.lighting.shadowNormalBias)
+        ? data.lighting.shadowNormalBias
+        : host.shadowNormalBiasValue;
     const legacyShadowEdgeSoftness = typeof data.lighting.shadowEdgeSoftness === "number" && Number.isFinite(data.lighting.shadowEdgeSoftness)
         ? data.lighting.shadowEdgeSoftness
         : null;
