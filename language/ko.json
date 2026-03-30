@@ -113,6 +113,7 @@
     "button.rigidBodies.title.on":  "전체 모델 강체 표시: ON (클릭하여 OFF)",
     "button.rigidBodies.title.off":  "전체 모델 강체 표시: OFF (클릭하여 ON)",
     "button.rigidBodies.title.unavailable":  "전체 모델 강체 표시: 사용할 수 없음",
+    "label.shadowMaxZ":  "그림자 거리",
     "button.applyAllMaterials":  "Assign to all materials",
     "button.resetAllMaterials":  "Reset all materials",
     "empty.trackNotSelected":  "트랙이 선택되지 않았습니다",

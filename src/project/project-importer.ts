@@ -318,6 +318,9 @@ export async function importProjectState(
     host.shadowFrustumSize = typeof data.lighting.shadowFrustumSize === "number" && Number.isFinite(data.lighting.shadowFrustumSize)
         ? data.lighting.shadowFrustumSize
         : host.shadowFrustumSizeValue;
+    host.shadowMaxZ = typeof data.lighting.shadowMaxZ === "number" && Number.isFinite(data.lighting.shadowMaxZ)
+        ? data.lighting.shadowMaxZ
+        : host.shadowMaxZValue;
     host.shadowBias = typeof data.lighting.shadowBias === "number" && Number.isFinite(data.lighting.shadowBias)
         ? data.lighting.shadowBias
         : host.shadowBiasValue;

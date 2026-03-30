@@ -851,6 +851,7 @@ export class UIController {
         const elLightFlatColorInfluence = document.getElementById("light-flat-color-influence") as HTMLInputElement;
         const elShadow = document.getElementById("light-shadow") as HTMLInputElement;
         const elShadowFrustumSize = document.getElementById("light-shadow-frustum-size") as HTMLInputElement;
+        const elShadowMaxZ = document.getElementById("light-shadow-max-z") as HTMLInputElement;
         const elShadowBias = document.getElementById("light-shadow-bias") as HTMLInputElement;
         const elShadowNormalBias = document.getElementById("light-shadow-normal-bias") as HTMLInputElement;
         const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
@@ -872,6 +873,7 @@ export class UIController {
         const valLightFlatColorInfluence = document.getElementById("light-flat-color-influence-val")!;
         const valSh = document.getElementById("light-shadow-val")!;
         const valShadowFrustumSize = document.getElementById("light-shadow-frustum-size-val")!;
+        const valShadowMaxZ = document.getElementById("light-shadow-max-z-val")!;
         const valShadowBias = document.getElementById("light-shadow-bias-val")!;
         const valShadowNormalBias = document.getElementById("light-shadow-normal-bias-val")!;
         const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
@@ -1031,6 +1033,11 @@ export class UIController {
             valShadowFrustumSize.textContent = String(Math.round(v));
             this.mmdManager.shadowFrustumSize = v;
         });
+        elShadowMaxZ.addEventListener("input", () => {
+            const v = Number(elShadowMaxZ.value);
+            valShadowMaxZ.textContent = String(Math.round(v));
+            this.mmdManager.shadowMaxZ = v;
+        });
         elShadowBias.addEventListener("input", () => {
             const v = Number(elShadowBias.value) / 1_000_000;
             valShadowBias.textContent = v.toFixed(5);
@@ -1074,6 +1081,8 @@ export class UIController {
         valSh.textContent = this.mmdManager.shadowDarkness.toFixed(2);
         elShadowFrustumSize.value = String(Math.round(this.mmdManager.shadowFrustumSize));
         valShadowFrustumSize.textContent = String(Math.round(this.mmdManager.shadowFrustumSize));
+        elShadowMaxZ.value = String(Math.round(this.mmdManager.shadowMaxZ));
+        valShadowMaxZ.textContent = String(Math.round(this.mmdManager.shadowMaxZ));
         elShadowBias.value = String(Math.round(this.mmdManager.shadowBias * 1_000_000));
         valShadowBias.textContent = this.mmdManager.shadowBias.toFixed(5);
         elShadowNormalBias.value = String(Math.round(this.mmdManager.shadowNormalBias * 100_000));
@@ -5324,6 +5333,7 @@ export class UIController {
         const shadowColor = this.mmdManager.getShadowColor();
         setSliderValue("light-shadow", "light-shadow-val", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
         setSliderValue("light-shadow-frustum-size", "light-shadow-frustum-size-val", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-max-z", "light-shadow-max-z-val", this.mmdManager.shadowMaxZ, (value) => String(Math.round(value)));
         setSliderValue("light-shadow-bias", "light-shadow-bias-val", this.mmdManager.shadowBias * 1_000_000, (value) => (value / 1_000_000).toFixed(5));
         setSliderValue("light-shadow-normal-bias", "light-shadow-normal-bias-val", this.mmdManager.shadowNormalBias * 100_000, (value) => (value / 100_000).toFixed(5));
         setSliderValue("light-shadow-color-r", "light-shadow-color-r-val", shadowColor.r * 255, (value) => String(Math.round(value)));

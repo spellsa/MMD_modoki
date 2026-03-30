@@ -24,6 +24,11 @@ function clampShadowFrustumSize(v: number): number {
     return Math.max(120, Math.min(6000, v));
 }
 
+function clampShadowMaxZ(v: number): number {
+    if (!Number.isFinite(v)) return DEFAULT_CSM_SHADOW_MAX_Z;
+    return Math.max(500, Math.min(12000, v));
+}
+
 function clampShadowBias(v: number): number {
     if (!Number.isFinite(v)) return 0;
     return Math.max(0, Math.min(0.01, v));
@@ -269,6 +274,19 @@ export function setShadowFrustumSize(host: any, v: number): void {
     }
 }
 
+export function getShadowMaxZ(host: any): number {
+    return clampShadowMaxZ(host.shadowMaxZValue);
+}
+
+export function setShadowMaxZ(host: any, v: number): void {
+    host.shadowMaxZValue = clampShadowMaxZ(v);
+    applyShadowFrustumSize(host);
+    if (host.dirLight) {
+        const direction = getLightDirection(host);
+        setLightDirection(host, direction.x, direction.y, direction.z);
+    }
+}
+
 export function getShadowBias(host: any): number {
     return clampShadowBias(host.shadowBiasValue);
 }
@@ -392,10 +410,10 @@ export function applyShadowFrustumSize(host: any): void {
     host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : host.shadowFrustumSizeValue;
     host.dirLight.shadowMinZ = 1;
     host.dirLight.shadowMaxZ = csmEnabled
-        ? DEFAULT_CSM_SHADOW_MAX_Z
+        ? clampShadowMaxZ(host.shadowMaxZValue)
         : Math.max(500, host.shadowFrustumSizeValue * 6);
     if (csmEnabled) {
-        host.shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
+        host.shadowGenerator.shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
     }
 }
 

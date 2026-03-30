@@ -113,6 +113,7 @@
     "button.rigidBodies.title.on":  "全モデル剛体表示: ON (クリックでOFF)",
     "button.rigidBodies.title.off":  "全モデル剛体表示: OFF (クリックでON)",
     "button.rigidBodies.title.unavailable":  "全モデル剛体表示: 利用不可",
+    "label.shadowMaxZ":  "影描画距離",
     "button.applyAllMaterials":  "全材質へ割り当て",
     "button.resetAllMaterials":  "全材質を標準化",
     "empty.trackNotSelected":  "トラック未選択",

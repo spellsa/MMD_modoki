@@ -113,6 +113,7 @@
     "button.rigidBodies.title.on":  "全模型剛體顯示: ON（點擊切到 OFF）",
     "button.rigidBodies.title.off":  "全模型剛體顯示: OFF（點擊切到 ON）",
     "button.rigidBodies.title.unavailable":  "全模型剛體顯示: 不可用",
+    "label.shadowMaxZ":  "陰影距離",
     "button.applyAllMaterials":  "Assign to all materials",
     "button.resetAllMaterials":  "Reset all materials",
     "empty.trackNotSelected":  "未選擇軌道",
