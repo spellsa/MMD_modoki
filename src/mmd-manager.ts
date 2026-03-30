@@ -507,7 +507,7 @@ export class MmdManager {
         desynchronized: false,
         adaptToDeviceRatio: false,
     };
-    private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.5;
+    private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.75;
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
@@ -1170,8 +1170,8 @@ ${beforeFogAppendBlock}
     private shadowFrustumSizeValue = 220;
     private shadowBiasValue = 0.0015;
     private shadowNormalBiasValue = 0.008;
-    private selfShadowEdgeSoftnessValue = 0.04;
-    private occlusionShadowEdgeSoftnessValue = 0.045;
+    private selfShadowEdgeSoftnessValue = 0.05;
+    private occlusionShadowEdgeSoftnessValue = 0.01;
     private toonShadowInfluenceValue = 1;
 
     private lightColorTemperatureKelvin = 6500;
@@ -2264,17 +2264,17 @@ ${beforeFogAppendBlock}
             ? new CascadedShadowGenerator(shadowMapSize, dirLight, undefined, this.camera)
             : new ShadowGenerator(shadowMapSize, dirLight);
         if (shadowGenerator instanceof CascadedShadowGenerator) {
-            shadowGenerator.numCascades = 4;
+            shadowGenerator.numCascades = 2;
             shadowGenerator.stabilizeCascades = true;
             shadowGenerator.lambda = 0.82;
             shadowGenerator.cascadeBlendPercentage = 0.05;
-            shadowGenerator.autoCalcDepthBounds = false;
+            shadowGenerator.autoCalcDepthBounds = true;
             shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
             dirLight.shadowFrustumSize = DEFAULT_CSM_FRUSTUM_SIZE;
             dirLight.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
         }
         shadowGenerator.usePercentageCloserFiltering = true;
-        shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
+        shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
         shadowGenerator.useContactHardeningShadow = false;
         shadowGenerator.bias = 0.00015;
         shadowGenerator.normalBias = 0.0006;

@@ -68,6 +68,13 @@
             </svg>
             <span id="physics-toggle-text" data-i18n="toolbar.physics.short">PHY</span>
           </button>
+          <button id="btn-toggle-shadow" class="toolbar-btn toolbar-btn--compact toggle-on" title="影の有効/無効を切り替える" data-i18n-title="toolbar.shadow.title.on" aria-pressed="true">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 2.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6z" />
+              <path d="M8 2.2a4.8 4.8 0 0 1 0 9.6z" fill="#0b0d12" opacity="0.45" />
+            </svg>
+            <span id="shadow-toggle-text" data-i18n="toolbar.shadow.short">影</span>
+          </button>
           <button id="btn-toggle-gi" class="toolbar-btn toolbar-btn--compact" title="グローバルイルミネーションの有効/無効を切り替える" data-i18n-title="toolbar.gi.title.off" aria-pressed="false" hidden>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
               <circle cx="8" cy="8" r="3.2" />
@@ -700,13 +707,13 @@
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.selfShadowEdge">セルフ影境界</span>
-              <input type="range" id="light-self-shadow-softness" class="light-slider" min="5" max="120" value="40" step="1">
-              <span id="light-self-shadow-softness-val" class="light-value">0.040</span>
+              <input type="range" id="light-self-shadow-softness" class="light-slider" min="5" max="120" value="50" step="1">
+              <span id="light-self-shadow-softness-val" class="light-value">0.050</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.occlusionShadowEdge">遮蔽影境界</span>
-              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="45" step="1">
-              <span id="light-occlusion-shadow-softness-val" class="light-value">0.045</span>
+              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="10" step="1">
+              <span id="light-occlusion-shadow-softness-val" class="light-value">0.010</span>
             </div>
           </div>
         </section>

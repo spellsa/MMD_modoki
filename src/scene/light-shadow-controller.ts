@@ -53,15 +53,15 @@ function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGen
         ? new CascadedShadowGenerator(shadowMapSize, dirLight, undefined, camera)
         : new ShadowGenerator(shadowMapSize, dirLight);
     if (shadowGenerator instanceof CascadedShadowGenerator) {
-        shadowGenerator.numCascades = 4;
+        shadowGenerator.numCascades = 2;
         shadowGenerator.stabilizeCascades = true;
         shadowGenerator.lambda = 0.82;
         shadowGenerator.cascadeBlendPercentage = 0.05;
-        shadowGenerator.autoCalcDepthBounds = false;
+        shadowGenerator.autoCalcDepthBounds = true;
         shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
     }
     shadowGenerator.usePercentageCloserFiltering = true;
-    shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_HIGH;
+    shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
     shadowGenerator.useContactHardeningShadow = false;
     shadowGenerator.frustumEdgeFalloff = 0.26;
     shadowGenerator.transparencyShadow = true;
@@ -137,6 +137,7 @@ export function initializeLightShadowSystem(host: any): void {
         DEFAULT_LIGHT_DIRECTION.clone(),
         host.scene,
     );
+    dirLight.shadowEnabled = Boolean(host.shadowEnabled);
     dirLight.intensity = 1.0;
     dirLight.position = new Vector3(-20, 30, -20);
     dirLight.shadowMinZ = 1;
@@ -292,6 +293,9 @@ export function getShadowEnabled(host: any): boolean {
 
 export function setShadowEnabled(host: any, enabled: boolean): void {
     host.shadowEnabled = Boolean(enabled);
+    if (host.dirLight) {
+        host.dirLight.shadowEnabled = host.shadowEnabled;
+    }
     if (host.shadowGenerator) {
         host.shadowGenerator.darkness = enabled ? host.shadowDarknessValue : 0;
     }
@@ -398,7 +402,7 @@ export function applyShadowFrustumSize(host: any): void {
 export function applyShadowEdgeSoftness(host: any): void {
     if (!host.shadowGenerator) return;
     host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
-        ? Math.max(0.008, Math.min(0.016, getEffectiveShadowEdgeSoftness(host) * 0.25))
+        ? Math.max(0.003, Math.min(0.010, getEffectiveShadowEdgeSoftness(host) * 0.18))
         : getEffectiveShadowEdgeSoftness(host);
     host.constructor.toonSelfShadowBoundarySoftness = host.selfShadowEdgeSoftnessValue;
     host.constructor.toonOcclusionShadowBoundarySoftness = host.occlusionShadowEdgeSoftnessValue;

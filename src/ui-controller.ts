@@ -193,6 +193,8 @@ export class UIController {
     private skydomeToggleText: HTMLElement;
     private btnTogglePhysics: HTMLElement;
     private physicsToggleText: HTMLElement;
+    private btnToggleShadow: HTMLElement;
+    private shadowToggleText: HTMLElement;
     private btnToggleRigidBodies: HTMLElement;
     private rigidBodiesToggleText: HTMLElement;
     private btnToggleGi: HTMLElement;
@@ -324,6 +326,7 @@ export class UIController {
     private bundledWgslScanInFlight = false;
     private bundledWgslLastScanMs = 0;
     private refreshAaToggleUi: (() => void) | null = null;
+    private refreshShadowToggleUi: (() => void) | null = null;
     private refreshGiToggleUi: (() => void) | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
@@ -368,6 +371,8 @@ export class UIController {
         this.skydomeToggleText = document.getElementById("skydome-toggle-text")!;
         this.btnTogglePhysics = document.getElementById("btn-toggle-physics")!;
         this.physicsToggleText = document.getElementById("physics-toggle-text")!;
+        this.btnToggleShadow = document.getElementById("btn-toggle-shadow")!;
+        this.shadowToggleText = document.getElementById("shadow-toggle-text")!;
         this.btnToggleRigidBodies = document.getElementById("btn-toggle-rigid-bodies")!;
         this.rigidBodiesToggleText = document.getElementById("rigid-bodies-toggle-text")!;
         this.btnToggleGi = document.getElementById("btn-toggle-gi")!;
@@ -445,6 +450,7 @@ export class UIController {
             this.mmdManager.getPhysicsEnabled(),
             this.mmdManager.isPhysicsAvailable()
         );
+        this.updateShadowToggleButton();
         this.updateRigidBodyToggleButton();
         this.updateGiToggleButton();
         this.updateInfoActionButtons();
@@ -542,6 +548,12 @@ export class UIController {
             const enabled = this.mmdManager.togglePhysicsEnabled();
             this.updatePhysicsToggleButton(enabled, true);
             this.showToast(enabled ? t("toast.physics.on") : t("toast.physics.off"), "info");
+        });
+        this.btnToggleShadow.addEventListener("click", () => {
+            const enabled = !this.mmdManager.getShadowEnabled();
+            this.mmdManager.setShadowEnabled(enabled);
+            this.updateShadowToggleButton();
+            this.showToast(enabled ? t("toast.shadow.on") : t("toast.shadow.off"), "info");
         });
         this.btnToggleRigidBodies.addEventListener("click", () => {
             if (!this.mmdManager.isRigidBodyVisualizerAvailable()) {
@@ -1058,8 +1070,6 @@ export class UIController {
             this.mmdManager.occlusionShadowEdgeSoftness = v;
         });
 
-        // Shadow is always enabled in UI.
-        this.mmdManager.setShadowEnabled(true);
         elShadow.value = String(Math.round(this.mmdManager.shadowDarkness * 100));
         valSh.textContent = this.mmdManager.shadowDarkness.toFixed(2);
         elShadowFrustumSize.value = String(Math.round(this.mmdManager.shadowFrustumSize));
@@ -5149,6 +5159,7 @@ export class UIController {
 
     private applyLocalizedUiState(): void {
         this.refreshAaToggleUi?.();
+        this.refreshShadowToggleUi?.();
         this.refreshGiToggleUi?.();
         this.updateGroundToggleButton(this.mmdManager.isGroundVisible());
         this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
@@ -5220,6 +5231,19 @@ export class UIController {
         if (this.physicsGravityDirZSlider) this.physicsGravityDirZSlider.disabled = !available;
         if (this.physicsSimulationRateSelect) this.physicsSimulationRateSelect.disabled = !available;
         this.refreshPhysicsSimulationRateUi();
+    }
+
+    private updateShadowToggleButton(): void {
+        this.refreshShadowToggleUi = () => {
+            const enabled = this.mmdManager.getShadowEnabled();
+            this.shadowToggleText.textContent = t("toolbar.shadow.short");
+            this.btnToggleShadow.setAttribute("aria-pressed", enabled ? "true" : "false");
+            this.btnToggleShadow.classList.toggle("toggle-on", enabled);
+            this.btnToggleShadow.title = enabled
+                ? t("toolbar.shadow.title.on")
+                : t("toolbar.shadow.title.off");
+        };
+        this.refreshShadowToggleUi();
     }
 
     private updateRigidBodyToggleButton(): void {
