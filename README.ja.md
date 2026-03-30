@@ -1,6 +1,6 @@
 # MMD modoki
 
-MMD modoki は、Babylon.js Editor と `babylon-mmd` をベースにした、MMD 風のローカル編集ツールです。
+MMD modoki は、Babylon.js と `babylon-mmd` をベースにした、MMD 風のローカル編集ツールです。
 
 元の MMD が使いにくい環境でも扱える代替ツールを目標に開発を進めています。Windows / Linux / macOS 向けのビルドを順次検証中で、UI は日本語 / 英語 / 繁体字中国語 / 簡体字中国語 / 韓国語を切り替えられます。
 
