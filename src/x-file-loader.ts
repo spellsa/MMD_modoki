@@ -15,8 +15,11 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Material } from "@babylonjs/core/Materials/material";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { MmdStandardMaterial } from "babylon-mmd/esm/Loader/mmdStandardMaterial";
+import { MmdPluginMaterialSphereTextureBlendMode } from "babylon-mmd/esm/Loader/mmdPluginMaterial";
 
 type Tok = { t: "id" | "num" | "str" | "sym"; v: string };
 type XMat = {
@@ -39,6 +42,8 @@ const META = { name: "xfile", extensions: { ".x": { isBinary: false } } } as con
 const HEADER = /^\s*xof\s+([0-9]{4})(txt|bin|tzip|bzip)\s+([0-9]{4})/i;
 const NUM = /^[+-]?(?:\d+\.\d*|\d+|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?/;
 const NON_TOON_SHADOW_AMBIENT = new Color3(1, 1, 1);
+const X_DEFAULT_TOON_TEXTURE_HEIGHT = 256;
+const xDefaultToonTextureCache = new WeakMap<Scene, DynamicTexture>();
 
 function lex(s: string): Tok[] {
     const out: Tok[] = [];
@@ -197,7 +202,13 @@ class P {
         this.expectSym("{");
         const n = this.int();
         const uvs: number[] = [];
-        for (let k = 0; k < n; k += 1) uvs.push(this.num(), this.num());
+        for (let k = 0; k < n; k += 1) {
+            const u = this.num();
+            const v = this.num();
+            // .x assets commonly use DirectX-style V orientation, so flip V
+            // when mapping into Babylon's standard UV space.
+            uvs.push(u, 1 - v);
+        }
         this.expectSym("}");
         this.sep();
         return uvs;
@@ -495,6 +506,32 @@ function localPathToFileUrl(pathText: string): string {
     return `file://${normalized}`;
 }
 
+function getDefaultXToonTexture(scene: Scene): DynamicTexture {
+    const cached = xDefaultToonTextureCache.get(scene);
+    if (cached) return cached;
+
+    const texture = new DynamicTexture(
+        "xAccessoryDefaultToon",
+        { width: 1, height: X_DEFAULT_TOON_TEXTURE_HEIGHT },
+        scene,
+        false,
+        Texture.BILINEAR_SAMPLINGMODE,
+    );
+    const context = texture.getContext();
+    const gradient = context.createLinearGradient(0, 0, 0, X_DEFAULT_TOON_TEXTURE_HEIGHT);
+    gradient.addColorStop(0, "#a8a8a8");
+    gradient.addColorStop(0.45, "#cdcdcd");
+    gradient.addColorStop(1, "#f1f1f1");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 1, X_DEFAULT_TOON_TEXTURE_HEIGHT);
+    texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+    texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+    texture.updateSamplingMode(Texture.BILINEAR_SAMPLINGMODE);
+    texture.update(false);
+    xDefaultToonTextureCache.set(scene, texture);
+    return texture;
+}
+
 function texturePathCandidates(rawName: string): string[] {
     const normalized = rawName.replace(/\\/g, "/");
     const out = new Set<string>();
@@ -623,10 +660,12 @@ async function resolveSceneTextureUrls(rootUrl: string, parsed: XScene): Promise
     }
 }
 
-function buildMat(scene: Scene, m: XMat, cache: Map<XMat, StandardMaterial>): StandardMaterial {
+function buildMat(scene: Scene, m: XMat, cache: Map<XMat, MmdStandardMaterial>): MmdStandardMaterial {
     const c = cache.get(m);
     if (c) return c;
-    const mat = new StandardMaterial(m.name || "x_material", scene);
+    const mat = new MmdStandardMaterial(m.name || "x_material", scene);
+    mat.toonTexture = getDefaultXToonTexture(scene);
+    mat.ignoreDiffuseWhenToonTextureIsNull = true;
     mat.diffuseColor = new Color3(m.diffuse.r, m.diffuse.g, m.diffuse.b);
     mat.ambientColor = NON_TOON_SHADOW_AMBIENT.clone();
     mat.alpha = m.diffuse.a;
@@ -647,23 +686,17 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, StandardMaterial>): St
         }
     }
     if (m.sphereTextureUrl) {
-        // Approximate MMD sphere maps on .x accessories with Babylon's spherical reflection.
         const sphereTex = new Texture(m.sphereTextureUrl, scene, false, true);
-        sphereTex.coordinatesMode = Texture.SPHERICAL_MODE;
-        mat.reflectionTexture = sphereTex;
-        mat.reflectionFresnelParameters = null;
-        if (m.sphereTextureMode === "add") {
-            mat.emissiveColor = mat.emissiveColor.add(new Color3(0.35, 0.35, 0.35));
-            mat.disableLighting = false;
-        } else {
-            mat.specularColor = mat.specularColor.add(new Color3(0.25, 0.25, 0.25));
-        }
+        mat.sphereTexture = sphereTex;
+        mat.sphereTextureBlendMode = m.sphereTextureMode === "add"
+            ? MmdPluginMaterialSphereTextureBlendMode.Add
+            : MmdPluginMaterialSphereTextureBlendMode.Multiply;
     }
     cache.set(m, mat);
     return mat;
 }
 
-function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: Map<XMat, StandardMaterial>): Mesh | null {
+function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: Map<XMat, MmdStandardMaterial>): Mesh | null {
     if (x.pos.length < 3 || x.faces.length === 0) return null;
     const { idx, faceId } = tri(x.faces);
     if (idx.length === 0) return null;
@@ -732,7 +765,9 @@ function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: 
             }
         }
     } else {
-        const mat = new StandardMaterial(`${mesh.name}_mat`, scene);
+        const mat = new MmdStandardMaterial(`${mesh.name}_mat`, scene);
+        mat.toonTexture = getDefaultXToonTexture(scene);
+        mat.ignoreDiffuseWhenToonTextureIsNull = true;
         mat.diffuseColor = new Color3(0.8, 0.8, 0.8);
         mat.ambientColor = NON_TOON_SHADOW_AMBIENT.clone();
         mat.backFaceCulling = false;
@@ -753,7 +788,7 @@ function applyMatrix(node: TransformNode, m: number[]): void {
     node.position.copyFrom(p);
 }
 
-function buildFrame(scene: Scene, f: XFrame, parent: TransformNode | null, meshes: Mesh[], nodes: TransformNode[], cache: Map<XMat, StandardMaterial>): void {
+function buildFrame(scene: Scene, f: XFrame, parent: TransformNode | null, meshes: Mesh[], nodes: TransformNode[], cache: Map<XMat, MmdStandardMaterial>): void {
     const node = new TransformNode(f.name || `x_frame_${nodes.length}`, scene);
     node.parent = parent;
     nodes.push(node);
@@ -768,7 +803,7 @@ function buildFrame(scene: Scene, f: XFrame, parent: TransformNode | null, meshe
 function buildScene(scene: Scene, parsed: XScene): { meshes: Mesh[]; nodes: TransformNode[] } {
     const meshes: Mesh[] = [];
     const nodes: TransformNode[] = [];
-    const cache = new Map<XMat, StandardMaterial>();
+    const cache = new Map<XMat, MmdStandardMaterial>();
     for (const m of parsed.root.meshes) {
         const mesh = buildMesh(scene, m, null, cache);
         if (mesh) meshes.push(mesh);

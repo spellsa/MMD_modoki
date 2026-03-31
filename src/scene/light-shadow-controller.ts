@@ -353,6 +353,13 @@ export function applyToonShadowInfluenceToAllModels(host: any): void {
         const meshes = [sceneModel.mesh, ...sceneModel.mesh.getChildMeshes()];
         applyToonShadowInfluenceToMeshes(host, meshes as Mesh[]);
     }
+
+    if (typeof host.getAccessoryMeshes === "function") {
+        const accessoryMeshes = host.getAccessoryMeshes();
+        if (Array.isArray(accessoryMeshes) && accessoryMeshes.length > 0) {
+            applyToonShadowInfluenceToMeshes(host, accessoryMeshes as Mesh[]);
+        }
+    }
 }
 
 export function applyToonShadowInfluenceToMeshes(host: any, meshes: Mesh[]): void {

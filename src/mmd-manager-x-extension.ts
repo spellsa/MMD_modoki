@@ -1,6 +1,7 @@
 import type { Scene } from "@babylonjs/core/scene";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MmdManager } from "./mmd-manager";
@@ -51,6 +52,7 @@ declare module "./mmd-manager" {
         getAccessoryTransformKeyframes(index: number): ProjectSerializedAccessoryTransformTrack | null;
         setAccessoryTransformKeyframes(index: number, track: ProjectSerializedAccessoryTransformTrack | null): boolean;
         getModelBoneNames(modelIndex: number): string[];
+        getAccessoryMeshes(): AbstractMesh[];
     }
 }
 
@@ -58,6 +60,7 @@ type XLoadHost = {
     scene: Scene;
     shadowGenerator: Pick<ShadowGenerator, "addShadowCaster">;
     onError: ((message: string) => void) | null;
+    applyToonShadowInfluenceToMeshes?: (meshes: Mesh[]) => void;
 };
 
 type AccessoryEntry = {
@@ -372,6 +375,7 @@ const mmdManagerProto = MmdManager.prototype as unknown as {
     getAccessoryTransformKeyframes?: (index: number) => ProjectSerializedAccessoryTransformTrack | null;
     setAccessoryTransformKeyframes?: (index: number, track: ProjectSerializedAccessoryTransformTrack | null) => boolean;
     getModelBoneNames?: (modelIndex: number) => string[];
+    getAccessoryMeshes?: () => AbstractMesh[];
 };
 
 if (!mmdManagerProto.loadX) {
@@ -428,6 +432,7 @@ if (!mmdManagerProto.loadX) {
                     host.shadowGenerator.addShadowCaster(mesh as AbstractMesh, false);
                 }
             }
+            host.applyToonShadowInfluenceToMeshes?.(result.meshes as Mesh[]);
 
             entries.push({
                 name: accessoryName,
@@ -464,6 +469,13 @@ if (!mmdManagerProto.getLoadedAccessories) {
             path: entry.path,
             visible: isAccessoryVisible(entry),
         }));
+    };
+}
+
+if (!mmdManagerProto.getAccessoryMeshes) {
+    mmdManagerProto.getAccessoryMeshes = function(): AbstractMesh[] {
+        const entries = getAccessoryEntries(this as unknown as object);
+        return entries.flatMap((entry) => entry.meshes);
     };
 }
 

@@ -437,6 +437,9 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-black-key-cutout"
     | "wgsl-full-shadow"
     | "wgsl-light-and-shadow"
+    | "wgsl-gloss-highlight"
+    | "wgsl-semi-matte-highlight"
+    | "wgsl-matte-highlight"
     | "wgsl-specular"
     | "wgsl-cel-sharp"
     | "wgsl-rim-lift"
@@ -581,6 +584,21 @@ export class MmdManager {
             id: "wgsl-light-and-shadow",
             label: "light_and_shadow",
             description: "Apply the standard light-and-shadow banding even to materials that normally skip toon shading",
+        },
+        {
+            id: "wgsl-gloss-highlight",
+            label: "Gloss Highlight",
+            description: "Narrow, strong highlight that tightens toward the light direction",
+        },
+        {
+            id: "wgsl-semi-matte-highlight",
+            label: "Semi-Matte Highlight",
+            description: "Balanced highlight with moderate spread toward the light direction",
+        },
+        {
+            id: "wgsl-matte-highlight",
+            label: "Matte Highlight",
+            description: "Broad, soft highlight with a restrained light-facing lift",
         },
         {
             id: "wgsl-specular",

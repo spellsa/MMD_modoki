@@ -4249,7 +4249,18 @@ export class UIController {
             this.shaderPresetSelect.appendChild(option);
         }
 
-        if (activeExternalWgslPath) {
+        for (const bundledFile of this.bundledWgslShaderFiles) {
+            const option = document.createElement("option");
+            option.value = this.makeExternalWgslPresetValue(bundledFile.path);
+            option.textContent = `WGSL: ${bundledFile.name}`;
+            this.shaderPresetSelect.appendChild(option);
+        }
+        if (
+            activeExternalWgslPath &&
+            !Array.from(this.shaderPresetSelect.options).some((option) =>
+                option.value === this.makeExternalWgslPresetValue(activeExternalWgslPath),
+            )
+        ) {
             const option = document.createElement("option");
             option.value = this.makeExternalWgslPresetValue(activeExternalWgslPath);
             option.textContent = `WGSL: ${this.getBaseNameForRenderer(activeExternalWgslPath)}`;

@@ -5,9 +5,15 @@ import fullLightWgslText from "../../wgsl/full_light.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import fullLightAddWgslText from "../../wgsl/full_light_add.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
+import glossHighlightWgslText from "../../wgsl/gloss_highlight.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
 import fullShadowWgslText from "../../wgsl/full_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import lightAndShadowWgslText from "../../wgsl/light_and_shadow.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import matteHighlightWgslText from "../../wgsl/matte_highlight.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import semiMatteHighlightWgslText from "../../wgsl/semi_matte_highlight.wgsl?raw";
 import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import type { ProjectModelMaterialShaderState } from "../types";
@@ -27,6 +33,9 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-black-key-cutout"
     | "wgsl-full-shadow"
     | "wgsl-light-and-shadow"
+    | "wgsl-gloss-highlight"
+    | "wgsl-semi-matte-highlight"
+    | "wgsl-matte-highlight"
     | "wgsl-specular"
     | "wgsl-cel-sharp"
     | "wgsl-rim-lift"
@@ -475,6 +484,39 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 material.disableLighting = false;
             }
             host.constructor.externalWgslToonFragmentByMaterial.set(material as object, lightAndShadowWgslText);
+            break;
+        }
+        case "wgsl-gloss-highlight": {
+            if ("disableLighting" in material) {
+                material.disableLighting = false;
+            }
+            if ("specularPower" in material) {
+                const base = defaults.specularPower ?? 32;
+                material.specularPower = Math.min(768, Math.max(96, base * 3.1));
+            }
+            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, glossHighlightWgslText);
+            break;
+        }
+        case "wgsl-semi-matte-highlight": {
+            if ("disableLighting" in material) {
+                material.disableLighting = false;
+            }
+            if ("specularPower" in material) {
+                const base = defaults.specularPower ?? 32;
+                material.specularPower = Math.min(256, Math.max(28, base * 1.2));
+            }
+            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, semiMatteHighlightWgslText);
+            break;
+        }
+        case "wgsl-matte-highlight": {
+            if ("disableLighting" in material) {
+                material.disableLighting = false;
+            }
+            if ("specularPower" in material) {
+                const base = defaults.specularPower ?? 32;
+                material.specularPower = Math.max(6, Math.min(48, base * 0.35));
+            }
+            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, matteHighlightWgslText);
             break;
         }
         case "wgsl-specular": {
