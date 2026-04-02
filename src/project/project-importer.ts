@@ -199,6 +199,7 @@ export async function importProjectState(
 
     const accessoryExtension = host as {
         loadX?: (filePath: string) => Promise<boolean>;
+        loadGlb?: (filePath: string) => Promise<boolean>;
         getLoadedAccessories?: () => Array<{ index: number }>;
         setAccessoryVisibility?: (index: number, visible: boolean) => boolean;
         setAccessoryTransform?: (
@@ -223,8 +224,18 @@ export async function importProjectState(
                     continue;
                 }
 
+                const normalizedPath = accessoryState.path.replace(/\\/g, "/");
+                const ext = normalizedPath.substring(normalizedPath.lastIndexOf(".") + 1).toLowerCase();
+                const loadAccessory = ext === "glb"
+                    ? accessoryExtension.loadGlb
+                    : accessoryExtension.loadX;
+                if (typeof loadAccessory !== "function") {
+                    warnings.push(`Accessory restore skipped: unsupported accessory type for ${accessoryState.path}`);
+                    continue;
+                }
+
                 const beforeCount = accessoryExtension.getLoadedAccessories?.().length ?? 0;
-                const loaded = await accessoryExtension.loadX(accessoryState.path);
+                const loaded = await loadAccessory(accessoryState.path);
                 if (!loaded) {
                     warnings.push(`Accessory load failed: ${accessoryState.path}`);
                     continue;

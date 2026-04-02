@@ -2758,6 +2758,9 @@ export class UIController {
                 this.setStatus("Loading audio...", true);
                 await this.mmdManager.loadMP3(filePath);
                 return;
+            case "glb":
+                this.showToast("GLB import is currently disabled", "error");
+                return;
             default:
                 if (source === "drop") {
                     this.showToast(`Unsupported file: ${filePath.replace(/^.*[\\/]/, "")}`, "error");
@@ -3482,7 +3485,8 @@ export class UIController {
         for (const accessory of accessories) {
             const option = document.createElement("option");
             option.value = String(accessory.index);
-            option.textContent = `${accessory.index + 1}: ${accessory.name}`;
+            const kindLabel = accessory.kind === "glb" ? " [GLB]" : "";
+            option.textContent = `${accessory.index + 1}: ${accessory.name}${kindLabel}`;
             option.title = accessory.path;
             select.appendChild(option);
         }

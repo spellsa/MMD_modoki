@@ -1,9 +1,16 @@
 import type { Scene } from "@babylonjs/core/scene";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
-import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader.js";
+import { Material } from "@babylonjs/core/Materials/material";
+import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MmdManager } from "./mmd-manager";
 import { loadXIntoScene } from "./x-file-loader";
 import type { ProjectSerializedAccessoryTransformTrack } from "./types";
@@ -14,6 +21,7 @@ export type AccessoryState = {
     name: string;
     path: string;
     visible: boolean;
+    kind: "x" | "glb";
 };
 
 export type AccessoryTransformState = {
@@ -38,6 +46,7 @@ type AccessoryTransformKeyframeState = {
 declare module "./mmd-manager" {
     interface MmdManager {
         loadX(filePath: string): Promise<boolean>;
+        loadGlb(filePath: string): Promise<boolean>;
         getLoadedAccessories(): AccessoryState[];
         clearAccessories(): void;
         setAccessoryVisibility(index: number, visible: boolean): boolean;
@@ -58,16 +67,21 @@ declare module "./mmd-manager" {
 
 type XLoadHost = {
     scene: Scene;
-    shadowGenerator: Pick<ShadowGenerator, "addShadowCaster">;
+    shadowGenerator: Pick<ShadowGenerator, "addShadowCaster" | "removeShadowCaster">;
     onError: ((message: string) => void) | null;
     applyToonShadowInfluenceToMeshes?: (meshes: Mesh[]) => void;
+    getLoadedModels?: () => ArrayLike<unknown>;
+    setCameraTarget?: (x: number, y: number, z: number) => void;
+    setCameraDistance?: (distance: number) => void;
 };
 
 type AccessoryEntry = {
+    kind: "x" | "glb";
     name: string;
     path: string;
     root: TransformNode;
     offset: TransformNode;
+    baseScale: number;
     meshes: AbstractMesh[];
     parentModelRef: object | null;
     parentModelName: string | null;
@@ -86,6 +100,13 @@ const tempPosition3 = new Vector3();
 const tempRotation = Quaternion.Identity();
 const tempRotation2 = Quaternion.Identity();
 const X_ACCESSORY_IMPORT_SCALE = 10;
+const GLB_ACCESSORY_IMPORT_SCALE = 25;
+const GLB_ACCESSORY_MIN_VISIBLE_SIZE = 60;
+const GLB_ACCESSORY_MAX_AUTO_SCALE = 400;
+const GLB_DEBUG_FORCE_NEON_MATERIAL = true;
+const GLB_DEBUG_SHOW_BOUNDING_BOX = true;
+const GLB_DEBUG_SHOW_EDGES = false;
+const GLB_DEBUG_DUMP_IMPORT = true;
 
 function getAccessoryEntries(host: object): AccessoryEntry[] {
     let entries = accessoryStore.get(host);
@@ -103,6 +124,687 @@ function createEmptyAccessoryTransformKeyframes(): AccessoryTransformKeyframeSta
         rotations: new Float32Array(0),
         scales: new Float32Array(0),
     };
+}
+
+function splitFilePath(filePath: string): { dir: string; fileName: string; fileUrl: string } {
+    const normalizedPath = filePath.replace(/\\/g, "/");
+    const lastSlash = normalizedPath.lastIndexOf("/");
+    const dir = normalizedPath.substring(0, lastSlash + 1);
+    const fileName = normalizedPath.substring(lastSlash + 1);
+    return {
+        dir,
+        fileName,
+        fileUrl: `file:///${dir}`,
+    };
+}
+
+function attachImportedNodesToAccessoryRoot(
+    result: { transformNodes: TransformNode[]; meshes: AbstractMesh[] },
+    offset: TransformNode,
+): void {
+    const importedNodes = new Set<object>();
+    for (const node of result.transformNodes) importedNodes.add(node);
+    for (const mesh of result.meshes) importedNodes.add(mesh);
+
+    for (const node of result.transformNodes) {
+        const parent = node.parent;
+        if (!parent || !importedNodes.has(parent)) {
+            node.parent = offset;
+        }
+    }
+    for (const mesh of result.meshes) {
+        const parent = mesh.parent;
+        if (!parent || !importedNodes.has(parent)) {
+            mesh.parent = offset;
+        }
+    }
+}
+
+function configureImportedAccessoryMeshes(host: XLoadHost, meshes: AbstractMesh[], managedMeshes: readonly AbstractMesh[]): void {
+    const managedMeshSet = new Set(managedMeshes);
+
+    for (const mesh of meshes) {
+        const managed = managedMeshSet.has(mesh);
+        mesh.setEnabled(true);
+        mesh.isVisible = true;
+        mesh.visibility = managed ? 1 : 0;
+        mesh.receiveShadows = managed;
+    }
+}
+
+function configureImportedGlbSourceMeshes(meshes: AbstractMesh[], sourceManagedMeshes: readonly AbstractMesh[]): void {
+    const sourceManagedSet = new Set(sourceManagedMeshes);
+
+    for (const mesh of meshes) {
+        const isSourceManaged = sourceManagedSet.has(mesh);
+        mesh.setEnabled(!isSourceManaged);
+        mesh.isVisible = !isSourceManaged;
+        mesh.visibility = isSourceManaged ? 0 : 1;
+        mesh.receiveShadows = false;
+    }
+}
+
+function configureImportedAccessoryTransformNodes(
+    transformNodes: TransformNode[],
+): void {
+    for (const node of transformNodes) {
+        node.setEnabled(true);
+    }
+}
+
+function forceAccessoryHierarchyEnabled(nodes: readonly (AbstractMesh | TransformNode)[]): void {
+    const visited = new Set<object>();
+
+    for (const startNode of nodes) {
+        let current: object | null = startNode;
+        while (current && !visited.has(current)) {
+            visited.add(current);
+
+            if (current instanceof TransformNode) {
+                current.setEnabled(true);
+            }
+
+            if (current instanceof Mesh) {
+                current.setEnabled(true);
+                current.isVisible = true;
+            }
+
+            const parent = (current as { parent?: object | null }).parent ?? null;
+            current = parent;
+        }
+    }
+}
+
+function getAccessoryRenderableVertexCount(mesh: AbstractMesh): number {
+    if (mesh instanceof Mesh) {
+        const directVertexCount = mesh.getTotalVertices();
+        if ((directVertexCount ?? 0) > 0) return directVertexCount;
+    }
+
+    const sourceMesh = (mesh as AbstractMesh & { sourceMesh?: Mesh | null }).sourceMesh;
+    if (sourceMesh instanceof Mesh) {
+        const sourceVertexCount = sourceMesh.getTotalVertices();
+        if ((sourceVertexCount ?? 0) > 0) return sourceVertexCount;
+    }
+
+    const positions = mesh.getVerticesData?.(VertexBuffer.PositionKind);
+    if (positions && positions.length >= 3) return Math.floor(positions.length / 3);
+
+    const sourcePositions = sourceMesh?.getVerticesData(VertexBuffer.PositionKind);
+    if (sourcePositions && sourcePositions.length >= 3) return Math.floor(sourcePositions.length / 3);
+
+    return 0;
+}
+
+function getAccessoryRenderableIndexCount(mesh: AbstractMesh): number {
+    if (mesh instanceof Mesh) {
+        const directIndexCount = mesh.getTotalIndices();
+        if ((directIndexCount ?? 0) > 0) return directIndexCount;
+    }
+
+    const sourceMesh = (mesh as AbstractMesh & { sourceMesh?: Mesh | null }).sourceMesh;
+    if (sourceMesh instanceof Mesh) {
+        const sourceIndexCount = sourceMesh.getTotalIndices();
+        if ((sourceIndexCount ?? 0) > 0) return sourceIndexCount;
+    }
+
+    const indices = mesh.getIndices?.();
+    if (indices && indices.length > 0) return indices.length;
+
+    const sourceIndices = sourceMesh?.getIndices();
+    if (sourceIndices && sourceIndices.length > 0) return sourceIndices.length;
+
+    return 0;
+}
+
+function getManagedAccessoryMeshes(meshes: AbstractMesh[]): AbstractMesh[] {
+    const managedMeshes: AbstractMesh[] = [];
+    for (const mesh of meshes) {
+        if ((mesh.subMeshes?.length ?? 0) === 0) continue;
+        const vertexCount = getAccessoryRenderableVertexCount(mesh);
+        const indexCount = getAccessoryRenderableIndexCount(mesh);
+        if (vertexCount <= 0 || indexCount <= 0) continue;
+
+        managedMeshes.push(mesh);
+    }
+    return managedMeshes;
+}
+
+function toFloat32VertexData(
+    data: ArrayLike<number> | null,
+    expectedStride: number,
+    vertexCount: number,
+): Float32Array | null {
+    if (!data || vertexCount <= 0) return null;
+    if (data.length !== vertexCount * expectedStride) return null;
+    return Float32Array.from(data);
+}
+
+function toColor4VertexData(
+    data: ArrayLike<number> | null,
+    vertexCount: number,
+): Float32Array | null {
+    if (!data || vertexCount <= 0) return null;
+    if (data.length === vertexCount * 4) {
+        return Float32Array.from(data);
+    }
+    if (data.length !== vertexCount * 3) return null;
+
+    const colors = new Float32Array(vertexCount * 4);
+    for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
+        const sourceOffset = vertexIndex * 3;
+        const targetOffset = vertexIndex * 4;
+        colors[targetOffset + 0] = Number(data[sourceOffset + 0] ?? 0);
+        colors[targetOffset + 1] = Number(data[sourceOffset + 1] ?? 0);
+        colors[targetOffset + 2] = Number(data[sourceOffset + 2] ?? 0);
+        colors[targetOffset + 3] = 1;
+    }
+    return colors;
+}
+
+function copyAbstractMeshWorldTransform(source: AbstractMesh, target: Mesh): void {
+    const worldMatrix = source.computeWorldMatrix(true).clone();
+    const scaling = new Vector3();
+    const rotation = Quaternion.Identity();
+    const position = new Vector3();
+    worldMatrix.decompose(scaling, rotation, position);
+
+    target.parent = null;
+    target.position.copyFrom(position);
+    target.scaling.copyFrom(scaling);
+    target.rotationQuaternion = rotation.clone();
+    target.rotation.set(0, 0, 0);
+}
+
+function createGlbReplacementMeshes(scene: Scene, offset: TransformNode, meshes: readonly AbstractMesh[]): Mesh[] {
+    const replacements: Mesh[] = [];
+
+    for (const abstractMesh of meshes) {
+        if (!(abstractMesh instanceof Mesh)) continue;
+
+        const sourceMesh = (abstractMesh as Mesh & { sourceMesh?: Mesh | null }).sourceMesh;
+        const extracted = VertexData.ExtractFromMesh(abstractMesh, true, true)
+            ?? (sourceMesh instanceof Mesh ? VertexData.ExtractFromMesh(sourceMesh, true, true) : null);
+        const positions = extracted?.positions ?? null;
+        const indices = extracted?.indices ?? null;
+        if (!positions || positions.length < 3 || !indices || indices.length === 0) {
+            console.warn("[GLB] Replacement skipped:", abstractMesh.name, {
+                hasExtracted: Boolean(extracted),
+                positions: positions?.length ?? 0,
+                indices: indices?.length ?? 0,
+                sourceMesh: sourceMesh?.name ?? null,
+            });
+            continue;
+        }
+
+        const vertexCount = Math.floor(positions.length / 3);
+        if (vertexCount <= 0) continue;
+
+        const safePositions = toFloat32VertexData(positions, 3, vertexCount);
+        if (!safePositions) continue;
+
+        const vertexData = new VertexData();
+        vertexData.positions = safePositions;
+        vertexData.indices = Uint32Array.from(indices);
+
+        const normals = toFloat32VertexData(extracted.normals ?? null, 3, vertexCount);
+        if (normals) {
+            vertexData.normals = normals;
+        } else {
+            const computedNormals = new Float32Array(vertexCount * 3);
+            VertexData.ComputeNormals(safePositions, vertexData.indices, computedNormals);
+            vertexData.normals = computedNormals;
+        }
+
+        const tangents = toFloat32VertexData(extracted.tangents ?? null, 4, vertexCount);
+        if (tangents) vertexData.tangents = tangents;
+
+        const uvs = toFloat32VertexData(extracted.uvs ?? null, 2, vertexCount);
+        if (uvs) vertexData.uvs = uvs;
+
+        const uv2 = toFloat32VertexData(extracted.uvs2 ?? null, 2, vertexCount);
+        if (uv2) vertexData.uvs2 = uv2;
+
+        const colors = toColor4VertexData(extracted.colors ?? null, vertexCount);
+        if (colors) vertexData.colors = colors;
+
+        const replacement = new Mesh(`${abstractMesh.name}__glb_rebuilt`, scene);
+        copyAbstractMeshWorldTransform(abstractMesh, replacement);
+        replacement.setParent(offset, true);
+        replacement.material = abstractMesh.material;
+        replacement.renderingGroupId = abstractMesh.renderingGroupId;
+        replacement.alphaIndex = abstractMesh.alphaIndex;
+        replacement.isPickable = abstractMesh.isPickable;
+        replacement.alwaysSelectAsActiveMesh = true;
+        replacement.skeleton = null;
+
+        vertexData.applyToMesh(replacement, false);
+        replacement.computeWorldMatrix(true);
+        replacement.refreshBoundingInfo(true, true);
+        replacements.push(replacement);
+    }
+
+    return replacements;
+}
+
+function normalizeAccessoryMaterialVisibility(material: Material | null): void {
+    if (!material) return;
+    const candidate = material as Material & Record<string, unknown>;
+    const diffuseTextureHasAlpha = Boolean(candidate.diffuseTexture && typeof candidate.diffuseTexture === "object" && "hasAlpha" in candidate.diffuseTexture && candidate.diffuseTexture.hasAlpha);
+    const albedoTextureHasAlpha = Boolean(candidate.albedoTexture && typeof candidate.albedoTexture === "object" && "hasAlpha" in candidate.albedoTexture && candidate.albedoTexture.hasAlpha);
+    const hasOpacityTexture = Boolean(candidate.opacityTexture);
+    const usesTextureAlpha = Boolean(candidate.useAlphaFromDiffuseTexture || candidate.useAlphaFromAlbedoTexture);
+    const isTransparencyModeEnabled = typeof candidate.transparencyMode === "number" && candidate.transparencyMode !== 0;
+    const hasTransparentTexturePath = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled;
+
+    if (candidate.alpha === 0 && !hasTransparentTexturePath && !isTransparencyModeEnabled) {
+        candidate.alpha = 1;
+    }
+
+    if ("disableLighting" in candidate && typeof candidate.disableLighting === "boolean" && candidate.disableLighting) {
+        candidate.disableLighting = false;
+    }
+}
+
+function prepareManagedAccessoryMeshes(host: XLoadHost, meshes: AbstractMesh[], castShadows: boolean): AbstractMesh[] {
+    for (const mesh of meshes) {
+        mesh.visibility = 1;
+        mesh.isVisible = true;
+        mesh.alwaysSelectAsActiveMesh = true;
+        mesh.receiveShadows = true;
+        mesh.showBoundingBox = GLB_DEBUG_SHOW_BOUNDING_BOX;
+        mesh.computeWorldMatrix(true);
+        mesh.refreshBoundingInfo(true, true);
+        normalizeAccessoryMaterialVisibility(mesh.material);
+        if (GLB_DEBUG_SHOW_EDGES && mesh instanceof Mesh) {
+            mesh.enableEdgesRendering();
+            mesh.edgesWidth = 6;
+            mesh.edgesColor = new Color4(1, 0, 0.2, 1);
+        }
+        if (castShadows) {
+            host.shadowGenerator.addShadowCaster(mesh, false);
+        }
+    }
+    return meshes;
+}
+
+function excludeGlbAccessoryMeshesFromDepthAndShadow(host: XLoadHost, meshes: readonly AbstractMesh[]): void {
+    for (const mesh of meshes) {
+        mesh.receiveShadows = false;
+
+        if (typeof host.shadowGenerator.removeShadowCaster === "function") {
+            host.shadowGenerator.removeShadowCaster(mesh, false);
+        }
+
+        const material = mesh.material;
+        if (!material) continue;
+
+        material.disableDepthWrite = true;
+        material.needDepthPrePass = false;
+    }
+}
+
+function clamp01(value: number): number {
+    return Math.min(1, Math.max(0, value));
+}
+
+function readColor3Like(value: unknown, fallback: Color3): Color3 {
+    if (value && typeof value === "object") {
+        const source = value as { r?: unknown; g?: unknown; b?: unknown };
+        if (Number.isFinite(source.r) && Number.isFinite(source.g) && Number.isFinite(source.b)) {
+            return new Color3(Number(source.r), Number(source.g), Number(source.b));
+        }
+    }
+    return fallback.clone();
+}
+
+function copyCommonMaterialFlags(source: Record<string, unknown>, target: StandardMaterial): void {
+    if (Number.isFinite(source.alpha)) target.alpha = Number(source.alpha);
+    if (Number.isFinite(source.alphaCutOff)) target.alphaCutOff = Number(source.alphaCutOff);
+    if (typeof source.backFaceCulling === "boolean") target.backFaceCulling = source.backFaceCulling;
+    if (typeof source.sideOrientation === "number") target.sideOrientation = source.sideOrientation;
+    if (typeof source.disableLighting === "boolean") target.disableLighting = source.disableLighting;
+    if (typeof source.useAlphaFromAlbedoTexture === "boolean") target.useAlphaFromDiffuseTexture = source.useAlphaFromAlbedoTexture;
+    if (typeof source.useAlphaFromBaseColorTexture === "boolean") target.useAlphaFromDiffuseTexture = source.useAlphaFromBaseColorTexture;
+    if (typeof source.useAlphaFromDiffuseTexture === "boolean") target.useAlphaFromDiffuseTexture = source.useAlphaFromDiffuseTexture;
+    if (typeof source.transparencyMode === "number") target.transparencyMode = source.transparencyMode;
+}
+
+function applyGlbDebugVisibilityMaterialTuning(target: StandardMaterial): void {
+    if (!GLB_DEBUG_FORCE_NEON_MATERIAL) return;
+
+    target.diffuseTexture = null;
+    target.opacityTexture = null;
+    target.emissiveTexture = null;
+    target.ambientTexture = null;
+    target.bumpTexture = null;
+    target.alpha = 1;
+    target.disableLighting = true;
+    target.backFaceCulling = false;
+    target.specularColor = Color3.Black();
+    target.diffuseColor = new Color3(0.05, 0.95, 0.3);
+    target.emissiveColor = new Color3(0.2, 1.0, 0.45);
+    target.ambientColor = Color3.Black();
+}
+
+function convertAccessoryMaterialToStandard(
+    sourceMaterial: Material,
+    scene: Scene,
+    cache: Map<Material, Material>,
+): Material {
+    const cached = cache.get(sourceMaterial);
+    if (cached) return cached;
+
+    if (sourceMaterial instanceof MultiMaterial) {
+        const converted = new MultiMaterial(`${sourceMaterial.name}_glbMulti`, scene);
+        cache.set(sourceMaterial, converted);
+        converted.subMaterials = sourceMaterial.subMaterials.map((subMaterial) => (
+            subMaterial ? convertAccessoryMaterialToStandard(subMaterial, scene, cache) : null
+        ));
+        return converted;
+    }
+
+    if (sourceMaterial instanceof StandardMaterial) {
+        applyGlbDebugVisibilityMaterialTuning(sourceMaterial);
+        cache.set(sourceMaterial, sourceMaterial);
+        return sourceMaterial;
+    }
+
+    const source = sourceMaterial as Material & Record<string, unknown>;
+    const converted = new StandardMaterial(`${sourceMaterial.name || "glb"}_fallback`, scene);
+    cache.set(sourceMaterial, converted);
+
+    copyCommonMaterialFlags(source, converted);
+
+    if ("albedoTexture" in source) converted.diffuseTexture = (source.albedoTexture as StandardMaterial["diffuseTexture"]) ?? null;
+    else if ("baseColorTexture" in source) converted.diffuseTexture = (source.baseColorTexture as StandardMaterial["diffuseTexture"]) ?? null;
+    else if ("diffuseTexture" in source) converted.diffuseTexture = (source.diffuseTexture as StandardMaterial["diffuseTexture"]) ?? null;
+
+    if ("opacityTexture" in source) converted.opacityTexture = (source.opacityTexture as StandardMaterial["opacityTexture"]) ?? null;
+    if ("emissiveTexture" in source) converted.emissiveTexture = (source.emissiveTexture as StandardMaterial["emissiveTexture"]) ?? null;
+    if ("bumpTexture" in source) converted.bumpTexture = (source.bumpTexture as StandardMaterial["bumpTexture"]) ?? null;
+    if ("ambientTexture" in source) converted.ambientTexture = (source.ambientTexture as StandardMaterial["ambientTexture"]) ?? null;
+
+    converted.diffuseColor = readColor3Like(
+        source.albedoColor ?? source.baseColor ?? source.diffuseColor,
+        Color3.White(),
+    );
+    converted.emissiveColor = readColor3Like(source.emissiveColor, Color3.Black());
+    converted.ambientColor = readColor3Like(source.ambientColor, Color3.Black());
+    converted.backFaceCulling = false;
+    if (converted.ambientColor.r === 0 && converted.ambientColor.g === 0 && converted.ambientColor.b === 0) {
+        converted.ambientColor = new Color3(0.2, 0.2, 0.2);
+    }
+
+    if ("specularColor" in source) {
+        converted.specularColor = readColor3Like(source.specularColor, new Color3(0.12, 0.12, 0.12));
+    } else {
+        const metallic = Number.isFinite(source.metallic) ? clamp01(Number(source.metallic)) : 0;
+        const roughness = Number.isFinite(source.roughness) ? clamp01(Number(source.roughness)) : 0.5;
+        const specularLevel = 0.08 + metallic * 0.32;
+        const gloss = 1 - roughness;
+        converted.specularColor = new Color3(specularLevel, specularLevel, specularLevel).scale(0.35 + gloss * 0.65);
+        converted.roughness = roughness;
+        converted.specularPower = Math.max(8, 16 + gloss * gloss * 240);
+    }
+
+    applyGlbDebugVisibilityMaterialTuning(converted);
+
+    return converted;
+}
+
+function normalizeGlbAccessoryMaterials(host: XLoadHost, meshes: readonly AbstractMesh[]): void {
+    if (!host.scene.getEngine().isWebGPU) return;
+
+    const cache = new Map<Material, Material>();
+    for (const mesh of meshes) {
+        const material = mesh.material;
+        if (!material) continue;
+        mesh.material = convertAccessoryMaterialToStandard(material, host.scene, cache);
+    }
+}
+
+function getAccessoryBaseScale(entry: AccessoryEntry): number {
+    return Number.isFinite(entry.baseScale) && entry.baseScale > 0 ? entry.baseScale : 1;
+}
+
+function getAccessoryRelativeScale(entry: AccessoryEntry): number {
+    const baseScale = getAccessoryBaseScale(entry);
+    const currentScale = (entry.offset.scaling.x + entry.offset.scaling.y + entry.offset.scaling.z) / 3;
+    return currentScale / baseScale;
+}
+
+function autoPlaceGlbAccessory(offset: TransformNode): void {
+    offset.computeWorldMatrix(true);
+    let bounds = offset.getHierarchyBoundingVectors(true);
+    const size = bounds.max.subtract(bounds.min);
+    const maxDimension = Math.max(size.x, size.y, size.z);
+
+    if (Number.isFinite(maxDimension) && maxDimension > 0 && maxDimension < GLB_ACCESSORY_MIN_VISIBLE_SIZE) {
+        const scaleMultiplier = Math.min(GLB_ACCESSORY_MAX_AUTO_SCALE, GLB_ACCESSORY_MIN_VISIBLE_SIZE / maxDimension);
+        offset.scaling.scaleInPlace(scaleMultiplier);
+        offset.computeWorldMatrix(true);
+        bounds = offset.getHierarchyBoundingVectors(true);
+    }
+
+    const centerX = (bounds.min.x + bounds.max.x) * 0.5;
+    const centerZ = (bounds.min.z + bounds.max.z) * 0.5;
+    offset.position.x -= centerX;
+    offset.position.y -= bounds.min.y;
+    offset.position.z -= centerZ;
+    offset.computeWorldMatrix(true);
+
+    const adjustedBounds = offset.getHierarchyBoundingVectors(true);
+    const adjustedSize = adjustedBounds.max.subtract(adjustedBounds.min);
+    console.log("[GLB] Auto placed:", offset.name, {
+        scale: offset.scaling.x,
+        position: {
+            x: offset.position.x,
+            y: offset.position.y,
+            z: offset.position.z,
+        },
+        size: {
+            x: adjustedSize.x,
+            y: adjustedSize.y,
+            z: adjustedSize.z,
+        },
+    });
+}
+
+function frameGlbAccessoryInCamera(host: XLoadHost, offset: TransformNode): void {
+    if (!host.setCameraTarget || !host.setCameraDistance) return;
+    if ((host.getLoadedModels?.().length ?? 0) > 0) return;
+
+    offset.computeWorldMatrix(true);
+    const bounds = offset.getHierarchyBoundingVectors(true);
+    const center = bounds.min.add(bounds.max).scale(0.5);
+    const size = bounds.max.subtract(bounds.min);
+    const maxDimension = Math.max(size.x, size.y, size.z, 0.001);
+    const distance = Math.max(8, Math.min(80, maxDimension * 4));
+
+    host.setCameraTarget(center.x, center.y, center.z);
+    host.setCameraDistance(distance);
+
+    console.log("[GLB] Camera framed:", offset.name, {
+        target: {
+            x: center.x,
+            y: center.y,
+            z: center.z,
+        },
+        distance,
+    });
+}
+
+function logGlbImportDebug(
+    accessoryName: string,
+    result: { transformNodes: TransformNode[]; meshes: AbstractMesh[] },
+    managedMeshes: readonly AbstractMesh[],
+): void {
+    if (!GLB_DEBUG_DUMP_IMPORT) return;
+
+    const managedMeshSet = new Set(managedMeshes);
+    const meshRows = result.meshes.map((mesh) => {
+        const sourceMesh = (mesh as AbstractMesh & { sourceMesh?: Mesh | null }).sourceMesh;
+        const material = mesh.material;
+        const absolutePosition = mesh.getAbsolutePosition();
+        const positionVertexBuffer = mesh.getVertexBuffer?.(VertexBuffer.PositionKind)
+            ?? sourceMesh?.getVertexBuffer(VertexBuffer.PositionKind)
+            ?? null;
+        return {
+            name: mesh.name,
+            className: typeof (mesh as { getClassName?: () => string }).getClassName === "function"
+                ? (mesh as { getClassName: () => string }).getClassName()
+                : "Unknown",
+            parent: mesh.parent?.name ?? null,
+            sourceMesh: sourceMesh?.name ?? null,
+            managed: managedMeshSet.has(mesh),
+            enabled: mesh.isEnabled(),
+            visible: mesh.isVisible,
+            vertices: getAccessoryRenderableVertexCount(mesh),
+            indices: getAccessoryRenderableIndexCount(mesh),
+            subMeshes: mesh.subMeshes?.length ?? 0,
+            positionStride: positionVertexBuffer?.byteStride ?? null,
+            material: material?.name ?? null,
+            materialClass: typeof (material as { getClassName?: () => string } | null)?.getClassName === "function"
+                ? (material as { getClassName: () => string }).getClassName()
+                : null,
+            position: `${absolutePosition.x.toFixed(2)}, ${absolutePosition.y.toFixed(2)}, ${absolutePosition.z.toFixed(2)}`,
+        };
+    });
+
+    const transformRows = result.transformNodes.map((node) => {
+        const absolutePosition = node.getAbsolutePosition();
+        return {
+            name: node.name,
+            parent: node.parent?.name ?? null,
+            enabled: node.isEnabled(),
+            position: `${absolutePosition.x.toFixed(2)}, ${absolutePosition.y.toFixed(2)}, ${absolutePosition.z.toFixed(2)}`,
+        };
+    });
+
+    console.groupCollapsed(`[GLB] Import debug: ${accessoryName}`);
+    console.table(meshRows);
+    if (transformRows.length > 0) console.table(transformRows);
+    console.log("[GLB] Import rows:", meshRows);
+    if (transformRows.length > 0) console.log("[GLB] Transform rows:", transformRows);
+    console.groupEnd();
+}
+
+function logGlbReplacementDebug(accessoryName: string, meshes: readonly AbstractMesh[]): void {
+    if (!GLB_DEBUG_DUMP_IMPORT) return;
+    if (meshes.length === 0) return;
+
+    const replacementRows = meshes.map((mesh) => {
+        const absolutePosition = mesh.getAbsolutePosition();
+        const bounds = mesh.getBoundingInfo().boundingBox;
+        const size = bounds.maximumWorld.subtract(bounds.minimumWorld);
+        const positionVertexBuffer = mesh.getVertexBuffer?.(VertexBuffer.PositionKind) ?? null;
+        return {
+            name: mesh.name,
+            parent: mesh.parent?.name ?? null,
+            enabled: mesh.isEnabled(),
+            visible: mesh.isVisible,
+            vertices: getAccessoryRenderableVertexCount(mesh),
+            indices: getAccessoryRenderableIndexCount(mesh),
+            subMeshes: mesh.subMeshes?.length ?? 0,
+            positionStride: positionVertexBuffer?.byteStride ?? null,
+            position: `${absolutePosition.x.toFixed(2)}, ${absolutePosition.y.toFixed(2)}, ${absolutePosition.z.toFixed(2)}`,
+            size: `${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)}`,
+            material: mesh.material?.name ?? null,
+        };
+    });
+
+    console.groupCollapsed(`[GLB] Replacement debug: ${accessoryName}`);
+    console.table(replacementRows);
+    console.log("[GLB] Replacement rows:", replacementRows);
+    console.groupEnd();
+}
+
+function createAccessoryEntryFromImport(
+    host: XLoadHost & object,
+    kind: "x" | "glb",
+    filePath: string,
+    accessoryName: string,
+    result: { transformNodes: TransformNode[]; meshes: AbstractMesh[] },
+    importScale: number,
+): AccessoryEntry {
+    const entries = getAccessoryEntries(host);
+    const root = new TransformNode(`${kind}_accessory_root_${entries.length}`, host.scene);
+    root.name = `${accessoryName}_root`;
+    const offset = new TransformNode(`${kind}_accessory_offset_${entries.length}`, host.scene);
+    offset.name = `${accessoryName}_offset`;
+    offset.parent = root;
+    offset.scaling.set(importScale, importScale, importScale);
+
+    attachImportedNodesToAccessoryRoot(result, offset);
+    let managedMeshes = getManagedAccessoryMeshes(result.meshes);
+    let hierarchyMeshes = result.meshes;
+    if (kind === "glb") {
+        normalizeGlbAccessoryMaterials(host, managedMeshes);
+    }
+    if (kind === "glb" && managedMeshes.length === 0) {
+        console.warn("[GLB] No managed meshes matched render filter:", accessoryName, result.meshes.map((mesh) => ({
+            name: mesh.name,
+            className: typeof (mesh as { getClassName?: () => string }).getClassName === "function"
+                ? (mesh as { getClassName: () => string }).getClassName()
+                : "Unknown",
+            subMeshes: mesh.subMeshes?.length ?? 0,
+            vertexCount: getAccessoryRenderableVertexCount(mesh),
+            indexCount: getAccessoryRenderableIndexCount(mesh),
+            hasPositions: (mesh.getVerticesData?.(VertexBuffer.PositionKind)?.length ?? 0) > 0,
+            sourceMesh: (mesh as AbstractMesh & { sourceMesh?: Mesh | null }).sourceMesh?.name ?? null,
+        })));
+    }
+    configureImportedAccessoryTransformNodes(result.transformNodes);
+    if (kind === "glb") {
+        const sourceManagedMeshes = managedMeshes;
+        managedMeshes = createGlbReplacementMeshes(host.scene, offset, sourceManagedMeshes);
+        configureImportedGlbSourceMeshes(result.meshes, sourceManagedMeshes);
+        const sourceManagedSet = new Set(sourceManagedMeshes);
+        hierarchyMeshes = result.meshes.filter((mesh) => !sourceManagedSet.has(mesh));
+    } else {
+        configureImportedAccessoryMeshes(host, result.meshes, managedMeshes);
+    }
+    forceAccessoryHierarchyEnabled([...result.transformNodes, ...hierarchyMeshes, ...managedMeshes]);
+    prepareManagedAccessoryMeshes(host, managedMeshes, kind !== "glb");
+    if (kind === "glb") {
+        excludeGlbAccessoryMeshesFromDepthAndShadow(host, managedMeshes);
+    }
+    if (kind === "glb" && managedMeshes.length > 0) {
+        autoPlaceGlbAccessory(offset);
+        frameGlbAccessoryInCamera(host, offset);
+    }
+    if (kind === "glb") {
+        logGlbImportDebug(accessoryName, result, managedMeshes);
+        logGlbReplacementDebug(accessoryName, managedMeshes);
+    }
+    const baseScale = (offset.scaling.x + offset.scaling.y + offset.scaling.z) / 3;
+
+    const entry: AccessoryEntry = {
+        kind,
+        name: accessoryName,
+        path: filePath,
+        root,
+        offset,
+        baseScale,
+        meshes: managedMeshes,
+        parentModelRef: null,
+        parentModelName: null,
+        parentBoneName: null,
+        parentBoneUseMeshWorldMatrix: false,
+        transformKeyframes: createEmptyAccessoryTransformKeyframes(),
+    };
+    entries.push(entry);
+    ensureAccessoryUpdateObserver(host);
+
+    if (kind === "glb") {
+        const observer = host.scene.onBeforeRenderObservable.add(() => {
+            forceAccessoryHierarchyEnabled([...result.transformNodes, ...hierarchyMeshes, ...managedMeshes]);
+            host.scene.onBeforeRenderObservable.remove(observer);
+        });
+    }
+
+    return entry;
 }
 
 function findFrameInsertionIndex(frames: Uint32Array, frame: number): { index: number; exists: boolean } {
@@ -172,7 +874,7 @@ function upsertAccessoryTransformKeyframes(
             y: toDegrees(entry.offset.rotationQuaternion ? entry.offset.rotationQuaternion.toEulerAngles().y : entry.offset.rotation.y),
             z: toDegrees(entry.offset.rotationQuaternion ? entry.offset.rotationQuaternion.toEulerAngles().z : entry.offset.rotation.z),
         },
-        scale: (entry.offset.scaling.x + entry.offset.scaling.y + entry.offset.scaling.z) / 3,
+        scale: getAccessoryRelativeScale(entry),
     };
     const frameEdit = insertFrameNumbers(entry.transformKeyframes.frameNumbers, frame);
 
@@ -361,6 +1063,7 @@ function toRadians(deg: number): number {
 
 const mmdManagerProto = MmdManager.prototype as unknown as {
     loadX?: (filePath: string) => Promise<boolean>;
+    loadGlb?: (filePath: string) => Promise<boolean>;
     getLoadedAccessories?: () => AccessoryState[];
     clearAccessories?: () => void;
     setAccessoryVisibility?: (index: number, visible: boolean) => boolean;
@@ -382,11 +1085,7 @@ if (!mmdManagerProto.loadX) {
     mmdManagerProto.loadX = async function(filePath: string): Promise<boolean> {
         const host = this as unknown as XLoadHost;
         try {
-            const pathParts = filePath.replace(/\\/g, "/");
-            const lastSlash = pathParts.lastIndexOf("/");
-            const dir = pathParts.substring(0, lastSlash + 1);
-            const fileName = pathParts.substring(lastSlash + 1);
-            const fileUrl = `file:///${dir}`;
+            const { fileName, fileUrl } = splitFilePath(filePath);
             const data = await window.electronAPI.readBinaryFile(filePath);
             if (!data) {
                 throw new Error(`Unable to read X file: ${filePath}`);
@@ -398,56 +1097,19 @@ if (!mmdManagerProto.loadX) {
                 throw new Error("No mesh data found in X file");
             }
 
-            const entries = getAccessoryEntries(host as unknown as object);
             const accessoryName = fileName.replace(/\.[^/.]+$/, "") || fileName;
-            const root = new TransformNode(`x_accessory_root_${entries.length}`, host.scene);
-            root.name = `${accessoryName}_root`;
-            const offset = new TransformNode(`x_accessory_offset_${entries.length}`, host.scene);
-            offset.name = `${accessoryName}_offset`;
-            offset.parent = root;
-            offset.scaling.set(X_ACCESSORY_IMPORT_SCALE, X_ACCESSORY_IMPORT_SCALE, X_ACCESSORY_IMPORT_SCALE);
-
-            const importedNodes = new Set<object>();
-            for (const node of result.transformNodes) importedNodes.add(node);
-            for (const mesh of result.meshes) importedNodes.add(mesh);
-
-            for (const node of result.transformNodes) {
-                const parent = node.parent;
-                if (!parent || !importedNodes.has(parent)) {
-                    node.parent = offset;
-                }
-            }
-            for (const mesh of result.meshes) {
-                const parent = mesh.parent;
-                if (!parent || !importedNodes.has(parent)) {
-                    mesh.parent = offset;
-                }
-            }
-
-            for (const mesh of result.meshes) {
-                mesh.setEnabled(true);
-                mesh.isVisible = true;
-                mesh.receiveShadows = true;
-                if ((mesh.getTotalVertices?.() ?? 0) > 0) {
-                    host.shadowGenerator.addShadowCaster(mesh as AbstractMesh, false);
-                }
-            }
+            createAccessoryEntryFromImport(
+                host as XLoadHost & object,
+                "x",
+                filePath,
+                accessoryName,
+                {
+                    transformNodes: result.transformNodes,
+                    meshes: result.meshes as AbstractMesh[],
+                },
+                X_ACCESSORY_IMPORT_SCALE,
+            );
             host.applyToonShadowInfluenceToMeshes?.(result.meshes as Mesh[]);
-
-            entries.push({
-                name: accessoryName,
-                path: filePath,
-                root,
-                offset,
-                meshes: result.meshes as AbstractMesh[],
-                parentModelRef: null,
-                parentModelName: null,
-                parentBoneName: null,
-                parentBoneUseMeshWorldMatrix: false,
-                transformKeyframes: createEmptyAccessoryTransformKeyframes(),
-            });
-
-            ensureAccessoryUpdateObserver(host as XLoadHost & object);
 
             console.log("[X] Loaded:", fileName, "meshes:", result.meshes.length, "accessory:", accessoryName);
             return true;
@@ -455,6 +1117,56 @@ if (!mmdManagerProto.loadX) {
             const message = err instanceof Error ? err.message : String(err);
             console.error("Failed to load X:", message);
             host.onError?.(`X load error: ${message}`);
+            return false;
+        }
+    };
+}
+
+    if (!mmdManagerProto.loadGlb) {
+    mmdManagerProto.loadGlb = async function(filePath: string): Promise<boolean> {
+        const host = this as unknown as XLoadHost;
+        try {
+            const { fileName, fileUrl } = splitFilePath(filePath);
+            const container = await LoadAssetContainerAsync(fileName, host.scene, {
+                rootUrl: fileUrl,
+                pluginExtension: ".glb",
+            });
+
+            if (container.meshes.length === 0) {
+                throw new Error("No mesh data found in GLB file");
+            }
+
+            for (const animationGroup of container.animationGroups) {
+                animationGroup.stop();
+            }
+
+            normalizeGlbAccessoryMaterials(host, container.meshes);
+            container.addToScene((asset) => {
+                const className = typeof (asset as { getClassName?: () => string }).getClassName === "function"
+                    ? (asset as { getClassName: () => string }).getClassName()
+                    : "";
+                return className !== "Camera" && className !== "Light";
+            });
+
+            const accessoryName = fileName.replace(/\.[^/.]+$/, "") || fileName;
+            createAccessoryEntryFromImport(
+                host as XLoadHost & object,
+                "glb",
+                filePath,
+                accessoryName,
+                {
+                    transformNodes: container.transformNodes,
+                    meshes: container.meshes as AbstractMesh[],
+                },
+                GLB_ACCESSORY_IMPORT_SCALE,
+            );
+
+            console.log("[GLB] Loaded:", fileName, "meshes:", container.meshes.length, "accessory:", accessoryName);
+            return true;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error("Failed to load GLB:", message);
+            host.onError?.(`GLB load error: ${message}`);
             return false;
         }
     };
@@ -468,6 +1180,7 @@ if (!mmdManagerProto.getLoadedAccessories) {
             name: entry.name,
             path: entry.path,
             visible: isAccessoryVisible(entry),
+            kind: entry.kind,
         }));
     };
 }
@@ -531,7 +1244,7 @@ if (!mmdManagerProto.getAccessoryTransform) {
         const rotation = entry.offset.rotationQuaternion
             ? entry.offset.rotationQuaternion.toEulerAngles()
             : entry.offset.rotation;
-        const scale = (entry.offset.scaling.x + entry.offset.scaling.y + entry.offset.scaling.z) / 3;
+        const scale = getAccessoryRelativeScale(entry);
 
         return {
             position: { x: position.x, y: position.y, z: position.z },
@@ -575,7 +1288,8 @@ if (!mmdManagerProto.setAccessoryTransform) {
 
         if (Number.isFinite(transform.scale)) {
             const safeScale = Math.max(0.001, Number(transform.scale));
-            entry.offset.scaling.copyFromFloats(safeScale, safeScale, safeScale);
+            const appliedScale = safeScale * getAccessoryBaseScale(entry);
+            entry.offset.scaling.copyFromFloats(appliedScale, appliedScale, appliedScale);
         }
 
         entry.offset.computeWorldMatrix(true);

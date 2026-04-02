@@ -3,6 +3,8 @@
  * Initializes Babylon.js, babylon-mmd, and all UI components.
  */
 
+import "@babylonjs/loaders/glTF";
+import { WebRequest } from "@babylonjs/core/Misc/webRequest";
 import "./index.css";
 import { MmdManager } from "./mmd-manager";
 import "./mmd-manager-x-extension";
@@ -13,7 +15,67 @@ import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 
+let shaderRequestTraceInstalled = false;
+
+function isLikelyShaderRequestUrl(url: string): boolean {
+  return /\.((vertex|fragment)\.fx|fx)(\?|$)/i.test(url)
+    || /\/Shaders(WGSL)?\//i.test(url)
+    || /shader/i.test(url);
+}
+
+function installShaderRequestTrace(): void {
+  if (shaderRequestTraceInstalled) return;
+  shaderRequestTraceInstalled = true;
+
+  const originalOpen = WebRequest.prototype.open;
+  const originalSend = WebRequest.prototype.send;
+
+  WebRequest.prototype.open = function(method: string, url: string): void {
+    if (isLikelyShaderRequestUrl(url)) {
+      console.log("[ShaderTrace] request", { method, url });
+    }
+    originalOpen.call(this, method, url);
+  };
+
+  WebRequest.prototype.send = function(body?: XMLHttpRequestBodyInit | Document | null): void {
+    const request = this as WebRequest & { __mmdShaderTraceAttached?: boolean };
+    if (!request.__mmdShaderTraceAttached && isLikelyShaderRequestUrl(this.requestURL)) {
+      request.__mmdShaderTraceAttached = true;
+      this.addEventListener("load", () => {
+        const contentType = this.getResponseHeader("content-type") || "";
+        const responseText = typeof this.responseText === "string" ? this.responseText.trimStart() : "";
+        const preview = responseText.slice(0, 120);
+        const looksLikeHtml = preview.startsWith("<!doctype html") || preview.startsWith("<html");
+        if (this.status >= 400 || looksLikeHtml || /text\/html/i.test(contentType)) {
+          console.error("[ShaderTrace] suspicious response", {
+            url: this.requestURL,
+            status: this.status,
+            statusText: this.statusText,
+            contentType,
+            preview,
+          });
+        } else {
+          console.log("[ShaderTrace] response", {
+            url: this.requestURL,
+            status: this.status,
+            contentType,
+          });
+        }
+      });
+      this.addEventListener("error", () => {
+        console.error("[ShaderTrace] network error", {
+          url: this.requestURL,
+          status: this.status,
+          statusText: this.statusText,
+        });
+      });
+    }
+    originalSend.call(this, body);
+  };
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  installShaderRequestTrace();
   initializeI18n(document);
   window.mmdI18n = {
     getLocale: () => getLocale(),
