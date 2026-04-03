@@ -76,7 +76,7 @@
             </svg>
             <span id="physics-toggle-text" data-i18n="toolbar.physics.short">PHY</span>
           </button>
-          <button id="btn-toggle-shadow" class="toolbar-btn toolbar-btn--compact toggle-on" title="影の有効/無効を切り替える" data-i18n-title="toolbar.shadow.title.on" aria-pressed="true">
+          <button id="btn-toggle-shadow" class="toolbar-btn toolbar-btn--compact toggle-on" title="影の有効/無効を切り替える" data-i18n-title="toolbar.shadow.title.on" aria-pressed="true" hidden>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M8 2.2a4.8 4.8 0 1 0 0 9.6 4.8 4.8 0 0 0 0-9.6z" />
               <path d="M8 2.2a4.8 4.8 0 0 1 0 9.6z" fill="#0b0d12" opacity="0.45" />
@@ -469,6 +469,18 @@
                 <input type="range" id="effect-dof-focus" class="effect-slider" min="100" max="300000" value="55000" step="100">
                 <span id="effect-dof-focus-val" class="effect-value">55.0m</span>
               </div>
+              <div class="effect-row effect-row-select-only">
+                <span class="effect-label" data-i18n="label.dofTargetModel">DoF中心モデル</span>
+                <select id="effect-dof-target-model" class="effect-select">
+                  <option value="" data-i18n="option.cameraTarget">カメラ注視点</option>
+                </select>
+              </div>
+              <div class="effect-row effect-row-select-only">
+                <span class="effect-label" data-i18n="label.dofTargetBone">DoF中心ボーン</span>
+                <select id="effect-dof-target-bone" class="effect-select" disabled>
+                  <option value="" data-i18n="option.none">なし</option>
+                </select>
+              </div>
               <div class="effect-row">
                 <span class="effect-label" data-i18n="label.dofOffset">前後補正</span>
                 <input type="range" id="effect-dof-focus-offset" class="effect-slider" min="-20000" max="20000" value="0" step="100">
@@ -640,11 +652,6 @@
               <input type="range" id="light-direction-z" class="light-slider" min="-1" max="1" value="0.60" step="0.01">
               <span id="light-direction-z-val" class="light-value">0.60</span>
             </div>
-                <div class="light-row light-row--shadow">
-              <span class="light-label" data-i18n="label.shadowStrength">照度</span>
-              <input type="range" id="light-intensity" class="light-slider" min="0" max="200" value="100" step="1">
-              <span id="light-intensity-val" class="light-value">1.0</span>
-            </div>
             <div class="light-row light-row--light light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.ambientLight">環境光</span>
               <input type="range" id="light-ambient" class="light-slider" min="0" max="200" value="0" step="1">
@@ -675,31 +682,6 @@
               <input type="range" id="light-flat-color-influence" class="light-slider" min="0" max="100" value="35" step="1">
               <span id="light-flat-color-influence-val" class="light-value">35%</span>
             </div>
-            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label" data-i18n="label.shadowDarkness">影の濃さ</span>
-              <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="0" step="1">
-              <span id="light-shadow-val" class="light-value">0.00</span>
-            </div>
-            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label" data-i18n="label.shadowFrustumSize">影範囲</span>
-              <input type="range" id="light-shadow-frustum-size" class="light-slider" min="120" max="6000" value="220" step="20">
-              <span id="light-shadow-frustum-size-val" class="light-value">220</span>
-            </div>
-            <div class="light-row light-row--shadow">
-              <span class="light-label" data-i18n="label.shadowMaxZ">影描画距離</span>
-              <input type="range" id="light-shadow-max-z" class="light-slider" min="500" max="12000" value="4800" step="50">
-              <span id="light-shadow-max-z-val" class="light-value">4800</span>
-            </div>
-            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label" data-i18n="label.shadowBias">Shadow Bias</span>
-              <input type="range" id="light-shadow-bias" class="light-slider" min="0" max="10000" value="500" step="1">
-              <span id="light-shadow-bias-val" class="light-value">0.00050</span>
-            </div>
-            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label" data-i18n="label.shadowNormalBias">Normal Bias</span>
-              <input type="range" id="light-shadow-normal-bias" class="light-slider" min="0" max="2000" value="1000" step="1">
-              <span id="light-shadow-normal-bias-val" class="light-value">0.01000</span>
-            </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowColorR">影色R</span>
               <input type="range" id="light-shadow-color-r" class="light-slider" min="0" max="255" value="38" step="1">
@@ -720,6 +702,21 @@
               <input type="range" id="light-toon-shadow-influence" class="light-slider" min="0" max="100" value="100" step="1">
               <span id="light-toon-shadow-influence-val" class="light-value">100%</span>
             </div>
+            <div class="light-row light-row--shadow">
+              <span class="light-label" data-i18n="label.shadowMaxZ">影描画距離</span>
+              <input type="range" id="light-shadow-max-z" class="light-slider" min="500" max="12000" value="4800" step="50">
+              <span id="light-shadow-max-z-val" class="light-value">4800</span>
+            </div>
+            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
+              <span class="light-label" data-i18n="label.shadowBias">Shadow Bias</span>
+              <input type="range" id="light-shadow-bias" class="light-slider" min="0" max="10000" value="500" step="1">
+              <span id="light-shadow-bias-val" class="light-value">0.00050</span>
+            </div>
+            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
+              <span class="light-label" data-i18n="label.shadowNormalBias">Normal Bias</span>
+              <input type="range" id="light-shadow-normal-bias" class="light-slider" min="0" max="2000" value="1000" step="1">
+              <span id="light-shadow-normal-bias-val" class="light-value">0.01000</span>
+            </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.selfShadowEdge">セルフ影境界</span>
               <input type="range" id="light-self-shadow-softness" class="light-slider" min="5" max="120" value="50" step="1">
@@ -729,6 +726,21 @@
               <span class="light-label" data-i18n="label.occlusionShadowEdge">遮蔽影境界</span>
               <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="10" step="1">
               <span id="light-occlusion-shadow-softness-val" class="light-value">0.010</span>
+            </div>
+            <div class="light-row light-row--shadow">
+              <span class="light-label" data-i18n="label.shadowStrength">照度</span>
+              <input type="range" id="light-intensity" class="light-slider" min="0" max="200" value="100" step="1">
+              <span id="light-intensity-val" class="light-value">1.0</span>
+            </div>
+            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
+              <span class="light-label" data-i18n="label.shadowDarkness">影の濃さ</span>
+              <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="0" step="1">
+              <span id="light-shadow-val" class="light-value">0.00</span>
+            </div>
+            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
+              <span class="light-label" data-i18n="label.shadowFrustumSize">影範囲</span>
+              <input type="range" id="light-shadow-frustum-size" class="light-slider" min="120" max="6000" value="220" step="20">
+              <span id="light-shadow-frustum-size-val" class="light-value">220</span>
             </div>
           </div>
         </section>

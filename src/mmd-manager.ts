@@ -289,6 +289,22 @@ type PhysicsSimulationRateHz = 30 | 60 | 120;
 
 let sprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
+const DOF_FOCUS_BONE_CANDIDATES = [
+    "頭",
+    "head",
+    "Head",
+    "首",
+    "neck",
+    "Neck",
+    "上半身2",
+    "upperbody2",
+    "upper body2",
+    "upperbody",
+    "上半身",
+    "センター",
+    "center",
+    "Center",
+] as const;
 
 function localPathToFileUrl(pathText: string): string {
     const normalized = pathText.replace(/\\/g, "/");
@@ -575,11 +591,6 @@ export class MmdManager {
             description: "Bloom-based emissive halo that respects final scene occlusion better",
         },
         {
-            id: "wgsl-debug-white",
-            label: "debug_white",
-            description: "White-shadow debug view using the built-in toon debug WGSL",
-        },
-        {
             id: "wgsl-full-light",
             label: "full_light",
             description: "Treat the material as always facing light regardless of PMX toon flags",
@@ -598,6 +609,11 @@ export class MmdManager {
             id: "wgsl-light-and-shadow",
             label: "light_and_shadow",
             description: "Use the standard MMD light-and-shadow path, including fallback toon ramps for non-toon materials",
+        },
+        {
+            id: "wgsl-cel-shadow-sharp",
+            label: "Cel Shadow Sharp",
+            description: "Hardens the self-shadow boundary for a crisper cel-look shadow band",
         },
         {
             id: "wgsl-gloss-highlight",
@@ -625,11 +641,6 @@ export class MmdManager {
             description: "Stronger toon contrast with reduced specular spread",
         },
         {
-            id: "wgsl-cel-shadow-sharp",
-            label: "Cel Shadow Sharp",
-            description: "Hardens the self-shadow boundary for a crisper cel-look shadow band",
-        },
-        {
             id: "wgsl-accessory-toon",
             label: "Accessory Toon",
             description: "Use the standard MMD shading path with an accessory-oriented fallback toon ramp",
@@ -643,6 +654,11 @@ export class MmdManager {
             id: "wgsl-mono-flat",
             label: "Mono Flat",
             description: "Monochrome flat shading with lighting disabled",
+        },
+        {
+            id: "wgsl-debug-white",
+            label: "debug_white",
+            description: "White-shadow debug view using the built-in toon debug WGSL",
         },
     ];
     private static readonly POST_EFFECT_LUT_PRESETS = [
@@ -1348,6 +1364,8 @@ ${beforeFogAppendBlock}
     private readonly dofAutoFocusLensCompensationExponent = 0.72;
     private dofNearSuppressionScaleValue = 4.0;
     private dofAutoFocusNearOffsetMmValue = 0;
+    private dofFocusTargetModelPathValue: string | null = null;
+    private dofFocusTargetBoneNameValue: string | null = null;
     private resizeObserver: ResizeObserver | null = null;
     private autoRenderEnabled = true;
     private readonly onWindowResize = () => {
@@ -1567,6 +1585,7 @@ ${beforeFogAppendBlock}
     public onCameraTransformEdited: (() => void) | null = null;
     public onMaterialShaderStateChanged: (() => void) | null = null;
     public onGlobalIlluminationStateChanged: ((enabled: boolean) => void) | null = null;
+    public onDofFocusTargetChanged: (() => void) | null = null;
 
     public getLoadedModels(): { index: number; name: string; path: string; active: boolean }[] {
         return this.sceneModels.map((entry, index) => ({
@@ -1783,6 +1802,53 @@ ${beforeFogAppendBlock}
         this.onModelLoaded?.(target.info);
         this.emitMergedKeyframeTracks();
         return true;
+    }
+
+    public getDofFocusTargetModelPath(): string | null {
+        return this.dofFocusTargetModelPathValue;
+    }
+
+    public getDofFocusTargetBoneName(): string | null {
+        return this.dofFocusTargetBoneNameValue;
+    }
+
+    public setDofFocusTargetByIndex(index: number | null, boneName: string | null): void {
+        if (index === null || !Number.isInteger(index) || index < 0 || index >= this.sceneModels.length) {
+            this.setDofFocusTargetByPath(null, null);
+            return;
+        }
+        this.setDofFocusTargetByPath(this.sceneModels[index]?.info.path ?? null, boneName);
+    }
+
+    public setDofFocusTargetByPath(modelPath: string | null, boneName: string | null): void {
+        const nextModelPath = typeof modelPath === "string" && modelPath.length > 0 ? modelPath : null;
+        const entry = nextModelPath !== null ? this.findSceneModelEntryByPath(nextModelPath) : null;
+        let nextBoneName = typeof boneName === "string" && boneName.length > 0 ? boneName : null;
+
+        if (entry) {
+            const boneNames = Array.isArray(entry.info.boneNames) ? entry.info.boneNames : [];
+            if (nextBoneName === null || !boneNames.includes(nextBoneName)) {
+                nextBoneName = this.findPreferredDofFocusBoneName(boneNames) ?? boneNames[0] ?? null;
+            }
+        } else {
+            nextBoneName = null;
+        }
+
+        const changed =
+            this.dofFocusTargetModelPathValue !== nextModelPath ||
+            this.dofFocusTargetBoneNameValue !== nextBoneName;
+
+        this.dofFocusTargetModelPathValue = nextModelPath;
+        this.dofFocusTargetBoneNameValue = nextBoneName;
+
+        if (this.dofAutoFocusEnabled) {
+            this.dofFocusDistanceMmValue = this.getDofAutoFocusDistanceMm();
+            this.updateEditorDofFocusAndFStop();
+        }
+
+        if (changed) {
+            this.onDofFocusTargetChanged?.();
+        }
     }
 
     public setTimelineTarget(target: "model" | "camera"): void {
@@ -2578,7 +2644,7 @@ ${beforeFogAppendBlock}
         canvas.addEventListener("contextmenu", this.onCanvasContextMenu);
         this.syncCameraRotationFromCurrentView();
         this.updateDofFocalLengthFromCameraFov();
-        this.dofFocusDistanceMmValue = this.getCameraFocusDistanceMm();
+        this.dofFocusDistanceMmValue = this.getDofAutoFocusDistanceMm();
         this.initializeDofPipeline();
         this.setupColorCorrectionPostProcess();
 
@@ -3355,20 +3421,10 @@ ${beforeFogAppendBlock}
     }
 
     private shouldActivateAsCurrent(info: ModelInfo): boolean {
-        if (!this.currentModel || !this.currentMesh || !this.activeModelInfo) {
-            return true;
-        }
-
-        // Keep the current character model active unless the current active model
-        // is effectively non-animatable (e.g. stage model loaded first).
-        if (this.activeModelInfo.boneCount === 0 && info.boneCount > 0) {
-            return true;
-        }
-        if (this.activeModelInfo.morphCount === 0 && info.morphCount > 0) {
-            return true;
-        }
-
-        return false;
+        void info;
+        // Prefer the most recently loaded PMX/PMD as the active model so
+        // the info panel and editing target follow the user's latest import.
+        return true;
     }
 
     private applyModelEdgeToAllModels(): void {
@@ -5496,8 +5552,96 @@ ${beforeFogAppendBlock}
         private disposeSsaoDepthRenderer(): void {
         return disposeSsaoDepthRendererImpl(this);
     }
-        private setupFarDofPostProcess(): void {
+    private setupFarDofPostProcess(): void {
         return setupFarDofPostProcessImpl(this);
+    }
+
+    private findSceneModelEntryByPath(modelPath: string): SceneModelEntry | null {
+        for (const entry of this.sceneModels) {
+            if (entry.info.path === modelPath) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private normalizeDofFocusBoneName(name: string): string {
+        return name.trim().replace(/\s+/g, "").toLowerCase();
+    }
+
+    public getPreferredDofFocusBoneName(modelIndex: number): string | null {
+        const modelEntry = this.sceneModels[modelIndex];
+        if (!modelEntry) return null;
+        return this.findPreferredDofFocusBoneName(modelEntry.info.boneNames);
+    }
+
+    private findPreferredDofFocusBoneName(boneNames: readonly string[]): string | null {
+        if (!Array.isArray(boneNames) || boneNames.length === 0) {
+            return null;
+        }
+
+        const normalizedToActual = new Map<string, string>();
+        for (const boneName of boneNames) {
+            if (typeof boneName !== "string") continue;
+            const normalized = this.normalizeDofFocusBoneName(boneName);
+            if (!normalizedToActual.has(normalized)) {
+                normalizedToActual.set(normalized, boneName);
+            }
+        }
+
+        for (const candidate of DOF_FOCUS_BONE_CANDIDATES) {
+            const actual = normalizedToActual.get(this.normalizeDofFocusBoneName(candidate));
+            if (actual) {
+                return actual;
+            }
+        }
+
+        return boneNames.find((name): name is string => typeof name === "string" && name.length > 0) ?? null;
+    }
+
+    private getRuntimeBoneByNameFromModel(model: MmdModel | null, boneName: string): EditorRuntimeBone | null {
+        const runtimeBones = model?.runtimeBones;
+        if (!runtimeBones) return null;
+
+        for (const runtimeBone of runtimeBones as readonly EditorRuntimeBone[]) {
+            if (runtimeBone.name === boneName) {
+                return runtimeBone;
+            }
+        }
+
+        return null;
+    }
+
+    private getDofFocusTargetPosition(): Vector3 | null {
+        const modelPath = this.dofFocusTargetModelPathValue;
+        if (!modelPath) {
+            return this.camera.target.clone();
+        }
+
+        const entry = this.findSceneModelEntryByPath(modelPath);
+        if (!entry) {
+            return this.camera.target.clone();
+        }
+
+        const boneName = this.dofFocusTargetBoneNameValue;
+        if (boneName) {
+            const runtimeBone = this.getRuntimeBoneByNameFromModel(entry.model, boneName);
+            if (runtimeBone) {
+                const worldMatrix = Matrix.Identity();
+                const worldPosition = Vector3.Zero();
+                runtimeBone.getWorldMatrixToRef(worldMatrix);
+                worldMatrix.getTranslationToRef(worldPosition);
+                return worldPosition;
+            }
+        }
+
+        return entry.mesh.getBoundingInfo().boundingBox.centerWorld.clone();
+    }
+
+    private getDofAutoFocusDistanceMm(): number {
+        const focusTarget = this.getDofFocusTargetPosition() ?? this.camera.target;
+        const distance = Vector3.Distance(this.camera.globalPosition, focusTarget);
+        return Math.max(this.camera.minZ, distance) * 1000;
     }
 
     private getCameraFocusDistanceMm(): number {

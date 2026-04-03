@@ -831,7 +831,7 @@ export function updateEditorDofFocusAndFStop(host: any): void {
         updateDofLensDistortionFromCameraFov(host);
     }
     if (host.dofAutoFocusToCameraTarget) {
-        const targetFocusMm = host.getCameraFocusDistanceMm();
+        const targetFocusMm = host.getDofAutoFocusDistanceMm();
         const minFocusMm = host.camera.minZ * 1000;
         host.dofFocusDistanceMmValue = Math.max(minFocusMm, targetFocusMm - host.dofAutoFocusNearOffsetMmValue);
     }
@@ -1159,7 +1159,7 @@ export function setupFarDofPostProcess(host: any): void {
             1 / Math.max(1, host.dofPostProcess?.width ?? host.engine.getRenderWidth()),
             1 / Math.max(1, host.dofPostProcess?.height ?? host.engine.getRenderHeight())
         );
-        effect.setFloat("focusDistance", host.getCameraFocusDistanceMm());
+        effect.setFloat("focusDistance", host.getDofAutoFocusDistanceMm());
         effect.setFloat("focusSharpRadius", host.farDofFocusSharpRadiusMm);
         effect.setFloat("farDofStrength", host.postEffectFarDofStrengthValue);
     });

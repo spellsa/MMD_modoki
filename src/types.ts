@@ -230,6 +230,8 @@ export interface ProjectEffectState {
     dofEnabled: boolean;
     dofFocusDistanceMm: number;
     dofFocusOffsetMm?: number;
+    dofTargetModelPath?: string | null;
+    dofTargetBoneName?: string | null;
     dofFStop: number;
     dofLensSize: number;
     dofLensBlurStrength: number;

@@ -2982,6 +2982,10 @@ body.bottom-panel-resizing {
   grid-template-columns: 34% minmax(0, 1fr) 64px;
 }
 
+.effect-row.effect-row-select-only {
+  grid-template-columns: 34% minmax(0, 1fr);
+}
+
 .dof-row-hidden {
   display: none;
 }

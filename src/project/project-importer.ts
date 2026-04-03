@@ -386,6 +386,14 @@ export async function importProjectState(
     host.dofAutoFocusNearOffsetMm = typeof data.effects.dofFocusOffsetMm === "number" && Number.isFinite(data.effects.dofFocusOffsetMm)
         ? data.effects.dofFocusOffsetMm
         : 0;
+    host.setDofFocusTargetByPath?.(
+        typeof data.effects.dofTargetModelPath === "string" && data.effects.dofTargetModelPath.length > 0
+            ? data.effects.dofTargetModelPath
+            : null,
+        typeof data.effects.dofTargetBoneName === "string" && data.effects.dofTargetBoneName.length > 0
+            ? data.effects.dofTargetBoneName
+            : null,
+    );
     host.dofFStop = data.effects.dofFStop;
     host.dofLensSize = data.effects.dofLensSize;
     host.dofLensBlurStrength = data.effects.dofLensBlurStrength;

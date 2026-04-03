@@ -161,6 +161,8 @@ export class UIController {
         "wgsl-mono-flat",
         "wgsl-full-light-add",
         "wgsl-full-alpha-test-hard",
+        "wgsl-alpha-mask",
+        "wgsl-accessory-toon",
         "wgsl-white-key-cutout",
         "wgsl-black-key-cutout",
     ]);
@@ -276,6 +278,8 @@ export class UIController {
     private dofFStopValueEl: HTMLElement | null = null;
     private dofFocalLengthSlider: HTMLInputElement | null = null;
     private dofFocalLengthValueEl: HTMLElement | null = null;
+    private dofTargetModelSelect: HTMLSelectElement | null = null;
+    private dofTargetBoneSelect: HTMLSelectElement | null = null;
     private lensDistortionSlider: HTMLInputElement | null = null;
     private lensDistortionValueEl: HTMLElement | null = null;
     private shortcutEdgeWidthRestore = 1;
@@ -333,6 +337,7 @@ export class UIController {
     private refreshGiToggleUi: (() => void) | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
+        this.refreshDofFocusTargetControls();
         this.refreshShaderPanel();
     };
 
@@ -917,6 +922,8 @@ export class UIController {
         const valEffectDofQuality = document.getElementById("effect-dof-quality-val");
         const elEffectDofFocus = document.getElementById("effect-dof-focus") as HTMLInputElement | null;
         const valEffectDofFocus = document.getElementById("effect-dof-focus-val");
+        const elEffectDofTargetModel = document.getElementById("effect-dof-target-model") as HTMLSelectElement | null;
+        const elEffectDofTargetBone = document.getElementById("effect-dof-target-bone") as HTMLSelectElement | null;
         const elEffectDofFocusOffset = document.getElementById("effect-dof-focus-offset") as HTMLInputElement | null;
         const valEffectDofFocusOffset = document.getElementById("effect-dof-focus-offset-val");
         const elEffectDofFStop = document.getElementById("effect-dof-fstop") as HTMLInputElement | null;
@@ -1229,6 +1236,8 @@ export class UIController {
             this.dofFStopValueEl = valEffectDofFStop;
             this.dofFocalLengthSlider = elEffectDofFocalLength;
             this.dofFocalLengthValueEl = valEffectDofFocalLength;
+            this.dofTargetModelSelect = elEffectDofTargetModel;
+            this.dofTargetBoneSelect = elEffectDofTargetBone;
 
             const applyDofEnabled = () => {
                 this.mmdManager.dofEnabled = elEffectDofEnabled.checked;
@@ -1304,6 +1313,34 @@ export class UIController {
                     this.refreshDofAutoFocusReadout();
                 }
             };
+            const applyDofTargetModel = () => {
+                if (!elEffectDofTargetModel) return;
+                const modelIndex = Number.parseInt(elEffectDofTargetModel.value, 10);
+                if (Number.isNaN(modelIndex)) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                    this.refreshDofFocusTargetControls();
+                    this.refreshDofAutoFocusReadout();
+                    return;
+                }
+                const preferredBoneName = this.mmdManager.getPreferredDofFocusBoneName(modelIndex);
+                this.mmdManager.setDofFocusTargetByIndex(modelIndex, preferredBoneName);
+                this.refreshDofFocusTargetControls();
+                this.refreshDofAutoFocusReadout();
+            };
+            const applyDofTargetBone = () => {
+                if (!elEffectDofTargetModel || !elEffectDofTargetBone) return;
+                const modelIndex = Number.parseInt(elEffectDofTargetModel.value, 10);
+                if (Number.isNaN(modelIndex)) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                    this.refreshDofFocusTargetControls();
+                    this.refreshDofAutoFocusReadout();
+                    return;
+                }
+                const boneName = elEffectDofTargetBone.value || null;
+                this.mmdManager.setDofFocusTargetByIndex(modelIndex, boneName);
+                this.refreshDofFocusTargetControls();
+                this.refreshDofAutoFocusReadout();
+            };
 
             elEffectDofEnabled.checked = this.mmdManager.dofEnabled;
             elEffectDofQuality.value = String(this.mmdManager.dofBlurLevel);
@@ -1320,7 +1357,7 @@ export class UIController {
             }
             if (autoFocusEnabled) {
                 elEffectDofFocus.disabled = true;
-                elEffectDofFocus.title = `Auto focus (camera target, ${this.mmdManager.dofAutoFocusRangeMeters.toFixed(1)}m radius in focus)`;
+                elEffectDofFocus.title = "Auto focus";
             }
             if (focalLengthLinkedToFov) {
                 elEffectDofFocalLength.disabled = true;
@@ -1336,6 +1373,7 @@ export class UIController {
             applyDofFocalInvert();
             applyDofLensSize();
             applyDofFocalLength();
+            this.refreshDofFocusTargetControls();
             this.refreshDofAutoFocusReadout();
 
             elEffectDofEnabled.addEventListener("change", applyDofEnabled);
@@ -1343,6 +1381,8 @@ export class UIController {
             if (!autoFocusEnabled) {
                 elEffectDofFocus.addEventListener("input", applyDofFocus);
             }
+            elEffectDofTargetModel?.addEventListener("change", applyDofTargetModel);
+            elEffectDofTargetBone?.addEventListener("change", applyDofTargetBone);
             elEffectDofFocusOffset.addEventListener("input", applyDofFocusOffset);
             elEffectDofFStop.addEventListener("input", applyDofFStop);
             elEffectDofNearSuppression.addEventListener("input", applyDofNearSuppression);
@@ -1547,6 +1587,7 @@ export class UIController {
                 this.applyActiveModelSelectionUI();
             }
             this.refreshModelSelector();
+            this.refreshDofFocusTargetControls();
             this.refreshShaderPanel();
             this.updateRigidBodyToggleButton();
         };
@@ -1559,10 +1600,16 @@ export class UIController {
                 this.applyActiveModelSelectionUI();
             }
             this.refreshModelSelector();
+            this.refreshDofFocusTargetControls();
             this.refreshShaderPanel();
             this.updateRigidBodyToggleButton();
             const activeLabel = active ? " [active]" : "";
             this.showToast(`Loaded model: ${info.name} (${totalCount})${activeLabel}`, "success");
+        };
+
+        this.mmdManager.onDofFocusTargetChanged = () => {
+            this.refreshDofFocusTargetControls();
+            this.refreshDofAutoFocusReadout();
         };
 
         // Motion loaded
@@ -4321,7 +4368,6 @@ export class UIController {
         const presets = this.mmdManager.getWgslMaterialShaderPresets()
             .filter((preset) => !UIController.HIDDEN_SHADER_PRESET_IDS.has(preset.id));
         const models = this.mmdManager.getWgslModelShaderStates();
-        const activeExternalWgslPath = this.mmdManager.getExternalWgslToonShaderPath();
 
         this.shaderPresetSelect.innerHTML = "";
         for (const preset of presets) {
@@ -4331,23 +4377,6 @@ export class UIController {
             this.shaderPresetSelect.appendChild(option);
         }
 
-        for (const bundledFile of this.bundledWgslShaderFiles) {
-            const option = document.createElement("option");
-            option.value = this.makeExternalWgslPresetValue(bundledFile.path);
-            option.textContent = `WGSL: ${bundledFile.name}`;
-            this.shaderPresetSelect.appendChild(option);
-        }
-        if (
-            activeExternalWgslPath &&
-            !Array.from(this.shaderPresetSelect.options).some((option) =>
-                option.value === this.makeExternalWgslPresetValue(activeExternalWgslPath),
-            )
-        ) {
-            const option = document.createElement("option");
-            option.value = this.makeExternalWgslPresetValue(activeExternalWgslPath);
-            option.textContent = `WGSL: ${this.getBaseNameForRenderer(activeExternalWgslPath)}`;
-            this.shaderPresetSelect.appendChild(option);
-        }
         if (!isAvailable) {
             this.shaderModelSelect.innerHTML = '<option value="">-</option>';
             this.shaderModelSelect.disabled = true;
@@ -4431,17 +4460,7 @@ export class UIController {
                 return paths.size === 1 ? Array.from(paths)[0] : null;
             })();
 
-        if (selectedExternalWgslPath && !Array.from(this.shaderPresetSelect.options).some((option) => option.value === this.makeExternalWgslPresetValue(selectedExternalWgslPath))) {
-            const option = document.createElement("option");
-            option.value = this.makeExternalWgslPresetValue(selectedExternalWgslPath);
-            option.textContent = `WGSL: ${this.getBaseNameForRenderer(selectedExternalWgslPath)}`;
-            this.shaderPresetSelect.appendChild(option);
-        }
-
         let selectedShaderValue: string = selectedPresetId;
-        if (selectedExternalWgslPath) {
-            selectedShaderValue = this.makeExternalWgslPresetValue(selectedExternalWgslPath);
-        }
         if (!Array.from(this.shaderPresetSelect.options).some((option) => option.value === selectedShaderValue)) {
             selectedShaderValue = presets[0]?.id ?? "wgsl-mmd-standard";
         }
@@ -5575,6 +5594,69 @@ export class UIController {
         this.camViewBottomBtn?.setAttribute("aria-pressed", bottom ? "true" : "false");
     }
 
+    private refreshDofFocusTargetControls(): void {
+        if (!this.dofTargetModelSelect || !this.dofTargetBoneSelect) {
+            return;
+        }
+
+        const modelSelect = this.dofTargetModelSelect;
+        const boneSelect = this.dofTargetBoneSelect;
+        const loadedModels = this.mmdManager.getLoadedModels();
+        const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
+        const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
+        const resolvedModel = targetModelPath
+            ? loadedModels.find((model) => model.path === targetModelPath) ?? null
+            : null;
+
+        modelSelect.innerHTML = "";
+        const cameraOption = document.createElement("option");
+        cameraOption.value = "";
+        cameraOption.textContent = t("option.cameraTarget");
+        modelSelect.appendChild(cameraOption);
+
+        for (const model of loadedModels) {
+            const option = document.createElement("option");
+            option.value = String(model.index);
+            option.textContent = model.name;
+            modelSelect.appendChild(option);
+        }
+
+        if (targetModelPath && !resolvedModel) {
+            this.mmdManager.setDofFocusTargetByIndex(null, null);
+            return;
+        }
+
+        modelSelect.value = resolvedModel ? String(resolvedModel.index) : "";
+        modelSelect.disabled = loadedModels.length === 0;
+
+        boneSelect.innerHTML = "";
+        if (!resolvedModel) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = t("option.none");
+            boneSelect.appendChild(option);
+            boneSelect.value = "";
+            boneSelect.disabled = true;
+            return;
+        }
+
+        const boneNames = this.mmdManager.getModelBoneNames(resolvedModel.index);
+        for (const boneName of boneNames) {
+            const option = document.createElement("option");
+            option.value = boneName;
+            option.textContent = boneName;
+            boneSelect.appendChild(option);
+        }
+
+        const fallbackBoneName =
+            targetBoneName && boneNames.includes(targetBoneName)
+                ? targetBoneName
+                : this.mmdManager.getPreferredDofFocusBoneName(resolvedModel.index);
+
+        boneSelect.value = fallbackBoneName && boneNames.includes(fallbackBoneName) ? fallbackBoneName : (boneNames[0] ?? "");
+        boneSelect.disabled = boneNames.length === 0;
+    }
+
     private refreshDofAutoFocusReadout(): void {
         if (!this.mmdManager.dofAutoFocusEnabled) return;
 
@@ -5585,6 +5667,11 @@ export class UIController {
             const clamped = Math.max(sliderMin, Math.min(sliderMax, focusMm));
             this.dofFocusSlider.value = String(Math.round(clamped));
             this.dofFocusValueEl.textContent = `${(focusMm / 1000).toFixed(1)}m (auto)`;
+            const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
+            const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
+            this.dofFocusSlider.title = targetModelPath
+                ? `Auto focus (${targetBoneName ?? "target"}, ${this.mmdManager.dofAutoFocusRangeMeters.toFixed(1)}m radius in focus)`
+                : `Auto focus (camera target, ${this.mmdManager.dofAutoFocusRangeMeters.toFixed(1)}m radius in focus)`;
             this.syncRangeNumberInput(this.dofFocusSlider);
         }
 

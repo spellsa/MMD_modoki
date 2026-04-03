@@ -131,6 +131,8 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             dofEnabled: host.dofEnabled,
             dofFocusDistanceMm: host.dofFocusDistanceMm,
             dofFocusOffsetMm: host.dofAutoFocusNearOffsetMm,
+            dofTargetModelPath: host.getDofFocusTargetModelPath?.() ?? null,
+            dofTargetBoneName: host.getDofFocusTargetBoneName?.() ?? null,
             dofFStop: host.dofFStop,
             dofLensSize: host.dofLensSize,
             dofLensBlurStrength: host.dofLensBlurStrength,
