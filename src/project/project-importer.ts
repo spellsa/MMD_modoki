@@ -297,15 +297,22 @@ export async function importProjectState(
     host.setGroundVisible(Boolean(data.viewport.groundVisible));
     host.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
-    if (typeof data.viewport.backgroundImagePath === "string" && data.viewport.backgroundImagePath.trim().length > 0) {
+    if (typeof data.viewport.backgroundVideoPath === "string" && data.viewport.backgroundVideoPath.trim().length > 0) {
+        try {
+            await host.setBackgroundVideoFromPath(data.viewport.backgroundVideoPath);
+        } catch {
+            warnings.push(`Background video load failed: ${data.viewport.backgroundVideoPath}`);
+            host.clearBackgroundMedia();
+        }
+    } else if (typeof data.viewport.backgroundImagePath === "string" && data.viewport.backgroundImagePath.trim().length > 0) {
         try {
             await host.setBackgroundImageFromPath(data.viewport.backgroundImagePath);
         } catch {
             warnings.push(`Background image load failed: ${data.viewport.backgroundImagePath}`);
-            host.clearBackgroundImage();
+            host.clearBackgroundMedia();
         }
     } else {
-        host.clearBackgroundImage();
+        host.clearBackgroundMedia();
     }
 
     host.setLightDirection(data.lighting.x, data.lighting.y, data.lighting.z);
@@ -467,9 +474,11 @@ export async function importProjectState(
     host.postEffectLutSourceMode = typeof data.effects.lutSourceMode === "string"
         ? data.effects.lutSourceMode
         : host.postEffectLutSourceMode;
-    host.postEffectLutExternalPath = typeof data.effects.lutExternalPath === "string"
-        ? data.effects.lutExternalPath
-        : null;
+    host.setPostEffectExternalLut(
+        typeof data.effects.lutExternalPath === "string" ? data.effects.lutExternalPath : null,
+        null,
+        null,
+    );
     host.setExternalWgslToonShader(
         typeof data.effects.wgslToonShaderPath === "string" ? data.effects.wgslToonShaderPath : null,
         null,

@@ -1134,6 +1134,14 @@ ${beforeFogAppendBlock}
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
     private backgroundImagePath: string | null = null;
+    private backgroundVideoLayer: Layer | null = null;
+    private backgroundVideoTexture: DynamicTexture | null = null;
+    private backgroundVideoElement: HTMLVideoElement | null = null;
+    private backgroundVideoCanvas: HTMLCanvasElement | null = null;
+    private backgroundVideoPath: string | null = null;
+    private backgroundMediaVisible = true;
+    private backgroundVideoLastSyncedTime = Number.NaN;
+    private backgroundVideoLastDrawnTime = Number.NaN;
     private readonly defaultClearColor = new Color4(0.94, 0.94, 0.94, 1);
     private readonly blackClearColor = new Color4(0, 0, 0, 1);
     private backgroundBlackEnabled = false;
@@ -2068,8 +2076,24 @@ ${beforeFogAppendBlock}
         return this.backgroundImagePath;
     }
 
+    public getBackgroundVideoPath(): string | null {
+        return this.backgroundVideoPath;
+    }
+
     public hasBackgroundImage(): boolean {
         return this.backgroundImageLayer !== null;
+    }
+
+    public hasBackgroundVideo(): boolean {
+        return this.backgroundVideoLayer !== null;
+    }
+
+    public hasBackgroundMedia(): boolean {
+        return this.backgroundImageLayer !== null || this.backgroundVideoLayer !== null;
+    }
+
+    public isBackgroundMediaVisible(): boolean {
+        return this.backgroundMediaVisible && this.hasBackgroundMedia();
     }
 
     public setSkydomeVisible(visible: boolean): void {
@@ -2083,6 +2107,21 @@ ${beforeFogAppendBlock}
         return next;
     }
 
+    public setBackgroundMediaVisible(visible: boolean): boolean {
+        this.backgroundMediaVisible = Boolean(visible);
+        if (this.backgroundImageLayer) {
+            this.backgroundImageLayer.isEnabled = this.backgroundMediaVisible;
+        }
+        if (this.backgroundVideoLayer) {
+            this.backgroundVideoLayer.isEnabled = this.backgroundMediaVisible;
+        }
+        return this.isBackgroundMediaVisible();
+    }
+
+    public toggleBackgroundMediaVisible(): boolean {
+        return this.setBackgroundMediaVisible(!this.backgroundMediaVisible);
+    }
+
     public clearBackgroundImage(): void {
         if (this.backgroundImageLayer) {
             this.backgroundImageLayer.dispose();
@@ -2091,10 +2130,36 @@ ${beforeFogAppendBlock}
         this.backgroundImagePath = null;
     }
 
+    public clearBackgroundVideo(): void {
+        if (this.backgroundVideoElement) {
+            this.backgroundVideoElement.pause();
+            this.backgroundVideoElement.removeAttribute("src");
+            this.backgroundVideoElement.load();
+            this.backgroundVideoElement = null;
+        }
+        if (this.backgroundVideoTexture) {
+            this.backgroundVideoTexture.dispose();
+            this.backgroundVideoTexture = null;
+        }
+        this.backgroundVideoCanvas = null;
+        if (this.backgroundVideoLayer) {
+            this.backgroundVideoLayer.dispose();
+            this.backgroundVideoLayer = null;
+        }
+        this.backgroundVideoPath = null;
+        this.backgroundVideoLastSyncedTime = Number.NaN;
+        this.backgroundVideoLastDrawnTime = Number.NaN;
+    }
+
+    public clearBackgroundMedia(): void {
+        this.clearBackgroundVideo();
+        this.clearBackgroundImage();
+    }
+
     public async setBackgroundImageFromPath(filePath: string): Promise<void> {
         const normalizedPath = filePath.trim();
         if (normalizedPath.length === 0) {
-            this.clearBackgroundImage();
+            this.clearBackgroundMedia();
             return;
         }
 
@@ -2139,10 +2204,179 @@ ${beforeFogAppendBlock}
         nextLayer.texture = texture;
         this.backgroundImageLayer = nextLayer;
         this.backgroundImagePath = normalizedPath;
+        this.backgroundMediaVisible = true;
+        this.backgroundImageLayer.isEnabled = true;
         previousLayer?.dispose();
+        this.clearBackgroundVideo();
 
         // A fullscreen background image should replace the flat skydome rather than hide behind it.
         this.setSkydomeVisible(false);
+    }
+
+    public async setBackgroundVideoFromPath(filePath: string): Promise<void> {
+        const normalizedPath = filePath.trim();
+        if (normalizedPath.length === 0) {
+            this.clearBackgroundMedia();
+            return;
+        }
+
+        const video = document.createElement("video");
+        video.preload = "auto";
+        video.muted = true;
+        video.defaultMuted = true;
+        video.volume = 0;
+        video.loop = false;
+        video.playsInline = true;
+        video.setAttribute("playsinline", "");
+        video.src = localPathToFileUrl(normalizedPath);
+
+        let texture: DynamicTexture | null = null;
+        let canvas: HTMLCanvasElement | null = null;
+        try {
+            texture = await new Promise<DynamicTexture>((resolve, reject) => {
+                let settled = false;
+                const cleanup = (): void => {
+                    video.removeEventListener("error", onVideoError);
+                    video.removeEventListener("loadeddata", onVideoLoaded);
+                };
+                const onVideoLoaded = (): void => {
+                    if (settled) return;
+                    const width = Math.max(1, video.videoWidth || 1);
+                    const height = Math.max(1, video.videoHeight || 1);
+                    canvas = document.createElement("canvas");
+                    canvas.width = width;
+                    canvas.height = height;
+                    texture = new DynamicTexture(
+                        `backgroundVideo:${normalizedPath.replace(/^.*[\\/]/, "")}`,
+                        { width, height },
+                        this.scene,
+                        false,
+                        Texture.TRILINEAR_SAMPLINGMODE,
+                    );
+                    const ctx = texture.getContext();
+                    ctx.save();
+                    ctx.translate(0, height);
+                    ctx.scale(1, -1);
+                    ctx.drawImage(video, 0, 0, width, height);
+                    ctx.restore();
+                    texture.update(false);
+                    settled = true;
+                    cleanup();
+                    resolve(texture);
+                };
+                const onVideoError = (): void => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    const mediaError = video.error;
+                    const detail = mediaError?.message
+                        || `Background video load failed (${mediaError?.code ?? "unknown"})`;
+                    reject(new Error(detail));
+                };
+                video.addEventListener("error", onVideoError, { once: true });
+                video.addEventListener("loadeddata", onVideoLoaded, { once: true });
+                if (video.readyState >= video.HAVE_CURRENT_DATA) {
+                    onVideoLoaded();
+                }
+            });
+        } catch (err) {
+            video.pause();
+            video.removeAttribute("src");
+            video.load();
+            throw err;
+        }
+
+        texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+        texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+        texture.updateSamplingMode(Texture.TRILINEAR_SAMPLINGMODE);
+
+        const previousLayer = this.backgroundVideoLayer;
+        const previousTexture = this.backgroundVideoTexture;
+        const previousVideo = this.backgroundVideoElement;
+        const nextLayer = new Layer("backgroundVideoLayer", null, this.scene, true, new Color4(1, 1, 1, 1));
+        nextLayer.texture = texture;
+        this.backgroundVideoLayer = nextLayer;
+        this.backgroundVideoTexture = texture;
+        this.backgroundVideoElement = video;
+        this.backgroundVideoCanvas = canvas;
+        this.backgroundVideoPath = normalizedPath;
+        this.backgroundMediaVisible = true;
+        this.backgroundVideoLayer.isEnabled = true;
+        this.backgroundVideoLastSyncedTime = Number.NaN;
+        this.backgroundVideoLastDrawnTime = Number.NaN;
+        previousLayer?.dispose();
+        previousTexture?.dispose();
+        if (previousVideo) {
+            previousVideo.pause();
+            previousVideo.removeAttribute("src");
+            previousVideo.load();
+        }
+        this.clearBackgroundImage();
+        this.syncBackgroundVideoFrame(true);
+
+        // A fullscreen background video should replace the flat skydome rather than hide behind it.
+        this.setSkydomeVisible(false);
+    }
+
+    private syncBackgroundVideoFrame(force = false): void {
+        const texture = this.backgroundVideoTexture;
+        const video = this.backgroundVideoElement;
+        const canvas = this.backgroundVideoCanvas;
+        if (!texture || !video || !canvas) return;
+        if (video.readyState < video.HAVE_METADATA) return;
+
+        const duration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY;
+        const clampedTarget = Math.max(0, Math.min(this._currentFrame / 30, Math.max(0, duration - 0.001)));
+
+        if (this._isPlaying) {
+            if (video.paused) {
+                void video.play().catch(() => {
+                    // Some containers/codecs may reject autoplay despite mute. Keep falling back to manual seeks.
+                });
+            }
+            if (Math.abs(video.currentTime - clampedTarget) > 0.2) {
+                this.backgroundVideoLastSyncedTime = clampedTarget;
+                try {
+                    video.currentTime = clampedTarget;
+                } catch {
+                    // Browser may reject seeks while metadata is still settling. Try again next frame.
+                }
+            }
+        } else {
+            if (!video.paused) {
+                video.pause();
+            }
+            if (force || Math.abs(clampedTarget - this.backgroundVideoLastSyncedTime) >= (1 / 120)) {
+                this.backgroundVideoLastSyncedTime = clampedTarget;
+                try {
+                    video.currentTime = clampedTarget;
+                } catch {
+                    // Browser may reject seeks while metadata is still settling. Try again next frame.
+                }
+            }
+        }
+        if (video.readyState < video.HAVE_CURRENT_DATA) return;
+
+        const width = Math.max(1, video.videoWidth || canvas.width || 1);
+        const height = Math.max(1, video.videoHeight || canvas.height || 1);
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        if (!force && Math.abs(video.currentTime - this.backgroundVideoLastDrawnTime) < (1 / 240)) {
+            return;
+        }
+
+        const ctx = texture.getContext();
+        ctx.clearRect(0, 0, width, height);
+        ctx.save();
+        ctx.translate(0, height);
+        ctx.scale(1, -1);
+        ctx.drawImage(video, 0, 0, width, height);
+        ctx.restore();
+        texture.update(false);
+        this.backgroundVideoLastDrawnTime = video.currentTime;
     }
 
     public isRigidBodyVisualizerEnabled(): boolean {
@@ -2526,6 +2760,7 @@ ${beforeFogAppendBlock}
             this.lastRenderTimestampMs = nowMs;
 
             this.updateSimpleMotionBlurState(deltaMs);
+            this.syncBackgroundVideoFrame();
             this.scene.render();
             if (!this._isPlaying) return;
 
@@ -3352,6 +3587,7 @@ ${beforeFogAppendBlock}
         this.manualPlaybackWithoutAudio = this.audioPlayer === null;
         this.refreshActiveRuntimeAnimationHandles();
         this.mmdRuntime.seekAnimation(this._currentFrame, true);
+        this.syncBackgroundVideoFrame(true);
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
         if (this.manualPlaybackWithoutAudio) {
@@ -3371,6 +3607,7 @@ ${beforeFogAppendBlock}
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
         this.mmdRuntime.pauseAnimation();
+        this.syncBackgroundVideoFrame(true);
     }
 
     stop(): void {
@@ -3385,6 +3622,7 @@ ${beforeFogAppendBlock}
         this.mmdRuntime.seekAnimation(0, true);
         this.applyPhysicsStateToAllModels();
         this._currentFrame = 0;
+        this.syncBackgroundVideoFrame(true);
         this.onFrameUpdate?.(0, this._totalFrames);
     }
 
@@ -3401,6 +3639,7 @@ ${beforeFogAppendBlock}
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
         }
+        this.syncBackgroundVideoFrame(true);
         this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
     }
 
@@ -3646,7 +3885,7 @@ ${beforeFogAppendBlock}
     private clearProjectForImport(): void {
         this.pause();
         (this as unknown as { clearAccessories?: () => void }).clearAccessories?.();
-        this.clearBackgroundImage();
+        this.clearBackgroundMedia();
 
         if (this.cameraAnimationHandle !== null) {
             this.mmdCamera.destroyRuntimeAnimation(this.cameraAnimationHandle);
@@ -5960,6 +6199,7 @@ ${beforeFogAppendBlock}
         const engineWithDelta = this.engine as typeof this.engine & { _deltaTime?: number };
         engineWithDelta._deltaTime = clampedDeltaMs;
         this.updateSimpleMotionBlurState(clampedDeltaMs);
+        this.syncBackgroundVideoFrame();
         this.scene.render();
         if (!this._isPlaying) return;
 
@@ -6125,7 +6365,7 @@ ${beforeFogAppendBlock}
             this.skydome.dispose();
             this.skydome = null;
         }
-        this.clearBackgroundImage();
+        this.clearBackgroundMedia();
         this.globalIlluminationController?.dispose();
         this.scene.dispose();
         this.engine.dispose();

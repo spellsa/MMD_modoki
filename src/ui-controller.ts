@@ -171,8 +171,6 @@ export class UIController {
 
     // Button elements
     private btnLoadFile: HTMLElement;
-    private btnLoadBackgroundImage: HTMLElement;
-    private btnClearBackgroundImage: HTMLElement;
     private btnSaveProject: HTMLElement;
     private btnLoadProject: HTMLElement;
     private btnExportPng: HTMLElement;
@@ -191,6 +189,8 @@ export class UIController {
     private isSyncingOutputSettings = false;
     private btnToggleGround: HTMLElement;
     private groundToggleText: HTMLElement;
+    private btnToggleBackground: HTMLElement;
+    private backgroundToggleText: HTMLElement;
     private btnToggleSkydome: HTMLElement;
     private skydomeToggleText: HTMLElement;
     private btnTogglePhysics: HTMLElement;
@@ -234,7 +234,8 @@ export class UIController {
     private btnModelDelete: HTMLButtonElement;
     private shaderModelSelect: HTMLSelectElement | null = null;
     private shaderPresetSelect: HTMLSelectElement | null = null;
-    private shaderApplyButton: HTMLButtonElement | null = null;
+    private shaderApplySelectedButton: HTMLButtonElement | null = null;
+    private shaderApplyAllButton: HTMLButtonElement | null = null;
     private shaderResetButton: HTMLButtonElement | null = null;
     private shaderPanelNote: HTMLElement | null = null;
     private shaderMaterialList: HTMLElement | null = null;
@@ -353,8 +354,6 @@ export class UIController {
 
         // Get DOM elements
         this.btnLoadFile = document.getElementById("btn-load-file")!;
-        this.btnLoadBackgroundImage = document.getElementById("btn-load-background-image")!;
-        this.btnClearBackgroundImage = document.getElementById("btn-clear-background-image")!;
         this.btnSaveProject = document.getElementById("btn-save-project")!;
         this.btnLoadProject = document.getElementById("btn-load-project")!;
         this.btnExportPng = document.getElementById("btn-export-png")!;
@@ -371,6 +370,8 @@ export class UIController {
         this.outputIncludeAudioInput = document.getElementById("output-include-audio") as HTMLInputElement | null;
         this.btnToggleGround = document.getElementById("btn-toggle-ground")!;
         this.groundToggleText = document.getElementById("ground-toggle-text")!;
+        this.btnToggleBackground = document.getElementById("btn-toggle-background")!;
+        this.backgroundToggleText = document.getElementById("background-toggle-text")!;
         this.btnToggleSkydome = document.getElementById("btn-toggle-skydome")!;
         this.skydomeToggleText = document.getElementById("skydome-toggle-text")!;
         this.btnTogglePhysics = document.getElementById("btn-toggle-physics")!;
@@ -413,7 +414,8 @@ export class UIController {
         this.btnModelDelete = document.getElementById("btn-model-delete") as HTMLButtonElement;
         this.shaderModelSelect = document.getElementById("shader-model-select") as HTMLSelectElement | null;
         this.shaderPresetSelect = document.getElementById("shader-preset-select") as HTMLSelectElement | null;
-        this.shaderApplyButton = document.getElementById("btn-shader-apply") as HTMLButtonElement | null;
+        this.shaderApplySelectedButton = document.getElementById("btn-shader-apply-selected") as HTMLButtonElement | null;
+        this.shaderApplyAllButton = document.getElementById("btn-shader-apply-all") as HTMLButtonElement | null;
         this.shaderResetButton = document.getElementById("btn-shader-reset") as HTMLButtonElement | null;
         this.shaderPanelNote = document.getElementById("shader-panel-note");
         this.shaderMaterialList = document.getElementById("shader-material-list");
@@ -449,6 +451,7 @@ export class UIController {
         this.refreshModelSelector();
         this.refreshAccessoryPanel();
         this.updateGroundToggleButton(this.mmdManager.isGroundVisible());
+        this.updateBackgroundToggleButton();
         this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
         this.updatePhysicsToggleButton(
             this.mmdManager.getPhysicsEnabled(),
@@ -501,14 +504,6 @@ export class UIController {
         this.btnLoadFile.addEventListener("click", () => {
             void this.loadFileFromDialog();
         });
-        this.btnLoadBackgroundImage.addEventListener("click", () => {
-            void this.loadBackgroundImageFromDialog();
-        });
-        this.btnClearBackgroundImage.addEventListener("click", () => {
-            this.mmdManager.clearBackgroundImage();
-            this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
-            this.showToast(t("toast.backgroundImage.cleared"), "info");
-        });
         this.btnSaveProject.addEventListener("click", () => this.saveProject(true));
         this.btnLoadProject.addEventListener("click", () => this.loadProject());
         this.btnExportPng.addEventListener("click", () => this.exportPNG());
@@ -524,6 +519,11 @@ export class UIController {
             const visible = this.mmdManager.toggleGroundVisible();
             this.updateGroundToggleButton(visible);
             this.showToast(visible ? t("toast.ground.on") : t("toast.ground.off"), "info");
+        });
+        this.btnToggleBackground.addEventListener("click", () => {
+            const visible = this.mmdManager.toggleBackgroundMediaVisible();
+            this.updateBackgroundToggleButton();
+            this.showToast(visible ? t("toast.backgroundMedia.on") : t("toast.backgroundMedia.off"), "info");
         });
         this.btnToggleSkydome.addEventListener("click", () => {
             const visible = this.mmdManager.toggleSkydomeVisible();
@@ -727,11 +727,14 @@ export class UIController {
 
         this.setupAccessoryControls();
 
-        this.shaderApplyButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(false);
+        this.shaderApplySelectedButton?.addEventListener("click", () => {
+            void this.applyShaderPresetFromPanel(false, "selected");
+        });
+        this.shaderApplyAllButton?.addEventListener("click", () => {
+            void this.applyShaderPresetFromPanel(false, "all");
         });
         this.shaderResetButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(true);
+            void this.applyShaderPresetFromPanel(true, "auto");
         });
 
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
@@ -2574,7 +2577,7 @@ export class UIController {
 
     private async loadFileFromDialog(): Promise<void> {
         const filePath = await window.electronAPI.openFileDialog([
-            { name: "Supported files", extensions: ["pmx", "pmd", "x", "vmd", "vpd", "mp3", "wav", "ogg", "png", "jpg", "jpeg", "bmp", "webp"] },
+            { name: "Supported files", extensions: ["pmx", "pmd", "x", "vmd", "vpd", "mp3", "wav", "ogg", "png", "jpg", "jpeg", "bmp", "webp", "webm", "mp4", "avi"] },
             { name: "All files", extensions: ["*"] },
         ]);
 
@@ -2592,10 +2595,21 @@ export class UIController {
         await this.applyBackgroundImage(filePath);
     }
 
+    private async loadBackgroundVideoFromDialog(): Promise<void> {
+        const filePath = await window.electronAPI.openFileDialog([
+            { name: "Video files", extensions: ["webm", "mp4", "avi"] },
+            { name: "All files", extensions: ["*"] },
+        ]);
+        if (!filePath) return;
+
+        await this.applyBackgroundVideo(filePath);
+    }
+
     private async applyBackgroundImage(filePath: string): Promise<void> {
         this.setStatus("Loading background image...", true);
         try {
             await this.mmdManager.setBackgroundImageFromPath(filePath);
+            this.updateBackgroundToggleButton();
             this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
             this.setStatus("Background image loaded", false);
             this.showToast(`${t("toast.backgroundImage.loaded")}: ${this.getBaseNameForRenderer(filePath)}`, "success");
@@ -2603,6 +2617,21 @@ export class UIController {
             const message = err instanceof Error ? err.message : String(err);
             this.setStatus("Background image load failed", false);
             this.showToast(`${t("toast.backgroundImage.failed")}: ${message}`, "error");
+        }
+    }
+
+    private async applyBackgroundVideo(filePath: string): Promise<void> {
+        this.setStatus("Loading background video...", true);
+        try {
+            await this.mmdManager.setBackgroundVideoFromPath(filePath);
+            this.updateBackgroundToggleButton();
+            this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
+            this.setStatus("Background video loaded", false);
+            this.showToast(`${t("toast.backgroundVideo.loaded")}: ${this.getBaseNameForRenderer(filePath)}`, "success");
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.setStatus("Background video load failed", false);
+            this.showToast(`${t("toast.backgroundVideo.failed")}: ${message}`, "error");
         }
     }
 
@@ -2800,6 +2829,11 @@ export class UIController {
             case "bmp":
             case "webp":
                 await this.applyBackgroundImage(filePath);
+                return;
+            case "webm":
+            case "mp4":
+            case "avi":
+                await this.applyBackgroundVideo(filePath);
                 return;
             case "glb":
                 this.showToast("GLB import is currently disabled", "error");
@@ -4262,7 +4296,8 @@ export class UIController {
         if (
             !this.shaderModelSelect ||
             !this.shaderPresetSelect ||
-            !this.shaderApplyButton ||
+            !this.shaderApplySelectedButton ||
+            !this.shaderApplyAllButton ||
             !this.shaderResetButton ||
             !this.shaderPanelNote ||
             !this.shaderMaterialList
@@ -4317,7 +4352,8 @@ export class UIController {
             this.shaderModelSelect.innerHTML = '<option value="">-</option>';
             this.shaderModelSelect.disabled = true;
             this.shaderPresetSelect.disabled = true;
-            this.shaderApplyButton.disabled = true;
+            this.shaderApplySelectedButton.disabled = true;
+            this.shaderApplyAllButton.disabled = true;
             this.shaderResetButton.disabled = true;
             this.shaderPanelNote.textContent = t("shader.note.wgslUnavailable");
             this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.wgslUnavailable")}</div>`;
@@ -4328,7 +4364,8 @@ export class UIController {
             this.shaderModelSelect.innerHTML = '<option value="">-</option>';
             this.shaderModelSelect.disabled = true;
             this.shaderPresetSelect.disabled = true;
-            this.shaderApplyButton.disabled = true;
+            this.shaderApplySelectedButton.disabled = true;
+            this.shaderApplyAllButton.disabled = true;
             this.shaderResetButton.disabled = true;
             this.shaderPanelNote.textContent = t("shader.note.loadModel");
             this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
@@ -4351,7 +4388,8 @@ export class UIController {
 
         if (selectedModel.materials.length === 0) {
             this.shaderPresetSelect.disabled = true;
-            this.shaderApplyButton.disabled = true;
+            this.shaderApplySelectedButton.disabled = true;
+            this.shaderApplyAllButton.disabled = true;
             this.shaderResetButton.disabled = true;
             this.shaderPanelNote.textContent = t("shader.note.noMaterial");
             this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.noMaterial")}</div>`;
@@ -4444,9 +4482,8 @@ export class UIController {
             this.shaderMaterialList.appendChild(item);
         }
 
-        this.shaderApplyButton.textContent = selectedMaterial
-            ? t("shader.apply.selected")
-            : t("shader.apply.all");
+        this.shaderApplySelectedButton.textContent = t("shader.apply.selected");
+        this.shaderApplyAllButton.textContent = t("shader.apply.all");
         this.shaderResetButton.textContent = selectedMaterial
             ? t("shader.reset.selected")
             : t("shader.reset.all");
@@ -4468,7 +4505,8 @@ export class UIController {
 
         const hasSelectableOption = Array.from(this.shaderPresetSelect.options).some((option) => !option.disabled && option.value.length > 0);
         this.shaderPresetSelect.disabled = !hasSelectableOption;
-        this.shaderApplyButton.disabled = !hasSelectableOption;
+        this.shaderApplySelectedButton.disabled = !hasSelectableOption || !selectedMaterial;
+        this.shaderApplyAllButton.disabled = !hasSelectableOption;
         this.shaderResetButton.disabled = false;
     }
 
@@ -4476,7 +4514,8 @@ export class UIController {
         if (
             !this.shaderModelSelect ||
             !this.shaderPresetSelect ||
-            !this.shaderApplyButton ||
+            !this.shaderApplySelectedButton ||
+            !this.shaderApplyAllButton ||
             !this.shaderResetButton ||
             !this.shaderPanelNote ||
             !this.shaderMaterialList
@@ -4490,7 +4529,8 @@ export class UIController {
         this.shaderPresetSelect.innerHTML = `<option value="postfx">${t("shader.camera.postfx")}</option>`;
         this.shaderPresetSelect.value = "postfx";
         this.shaderPresetSelect.disabled = true;
-        this.shaderApplyButton.disabled = true;
+        this.shaderApplySelectedButton.disabled = true;
+        this.shaderApplyAllButton.disabled = true;
         this.shaderResetButton.disabled = true;
         this.shaderPanelNote.textContent = t("shader.camera.note");
         const lutPresetOptionsHtml = this.buildLutPresetOptionsHtml();
@@ -5147,7 +5187,7 @@ export class UIController {
         }
     }
 
-    private async applyShaderPresetFromPanel(resetToDefault: boolean): Promise<void> {
+    private async applyShaderPresetFromPanel(resetToDefault: boolean, target: "auto" | "selected" | "all"): Promise<void> {
         if (!this.shaderPresetSelect) {
             return;
         }
@@ -5170,7 +5210,12 @@ export class UIController {
             return;
         }
 
-        const materialKey = this.shaderSelectedMaterialKeys.get(modelIndex) ?? null;
+        const selectedMaterialKey = this.shaderSelectedMaterialKeys.get(modelIndex) ?? null;
+        if (target === "selected" && selectedMaterialKey === null) {
+            this.showToast("No material selected", "error");
+            return;
+        }
+        const materialKey = target === "all" ? null : selectedMaterialKey;
         const selectedValue = resetToDefault ? "wgsl-mmd-standard" : this.shaderPresetSelect.value;
         if (!selectedValue) {
             this.showToast("Effect preset is not selected", "error");
@@ -5229,6 +5274,7 @@ export class UIController {
         this.refreshShadowToggleUi?.();
         this.refreshGiToggleUi?.();
         this.updateGroundToggleButton(this.mmdManager.isGroundVisible());
+        this.updateBackgroundToggleButton();
         this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
         this.updatePhysicsToggleButton(
             this.mmdManager.getPhysicsEnabled(),
@@ -5268,6 +5314,18 @@ export class UIController {
         this.btnToggleGround.title = visible
             ? t("toolbar.ground.title.on")
             : t("toolbar.ground.title.off");
+    }
+
+    private updateBackgroundToggleButton(): void {
+        const hasBackground = this.mmdManager.hasBackgroundMedia();
+        const visible = this.mmdManager.isBackgroundMediaVisible();
+        this.backgroundToggleText.textContent = t("toolbar.background.short");
+        this.btnToggleBackground.setAttribute("aria-pressed", visible ? "true" : "false");
+        this.btnToggleBackground.classList.toggle("toggle-on", visible);
+        (this.btnToggleBackground as HTMLButtonElement).disabled = !hasBackground;
+        this.btnToggleBackground.title = hasBackground
+            ? (visible ? t("toolbar.background.title.on") : t("toolbar.background.title.off"))
+            : t("toolbar.background.title.unavailable");
     }
 
     private updateSkydomeToggleButton(visible: boolean): void {

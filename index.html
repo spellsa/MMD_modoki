@@ -28,21 +28,6 @@
           </svg>
           <span data-i18n="toolbar.loadFile.label">ファイル読込</span>
         </button>
-        <button id="btn-load-background-image" class="toolbar-btn" title="背景画像を読み込む" data-i18n-title="toolbar.loadBackgroundImage.title">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2.5 3.5h11v9h-11z" stroke="currentColor" stroke-width="1.2" />
-            <circle cx="5.2" cy="6" r="1" fill="currentColor" />
-            <path d="M4 11l2.2-2.5 1.7 1.7 2.8-3 1.3 1.5" stroke="currentColor" stroke-width="1.2" />
-          </svg>
-          <span data-i18n="toolbar.loadBackgroundImage.label">背景画像</span>
-        </button>
-        <button id="btn-clear-background-image" class="toolbar-btn" title="背景画像を解除する" data-i18n-title="toolbar.clearBackgroundImage.title">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M2.5 3.5h11v9h-11z" stroke="currentColor" stroke-width="1.2" />
-            <path d="M5 6l6 5M11 6l-6 5" stroke="currentColor" stroke-width="1.2" />
-          </svg>
-          <span data-i18n="toolbar.clearBackgroundImage.label">背景解除</span>
-        </button>
         <button id="btn-save-project" class="toolbar-btn" title="プロジェクトJSONを保存する" data-i18n-title="toolbar.saveProject.title">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M2 2h9l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2zm2 1v3h6V3H4zm0 6v4h8V9H4z" />
@@ -56,6 +41,14 @@
           <span data-i18n="toolbar.loadProject.label">プロジェクト読込</span>
         </button>
         <div class="toolbar-toggle-group" role="group" aria-label="表示と機能の切替" data-i18n-aria-label="toolbar.toggleGroup.ariaLabel">
+          <button id="btn-toggle-background" class="toolbar-btn toolbar-btn--compact" title="背景: 未設定" data-i18n-title="toolbar.background.title.unavailable" aria-pressed="false" disabled>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2.5 3.5h11v9h-11z" stroke="currentColor" stroke-width="1.2" />
+              <circle cx="5.2" cy="6" r="1" fill="currentColor" />
+              <path d="M4 11l2.2-2.5 1.7 1.7 2.8-3 1.3 1.5" stroke="currentColor" stroke-width="1.2" />
+            </svg>
+            <span id="background-toggle-text" data-i18n="toolbar.background.short">背景</span>
+          </button>
           <button id="btn-toggle-ground" class="toolbar-btn toolbar-btn--compact toggle-on" title="地面表示を切り替える" data-i18n-title="toolbar.ground.title.on" aria-pressed="true">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <path d="M1 4h14v8H1z" />
@@ -97,22 +90,23 @@
             </svg>
             <span id="gi-toggle-text" data-i18n="toolbar.gi.short">GI</span>
           </button>
-          <button id="btn-toggle-shader-panel" class="toolbar-btn toolbar-btn--compact" title="エフェクト欄の表示/非表示" data-i18n-title="toolbar.fx.title.off" aria-pressed="false">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
-              <rect x="2.2" y="3" width="11.6" height="10" rx="1.2" />
-              <path d="M6 5.2v5.6M8.5 5.2v5.6M11 5.2v5.6" />
-            </svg>
-            <span id="shader-panel-toggle-text" data-i18n="toolbar.fx.short">FX</span>
-          </button>
-          <button id="btn-toggle-fullscreen-ui" class="toolbar-btn toolbar-btn--compact" title="UIを非表示/表示 (ESCで戻る)" data-i18n-title="toolbar.ui.title.off" aria-pressed="false">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
-            </svg>
-            <span id="fullscreen-ui-toggle-text" data-i18n="toolbar.ui.short">UI</span>
-          </button>
         </div>
       </div>
       <div class="toolbar-right">
+        <button id="btn-toggle-shader-panel" class="toolbar-btn toolbar-btn--compact" title="エフェクト欄の表示/非表示" data-i18n-title="toolbar.fx.title.off" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+            <rect x="2.2" y="3" width="11.6" height="10" rx="1.2" />
+            <path d="M6 5.2v5.6M8.5 5.2v5.6M11 5.2v5.6" />
+          </svg>
+          <span id="shader-panel-toggle-text" data-i18n="toolbar.fx.short">FX</span>
+        </button>
+        <button id="btn-toggle-fullscreen-ui" class="toolbar-btn toolbar-btn--compact" title="UIを非表示/表示 (ESCで戻る)" data-i18n-title="toolbar.ui.title.off" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+            <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
+          </svg>
+          <span id="fullscreen-ui-toggle-text" data-i18n="toolbar.ui.short">UI</span>
+        </button>
+        <span class="toolbar-locale-label" data-i18n="toolbar.locale.label">Language</span>
         <select
           id="toolbar-locale-select"
           class="toolbar-locale-select"
@@ -292,8 +286,9 @@
             </select>
           </div>
           <div class="shader-panel-actions">
-            <button id="btn-shader-apply" class="info-action-btn" type="button" disabled data-i18n="button.applyAllMaterials">全材質へ割り当て</button>
-            <button id="btn-shader-reset" class="info-action-btn" type="button" disabled data-i18n="button.resetAllMaterials">全材質を標準化</button>
+            <button id="btn-shader-apply-all" class="info-action-btn" type="button" disabled data-i18n="shader.apply.all">全材質へ割り当て</button>
+            <button id="btn-shader-apply-selected" class="info-action-btn" type="button" disabled data-i18n="shader.apply.selected">選択へ割り当て</button>
+            <button id="btn-shader-reset" class="info-action-btn info-action-btn--span-all" type="button" disabled data-i18n="shader.reset.all" hidden>全材質を標準化</button>
           </div>
           <div id="shader-panel-note" class="shader-panel-note" data-i18n="empty.loadModel">モデルを読み込んでください</div>
           <div id="shader-material-list" class="shader-material-list">

@@ -243,6 +243,13 @@ body.exporter-mode #bone-overlay-canvas {
   transition: all var(--transition-fast);
 }
 
+.toolbar-locale-label {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .toolbar-locale-select:hover {
   border-color: var(--border-accent);
   color: var(--text-primary);
@@ -808,6 +815,10 @@ body.file-drag-active #viewport-container {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   margin-top: 2px;
+}
+
+.info-action-btn--span-all {
+  grid-column: 1 / -1;
 }
 
 .shader-panel-note {
@@ -3120,6 +3131,10 @@ body.bottom-panel-resizing {
     font-size: 10px;
   }
 
+  .toolbar-locale-label {
+    font-size: 10px;
+  }
+
   .perf-badge {
     gap: 4px;
     padding: 3px 8px;
@@ -3192,6 +3207,10 @@ body.bottom-panel-resizing {
     min-width: 124px;
     height: 36px;
     padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .toolbar-locale-label {
     font-size: 12px;
   }
 

@@ -115,6 +115,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             skydomeVisible: host.isSkydomeVisible(),
             antialiasEnabled: host.antialiasEnabled,
             backgroundImagePath: host.getBackgroundImagePath(),
+            backgroundVideoPath: host.getBackgroundVideoPath(),
         },
         physics: {
             enabled: host.physicsEnabled,
