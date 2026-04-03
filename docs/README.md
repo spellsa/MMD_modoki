@@ -5,7 +5,7 @@
 ## 配布関連
 
 - Release 一覧: https://github.com/togechiyo/MMD_modoki/releases
-- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.6
+- 現行公開版: https://github.com/togechiyo/MMD_modoki/releases/tag/v0.1.7
 
 ## 主要ドキュメント
 
