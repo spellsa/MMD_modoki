@@ -432,6 +432,7 @@ export function applyShadowEdgeSoftness(host: any): void {
     host.constructor.toonSelfShadowBoundarySoftness = host.selfShadowEdgeSoftnessValue;
     host.constructor.toonOcclusionShadowBoundarySoftness = host.occlusionShadowEdgeSoftnessValue;
     applyToonShadowInfluenceToAllModels(host);
+    host.engine?.releaseEffects?.();
 }
 
 export function setLightDirection(host: any, x: number, y: number, z: number): void {

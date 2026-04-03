@@ -9,13 +9,18 @@ import glossHighlightWgslText from "../../wgsl/gloss_highlight.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import fullShadowWgslText from "../../wgsl/full_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
-import lightAndShadowWgslText from "../../wgsl/light_and_shadow.wgsl?raw";
-// eslint-disable-next-line import/no-unresolved
 import matteHighlightWgslText from "../../wgsl/matte_highlight.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import semiMatteHighlightWgslText from "../../wgsl/semi_matte_highlight.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import toonHardShadowWgslText from "../../wgsl/toon_hard_shadow.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
+import fallbackAccessoryToonTextureUrl from "../assets/textures/toon/fallback_accessory_toon.bmp?url";
+// eslint-disable-next-line import/no-unresolved
+import fallbackShadowToonTextureUrl from "../assets/textures/toon/fallback_shadow_toon.bmp?url";
 import { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import type { ProjectModelMaterialShaderState } from "../types";
 
 export type WgslMaterialShaderPresetId =
@@ -38,6 +43,8 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-matte-highlight"
     | "wgsl-specular"
     | "wgsl-cel-sharp"
+    | "wgsl-cel-shadow-sharp"
+    | "wgsl-accessory-toon"
     | "wgsl-rim-lift"
     | "wgsl-mono-flat";
 
@@ -45,11 +52,14 @@ type MaterialShaderDefaults = {
     disableLighting: boolean | null;
     specularPower: number | null;
     emissiveColor: Color3 | null;
+    ambientColor: Color3 | null;
     transparencyMode: number | null;
     alphaCutOff: number | null;
     forceDepthWrite: boolean | null;
     useAlphaFromDiffuseTexture: boolean | null;
     useAlphaFromAlbedoTexture: boolean | null;
+    toonTexture: any;
+    ignoreDiffuseWhenToonTextureIsNull: boolean | null;
 };
 
 const DEFAULT_WGSL_MATERIAL_SHADER_PRESET = "wgsl-mmd-standard";
@@ -59,6 +69,8 @@ const AUTO_LUMINOUS_BLOOM_KERNEL = 64;
 const AUTO_LUMINOUS_BASE_LEVEL = 1.28;
 const AUTO_LUMINOUS_BRIGHTNESS_BIAS = 0.14;
 const AUTO_LUMINOUS_TINT_STRENGTH = 0.72;
+const presetFallbackAccessoryToonTextureByScene = new WeakMap<object, Texture>();
+const presetFallbackShadowToonTextureByScene = new WeakMap<object, Texture>();
 
 function getPresetCatalog(host: any): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
     return host.constructor.WGSL_MATERIAL_SHADER_PRESETS ?? [];
@@ -171,6 +183,90 @@ function markMaterialShaderDirty(material: any): void {
     }
 }
 
+function getPresetFallbackShadowToonTexture(host: any): Texture | null {
+    const scene = host?.scene;
+    if (!scene || typeof scene !== "object") return null;
+
+    const cached = presetFallbackShadowToonTextureByScene.get(scene as object);
+    if (cached) return cached;
+
+    const texture = new Texture(fallbackShadowToonTextureUrl, scene, false, true, Texture.BILINEAR_SAMPLINGMODE);
+    texture.name = "preset:fallback_shadow_toon";
+    texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+    texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+    texture.updateSamplingMode(Texture.BILINEAR_SAMPLINGMODE);
+    presetFallbackShadowToonTextureByScene.set(scene as object, texture);
+    return texture;
+}
+
+function getPresetFallbackAccessoryToonTexture(host: any): Texture | null {
+    const scene = host?.scene;
+    if (!scene || typeof scene !== "object") return null;
+
+    const cached = presetFallbackAccessoryToonTextureByScene.get(scene as object);
+    if (cached) return cached;
+
+    const texture = new Texture(fallbackAccessoryToonTextureUrl, scene, false, true, Texture.BILINEAR_SAMPLINGMODE);
+    texture.name = "preset:fallback_accessory_toon";
+    texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+    texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+    texture.updateSamplingMode(Texture.BILINEAR_SAMPLINGMODE);
+    presetFallbackAccessoryToonTextureByScene.set(scene as object, texture);
+    return texture;
+}
+
+function setPresetFallbackToonTexture(host: any, material: any, kind: "shadow" | "accessory"): void {
+    if (!material || typeof material !== "object") return;
+    if (!("toonTexture" in material)) return;
+
+    const fallbackTexture = kind === "accessory"
+        ? getPresetFallbackAccessoryToonTexture(host)
+        : getPresetFallbackShadowToonTexture(host);
+    if (!fallbackTexture) return;
+
+    material.toonTexture = fallbackTexture;
+    if ("ignoreDiffuseWhenToonTextureIsNull" in material) {
+        material.ignoreDiffuseWhenToonTextureIsNull = true;
+    }
+}
+
+function ensurePresetFallbackToonTexture(host: any, material: any, kind: "shadow" | "accessory" = "shadow"): void {
+    if (!material || typeof material !== "object") return;
+    if (!("toonTexture" in material)) return;
+    if (material.toonTexture) return;
+
+    setPresetFallbackToonTexture(host, material, kind);
+}
+
+function ensureAccessoryPresetToonTexture(host: any, material: any): void {
+    if (!material || typeof material !== "object") return;
+    if (!("toonTexture" in material)) return;
+
+    const toonTextureName = typeof material.toonTexture?.name === "string"
+        ? material.toonTexture.name
+        : "";
+    if (material.toonTexture && toonTextureName !== "xAccessoryDefaultToon") {
+        return;
+    }
+
+    setPresetFallbackToonTexture(host, material, "accessory");
+}
+
+function applyAccessoryAmbientTuning(material: any, defaults: MaterialShaderDefaults): void {
+    if (!material || typeof material !== "object") return;
+    if (!("ambientColor" in material)) return;
+
+    const baseAmbient = defaults.ambientColor;
+    if (!baseAmbient) return;
+
+    const looksLikeLegacyXAmbient = baseAmbient.r >= 0.99
+        && baseAmbient.g >= 0.99
+        && baseAmbient.b >= 0.99;
+    if (!looksLikeLegacyXAmbient) return;
+
+    setMaterialColorProperty(material, "ambientColor", new Color3(0.22, 0.22, 0.22));
+}
+
 function collectLuminousMaterials(host: any): Set<object> {
     const luminousMaterials = new Set<object>();
     for (const entry of host.sceneModels ?? []) {
@@ -238,6 +334,7 @@ export function ensureMaterialShaderDefaults(host: any, material: any): Material
                 ? Number(material.specularPower)
                 : null,
             emissiveColor: cloneColor3OrNull(material.emissiveColor),
+            ambientColor: cloneColor3OrNull(material.ambientColor),
             transparencyMode: "transparencyMode" in material && typeof material.transparencyMode === "number"
                 ? material.transparencyMode
                 : null,
@@ -250,6 +347,10 @@ export function ensureMaterialShaderDefaults(host: any, material: any): Material
                 : null,
             useAlphaFromAlbedoTexture: "useAlphaFromAlbedoTexture" in material
                 ? Boolean(material.useAlphaFromAlbedoTexture)
+                : null,
+            toonTexture: "toonTexture" in material ? (material.toonTexture ?? null) : undefined,
+            ignoreDiffuseWhenToonTextureIsNull: "ignoreDiffuseWhenToonTextureIsNull" in material
+                ? Boolean(material.ignoreDiffuseWhenToonTextureIsNull)
                 : null,
         };
         host.materialShaderDefaultsByMaterial.set(material as object, defaults);
@@ -289,10 +390,24 @@ function restoreMaterialShaderDefaults(host: any, material: any, defaults: Mater
         material.useAlphaFromAlbedoTexture = defaults.useAlphaFromAlbedoTexture;
     }
 
+    if (defaults.toonTexture !== undefined && "toonTexture" in material) {
+        material.toonTexture = defaults.toonTexture;
+    }
+
+    if (defaults.ignoreDiffuseWhenToonTextureIsNull !== null && "ignoreDiffuseWhenToonTextureIsNull" in material) {
+        material.ignoreDiffuseWhenToonTextureIsNull = defaults.ignoreDiffuseWhenToonTextureIsNull;
+    }
+
     if (defaults.emissiveColor) {
         setMaterialColorProperty(material, "emissiveColor", defaults.emissiveColor);
     } else if ("emissiveColor" in material) {
         setMaterialColorProperty(material, "emissiveColor", new Color3(0, 0, 0));
+    }
+
+    if (defaults.ambientColor) {
+        setMaterialColorProperty(material, "ambientColor", defaults.ambientColor);
+    } else if ("ambientColor" in material) {
+        setMaterialColorProperty(material, "ambientColor", new Color3(0, 0, 0));
     }
 }
 
@@ -410,6 +525,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                     Math.min(1, baseEmissive.b + diffuse.b * emissiveBoost),
                 ),
             );
+            ensurePresetFallbackToonTexture(host, material);
             host.constructor.externalWgslToonFragmentByMaterial.set(material as object, fullLightWgslText);
             break;
         }
@@ -476,6 +592,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
             if ("specularPower" in material) {
                 material.specularPower = 0;
             }
+            ensurePresetFallbackToonTexture(host, material);
             host.constructor.externalWgslToonFragmentByMaterial.set(material as object, fullShadowWgslText);
             break;
         }
@@ -483,7 +600,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
             if ("disableLighting" in material) {
                 material.disableLighting = false;
             }
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, lightAndShadowWgslText);
+            ensurePresetFallbackToonTexture(host, material);
             break;
         }
         case "wgsl-gloss-highlight": {
@@ -547,6 +664,26 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                     Math.min(1, baseEmissive.b + 0.015),
                 ),
             );
+            break;
+        }
+        case "wgsl-cel-shadow-sharp": {
+            if ("disableLighting" in material) {
+                material.disableLighting = false;
+            }
+            if ("specularPower" in material) {
+                const base = defaults.specularPower ?? 32;
+                material.specularPower = Math.max(4, base * 0.14);
+            }
+            ensurePresetFallbackToonTexture(host, material);
+            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, toonHardShadowWgslText);
+            break;
+        }
+        case "wgsl-accessory-toon": {
+            if ("disableLighting" in material) {
+                material.disableLighting = false;
+            }
+            ensureAccessoryPresetToonTexture(host, material);
+            applyAccessoryAmbientTuning(material, defaults);
             break;
         }
         case "wgsl-rim-lift": {
@@ -730,6 +867,34 @@ export function setWgslMaterialShaderPreset(
         setExternalWgslToonShaderForMaterial(host, target.material, null, null);
         applyWgslShaderPresetToMaterial(host, target.material, presetId);
     }
+
+    syncLuminousGlowLayer(host);
+    host.engine.releaseEffects?.();
+    host.onMaterialShaderStateChanged?.();
+    return true;
+}
+
+export function applyWgslShaderPresetToMaterials(
+    host: any,
+    materials: Iterable<any>,
+    presetId: WgslMaterialShaderPresetId,
+): boolean {
+    if (!isWgslMaterialShaderAssignmentAvailable(host)) return false;
+    if (!getPresetCatalog(host).some((item) => item.id === presetId)) return false;
+
+    const seen = new Set<object>();
+    let applied = false;
+    for (const material of materials) {
+        const key = getMaterialKey(material);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+
+        setExternalWgslToonShaderForMaterial(host, material, null, null);
+        applyWgslShaderPresetToMaterial(host, material, presetId);
+        applied = true;
+    }
+
+    if (!applied) return false;
 
     syncLuminousGlowLayer(host);
     host.engine.releaseEffects?.();

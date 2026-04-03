@@ -34,7 +34,16 @@ type XMat = {
     sphereTextureUrl: string | null;
     sphereTextureMode: "multiply" | "add" | null;
 };
-type XMesh = { name: string; pos: number[]; faces: number[][]; uvs: number[] | null; mats: XMat[]; faceMats: number[] };
+type XMeshNormals = { values: number[]; faces: number[][] };
+type XMesh = {
+    name: string;
+    pos: number[];
+    faces: number[][];
+    uvs: number[] | null;
+    normals: XMeshNormals | null;
+    mats: XMat[];
+    faceMats: number[];
+};
 type XFrame = { name: string; matrix: number[] | null; frames: XFrame[]; meshes: XMesh[] };
 type XScene = { root: XFrame };
 
@@ -181,6 +190,7 @@ class P {
             faces.push(f);
         }
         let uvs: number[] | null = null;
+        let normals: XMeshNormals | null = null;
         let mats: XMat[] = [];
         let faceMats: number[] = [];
         while (!this.eof()) {
@@ -189,11 +199,11 @@ class P {
             const id = this.peekId();
             if (id === "meshtexturecoords") uvs = this.meshUv();
             else if (id === "meshmateriallist") ({ mats, faceMats } = this.meshMats());
-            else if (id === "meshnormals") this.skipNormals();
+            else if (id === "meshnormals") normals = this.meshNormals();
             else this.skipObj();
         }
         this.sep();
-        return { name: name || "Mesh", pos, faces, uvs, mats, faceMats };
+        return { name: name || "Mesh", pos, faces, uvs, normals, mats, faceMats };
     }
 
     private meshUv(): number[] {
@@ -295,23 +305,26 @@ class P {
         return v;
     }
 
-    private skipNormals(): void {
+    private meshNormals(): XMeshNormals {
         this.expectId("meshnormals");
         this.optName();
         this.expectSym("{");
-        const n = this.int();
-        for (let i = 0; i < n; i += 1) {
-            this.num();
-            this.num();
-            this.num();
+        const normalCount = this.int();
+        const values: number[] = [];
+        for (let i = 0; i < normalCount; i += 1) {
+            values.push(this.num(), this.num(), this.num());
         }
         const fn = this.int();
+        const faces: number[][] = [];
         for (let i = 0; i < fn; i += 1) {
             const c = this.int();
-            for (let j = 0; j < c; j += 1) this.int();
+            const face: number[] = [];
+            for (let j = 0; j < c; j += 1) face.push(this.int());
+            faces.push(face);
         }
         this.expectSym("}");
         this.sep();
+        return { values, faces };
     }
 
     private skipObj(): void {
@@ -468,6 +481,94 @@ function tri(faces: number[][]): { idx: number[]; faceId: number[] } {
     return { idx, faceId };
 }
 
+type TriangulatedMeshData = {
+    positions: number[];
+    indices: number[];
+    faceId: number[];
+    uvs: number[] | null;
+    normals: number[] | null;
+};
+
+function canUseExplicitNormals(x: XMesh): boolean {
+    if (!x.normals) return false;
+    if (x.normals.faces.length !== x.faces.length) return false;
+
+    for (let faceIndex = 0; faceIndex < x.faces.length; faceIndex += 1) {
+        const face = x.faces[faceIndex];
+        const normalFace = x.normals.faces[faceIndex];
+        if (!face || !normalFace || face.length < 3 || normalFace.length !== face.length) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function buildTriangulatedMeshData(x: XMesh): TriangulatedMeshData {
+    if (!canUseExplicitNormals(x) || !x.normals) {
+        const { idx, faceId } = tri(x.faces);
+        return {
+            positions: x.pos.slice(),
+            indices: idx,
+            faceId,
+            uvs: x.uvs ? x.uvs.slice() : null,
+            normals: null,
+        };
+    }
+
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const faceId: number[] = [];
+    const uvs = x.uvs ? [] as number[] : null;
+    const normals: number[] = [];
+    const normalValues = x.normals.values;
+    let vertexIndex = 0;
+
+    for (let faceIndex = 0; faceIndex < x.faces.length; faceIndex += 1) {
+        const face = x.faces[faceIndex];
+        const normalFace = x.normals.faces[faceIndex];
+        if (!face || !normalFace || face.length < 3 || normalFace.length !== face.length) {
+            continue;
+        }
+
+        for (let cornerIndex = 1; cornerIndex < face.length - 1; cornerIndex += 1) {
+            const vertexTriplet = [face[0], face[cornerIndex], face[cornerIndex + 1]];
+            const normalTriplet = [normalFace[0], normalFace[cornerIndex], normalFace[cornerIndex + 1]];
+
+            for (let triCorner = 0; triCorner < 3; triCorner += 1) {
+                const sourceVertexIndex = vertexTriplet[triCorner];
+                const sourceNormalIndex = normalTriplet[triCorner];
+                const posOffset = sourceVertexIndex * 3;
+                const normalOffset = sourceNormalIndex * 3;
+
+                positions.push(
+                    x.pos[posOffset] ?? 0,
+                    x.pos[posOffset + 1] ?? 0,
+                    x.pos[posOffset + 2] ?? 0,
+                );
+                normals.push(
+                    normalValues[normalOffset] ?? 0,
+                    normalValues[normalOffset + 1] ?? 0,
+                    normalValues[normalOffset + 2] ?? 0,
+                );
+                if (uvs) {
+                    const uvOffset = sourceVertexIndex * 2;
+                    uvs.push(
+                        x.uvs?.[uvOffset] ?? 0,
+                        x.uvs?.[uvOffset + 1] ?? 0,
+                    );
+                }
+                indices.push(vertexIndex);
+                vertexIndex += 1;
+            }
+
+            faceId.push(faceIndex);
+        }
+    }
+
+    return { positions, indices, faceId, uvs, normals };
+}
+
 function textureUrl(rootUrl: string, name: string): string {
     const n = name.replace(/\\/g, "/");
     if (/^data:/i.test(n)) return n;
@@ -530,6 +631,15 @@ function getDefaultXToonTexture(scene: Scene): DynamicTexture {
     texture.update(false);
     xDefaultToonTextureCache.set(scene, texture);
     return texture;
+}
+
+function configureTransparentXMaterial(mat: MmdStandardMaterial): void {
+    mat.needDepthPrePass = true;
+    mat.separateCullingPass = true;
+    mat.useSpecularOverAlpha = false;
+    mat.forceDepthWrite = false;
+    mat.alphaCutOff = 0;
+    mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
 }
 
 function texturePathCandidates(rawName: string): string[] {
@@ -673,6 +783,9 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, MmdStandardMaterial>):
     mat.specularColor = m.specular.clone();
     mat.emissiveColor = m.emissive.clone();
     mat.backFaceCulling = false;
+    if (m.diffuse.a < 0.999) {
+        configureTransparentXMaterial(mat);
+    }
     if (m.textureUrl) {
         const diffuseTexture = new Texture(m.textureUrl, scene, false, true);
         mat.diffuseTexture = diffuseTexture;
@@ -682,7 +795,7 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, MmdStandardMaterial>):
         if (isAlphaCapableTextureUrl(m.textureUrl)) {
             diffuseTexture.hasAlpha = true;
             mat.useAlphaFromDiffuseTexture = true;
-            mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+            configureTransparentXMaterial(mat);
         }
     }
     if (m.sphereTextureUrl) {
@@ -698,30 +811,36 @@ function buildMat(scene: Scene, m: XMat, cache: Map<XMat, MmdStandardMaterial>):
 
 function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: Map<XMat, MmdStandardMaterial>): Mesh | null {
     if (x.pos.length < 3 || x.faces.length === 0) return null;
-    const { idx, faceId } = tri(x.faces);
-    if (idx.length === 0) return null;
+    const geometry = buildTriangulatedMeshData(x);
+    if (geometry.indices.length === 0) return null;
 
     const mesh = new Mesh(x.name || "x_mesh", scene);
     if (parent) mesh.parent = parent;
 
     const vd = new VertexData();
-    vd.positions = x.pos.slice();
-    vd.indices = idx.slice();
-    if (x.uvs && x.uvs.length === (x.pos.length / 3) * 2) vd.uvs = x.uvs.slice();
-    const normals: number[] = [];
-    VertexData.ComputeNormals(vd.positions, vd.indices, normals);
-    vd.normals = normals;
+    vd.positions = geometry.positions;
+    vd.indices = geometry.indices.slice();
+    if (geometry.uvs && geometry.uvs.length === (geometry.positions.length / 3) * 2) {
+        vd.uvs = geometry.uvs;
+    }
+    if (geometry.normals && geometry.normals.length === geometry.positions.length) {
+        vd.normals = geometry.normals;
+    } else {
+        const normals: number[] = [];
+        VertexData.ComputeNormals(vd.positions, vd.indices, normals);
+        vd.normals = normals;
+    }
     vd.applyToMesh(mesh, true);
 
     if (x.mats.length > 0) {
         const groups = new Map<number, number[]>();
-        for (let tri = 0; tri < faceId.length; tri += 1) {
-            const sourceFace = faceId[tri];
+        for (let tri = 0; tri < geometry.faceId.length; tri += 1) {
+            const sourceFace = geometry.faceId[tri];
             const rawMatIndex = x.faceMats[sourceFace] ?? 0;
             const matIndex = Math.max(0, Math.min(x.mats.length - 1, rawMatIndex));
             const g = groups.get(matIndex) ?? [];
             const base = tri * 3;
-            g.push(idx[base], idx[base + 1], idx[base + 2]);
+            g.push(geometry.indices[base], geometry.indices[base + 1], geometry.indices[base + 2]);
             groups.set(matIndex, g);
         }
 
@@ -754,7 +873,7 @@ function buildMesh(scene: Scene, x: XMesh, parent: TransformNode | null, cache: 
             if (rebuilt.length > 0) {
                 mesh.setIndices(rebuilt);
                 mesh.releaseSubMeshes();
-                const vertexCount = x.pos.length / 3;
+                const vertexCount = geometry.positions.length / 3;
                 for (const r of ranges) {
                     new SubMesh(r.sub, 0, vertexCount, r.start, r.count, mesh);
                 }

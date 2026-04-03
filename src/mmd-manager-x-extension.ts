@@ -12,6 +12,7 @@ import { Material } from "@babylonjs/core/Materials/material";
 import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MmdManager } from "./mmd-manager";
+import { applyWgslShaderPresetToMaterials } from "./scene/material-shader-service";
 import { loadXIntoScene } from "./x-file-loader";
 import type { ProjectSerializedAccessoryTransformTrack } from "./types";
 import { copyProjectArrayToFloat32, copyProjectArrayToUint32, packFloat32Array, packFrameNumbers } from "./project/project-codec";
@@ -406,6 +407,32 @@ function normalizeAccessoryMaterialVisibility(material: Material | null): void {
     }
 }
 
+function collectAccessoryMaterials(meshes: readonly AbstractMesh[]): Material[] {
+    const materials: Material[] = [];
+    const seen = new Set<object>();
+
+    const register = (material: Material | null | undefined): void => {
+        if (!(material instanceof Material)) return;
+        if (seen.has(material as object)) return;
+        seen.add(material as object);
+        materials.push(material);
+    };
+
+    for (const mesh of meshes) {
+        const material = mesh.material;
+        if (material instanceof MultiMaterial) {
+            for (const subMaterial of material.subMaterials) {
+                register(subMaterial ?? null);
+            }
+            continue;
+        }
+
+        register(material ?? null);
+    }
+
+    return materials;
+}
+
 function prepareManagedAccessoryMeshes(host: XLoadHost, meshes: AbstractMesh[], castShadows: boolean): AbstractMesh[] {
     for (const mesh of meshes) {
         mesh.visibility = 1;
@@ -767,6 +794,10 @@ function createAccessoryEntryFromImport(
     }
     forceAccessoryHierarchyEnabled([...result.transformNodes, ...hierarchyMeshes, ...managedMeshes]);
     prepareManagedAccessoryMeshes(host, managedMeshes, kind !== "glb");
+    if (kind === "x") {
+        const accessoryMaterials = collectAccessoryMaterials(managedMeshes);
+        applyWgslShaderPresetToMaterials(host as any, accessoryMaterials, "wgsl-accessory-toon");
+    }
     if (kind === "glb") {
         excludeGlbAccessoryMeshesFromDepthAndShadow(host, managedMeshes);
     }

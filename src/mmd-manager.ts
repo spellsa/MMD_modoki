@@ -7,6 +7,7 @@ import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
+import { Material } from "@babylonjs/core/Materials/material";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
@@ -445,6 +446,7 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-matte-highlight"
     | "wgsl-specular"
     | "wgsl-cel-sharp"
+    | "wgsl-cel-shadow-sharp"
     | "wgsl-rim-lift"
     | "wgsl-mono-flat";
 
@@ -586,7 +588,7 @@ export class MmdManager {
         {
             id: "wgsl-light-and-shadow",
             label: "light_and_shadow",
-            description: "Apply the standard light-and-shadow banding even to materials that normally skip toon shading",
+            description: "Use the standard MMD light-and-shadow path, including fallback toon ramps for non-toon materials",
         },
         {
             id: "wgsl-gloss-highlight",
@@ -612,6 +614,16 @@ export class MmdManager {
             id: "wgsl-cel-sharp",
             label: "Cel Sharp",
             description: "Stronger toon contrast with reduced specular spread",
+        },
+        {
+            id: "wgsl-cel-shadow-sharp",
+            label: "Cel Shadow Sharp",
+            description: "Hardens the self-shadow boundary for a crisper cel-look shadow band",
+        },
+        {
+            id: "wgsl-accessory-toon",
+            label: "Accessory Toon",
+            description: "Use the standard MMD shading path with an accessory-oriented fallback toon ramp",
         },
         {
             id: "wgsl-rim-lift",
@@ -719,7 +731,7 @@ toonRaw.r=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.r)).r;
 toonRaw.g=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.g)).g;
 toonRaw.b=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonRaw.b)).b;
 let selfMask=smoothstep(${selfMaskMin},${selfMaskMax},clamp(info.ndl,0.0,1.0));
-let occlusionMask=clamp(shadow,0.0,1.0);
+let occlusionMask=smoothstep(${occlusionMaskMin},${occlusionMaskMax},clamp(shadow,0.0,1.0));
 let toneBandLuma=clamp(dot(toonRaw,vec3f(0.299,0.587,0.114)),0.0,1.0);
 let geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
 let litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,${toonBandAlignment.toFixed(6)}),0.0,1.0);
@@ -747,7 +759,7 @@ toonRaw.r=texture2D(toonSampler,vec2(0.5,toonRaw.r)).r;
 toonRaw.g=texture2D(toonSampler,vec2(0.5,toonRaw.g)).g;
 toonRaw.b=texture2D(toonSampler,vec2(0.5,toonRaw.b)).b;
 float selfMask=smoothstep(${selfMaskMin},${selfMaskMax},clamp(info.ndl,0.0,1.0));
-float occlusionMask=clamp(shadow,0.0,1.0);
+float occlusionMask=smoothstep(${occlusionMaskMin},${occlusionMaskMax},clamp(shadow,0.0,1.0));
 float toneBandLuma=clamp(dot(toonRaw,vec3(0.299,0.587,0.114)),0.0,1.0);
 float geometricLitMask=clamp(selfMask*occlusionMask,0.0,1.0);
 float litMask=clamp(geometricLitMask*mix(1.0,toneBandLuma,${toonBandAlignment.toFixed(6)}),0.0,1.0);
@@ -1618,7 +1630,7 @@ ${beforeFogAppendBlock}
 
         if (typeof material.markAsDirty === "function") {
             try {
-                material.markAsDirty(1);
+                material.markAsDirty(Material.AllDirtyFlag);
                 return;
             } catch {
                 try {
