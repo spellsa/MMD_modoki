@@ -171,6 +171,8 @@ export class UIController {
 
     // Button elements
     private btnLoadFile: HTMLElement;
+    private btnLoadBackgroundImage: HTMLElement;
+    private btnClearBackgroundImage: HTMLElement;
     private btnSaveProject: HTMLElement;
     private btnLoadProject: HTMLElement;
     private btnExportPng: HTMLElement;
@@ -351,6 +353,8 @@ export class UIController {
 
         // Get DOM elements
         this.btnLoadFile = document.getElementById("btn-load-file")!;
+        this.btnLoadBackgroundImage = document.getElementById("btn-load-background-image")!;
+        this.btnClearBackgroundImage = document.getElementById("btn-clear-background-image")!;
         this.btnSaveProject = document.getElementById("btn-save-project")!;
         this.btnLoadProject = document.getElementById("btn-load-project")!;
         this.btnExportPng = document.getElementById("btn-export-png")!;
@@ -496,6 +500,14 @@ export class UIController {
         // File loading
         this.btnLoadFile.addEventListener("click", () => {
             void this.loadFileFromDialog();
+        });
+        this.btnLoadBackgroundImage.addEventListener("click", () => {
+            void this.loadBackgroundImageFromDialog();
+        });
+        this.btnClearBackgroundImage.addEventListener("click", () => {
+            this.mmdManager.clearBackgroundImage();
+            this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
+            this.showToast(t("toast.backgroundImage.cleared"), "info");
         });
         this.btnSaveProject.addEventListener("click", () => this.saveProject(true));
         this.btnLoadProject.addEventListener("click", () => this.loadProject());
@@ -2562,12 +2574,36 @@ export class UIController {
 
     private async loadFileFromDialog(): Promise<void> {
         const filePath = await window.electronAPI.openFileDialog([
-            { name: "Supported files", extensions: ["pmx", "pmd", "x", "vmd", "vpd", "mp3", "wav", "ogg"] },
+            { name: "Supported files", extensions: ["pmx", "pmd", "x", "vmd", "vpd", "mp3", "wav", "ogg", "png", "jpg", "jpeg", "bmp", "webp"] },
             { name: "All files", extensions: ["*"] },
         ]);
 
         if (!filePath) return;
         await this.loadFileByPath(filePath, "dialog");
+    }
+
+    private async loadBackgroundImageFromDialog(): Promise<void> {
+        const filePath = await window.electronAPI.openFileDialog([
+            { name: "Image files", extensions: ["png", "jpg", "jpeg", "bmp", "webp"] },
+            { name: "All files", extensions: ["*"] },
+        ]);
+        if (!filePath) return;
+
+        await this.applyBackgroundImage(filePath);
+    }
+
+    private async applyBackgroundImage(filePath: string): Promise<void> {
+        this.setStatus("Loading background image...", true);
+        try {
+            await this.mmdManager.setBackgroundImageFromPath(filePath);
+            this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
+            this.setStatus("Background image loaded", false);
+            this.showToast(`${t("toast.backgroundImage.loaded")}: ${this.getBaseNameForRenderer(filePath)}`, "success");
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.setStatus("Background image load failed", false);
+            this.showToast(`${t("toast.backgroundImage.failed")}: ${message}`, "error");
+        }
     }
 
     private getFileExtension(filePath: string): string {
@@ -2757,6 +2793,13 @@ export class UIController {
             case "ogg":
                 this.setStatus("Loading audio...", true);
                 await this.mmdManager.loadMP3(filePath);
+                return;
+            case "png":
+            case "jpg":
+            case "jpeg":
+            case "bmp":
+            case "webp":
+                await this.applyBackgroundImage(filePath);
                 return;
             case "glb":
                 this.showToast("GLB import is currently disabled", "error");

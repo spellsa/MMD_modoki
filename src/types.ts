@@ -215,6 +215,7 @@ export interface ProjectViewportState {
     groundVisible: boolean;
     skydomeVisible: boolean;
     antialiasEnabled: boolean;
+    backgroundImagePath?: string | null;
 }
 
 export interface ProjectPhysicsState {

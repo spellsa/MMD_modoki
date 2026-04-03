@@ -297,6 +297,16 @@ export async function importProjectState(
     host.setGroundVisible(Boolean(data.viewport.groundVisible));
     host.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
+    if (typeof data.viewport.backgroundImagePath === "string" && data.viewport.backgroundImagePath.trim().length > 0) {
+        try {
+            await host.setBackgroundImageFromPath(data.viewport.backgroundImagePath);
+        } catch {
+            warnings.push(`Background image load failed: ${data.viewport.backgroundImagePath}`);
+            host.clearBackgroundImage();
+        }
+    } else {
+        host.clearBackgroundImage();
+    }
 
     host.setLightDirection(data.lighting.x, data.lighting.y, data.lighting.z);
     host.lightIntensity = data.lighting.intensity;
