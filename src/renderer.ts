@@ -14,6 +14,7 @@ import { UIController } from "./ui-controller";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
+import { logError, logInfo, toLogErrorData } from "./app-logger";
 
 let shaderRequestTraceInstalled = false;
 
@@ -77,6 +78,18 @@ function installShaderRequestTrace(): void {
 document.addEventListener("DOMContentLoaded", () => {
   installShaderRequestTrace();
   initializeI18n(document);
+  window.addEventListener("error", (event) => {
+    logError("renderer", "uncaught renderer error", {
+      message: event.message,
+      source: event.filename,
+      line: event.lineno,
+      column: event.colno,
+      ...toLogErrorData(event.error),
+    });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    logError("renderer", "unhandled renderer rejection", toLogErrorData(event.reason));
+  });
   window.mmdI18n = {
     getLocale: () => getLocale(),
     setLocale: (locale) => {
@@ -92,6 +105,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initializeApp(): Promise<void> {
   const searchParams = new URLSearchParams(window.location.search);
   const mode = searchParams.get("mode");
+  logInfo("renderer", "initialize app", { mode: mode ?? "editor" });
   if (mode === "exporter") {
     await initializePngSequenceExporter(searchParams);
     return;
@@ -109,6 +123,10 @@ async function initializeApp(): Promise<void> {
 
   try {
     const mmdManager = await MmdManager.create(canvas);
+    logInfo("renderer", "MmdManager initialized", {
+      engine: mmdManager.getEngineType(),
+      physicsBackend: mmdManager.getPhysicsBackendLabel(),
+    });
     const timeline = new Timeline(
       "timeline-canvas",
       "timeline-tracks-scroll",
@@ -121,6 +139,7 @@ async function initializeApp(): Promise<void> {
     new UIController(mmdManager, timeline, bottomPanel);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    logError("renderer", "failed to initialize MMD_modoki", toLogErrorData(err));
     console.error("Failed to initialize MMD modoki:", message);
 
     const statusText = document.getElementById("status-text");
@@ -259,6 +278,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
 
   const jobId = searchParams.get("jobId");
   if (!jobId) {
+    logError("webm", "export job id is missing");
     setStatus("Export job id is missing");
     closeExporterWindowSoon();
     return;
@@ -267,6 +287,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
   try {
     const request = await window.electronAPI.takeWebmExportJob(jobId);
     if (!request) {
+      logError("webm", "export job is unavailable", { jobId });
       setStatus("Export job is unavailable");
       closeExporterWindowSoon();
       return;
@@ -284,6 +305,16 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
     let capturedFrames = 0;
     let currentFrame = request.startFrame;
     const totalOutputFrames = Math.max(1, Math.round(((request.endFrame - request.startFrame + 1) / 30) * Math.max(1, request.fps || 30)));
+    logInfo("webm", "exporter job accepted", {
+      jobId,
+      startFrame: request.startFrame,
+      endFrame: request.endFrame,
+      fps: request.fps,
+      outputWidth: request.outputWidth,
+      outputHeight: request.outputHeight,
+      includeAudio: request.includeAudio === true,
+      preferredVideoCodec: request.preferredVideoCodec,
+    });
     const emitWebmProgress = (phase: string, message: string, force = false): void => {
       const now = performance.now();
       const shouldReport = force || now - lastProgressReportAt >= 1000;
@@ -320,6 +351,11 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
     });
 
     setStatus(`Done: ${result.encodedFrames} frame(s) ${result.codec}`);
+    logInfo("webm", "exporter job completed", {
+      jobId,
+      encodedFrames: result.encodedFrames,
+      codec: result.codec,
+    });
     encodedFrames = result.encodedFrames;
     currentFrame = request.endFrame;
     emitWebmProgress("completed", `Done: ${result.encodedFrames} frame(s) ${result.codec}`, true);
@@ -331,6 +367,10 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    logError("webm", "exporter job failed", {
+      jobId,
+      ...toLogErrorData(err),
+    });
     console.error("WebM export failed:", message);
     setStatus(`Export failed: ${message}`);
     window.electronAPI.reportWebmExportProgress({

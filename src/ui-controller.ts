@@ -20,6 +20,7 @@ import type {
     WebmExportState,
 } from "./types";
 import { normalizeLutFile } from "./lut-file";
+import { logError, logInfo } from "./app-logger";
 
 type CameraViewPreset = "left" | "front" | "right" | "top" | "back" | "bottom";
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
@@ -3165,6 +3166,7 @@ export class UIController {
 
     private async exportWebm(): Promise<void> {
         if (!window.isSecureContext) {
+            logError("webm", "export blocked by insecure context");
             this.showToast("WebM export requires a secure context", "error");
             return;
         }
@@ -3173,12 +3175,26 @@ export class UIController {
         const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
         const totalTimelineFrames = endFrame - startFrame + 1;
         if (totalTimelineFrames <= 0) {
+            logError("webm", "export blocked because no frames are available", {
+                startFrame,
+                endFrame,
+            });
             this.showToast("No frames to export", "error");
             return;
         }
 
         const outputSettings = this.getOutputSettings();
         const totalOutputFrames = Math.max(1, Math.round((totalTimelineFrames / 30) * outputSettings.fps));
+        logInfo("webm", "export requested", {
+            startFrame,
+            endFrame,
+            totalTimelineFrames,
+            totalOutputFrames,
+            fps: outputSettings.fps,
+            outputWidth: outputSettings.width,
+            outputHeight: outputSettings.height,
+            qualityScale: outputSettings.qualityScale,
+        });
         const defaultFileName = this.buildWebmFileName(
             outputSettings.width,
             outputSettings.height,
@@ -3187,6 +3203,7 @@ export class UIController {
         );
         const outputFilePath = await window.electronAPI.saveWebmDialog(defaultFileName);
         if (!outputFilePath) {
+            logInfo("webm", "export canceled before launch", { defaultFileName });
             this.showToast(t("toast.webmExportCanceled"), "info");
             return;
         }
@@ -3199,6 +3216,17 @@ export class UIController {
             this.showToast(t("toast.audioMissingForWebm"), "info");
         }
         project.assets.audioPath = null;
+        logInfo("webm", "export launching", {
+            outputFilePath,
+            startFrame,
+            endFrame,
+            fps: outputSettings.fps,
+            outputWidth: outputSettings.width,
+            outputHeight: outputSettings.height,
+            includeAudio,
+            audioFilePath: includeAudio ? audioFilePath : null,
+            preferredVideoCodec,
+        });
 
         this.setStatus(t("busy.webmExportLaunching"), true);
         const result = await window.electronAPI.startWebmExportWindow({
@@ -3215,11 +3243,16 @@ export class UIController {
         });
 
         if (!result) {
+            logError("webm", "export launch failed", { outputFilePath });
             this.setStatus("WebM export launch failed", false);
             this.showToast("Failed to start WebM export window", "error");
             return;
         }
 
+        logInfo("webm", "export launch completed", {
+            jobId: result.jobId,
+            totalOutputFrames,
+        });
         this.setStatus("WebM export started", false);
         this.showToast(`WebM export started (${totalOutputFrames} frames)`, "success");
     }

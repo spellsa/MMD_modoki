@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
+    AppLogData,
+    AppLogScope,
     ElectronAPI,
     PngSequenceExportProgress,
     PngSequenceExportRequest,
@@ -117,4 +119,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
             ipcRenderer.removeListener('export:webmProgress', listener);
         };
     },
+    logDebug: (scope: AppLogScope, message: string, data?: AppLogData) => {
+        ipcRenderer.send('log:write', 'debug', scope, message, data);
+    },
+    logInfo: (scope: AppLogScope, message: string, data?: AppLogData) => {
+        ipcRenderer.send('log:write', 'info', scope, message, data);
+    },
+    logWarn: (scope: AppLogScope, message: string, data?: AppLogData) => {
+        ipcRenderer.send('log:write', 'warn', scope, message, data);
+    },
+    logError: (scope: AppLogScope, message: string, data?: AppLogData) => {
+        ipcRenderer.send('log:write', 'error', scope, message, data);
+    },
+    getLogFileInfo: () =>
+        ipcRenderer.invoke('log:getFileInfo'),
+    openLogFolder: () =>
+        ipcRenderer.invoke('log:openFolder'),
 } as ElectronAPI);

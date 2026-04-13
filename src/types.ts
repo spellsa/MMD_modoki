@@ -44,9 +44,43 @@ export interface ElectronAPI {
     reportWebmExportProgress: (progress: WebmExportProgress) => void;
     onWebmExportState: (callback: (state: WebmExportState) => void) => () => void;
     onWebmExportProgress: (callback: (progress: WebmExportProgress) => void) => () => void;
+    logDebug: (scope: AppLogScope, message: string, data?: AppLogData) => void;
+    logInfo: (scope: AppLogScope, message: string, data?: AppLogData) => void;
+    logWarn: (scope: AppLogScope, message: string, data?: AppLogData) => void;
+    logError: (scope: AppLogScope, message: string, data?: AppLogData) => void;
+    getLogFileInfo: () => Promise<AppLogFileInfo>;
+    openLogFolder: () => Promise<boolean>;
 }
 
 export type UiLocale = "ja" | "en" | "zh-Hant" | "zh-Hans" | "ko";
+
+export type AppLogLevel = "debug" | "info" | "warn" | "error";
+
+export type AppLogScope =
+    | "main"
+    | "ipc"
+    | "renderer"
+    | "asset"
+    | "camera-vmd"
+    | "timeline"
+    | "webm"
+    | "physics"
+    | "shader"
+    | "project"
+    | "ui";
+
+export type AppLogData = Record<string, unknown>;
+
+export interface AppLogFileInfo {
+    path: string;
+    directoryPath: string;
+    fileName: string;
+    level: AppLogLevel | "off";
+    sessionId: string;
+    appName: "MMD_modoki";
+    isDev: boolean;
+    maxSizeBytes: number;
+}
 
 declare global {
     interface Window {

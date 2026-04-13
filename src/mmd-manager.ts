@@ -56,6 +56,7 @@ import {
     loadVMD as loadVMDImpl,
     loadVPD as loadVPDImpl,
 } from "./assets/motion-asset-service";
+import { logError, logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
@@ -2550,6 +2551,7 @@ ${beforeFogAppendBlock}
             const isWebGpuSupported = await WebGPUEngine.IsSupportedAsync;
             if (!isWebGpuSupported) {
                 console.info("WebGPU unavailable. Falling back to WebGL2.");
+                logInfo("shader", "WebGPU unavailable; falling back to WebGL2");
                 startupDiagnostics.push("WebGPU unavailable. Using WebGL2.");
                 return { engine: MmdManager.createWebGlEngine(canvas), startupDiagnostics };
             }
@@ -2569,10 +2571,12 @@ ${beforeFogAppendBlock}
             engine.compatibilityMode = MmdManager.WEBGPU_COMPATIBILITY_MODE;
             const webGpuMode = engine.compatibilityMode ? "compatibility" : "native";
             console.info(`Using WebGPU renderer (${webGpuMode}, WGSL-first).`);
+            logInfo("shader", "using WebGPU renderer", { mode: webGpuMode });
             return { engine, startupDiagnostics };
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             console.warn(`WebGPU initialization failed. Falling back to WebGL2. Reason: ${message}`);
+            logWarn("shader", "WebGPU initialization failed; falling back to WebGL2", toLogErrorData(err));
             startupDiagnostics.push("WebGPU initialization failed. Using WebGL2.");
             return { engine: MmdManager.createWebGlEngine(canvas), startupDiagnostics };
         }
@@ -2859,15 +2863,30 @@ ${beforeFogAppendBlock}
     private async initializePhysics(): Promise<boolean> {
         try {
             await this.initializeBulletPhysicsBackend();
+            logInfo("physics", "physics backend initialized", {
+                backend: "Bullet",
+                fallback: false,
+                simulationRateHz: this.physicsSimulationRateHz,
+            });
         } catch (bulletErr: unknown) {
             const bulletMessage = bulletErr instanceof Error ? bulletErr.message : String(bulletErr);
             console.warn("Bullet physics initialization failed. Falling back to Ammo.js:", bulletMessage);
+            logWarn("physics", "Bullet physics initialization failed; falling back to Ammo.js", toLogErrorData(bulletErr));
 
             try {
                 await this.initializeAmmoPhysicsBackend();
+                logInfo("physics", "physics backend initialized", {
+                    backend: "Ammo",
+                    fallback: true,
+                    simulationRateHz: this.physicsSimulationRateHz,
+                });
             } catch (ammoErr: unknown) {
                 const ammoMessage = ammoErr instanceof Error ? ammoErr.message : String(ammoErr);
                 console.warn("Physics initialization failed:", ammoMessage);
+                logError("physics", "physics initialization failed", {
+                    bullet: toLogErrorData(bulletErr).error,
+                    ammo: toLogErrorData(ammoErr).error,
+                });
                 this.physicsAvailable = false;
                 this.physicsEnabled = false;
                 this.physicsBackend = "none";

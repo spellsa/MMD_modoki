@@ -45,6 +45,7 @@
     "@babylonjs/gui": "8.45.3",
     "@babylonjs/loaders": "8.45.3",
     "babylon-mmd": "^1.1.0",
+    "electron-log": "^5.4.3",
     "electron-squirrel-startup": "^1.0.1",
     "i18next": "^25.8.18",
     "mediabunny": "^1.39.1"

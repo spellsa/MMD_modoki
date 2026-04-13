@@ -1,4 +1,5 @@
 import type { MotionInfo } from "../types";
+import { logError, logInfo, logWarn, toLogErrorData } from "../app-logger";
 import { StreamAudioPlayer } from "babylon-mmd/esm/Runtime/Audio/streamAudioPlayer";
 
 function getAudioMimeType(fileName: string): string {
@@ -160,9 +161,11 @@ export async function loadCameraVMD(host: any, filePath: string): Promise<Motion
         const pathParts = filePath.replace(/\\/g, "/");
         const lastSlash = pathParts.lastIndexOf("/");
         const fileName = pathParts.substring(lastSlash + 1);
+        logInfo("camera-vmd", "load started", { filePath });
 
         const buffer = await window.electronAPI.readBinaryFile(filePath);
         if (!buffer) {
+            logError("camera-vmd", "file read failed", { filePath });
             host.onError?.("Failed to read camera VMD file");
             return null;
         }
@@ -180,6 +183,7 @@ export async function loadCameraVMD(host: any, filePath: string): Promise<Motion
         }
 
         if (animation.cameraTrack.frameNumbers.length === 0) {
+            logWarn("camera-vmd", "camera track is empty", { filePath });
             host.onError?.("This VMD has no camera track");
             return null;
         }
@@ -208,11 +212,25 @@ export async function loadCameraVMD(host: any, filePath: string): Promise<Motion
             path: filePath,
             frameCount: host._totalFrames,
         };
+        const lastCameraFrame = host.cameraKeyframeFrames.length > 0
+            ? host.cameraKeyframeFrames[host.cameraKeyframeFrames.length - 1]
+            : null;
+        logInfo("camera-vmd", "load completed", {
+            filePath,
+            cameraFrameCount: animation.cameraTrack.frameNumbers.length,
+            lastCameraFrame,
+            totalFrames: host._totalFrames,
+            currentFrame: host._currentFrame,
+        });
 
         host.onCameraMotionLoaded?.(motionInfo);
         return motionInfo;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        logError("camera-vmd", "load failed", {
+            filePath,
+            ...toLogErrorData(err),
+        });
         console.error("Failed to load camera VMD:", message);
         host.onError?.(`Camera VMD load error: ${message}`);
         return null;
