@@ -12,7 +12,8 @@
     "make:zip": "electron-forge make --targets @electron-forge/maker-zip",
     "publish": "electron-forge publish",
     "generate:luts": "node scripts/generate-builtin-luts.js",
-    "lint": "eslint --ext .ts,.tsx ."
+    "lint": "eslint --ext .ts,.tsx .",
+    "test:unit": "vitest run --environment node"
   },
   "keywords": [],
   "author": {
@@ -38,7 +39,8 @@
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
     "typescript": "^5.9.3",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
   },
   "dependencies": {
     "@babylonjs/core": "8.45.3",
