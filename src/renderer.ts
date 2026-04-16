@@ -15,8 +15,25 @@ import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 import { logError, logInfo, toLogErrorData } from "./app-logger";
+import type { AppLogData, SmokeRendererReadyPayload } from "./types";
 
 let shaderRequestTraceInstalled = false;
+
+function reportSmokeRendererReady(payload: SmokeRendererReadyPayload): void {
+  try {
+    window.electronAPI.reportSmokeRendererReady(payload);
+  } catch {
+    // Smoke reporting must not affect normal editor startup.
+  }
+}
+
+function reportSmokeRendererFailure(message: string, details?: AppLogData): void {
+  try {
+    window.electronAPI.reportSmokeRendererFailure({ message, details });
+  } catch {
+    // Smoke reporting must not affect normal editor startup.
+  }
+}
 
 function isLikelyShaderRequestUrl(url: string): boolean {
   return /\.((vertex|fragment)\.fx|fx)(\?|$)/i.test(url)
@@ -118,14 +135,17 @@ async function initializeApp(): Promise<void> {
   const canvas = document.getElementById("render-canvas") as HTMLCanvasElement;
   if (!canvas) {
     console.error("Canvas not found");
+    reportSmokeRendererFailure("Canvas not found");
     return;
   }
 
   try {
     const mmdManager = await MmdManager.create(canvas);
+    const engine = mmdManager.getEngineType();
+    const physicsBackend = mmdManager.getPhysicsBackendLabel();
     logInfo("renderer", "MmdManager initialized", {
-      engine: mmdManager.getEngineType(),
-      physicsBackend: mmdManager.getPhysicsBackendLabel(),
+      engine,
+      physicsBackend,
     });
     const timeline = new Timeline(
       "timeline-canvas",
@@ -137,9 +157,14 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
+    reportSmokeRendererReady({
+      engine,
+      physicsBackend,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logError("renderer", "failed to initialize MMD_modoki", toLogErrorData(err));
+    reportSmokeRendererFailure(message, toLogErrorData(err));
     console.error("Failed to initialize MMD modoki:", message);
 
     const statusText = document.getElementById("status-text");

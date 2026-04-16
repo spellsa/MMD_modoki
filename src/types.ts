@@ -48,6 +48,8 @@ export interface ElectronAPI {
     logInfo: (scope: AppLogScope, message: string, data?: AppLogData) => void;
     logWarn: (scope: AppLogScope, message: string, data?: AppLogData) => void;
     logError: (scope: AppLogScope, message: string, data?: AppLogData) => void;
+    reportSmokeRendererReady: (payload: SmokeRendererReadyPayload) => void;
+    reportSmokeRendererFailure: (payload: SmokeRendererFailurePayload) => void;
     getLogFileInfo: () => Promise<AppLogFileInfo>;
     openLogFolder: () => Promise<boolean>;
 }
@@ -70,6 +72,16 @@ export type AppLogScope =
     | "ui";
 
 export type AppLogData = Record<string, unknown>;
+
+export interface SmokeRendererReadyPayload {
+    engine: string;
+    physicsBackend: string;
+}
+
+export interface SmokeRendererFailurePayload {
+    message: string;
+    details?: AppLogData;
+}
 
 export interface AppLogFileInfo {
     path: string;

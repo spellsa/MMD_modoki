@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, session, shell, type IpcMainEvent } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -18,6 +18,8 @@ import type {
   WebmExportProgress,
   WebmExportRequest,
   WebmExportState,
+  SmokeRendererFailurePayload,
+  SmokeRendererReadyPayload,
 } from './types';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -26,6 +28,7 @@ if (started) {
 }
 
 const isDev = Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+const isSmokeMode = process.env.MMD_MODOKI_SMOKE === '1';
 if (isDev) {
   // Keep local file loading behavior while hiding noisy Electron dev warnings.
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
@@ -171,6 +174,12 @@ const MAIN_WINDOW_DEFAULT_HEIGHT = Math.round(MAIN_WINDOW_DEFAULT_WIDTH / MAIN_W
 const MAIN_WINDOW_MIN_WIDTH = 1120;
 const MAIN_WINDOW_MIN_HEIGHT = Math.round(MAIN_WINDOW_MIN_WIDTH / MAIN_WINDOW_ASPECT_RATIO);
 const ALLOWED_PRODUCTION_PROTOCOLS = new Set(['file:', 'data:', 'blob:', 'devtools:']);
+const SMOKE_TEST_TIMEOUT_MS = Math.max(
+  5000,
+  Number.parseInt(process.env.MMD_MODOKI_SMOKE_TIMEOUT_MS ?? '20000', 10) || 20000,
+);
+const SMOKE_TEST_REQUIRE_WEBGPU = process.env.MMD_MODOKI_SMOKE_REQUIRE_WEBGPU !== '0';
+const SMOKE_TEST_RESULT_PATH = process.env.MMD_MODOKI_SMOKE_RESULT_PATH ?? null;
 
 const pngSequenceExportJobMap = new Map<string, PngSequenceExportRequest>();
 const pngSequenceExportActiveCountByOwner = new Map<number, number>();
@@ -484,6 +493,132 @@ const configureSessionSecurity = (): void => {
   });
 };
 
+const finishSmokeTest = (success: boolean, reason: string, data?: AppLogData): void => {
+  writeAppLog(success ? 'info' : 'error', 'main', `smoke test ${success ? 'passed' : 'failed'}: ${reason}`, data);
+  console.log(`[smoke] ${success ? 'pass' : 'fail'}: ${reason}`);
+  if (SMOKE_TEST_RESULT_PATH) {
+    try {
+      fs.mkdirSync(path.dirname(SMOKE_TEST_RESULT_PATH), { recursive: true });
+      fs.writeFileSync(
+        SMOKE_TEST_RESULT_PATH,
+        JSON.stringify({
+          success,
+          reason,
+          data,
+          createdAt: new Date().toISOString(),
+        }, null, 2),
+        'utf8',
+      );
+    } catch (err) {
+      writeAppLog('warn', 'main', 'failed to write smoke result file', createLogErrorData(err));
+    }
+  }
+  app.exit(success ? 0 : 1);
+};
+
+const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise<void>): void => {
+  if (!isSmokeMode) return;
+
+  let finished = false;
+  let didFinishLoad = false;
+  let removeSmokeIpcListeners = (): void => undefined;
+  const complete = (success: boolean, reason: string, data?: AppLogData): void => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeoutId);
+    removeSmokeIpcListeners();
+    finishSmokeTest(success, reason, data);
+  };
+
+  const timeoutId = setTimeout(() => {
+    complete(false, 'timeout waiting for renderer runtime initialization', {
+      timeoutMs: SMOKE_TEST_TIMEOUT_MS,
+      didFinishLoad,
+      webContentsId: mainWindow.webContents.id,
+    });
+  }, SMOKE_TEST_TIMEOUT_MS);
+
+  writeAppLog('info', 'main', 'smoke test enabled', {
+    timeoutMs: SMOKE_TEST_TIMEOUT_MS,
+    requireWebGpu: SMOKE_TEST_REQUIRE_WEBGPU,
+    webContentsId: mainWindow.webContents.id,
+  });
+  console.log(`[smoke] waiting for renderer runtime (${SMOKE_TEST_TIMEOUT_MS}ms timeout, requireWebGPU=${SMOKE_TEST_REQUIRE_WEBGPU})`);
+
+  loadPromise.catch((err: unknown) => {
+    complete(false, 'loadEditorWindow rejected', createLogErrorData(err));
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    complete(false, 'renderer failed to load', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame,
+      webContentsId: mainWindow.webContents.id,
+    });
+  });
+
+  mainWindow.webContents.once('render-process-gone', (_event, details) => {
+    complete(false, 'renderer process gone', {
+      reason: details.reason,
+      exitCode: details.exitCode,
+      webContentsId: mainWindow.webContents.id,
+    });
+  });
+
+  mainWindow.once('unresponsive', () => {
+    complete(false, 'main window became unresponsive', {
+      webContentsId: mainWindow.webContents.id,
+    });
+  });
+
+  mainWindow.webContents.once('did-finish-load', () => {
+    didFinishLoad = true;
+    writeAppLog('info', 'main', 'smoke main window finished load', {
+      webContentsId: mainWindow.webContents.id,
+    });
+  });
+
+  const onRendererReady = (event: IpcMainEvent, payload: SmokeRendererReadyPayload): void => {
+    if (event.sender.id !== mainWindow.webContents.id) return;
+    const engine = typeof payload?.engine === 'string' ? payload.engine : 'unknown';
+    const physicsBackend = typeof payload?.physicsBackend === 'string' ? payload.physicsBackend : 'unknown';
+    if (SMOKE_TEST_REQUIRE_WEBGPU && engine !== 'WebGPU') {
+      complete(false, 'renderer initialized without WebGPU', {
+        engine,
+        physicsBackend,
+        requireWebGpu: SMOKE_TEST_REQUIRE_WEBGPU,
+        webContentsId: mainWindow.webContents.id,
+      });
+      return;
+    }
+    console.log(`[smoke] renderer ready: engine=${engine} physics=${physicsBackend}`);
+    complete(true, 'renderer runtime initialized', {
+      engine,
+      physicsBackend,
+      webContentsId: mainWindow.webContents.id,
+    });
+  };
+
+  const onRendererFailure = (event: IpcMainEvent, payload: SmokeRendererFailurePayload): void => {
+    if (event.sender.id !== mainWindow.webContents.id) return;
+    complete(false, 'renderer reported initialization failure', {
+      message: typeof payload?.message === 'string' ? payload.message : 'unknown renderer failure',
+      details: payload?.details,
+      webContentsId: mainWindow.webContents.id,
+    });
+  };
+
+  ipcMain.on('smoke:rendererReady', onRendererReady);
+  ipcMain.on('smoke:rendererFailure', onRendererFailure);
+  removeSmokeIpcListeners = () => {
+    ipcMain.removeListener('smoke:rendererReady', onRendererReady);
+    ipcMain.removeListener('smoke:rendererFailure', onRendererFailure);
+  };
+};
+
 const createWindow = () => {
   const mainWindow = new BrowserWindow({
     width: MAIN_WINDOW_DEFAULT_WIDTH,
@@ -510,10 +645,12 @@ const createWindow = () => {
   });
 
   // Load the app
-  void loadEditorWindow(mainWindow);
+  const loadPromise = loadEditorWindow(mainWindow);
+  setupSmokeTestLifecycle(mainWindow, loadPromise);
+  void loadPromise;
 
   // Open DevTools in dev mode
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL && !isSmokeMode) {
     mainWindow.webContents.openDevTools();
   }
 

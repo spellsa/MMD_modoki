@@ -6,6 +6,8 @@ import type {
     PngSequenceExportProgress,
     PngSequenceExportRequest,
     PngSequenceExportState,
+    SmokeRendererFailurePayload,
+    SmokeRendererReadyPayload,
     WebmExportProgress,
     WebmExportRequest,
     WebmExportState
@@ -130,6 +132,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     logError: (scope: AppLogScope, message: string, data?: AppLogData) => {
         ipcRenderer.send('log:write', 'error', scope, message, data);
+    },
+    reportSmokeRendererReady: (payload: SmokeRendererReadyPayload) => {
+        ipcRenderer.send('smoke:rendererReady', payload);
+    },
+    reportSmokeRendererFailure: (payload: SmokeRendererFailurePayload) => {
+        ipcRenderer.send('smoke:rendererFailure', payload);
     },
     getLogFileInfo: () =>
         ipcRenderer.invoke('log:getFileInfo'),

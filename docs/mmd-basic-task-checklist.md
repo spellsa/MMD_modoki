@@ -164,6 +164,7 @@
 - [ ] 配布時アセット / wasm / モデルローダー同梱確認
 - [ ] Windows 配布時の注意点整理
 - [ ] クリーン環境でのインストール / 起動確認
+- [x] WebGPU 必須のローカル起動スモークテスト追加（`npm.cmd run smoke:launch`）
 - [ ] 配布用ドキュメント整備
 
 ## 8. 拡張候補
@@ -253,6 +254,7 @@
 - [x] 優先テスト対象の決定 → 同上
 - [x] 単体テスト基盤の整備（Vitest 導入）
 - [x] 重要ロジックの単体テスト追加
+- [x] Electron ローカル起動スモークテスト導線の追加（WebGPU 判定込み） → [electron-local-smoke-test-plan.md](electron-local-smoke-test-plan.md)
 
 ## 参考リンク
 
