@@ -15,11 +15,12 @@ import type {
     TrackCategory,
     TimelineInterpolationPreview,
 } from "./types";
-import { normalizeLutFile } from "./lut-file";
 import { AccessoryPanelController } from "./ui/accessory-panel-controller";
+import { ColorPostFxController } from "./ui/color-postfx-controller";
 import { DofPanelController } from "./ui/dof-panel-controller";
 import { ExportUiController } from "./ui/export-ui-controller";
 import { LayoutUiController } from "./ui/layout-ui-controller";
+import { LutPanelController } from "./ui/lut-panel-controller";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
@@ -136,14 +137,6 @@ type MmdManagerInternalView = {
     cameraAnimationHandle: unknown | null;
 };
 
-type ImportedLutRegistryEntry = {
-    sourcePath: string;
-    displayName: string;
-    rawText: string;
-    runtimeText: string;
-    sourceFormat: "3dl" | "cube";
-};
-
 export class UIController {
     private static readonly CAMERA_SELECT_VALUE = "__camera__";
     private static readonly DEBUG_KEYFRAME_FLOW = false;
@@ -222,16 +215,14 @@ export class UIController {
     private interpolationDragState: InterpolationDragState | null = null;
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
+    private colorPostFxController: ColorPostFxController | null = null;
     private dofPanelController: DofPanelController | null = null;
     private exportUiController: ExportUiController | null = null;
     private layoutUiController: LayoutUiController | null = null;
+    private lutPanelController: LutPanelController | null = null;
     private runtimeFeatureUiController: RuntimeFeatureUiController | null = null;
     private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
     private shaderPanelController: ShaderPanelController | null = null;
-    private postFxLutExternalPath: string | null = null;
-    private postFxLutExternalText: string | null = null;
-    private postFxLutExternalRuntimeText: string | null = null;
-    private readonly customLutEntriesByPath = new Map<string, ImportedLutRegistryEntry>();
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
     private currentProjectFilePath: string | null = null;
@@ -340,10 +331,20 @@ export class UIController {
             },
             onSelectionChanged: () => this.updateSectionKeyframeButtons(),
         });
+        this.colorPostFxController = new ColorPostFxController({
+            mmdManager: this.mmdManager,
+        });
         this.dofPanelController = new DofPanelController({
             mmdManager: this.mmdManager,
             syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
+        });
+        this.lutPanelController = new LutPanelController({
+            mmdManager: this.mmdManager,
+            getBaseNameForRenderer: (filePath) => this.getBaseNameForRenderer(filePath),
+            setStatus: (text, loading) => this.setStatus(text, loading),
+            showToast: (message, type) => this.showToast(message, type),
+            refreshShaderPanel: () => this.refreshShaderPanel(),
         });
         this.shaderPanelController = new ShaderPanelController({
             mmdManager: this.mmdManager,
@@ -1695,27 +1696,25 @@ export class UIController {
         this.setStatus("Saving project...", true);
         try {
             const project = this.buildProjectStateForPersistence();
-            const lutMode = this.mmdManager.postEffectLutSourceMode;
             let relativeLutFileName: string | null = null;
+            let relativeLutText: string | null = null;
             let relativeWgslFileName: string | null = null;
-            project.effects.lutSourceMode = lutMode;
+            const lutSavePlan = this.lutPanelController?.prepareProjectSave();
+            if (lutSavePlan) {
+                project.effects.lutSourceMode = lutSavePlan.sourceMode;
+                project.effects.lutExternalPath = lutSavePlan.externalPath;
+                relativeLutFileName = lutSavePlan.relativeFileName;
+                relativeLutText = lutSavePlan.externalText;
+                if (lutSavePlan.disableLut) {
+                    project.effects.lutEnabled = false;
+                    this.showToast("External LUT is missing, saving with LUT disabled", "info");
+                }
+            }
             if (!this.postFxWgslToonPath || !this.postFxWgslToonText) {
                 project.effects.wgslToonShaderPath = null;
             } else {
                 relativeWgslFileName = this.getBaseNameForRenderer(this.postFxWgslToonPath) || "external_toon.wgsl";
                 project.effects.wgslToonShaderPath = `wgsl/${relativeWgslFileName}`;
-            }
-            if (lutMode === "builtin") {
-                project.effects.lutExternalPath = null;
-            } else if (!this.postFxLutExternalPath || !this.postFxLutExternalText) {
-                project.effects.lutEnabled = false;
-                project.effects.lutExternalPath = null;
-                this.showToast("External LUT is missing, saving with LUT disabled", "info");
-            } else if (lutMode === "project-relative") {
-                relativeLutFileName = this.getBaseNameForRenderer(this.postFxLutExternalPath) || "external_lut.cube";
-                project.effects.lutExternalPath = `luts/${relativeLutFileName}`;
-            } else {
-                project.effects.lutExternalPath = this.postFxLutExternalPath;
             }
 
             const json = JSON.stringify(project, null, 2);
@@ -1742,11 +1741,11 @@ export class UIController {
                 }
             }
 
-            if (relativeLutFileName && this.postFxLutExternalText) {
+            if (relativeLutFileName && relativeLutText) {
                 const projectDir = this.getDirectoryPathForRenderer(savedPath);
                 const lutDir = this.joinPathForRenderer(projectDir, "luts");
                 const lutPath = this.joinPathForRenderer(lutDir, relativeLutFileName);
-                const wrote = await window.electronAPI.writeTextFileToPath(lutPath, this.postFxLutExternalText);
+                const wrote = await window.electronAPI.writeTextFileToPath(lutPath, relativeLutText);
                 if (!wrote) {
                     this.showToast("Failed to save project-relative LUT file", "error");
                 }
@@ -1819,17 +1818,16 @@ export class UIController {
                     const lutText = await window.electronAPI.readTextFile(resolvedExternalLutPath);
                     if (lutText) {
                         resolvedExternalLutText = lutText;
-                        const imported = await this.importExternalLutFile(
+                        const imported = await this.lutPanelController?.importExternalLutFile(
                             resolvedExternalLutPath,
                             "project",
                             false,
                             lutText,
                             requestedLutMode === "project-relative" ? "project-relative" : "external-absolute",
-                        );
+                        ) ?? false;
                         if (!imported) {
                             resolvedExternalLutText = null;
-                            this.postFxLutExternalRuntimeText = null;
-                            this.mmdManager.setPostEffectExternalLut(null, null, null);
+                            this.lutPanelController?.clearExternalAsset();
                             externalLutWarning = 'External LUT parse failed: ' + requestedLutPath;
                         }
                     } else {
@@ -1866,11 +1864,7 @@ export class UIController {
             this.postFxWgslToonText = resolvedWgslToonText;
             this.shaderPanelController?.setExternalWgslToonAsset(resolvedWgslToonPath, resolvedWgslToonText);
             this.mmdManager.setExternalWgslToonShader(resolvedWgslToonPath, resolvedWgslToonText);
-            this.postFxLutExternalPath = resolvedExternalLutPath;
-            this.postFxLutExternalText = resolvedExternalLutText;
-            if (!resolvedExternalLutText) {
-                this.postFxLutExternalRuntimeText = null;
-            }
+            this.lutPanelController?.restoreProjectExternalAsset(resolvedExternalLutPath, resolvedExternalLutText);
             if (isExternalLutMode && !resolvedExternalLutText) {
                 this.mmdManager.postEffectLutEnabled = false;
             }
@@ -1934,121 +1928,6 @@ export class UIController {
         return fileName.substring(dot + 1).toLowerCase();
     }
 
-    private normalizeImportedLutPath(filePath: string): string {
-        return filePath.replace(/[\\/]+/g, "\\").toLowerCase();
-    }
-
-    private escapeHtml(value: string): string {
-        return value
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    private getImportedLutEntry(filePath: string): ImportedLutRegistryEntry | null {
-        return this.customLutEntriesByPath.get(this.normalizeImportedLutPath(filePath)) ?? null;
-    }
-
-    private registerImportedLutEntry(filePath: string, normalizedLut: {
-        displayName: string;
-        rawText: string;
-        runtimeText: string;
-        sourceFormat: '3dl' | 'cube';
-    }): ImportedLutRegistryEntry {
-        const entry: ImportedLutRegistryEntry = {
-            sourcePath: filePath,
-            displayName: normalizedLut.displayName,
-            rawText: normalizedLut.rawText,
-            runtimeText: normalizedLut.runtimeText,
-            sourceFormat: normalizedLut.sourceFormat,
-        };
-        this.customLutEntriesByPath.set(this.normalizeImportedLutPath(filePath), entry);
-        return entry;
-    }
-
-    private buildLutPresetOptionsHtml(): string {
-        const importedEntries = Array.from(this.customLutEntriesByPath.values())
-            .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }) || a.sourcePath.localeCompare(b.sourcePath, undefined, { sensitivity: 'base' }));
-        const labelCounts = new Map<string, number>();
-        const importedOptionsHtml = importedEntries
-            .map((entry) => {
-                const baseName = entry.displayName || this.getBaseNameForRenderer(entry.sourcePath) || t("shader.group.importedLutFallback");
-                const count = (labelCounts.get(baseName) ?? 0) + 1;
-                labelCounts.set(baseName, count);
-                const label = count === 1 ? baseName : baseName + ' (' + count + ')';
-                return '<option value="' + this.escapeHtml(entry.sourcePath) + '">' + this.escapeHtml(label) + '</option>';
-            })
-            .join('');
-        const builtInOptionsHtml = this.mmdManager.getPostEffectLutPresetOptions()
-            .map((preset) => '<option value="' + this.escapeHtml(preset.id) + '">' + this.escapeHtml(preset.label) + '</option>')
-            .join('');
-
-        const importedGroupHtml = importedEntries.length > 0
-            ? '<optgroup label="' + this.escapeHtml(t("shader.group.importedLuts")) + '">' + importedOptionsHtml + '</optgroup>'
-            : '';
-        const builtInGroupHtml = '<optgroup label="' + this.escapeHtml(t("shader.group.builtInLuts")) + '">' + builtInOptionsHtml + '</optgroup>';
-
-        return importedGroupHtml + builtInGroupHtml;
-    }
-
-    private getCurrentLutPresetSelectValue(): string {
-        if (this.mmdManager.postEffectLutSourceMode !== 'builtin') {
-            const activeImportedEntry = this.postFxLutExternalPath ? this.getImportedLutEntry(this.postFxLutExternalPath) : null;
-            if (activeImportedEntry) {
-                return activeImportedEntry.sourcePath;
-            }
-            if (this.postFxLutExternalPath) {
-                return this.postFxLutExternalPath;
-            }
-        }
-        return this.mmdManager.postEffectLutPreset;
-    }
-
-    private async importExternalLutFile(
-        filePath: string,
-        source: 'dialog' | 'drop' | 'project',
-        notify = true,
-        rawTextOverride?: string,
-        sourceModeOverride: 'external-absolute' | 'project-relative' = 'external-absolute',
-    ): Promise<boolean> {
-        const rawText = typeof rawTextOverride === 'string'
-            ? rawTextOverride
-            : await window.electronAPI.readTextFile(filePath);
-        if (!rawText) {
-            if (notify) {
-                this.showToast('Failed to load LUT file', 'error');
-            }
-            return false;
-        }
-
-        let normalizedLut: ReturnType<typeof normalizeLutFile>;
-        try {
-            normalizedLut = normalizeLutFile(filePath, rawText);
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (notify) {
-                this.showToast('Failed to load LUT file: ' + message, 'error');
-            }
-            return false;
-        }
-
-        const entry = this.registerImportedLutEntry(filePath, normalizedLut);
-        this.postFxLutExternalPath = entry.sourcePath;
-        this.postFxLutExternalText = entry.rawText;
-        this.postFxLutExternalRuntimeText = entry.runtimeText;
-        this.mmdManager.setPostEffectExternalLut(entry.sourcePath, entry.runtimeText, entry.sourceFormat);
-        this.mmdManager.postEffectLutSourceMode = sourceModeOverride;
-        if (source !== "project") {
-            this.mmdManager.postEffectLutEnabled = true;
-        }
-        if (notify) {
-            this.showToast('Loaded LUT: ' + this.getBaseNameForRenderer(filePath), 'success');
-        }
-        this.refreshShaderPanel();
-        return true;
-    }
     private isLikelyCameraVmdPath(filePath: string): boolean {
         if (this.mmdManager.getTimelineTarget() === "camera") return true;
         if (this.mmdManager.getLoadedModels().length === 0) return true;
@@ -2080,7 +1959,7 @@ export class UIController {
             case "3dl":
             case "cube":
                 this.setStatus("Loading LUT...", true);
-                if (await this.importExternalLutFile(filePath, source)) {
+                if (await this.lutPanelController?.importExternalLutFile(filePath, source)) {
                     this.setStatus("LUT loaded", false);
                 } else {
                     this.setStatus("LUT load failed", false);
@@ -2540,7 +2419,7 @@ export class UIController {
         this.shaderApplyAllButton.disabled = true;
         this.shaderResetButton.disabled = true;
         this.shaderPanelNote.textContent = t("shader.camera.note");
-        const lutPresetOptionsHtml = this.buildLutPresetOptionsHtml();
+        const lutPresetOptionsHtml = this.lutPanelController?.buildPresetOptionsHtml() ?? "";
 
         this.shaderMaterialList.innerHTML = `
             <div class="shader-postfx-controls">
@@ -2692,21 +2571,16 @@ export class UIController {
         applyI18nToDom(this.shaderMaterialList);
 
         const postFxControls = this.shaderMaterialList.querySelector<HTMLElement>(".shader-postfx-controls");
-        if (postFxControls) {
-            this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
+        if (
+            !postFxControls ||
+            !this.colorPostFxController?.connect(postFxControls) ||
+            !this.lutPanelController?.connect(postFxControls)
+        ) {
+            return;
         }
-        const contrastInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="contrast"]');
-        const contrastVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="contrast"]');
-        const gammaInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="gamma"]');
-        const gammaVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="gamma"]');
-        const exposureInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="exposure"]');
-        const exposureVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="exposure"]');
+        this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
         const toneMappingTypeSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="tone-mapping-type"]');
         const toneMappingVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="tone-mapping"]');
-        const ditheringIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="dithering-intensity"]');
-        const ditheringVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="dithering"]');
-        const vignetteWeightInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="vignette-weight"]');
-        const vignetteVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="vignette"]');
         const bloomEnabledInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx-check="bloom"]');
         const bloomWeightInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="bloom-weight"]');
         const bloomWeightVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="bloom-weight"]');
@@ -2716,23 +2590,8 @@ export class UIController {
         const bloomKernelVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="bloom-kernel"]');
         const chromaticAberrationInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="chromatic-aberration"]');
         const chromaticAberrationVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="chromatic-aberration"]');
-        const grainIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="grain-intensity"]');
-        const grainIntensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="grain-intensity"]');
-        const sharpenEdgeInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="sharpen-edge"]');
-        const sharpenEdgeVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="sharpen-edge"]');
-        const colorCurvesSaturationInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="color-curves-saturation"]');
-        const colorCurvesSaturationVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="color-curves-saturation"]');
         const glowIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="glow-intensity"]');
         const glowIntensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="glow-intensity"]');
-        const lutSourceSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="lut-source"]');
-        const lutSourceVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-source"]');
-        const lutFileButton = this.shaderMaterialList.querySelector<HTMLButtonElement>('button[data-postfx-btn="lut-file"]');
-        const lutFileVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-file"]');
-        const lutEnabledInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx-check="lut"]');
-        const lutPresetSelect = this.shaderMaterialList.querySelector<HTMLSelectElement>('select[data-postfx-select="lut-preset"]');
-        const lutVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut"]');
-        const lutIntensityInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="lut-intensity"]');
-        const lutIntensityVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lut-intensity"]');
         const motionBlurStrengthInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="motion-blur-strength"]');
         const motionBlurStrengthVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="motion-blur-strength"]');
         const ssrStrengthInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="ssr-strength"]');
@@ -2747,18 +2606,8 @@ export class UIController {
         const edgeWidthVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="edge-width"]');
 
         if (
-            !contrastInput ||
-            !contrastVal ||
-            !gammaInput ||
-            !gammaVal ||
-            !exposureInput ||
-            !exposureVal ||
             !toneMappingTypeSelect ||
             !toneMappingVal ||
-            !ditheringIntensityInput ||
-            !ditheringVal ||
-            !vignetteWeightInput ||
-            !vignetteVal ||
             !bloomEnabledInput ||
             !bloomWeightInput ||
             !bloomWeightVal ||
@@ -2768,23 +2617,8 @@ export class UIController {
             !bloomKernelVal ||
             !chromaticAberrationInput ||
             !chromaticAberrationVal ||
-            !grainIntensityInput ||
-            !grainIntensityVal ||
-            !sharpenEdgeInput ||
-            !sharpenEdgeVal ||
-            !colorCurvesSaturationInput ||
-            !colorCurvesSaturationVal ||
             !glowIntensityInput ||
             !glowIntensityVal ||
-            !lutSourceSelect ||
-            !lutSourceVal ||
-            !lutFileButton ||
-            !lutFileVal ||
-            !lutEnabledInput ||
-            !lutPresetSelect ||
-            !lutVal ||
-            !lutIntensityInput ||
-            !lutIntensityVal ||
             !motionBlurStrengthInput ||
             !motionBlurStrengthVal ||
             !ssrStrengthInput ||
@@ -2800,26 +2634,6 @@ export class UIController {
         ) {
             return;
         }
-
-        const applyContrast = (): void => {
-            const offsetPercent = Number(contrastInput.value);
-            this.mmdManager.postEffectContrast = 1 + offsetPercent / 100;
-            const roundedOffset = Math.round((this.mmdManager.postEffectContrast - 1) * 100);
-            contrastVal.textContent = `${roundedOffset}%`;
-        };
-
-        const applyGamma = (): void => {
-            const offsetPercent = Number(gammaInput.value);
-            const gammaPower = Math.pow(2, -offsetPercent / 100);
-            this.mmdManager.postEffectGamma = gammaPower;
-            const roundedOffset = Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100);
-            gammaVal.textContent = `${roundedOffset}%`;
-        };
-
-        const applyExposure = (): void => {
-            this.mmdManager.postEffectExposure = Number(exposureInput.value);
-            exposureVal.textContent = `x${this.mmdManager.postEffectExposure.toFixed(2)}`;
-        };
 
         const toneMapTypeToLabel = (value: number): string => {
             switch (value) {
@@ -2842,23 +2656,6 @@ export class UIController {
             toneMappingVal.textContent = this.mmdManager.postEffectToneMappingEnabled
                 ? toneMapTypeToLabel(this.mmdManager.postEffectToneMappingType)
                 : t("option.none");
-        };
-
-        const applyDithering = (): void => {
-            this.mmdManager.postEffectDitheringIntensity = Number(ditheringIntensityInput.value);
-            this.mmdManager.postEffectDitheringEnabled = this.mmdManager.postEffectDitheringIntensity > 0.000001;
-            const effectivePercent = this.mmdManager.postEffectDitheringIntensity * 100;
-            ditheringVal.textContent = this.mmdManager.postEffectDitheringEnabled
-                ? `${effectivePercent.toFixed(2)}%`
-                : t("status.off");
-        };
-
-        const applyVignette = (): void => {
-            this.mmdManager.postEffectVignetteWeight = Number(vignetteWeightInput.value);
-            this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.000001;
-            vignetteVal.textContent = this.mmdManager.postEffectVignetteEnabled
-                ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
-                : t("status.off");
         };
 
         const applyBloom = (): void => {
@@ -2886,37 +2683,11 @@ export class UIController {
                 : t("status.off");
         };
 
-        const applyGrainIntensity = (): void => {
-            this.mmdManager.postEffectGrainIntensity = Number(grainIntensityInput.value);
-            grainIntensityVal.textContent = this.mmdManager.postEffectGrainIntensity > 0.000001
-                ? this.mmdManager.postEffectGrainIntensity.toFixed(1)
-                : t("status.off");
-        };
-
-        const applySharpenEdge = (): void => {
-            this.mmdManager.postEffectSharpenEdge = Number(sharpenEdgeInput.value) / 100;
-            sharpenEdgeVal.textContent = this.mmdManager.postEffectSharpenEdge > 0.000001
-                ? this.mmdManager.postEffectSharpenEdge.toFixed(2)
-                : t("status.off");
-        };
-
         const disableSsao = (): void => {
             this.mmdManager.postEffectSsaoStrength = 0;
             this.mmdManager.postEffectSsaoRadius = 2;
             this.mmdManager.postEffectSsaoFadeEnd = 200;
             this.mmdManager.postEffectSsaoEnabled = false;
-        };
-
-        const applyColorCurves = (): void => {
-            this.mmdManager.postEffectColorCurvesHue = 30;
-            this.mmdManager.postEffectColorCurvesDensity = 0;
-            this.mmdManager.postEffectColorCurvesSaturation = Number(colorCurvesSaturationInput.value);
-            this.mmdManager.postEffectColorCurvesExposure = 0;
-            this.mmdManager.postEffectColorCurvesEnabled = Math.abs(this.mmdManager.postEffectColorCurvesSaturation) > 0.000001;
-
-            colorCurvesSaturationVal.textContent = this.mmdManager.postEffectColorCurvesEnabled
-                ? `${Math.round(this.mmdManager.postEffectColorCurvesSaturation)}`
-                : t("status.off");
         };
 
         const applyGlow = (): void => {
@@ -2926,86 +2697,6 @@ export class UIController {
 
             glowIntensityVal.textContent = this.mmdManager.postEffectGlowEnabled
                 ? this.mmdManager.postEffectGlowIntensity.toFixed(2)
-                : t("status.off");
-        };
-
-        const lutModeToLabel = (mode: string): string => {
-            switch (mode) {
-                case "external-absolute":
-                    return t("shader.option.externalAbsolute");
-                case "project-relative":
-                    return t("shader.option.projectLut");
-                default:
-                    return t("shader.option.builtin");
-            }
-        };
-
-        const chooseExternalLut = async (): Promise<void> => {
-            const lutPath = await window.electronAPI.openFileDialog([
-                { name: t("shader.group.lutFiles"), extensions: ["3dl", "cube"] },
-                { name: t("option.allFiles"), extensions: ["*"] },
-            ]);
-            if (!lutPath) return;
-
-            this.setStatus(t("status.loadingLut"), true);
-            if (await this.importExternalLutFile(lutPath, "dialog")) {
-                this.setStatus(t("status.lutLoaded"), false);
-            } else {
-                this.setStatus(t("status.lutLoadFailed"), false);
-            }
-        };
-
-        const applyLut = (): void => {
-            const selectedPresetValue = lutPresetSelect.value;
-            const selectedImportedEntry = this.getImportedLutEntry(selectedPresetValue);
-            const selectedMode = selectedImportedEntry
-                ? (lutSourceSelect.value === "project-relative" ? "project-relative" : "external-absolute")
-                : "builtin";
-            const hasLutSource = selectedMode === "builtin" || Boolean(selectedImportedEntry);
-
-            if (lutSourceSelect.value !== selectedMode) {
-                lutSourceSelect.value = selectedMode;
-            }
-
-            if (selectedImportedEntry) {
-                lutEnabledInput.checked = true;
-            }
-
-            if (selectedImportedEntry) {
-                this.postFxLutExternalPath = selectedImportedEntry.sourcePath;
-                this.postFxLutExternalText = selectedImportedEntry.rawText;
-                this.postFxLutExternalRuntimeText = selectedImportedEntry.runtimeText;
-                this.mmdManager.setPostEffectExternalLut(
-                    selectedImportedEntry.sourcePath,
-                    selectedImportedEntry.runtimeText,
-                    selectedImportedEntry.sourceFormat,
-                );
-            } else {
-                this.postFxLutExternalPath = null;
-                this.postFxLutExternalText = null;
-                this.postFxLutExternalRuntimeText = null;
-                this.mmdManager.setPostEffectExternalLut(null, null, null);
-                this.mmdManager.postEffectLutPreset = selectedPresetValue;
-            }
-
-            this.mmdManager.postEffectLutSourceMode = selectedMode;
-            this.mmdManager.postEffectLutIntensity = Number(lutIntensityInput.value) / 100;
-            this.mmdManager.postEffectLutEnabled = lutEnabledInput.checked
-                && hasLutSource
-                && this.mmdManager.postEffectLutIntensity > 0.000001;
-
-            lutIntensityInput.disabled = !lutEnabledInput.checked || !hasLutSource;
-            lutSourceVal.textContent = lutModeToLabel(selectedMode);
-            lutFileVal.textContent = this.postFxLutExternalPath
-                ? this.getBaseNameForRenderer(this.postFxLutExternalPath)
-                : t("option.none");
-            lutVal.textContent = this.mmdManager.postEffectLutEnabled
-                ? (selectedImportedEntry
-                    ? this.getBaseNameForRenderer(selectedImportedEntry.sourcePath)
-                    : this.mmdManager.postEffectLutPreset)
-                : t("status.off");
-            lutIntensityVal.textContent = this.mmdManager.postEffectLutEnabled
-                ? this.mmdManager.postEffectLutIntensity.toFixed(2)
                 : t("status.off");
         };
 
@@ -3056,18 +2747,9 @@ export class UIController {
             edgeWidthVal.textContent = `${Math.round(this.mmdManager.modelEdgeWidth * 100)}%`;
         };
 
-        contrastInput.value = String(Math.round((this.mmdManager.postEffectContrast - 1) * 100));
-        gammaInput.value = String(Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100));
-        exposureInput.value = String(Math.max(0, Math.min(8, this.mmdManager.postEffectExposure)).toFixed(2));
         toneMappingTypeSelect.value = this.mmdManager.postEffectToneMappingEnabled
             ? String(this.mmdManager.postEffectToneMappingType)
             : "-1";
-        ditheringIntensityInput.value = String(
-            Math.max(0, Math.min(1, this.mmdManager.postEffectDitheringEnabled ? this.mmdManager.postEffectDitheringIntensity : 0)).toFixed(4),
-        );
-        vignetteWeightInput.value = String(
-            Math.max(0, Math.min(4, this.mmdManager.postEffectVignetteEnabled ? this.mmdManager.postEffectVignetteWeight : 0)).toFixed(2),
-        );
         bloomEnabledInput.checked = this.mmdManager.postEffectBloomEnabled;
         bloomWeightInput.value = String(
             Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectBloomWeight * 100))),
@@ -3081,31 +2763,8 @@ export class UIController {
         chromaticAberrationInput.value = String(
             Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectChromaticAberration))),
         );
-        grainIntensityInput.value = String(
-            Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectGrainIntensity))),
-        );
-        sharpenEdgeInput.value = String(
-            Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))),
-        );
-        colorCurvesSaturationInput.value = String(
-            Math.max(
-                -100,
-                Math.min(100, Math.round(this.mmdManager.postEffectColorCurvesEnabled ? this.mmdManager.postEffectColorCurvesSaturation : 0)),
-            ),
-        );
         glowIntensityInput.value = String(
             Math.max(0, Math.min(400, Math.round((this.mmdManager.postEffectGlowEnabled ? this.mmdManager.postEffectGlowIntensity : 0) * 100))),
-        );
-        if (!this.postFxLutExternalPath && this.mmdManager.postEffectLutExternalPath) {
-            this.postFxLutExternalPath = this.mmdManager.postEffectLutExternalPath;
-        }
-        lutSourceSelect.value = lutSourceSelect.querySelector(`option[value="${this.mmdManager.postEffectLutSourceMode}"]`)
-            ? this.mmdManager.postEffectLutSourceMode
-            : "builtin";
-        lutEnabledInput.checked = this.mmdManager.postEffectLutEnabled;
-        lutPresetSelect.value = this.getCurrentLutPresetSelectValue();
-        lutIntensityInput.value = String(
-            Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectLutIntensity * 100))),
         );
         motionBlurStrengthInput.value = String(
             Math.max(0, Math.min(200, Math.round((this.mmdManager.postEffectMotionBlurEnabled ? this.mmdManager.postEffectMotionBlurStrength : 0) * 100))),
@@ -3120,20 +2779,11 @@ export class UIController {
         lensEdgeBlurInput.value = String(Math.round(this.mmdManager.dofLensEdgeBlur * 100));
         edgeWidthInput.value = String(Math.round(this.mmdManager.modelEdgeWidth * 100));
 
-        applyContrast();
-        applyGamma();
-        applyExposure();
         applyToneMapping();
-        applyDithering();
-        applyVignette();
         applyBloom();
         applyChromaticAberration();
-        applyGrainIntensity();
-        applySharpenEdge();
         disableSsao();
-        applyColorCurves();
         applyGlow();
-        applyLut();
         applyMotionBlur();
         applySsr();
         applyVls();
@@ -3144,28 +2794,13 @@ export class UIController {
             this.installRangeNumberInputs(postFxControls);
         }
 
-        contrastInput.addEventListener("input", applyContrast);
-        gammaInput.addEventListener("input", applyGamma);
-        exposureInput.addEventListener("input", applyExposure);
         toneMappingTypeSelect.addEventListener("change", applyToneMapping);
-        ditheringIntensityInput.addEventListener("input", applyDithering);
-        vignetteWeightInput.addEventListener("input", applyVignette);
         bloomEnabledInput.addEventListener("input", applyBloom);
         bloomWeightInput.addEventListener("input", applyBloom);
         bloomThresholdInput.addEventListener("input", applyBloom);
         bloomKernelInput.addEventListener("input", applyBloom);
         chromaticAberrationInput.addEventListener("input", applyChromaticAberration);
-        grainIntensityInput.addEventListener("input", applyGrainIntensity);
-        sharpenEdgeInput.addEventListener("input", applySharpenEdge);
-        colorCurvesSaturationInput.addEventListener("input", applyColorCurves);
         glowIntensityInput.addEventListener("input", applyGlow);
-        lutSourceSelect.addEventListener("change", applyLut);
-        lutFileButton.addEventListener("click", () => {
-            void chooseExternalLut();
-        });
-        lutEnabledInput.addEventListener("input", applyLut);
-        lutPresetSelect.addEventListener("change", applyLut);
-        lutIntensityInput.addEventListener("input", applyLut);
         motionBlurStrengthInput.addEventListener("input", applyMotionBlur);
         ssrStrengthInput.addEventListener("input", applySsr);
         vlsExposureInput.addEventListener("input", applyVls);
