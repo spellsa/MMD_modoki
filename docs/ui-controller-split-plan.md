@@ -16,6 +16,69 @@
 - 切り出し後も `npm.cmd run lint` で最低限確認する。
 - 大きな UI 挙動変更を混ぜない。分割と挙動変更は別コミットにする。
 
+## 進捗: 2026-04-16
+
+`ui-controller.ts` 分割は、低リスクで切り出しやすい UI 領域を中心に進めた。
+
+現在の行数:
+
+```text
+src/ui-controller.ts: 4929 行
+src/ui/accessory-panel-controller.ts: 381 行
+src/ui/dof-panel-controller.ts: 398 行
+src/ui/export-ui-controller.ts: 641 行
+src/ui/layout-ui-controller.ts: 373 行
+src/ui/runtime-feature-ui-controller.ts: 252 行
+src/ui/scene-environment-ui-controller.ts: 137 行
+src/ui/shader-panel-controller.ts: 394 行
+```
+
+分割済み:
+
+- `ExportUiController`
+  - output 設定、PNG / PNG sequence / WebM export、background export busy state。
+- `SceneEnvironmentUiController`
+  - ground / background image / background video / skydome。
+- `RuntimeFeatureUiController`
+  - AA / physics / shadow / rigid body visualizer / GI / physics gravity controls。
+- `AccessoryPanelController`
+  - accessory selector、transform slider、parent model / bone、visibility / delete。
+- `LayoutUiController`
+  - shader panel 開閉、UI fullscreen、timeline / shader / bottom panel resizer、viewport aspect presentation。
+- `ShaderPanelController`
+  - WGSL material preset、material list、selected / all material への preset 適用、外部 WGSL snippet validation。
+- `DofPanelController`
+  - DoF enabled / quality / focus / f-stop / focal length、focus target model / bone、shader panel への DoF controls 移動。
+
+進捗感:
+
+- `ui-controller.ts` は 2026-04 時点の 7,800 行超から 4,929 行まで減った。
+- 行数ベースでは約 3 分の 1 弱を外へ逃がせた。
+- 安全に切り出しやすい toolbar / panel / export / accessory / layout はかなり進んだ。
+- まだ残っている大きな塊は、PostFX / LUT、camera controls、model info、timeline / keyframe 編集。
+
+残作業の優先候補:
+
+1. `PostFxPanelController`
+   - camera target 時の shader panel 内 PostFX controls。
+   - LUT import / LUT preset / bloom / tone mapping / edge / distortion など。
+   - shader panel から見えるが、責務としては描画効果 UI。
+2. `ModelInfoPanelController`
+   - model selector、visibility、delete、info action button。
+   - accessory panel と近い形で切れる見込み。
+3. `CameraPanelController`
+   - camera slider、view preset、camera DoF 周辺との接続。
+   - timeline / keyframe ほど危険ではないが、DoF との境界に注意する。
+4. `TimelineEditUiController` / `KeyframePanelController`
+   - keyframe add / delete / nudge、dirty state、interpolation、bone / morph / camera / accessory keyframe 登録。
+   - MMD 編集体験の本丸なので最後に回す。
+
+現時点の方針:
+
+- 次に右パネルを続けるなら、`PostFxPanelController` を独立させる。
+- `ShaderPanelController` に PostFX / DoF まで抱えさせると、また巨大 controller になりやすい。
+- `UIController` は当面 composition root / facade として残し、controller 間 callback と project load/save の橋渡しを担当させる。
+
 ## 参考にする設計: timeline.ts
 
 `src/timeline.ts` はコードレビューで評価されていた通り、UI 実装として次の点が参考になる。
@@ -220,6 +283,337 @@ export class SomeUiController {
 
 - `UIController` は、controller 間の接続と全体状態だけを見る形へ寄せる。
 
+## 直近の作業プラン
+
+2026-04-16 時点では、まず `ExportUiController` を小さく導入する。
+`UIController` を一気に置き換えるのではなく、状態管理、output 設定、export 実行本体を段階的に移す。
+
+### Phase 0: 作業前の現状固定
+
+作業前に、最低限の確認を通しておく。
+
+```powershell
+npm.cmd run lint
+npm.cmd run smoke:launch
+```
+
+`smoke:launch` は WebGPU runtime 初期化まで確認するため、UI 分割後の起動回帰検知に使う。
+
+### Phase 1: ExportUiController の土台追加
+
+追加ファイル:
+
+```text
+src/ui/export-ui-controller.ts
+```
+
+最初に持たせる責務:
+
+- export ボタンの DOM 解決。
+- output 設定 DOM の DOM 解決。
+- busy overlay DOM の DOM 解決。
+- `dispose()` の用意。
+- `hasBackgroundExportActive()` の公開。
+- `refreshLocalizedState()` のような軽い公開 API。
+
+この段階では、`exportPNG` / `exportPNGSequence` / `exportWebm` 本体は `UIController` 側に残してよい。
+
+### Phase 2: background export state bridge を移す
+
+最初に移す対象:
+
+- `setupPngSequenceExportStateBridge`
+- `applyPngSequenceExportState`
+- `applyPngSequenceExportProgress`
+- `setupWebmExportStateBridge`
+- `applyWebmExportState`
+- `applyWebmExportProgress`
+- `startBackgroundExportMonitor`
+- `refreshBackgroundExportLock`
+- `updateBackgroundExportBusyMessage`
+- `formatWebmExportPhaseLabel`
+- `formatExportAge`
+
+`UIController` からは callback で接続する。
+
+```ts
+this.exportUiController = new ExportUiController({
+    onPausePlayback: () => this.pause(false),
+});
+```
+
+`beforeunload` では、個別 unsubscribe を直接呼ばずに `ExportUiController.dispose()` へ寄せる。
+
+```ts
+this.exportUiController.dispose();
+```
+
+狙いは、IPC unsubscribe / interval / busy overlay 状態を `UIController` から剥がすこと。
+
+### Phase 3: output controls を移す
+
+次に output 設定まわりを移す。
+
+- `setupOutputControls`
+- `resolveSelectedOutputAspectRatio`
+- `getOutputSettings`
+- `clampOutputWidth`
+- `clampOutputHeight`
+- `outputAspectRatio`
+- `isSyncingOutputSettings`
+
+この領域は viewport aspect と接続しているため、`ExportUiController` へ getter / callback を渡す。
+
+```ts
+this.exportUiController = new ExportUiController({
+    getViewportSize: () => ({
+        width: this.viewportContainerEl?.clientWidth ?? 0,
+        height: this.viewportContainerEl?.clientHeight ?? 0,
+    }),
+    onOutputAspectChanged: () => {
+        this.applyViewportAspectPresentation();
+        this.syncMainWindowPresentationAspect();
+    },
+});
+```
+
+この段階で、`UIController` は `this.exportUiController.getOutputSettings()` を呼ぶ形にする。
+
+### Phase 4: project output state を移す
+
+保存 / 読み込み用の output 設定も `ExportUiController` に寄せる。
+
+- `exportOutputProjectState`
+- `applyOutputProjectState`
+
+`UIController` 側は次のような呼び出しに縮める。
+
+```ts
+project.output = this.exportUiController.exportProjectState();
+this.exportUiController.applyProjectState(parsedProject.output);
+```
+
+ここまでで、output 設定の責務はほぼ `ExportUiController` に閉じる。
+
+### Phase 5: export 実行本体を移す
+
+最後に export 実行処理を移す。
+
+- `exportPNG`
+- `exportPNGSequence`
+- `exportWebm`
+- `buildPngSequenceFolderName`
+- `buildWebmFileName`
+- `sanitizeFileNameSegment`
+- `joinPathForRenderer`
+
+依存は callback で渡す。
+
+```ts
+this.exportUiController = new ExportUiController({
+    mmdManager,
+    buildProjectState: () => this.buildProjectStateForPersistence(),
+    setStatus: (text, loading) => this.setStatus(text, loading),
+    showToast: (message, type) => this.showToast(message, type),
+});
+```
+
+`buildProjectStateForPersistence()` は、shader / LUT / project 全体状態と絡むため、最初は `UIController` 側に残す。
+
+### Phase 6: UIController 側の削減
+
+Export 移動後に削除する候補:
+
+- `btnExportPng`
+- `btnExportPngSeq`
+- `btnExportWebm`
+- `outputAspectSelect`
+- `outputSizePresetSelect`
+- `outputWidthInput`
+- `outputHeightInput`
+- `outputLockAspectInput`
+- `outputQualitySelect`
+- `outputFpsSelect`
+- `outputWebmCodecSelect`
+- `outputIncludeAudioInput`
+- `outputAspectRatio`
+- `isSyncingOutputSettings`
+- PNG / WebM export state unsubscribe 群
+- PNG / WebM export active / progress 群
+- `backgroundExportMonitorIntervalId`
+- `busyOverlayEl`
+- `busyTextEl`
+
+`appRootEl` は他用途が出る可能性があるため、最初は無理に移さなくてもよい。
+
+### 最初のコミット単位
+
+最初の実装コミットは、次の範囲に絞る。
+
+```text
+ExportUiController を追加し、background export state bridge / busy overlay / cleanup だけ移す
+```
+
+この範囲なら、export request 作成や project 保存形式に触れずに済み、回帰範囲を狭くできる。
+
+### 実装メモ: 2026-04-16
+
+実装は `src/ui/export-ui-controller.ts` を追加し、当初の最初のコミット単位より少し進めて、Phase 1 から Phase 5 までをまとめて移した。
+
+移動済み:
+
+- background export state bridge / progress / busy overlay / cleanup。
+- output size / aspect / quality / fps / WebM codec / audio include の UI 状態。
+- project output state の保存 / 復元。
+- PNG 1 枚、PNG 連番、WebM の export 実行本体。
+
+`UIController` に残したもの:
+
+- export ボタンとショートカットの接続。
+- `buildProjectStateForPersistence()`。
+- project 保存 / 読み込み用の path helper。
+- viewport canvas の実際の presentation aspect 適用。
+
+次に削れる候補:
+
+- export ボタン DOM の解決とイベント登録。
+- `ExportUiController` へ渡している callback 群の型整理。
+- `joinPathForRenderer` など renderer path helper の共通化。
+
+### 実装メモ: SceneEnvironmentUiController
+
+export 分割の次に、`src/ui/scene-environment-ui-controller.ts` を追加した。
+
+移動済み:
+
+- ground / background media / skydome の toolbar ボタン DOM 解決。
+- ground / background media / skydome の click handler。
+- `G` shortcut 相当の ground toggle。
+- `B` shortcut 相当の背景黒 toggle。
+- 背景画像 / 背景動画の読み込み処理。
+- locale 変更時の toolbar 表示更新。
+
+`UIController` に残したもの:
+
+- load file routing から背景画像 / 動画 loader を呼ぶ接続。
+- project / renderer path helper。
+- ground 以外の表示系 shortcut。
+
+### 実装メモ: RuntimeFeatureUiController
+
+`src/ui/runtime-feature-ui-controller.ts` を追加し、runtime の表示 / 機能 toggle を切り出した。
+
+移動済み:
+
+- AA toggle。
+- physics toggle。
+- physics gravity / simulation rate の UI。
+- shadow toggle。
+- rigid body visualizer toggle。
+- global illumination toggle。
+- locale 変更時の toolbar 表示更新。
+
+`UIController` に残したもの:
+
+- MMD runtime callback から refresh を呼ぶ接続。
+- モデル読み込み / 選択変更後に rigid body visualizer の状態を refresh する接続。
+- shader panel / fullscreen UI など layout 系 toolbar。
+
+### 実装メモ: AccessoryPanelController
+
+`src/ui/accessory-panel-controller.ts` を追加し、アクセサリ UI を切り出した。
+
+移動済み:
+
+- accessory selector の DOM 解決と一覧 refresh。
+- accessory transform slider / value label の同期。
+- accessory parent model / bone selector の同期。
+- accessory visibility / delete の操作。
+- アクセサリ選択変更時の UI refresh。
+
+`UIController` に残したもの:
+
+- アクセサリ transform 変更時に section keyframe dirty を付ける接続。
+- アクセサリ keyframe 登録処理。
+- load file routing から accessory refresh を呼ぶ接続。
+
+### 実装メモ: LayoutUiController
+
+`src/ui/layout-ui-controller.ts` を追加し、layout / panel 表示まわりを切り出した。
+
+移動済み:
+
+- shader panel の開閉ボタンと表示状態。
+- UI fullscreen / presentation mode の切り替え。
+- timeline / shader panel / bottom panel の resizer。
+- viewport container の aspect presentation 同期。
+- output aspect 変更時の canvas 表示サイズ反映。
+- window resize 時の panel 幅 / 高さ clamp。
+
+`UIController` に残したもの:
+
+- `ExportUiController` と `LayoutUiController` の接続。
+- Escape / Alt+Enter shortcut から layout controller を呼ぶ接続。
+- shader panel の中身そのもの。
+
+注意点:
+
+- `LayoutUiController` は `ExportUiController` の output aspect 設定を参照するため、controller 間の依存がある。
+- shader panel 本体はまだ `UIController` に残っているので、次に shader panel を切る場合は、開閉状態と中身の責務境界を崩さないようにする。
+
+### 実装メモ: ShaderPanelController
+
+`src/ui/shader-panel-controller.ts` を追加し、右パネルの WGSL 材質割り当て UI を切り出した。
+
+移動済み:
+
+- shader model selector の event handler。
+- shader preset apply / reset button の event handler。
+- WGSL material preset 一覧の描画。
+- material list の選択状態。
+- selected / all material への shader preset 適用。
+- 外部 WGSL toon snippet の validation と適用。
+- bundled WGSL file scan の状態。
+
+`UIController` に残したもの:
+
+- camera target 時の PostFX / DoF controls 描画。
+- LUT import / project-relative LUT 保存。
+- DoF focus target controls。
+- project 保存 / 読み込み時の外部 WGSL / LUT 連携。
+
+注意点:
+
+- 現時点の `ShaderPanelController` は、camera target では `UIController.renderShaderCameraPostEffectsPanel()` を callback で呼ぶ。
+- PostFX / LUT / DoF は shader panel 内に描画されているが、実際の責務は描画効果と camera control にまたがるため、WGSL material panel と同時には移さなかった。
+- 次に右パネルをさらに整理するなら、`PostFxPanelController` と `DofPanelController` に分ける方が安全。
+
+### 実装メモ: DofPanelController
+
+`src/ui/dof-panel-controller.ts` を追加し、DoF controls を切り出した。
+
+移動済み:
+
+- DoF enabled / quality / focus / focus offset / f-stop / near suppression / focal invert / lens size / focal length の UI。
+- DoF lens blur strength の UI。
+- focus target model / bone selector の同期。
+- auto focus readout の更新。
+- shader panel 内へ DoF controls を移す処理。
+- camera panel へ DoF controls を戻す処理。
+
+`UIController` に残したもの:
+
+- camera target 時の PostFX controls 描画。
+- PostFX controls から DoF controls の attach を呼ぶ接続。
+- camera distance 変更や runtime tick から DoF auto focus readout を refresh する接続。
+- lens distortion auto readout。
+
+注意点:
+
+- DoF controls は camera panel に実体 DOM があり、camera target 時だけ shader panel 内の PostFX controls へ移される。
+- `DofPanelController` はこの DOM 移動を担当するが、PostFX / LUT 本体はまだ `UIController` 側に残っている。
+- 次に右パネルを続ける場合は、`PostFxPanelController` を作り、LUT / bloom / tone mapping / edge / distortion を移す。
+
 ## 切り出し時の確認観点
 
 - PNG 1 枚出力が動く。
@@ -230,6 +624,7 @@ export class SomeUiController {
 - output size preset / aspect lock / quality / fps が従来通り同期する。
 - locale 変更後に表示テキストが破綻しない。
 - `npm.cmd run lint` が通る。
+- `npm.cmd run smoke:launch` が通り、`engine=WebGPU` が報告される。
 
 ## やらないこと
 

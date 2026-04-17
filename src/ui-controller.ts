@@ -1,4 +1,4 @@
-import type { MmdManager, WgslMaterialShaderPresetId } from "./mmd-manager";
+import type { MmdManager } from "./mmd-manager";
 import type { Timeline } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
 import { applyI18nToDom, getLocale, setLocale, t } from "./i18n";
@@ -10,20 +10,21 @@ import type {
     MmdModokiProjectFileV1,
     ModelInfo,
     MotionInfo,
-    PngSequenceExportProgress,
-    PngSequenceExportState,
     ProjectOutputState,
     UiLocale,
     TrackCategory,
     TimelineInterpolationPreview,
-    WebmExportProgress,
-    WebmExportState,
 } from "./types";
 import { normalizeLutFile } from "./lut-file";
-import { logError, logInfo } from "./app-logger";
+import { AccessoryPanelController } from "./ui/accessory-panel-controller";
+import { DofPanelController } from "./ui/dof-panel-controller";
+import { ExportUiController } from "./ui/export-ui-controller";
+import { LayoutUiController } from "./ui/layout-ui-controller";
+import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
+import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
+import { ShaderPanelController } from "./ui/shader-panel-controller";
 
 type CameraViewPreset = "left" | "front" | "right" | "top" | "back" | "bottom";
-type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
 type NumericArrayLike = ArrayLike<number> | null | undefined;
@@ -34,7 +35,6 @@ type SelectedBonePoseSnapshot = {
     distance?: number;
     fov?: number;
 };
-type OutputSettings = { width: number; height: number; qualityScale: number; fps: number };
 
 type RuntimeMovableBoneTrackLike = {
     name: string;
@@ -147,27 +147,8 @@ type ImportedLutRegistryEntry = {
 export class UIController {
     private static readonly CAMERA_SELECT_VALUE = "__camera__";
     private static readonly DEBUG_KEYFRAME_FLOW = false;
-    private static readonly MIN_TIMELINE_WIDTH = 160;
-    private static readonly MIN_SHADER_PANEL_WIDTH = 220;
-    private static readonly MIN_VIEWPORT_WIDTH = 360;
-    private static readonly MIN_BOTTOM_PANEL_HEIGHT = 132;
-    private static readonly MIN_MAIN_CONTENT_HEIGHT = 220;
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 90;
-    private static readonly EXTERNAL_WGSL_PRESET_PREFIX = "external-wgsl::";
-    private static readonly HIDDEN_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
-        "wgsl-specular",
-        "wgsl-cel-sharp",
-        "wgsl-rim-lift",
-        "wgsl-mono-flat",
-        "wgsl-full-light-add",
-        "wgsl-full-alpha-test-hard",
-        "wgsl-alpha-mask",
-        "wgsl-accessory-toon",
-        "wgsl-white-key-cutout",
-        "wgsl-black-key-cutout",
-    ]);
-
     private mmdManager: MmdManager;
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
@@ -179,36 +160,7 @@ export class UIController {
     private btnExportPng: HTMLElement;
     private btnExportPngSeq: HTMLElement | null = null;
     private btnExportWebm: HTMLElement | null = null;
-    private outputAspectSelect: HTMLSelectElement | null = null;
-    private outputSizePresetSelect: HTMLSelectElement | null = null;
-    private outputWidthInput: HTMLInputElement | null = null;
-    private outputHeightInput: HTMLInputElement | null = null;
-    private outputLockAspectInput: HTMLInputElement | null = null;
-    private outputQualitySelect: HTMLSelectElement | null = null;
-    private outputFpsSelect: HTMLSelectElement | null = null;
-    private outputWebmCodecSelect: HTMLSelectElement | null = null;
-    private outputIncludeAudioInput: HTMLInputElement | null = null;
-    private outputAspectRatio = 16 / 9;
-    private isSyncingOutputSettings = false;
-    private btnToggleGround: HTMLElement;
-    private groundToggleText: HTMLElement;
-    private btnToggleBackground: HTMLElement;
-    private backgroundToggleText: HTMLElement;
-    private btnToggleSkydome: HTMLElement;
-    private skydomeToggleText: HTMLElement;
-    private btnTogglePhysics: HTMLElement;
-    private physicsToggleText: HTMLElement;
-    private btnToggleShadow: HTMLElement;
-    private shadowToggleText: HTMLElement;
-    private btnToggleRigidBodies: HTMLElement;
-    private rigidBodiesToggleText: HTMLElement;
-    private btnToggleGi: HTMLElement;
-    private giToggleText: HTMLElement;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
-    private btnToggleShaderPanel: HTMLButtonElement | null = null;
-    private shaderPanelToggleText: HTMLElement | null = null;
-    private btnToggleFullscreenUi: HTMLButtonElement | null = null;
-    private fullscreenUiToggleText: HTMLElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
     private btnStop: HTMLElement;
@@ -219,9 +171,6 @@ export class UIController {
     private statusText: HTMLElement;
     private statusDot: HTMLElement;
     private viewportOverlay: HTMLElement;
-    private viewportContainerEl: HTMLElement | null = null;
-    private renderCanvasEl: HTMLCanvasElement | null = null;
-    private viewportAspectResizeObserver: ResizeObserver | null = null;
     private btnKeyframeAdd: HTMLButtonElement;
     private btnKeyframeDelete: HTMLButtonElement;
     private btnKeyframeNudgeLeft: HTMLButtonElement;
@@ -242,21 +191,8 @@ export class UIController {
     private shaderResetButton: HTMLButtonElement | null = null;
     private shaderPanelNote: HTMLElement | null = null;
     private shaderMaterialList: HTMLElement | null = null;
-    private readonly shaderSelectedMaterialKeys = new Map<number, string>();
-    private mainContentEl: HTMLElement;
-    private timelinePanelEl: HTMLElement | null = null;
-    private timelineResizerEl: HTMLElement | null = null;
-    private shaderResizerEl: HTMLElement | null = null;
-    private shaderPanelEl: HTMLElement | null = null;
-    private bottomPanelEl: HTMLElement | null = null;
-    private bottomPanelResizerEl: HTMLElement | null = null;
-    private isTimelineResizing = false;
-    private isShaderResizing = false;
-    private isBottomPanelResizing = false;
     private camDistanceSlider: HTMLInputElement | null = null;
     private camDistanceValueEl: HTMLElement | null = null;
-    private cameraControlsEl: HTMLElement | null = null;
-    private cameraDofControlsEl: HTMLElement | null = null;
     private camViewLeftBtn: HTMLButtonElement | null = null;
     private camViewFrontBtn: HTMLButtonElement | null = null;
     private camViewRightBtn: HTMLButtonElement | null = null;
@@ -268,33 +204,10 @@ export class UIController {
     private btnBoneKeyframe: HTMLButtonElement | null = null;
     private btnMorphKeyframe: HTMLButtonElement | null = null;
     private btnAccessoryKeyframe: HTMLButtonElement | null = null;
-    private physicsGravityAccelSlider: HTMLInputElement | null = null;
-    private physicsGravityDirXSlider: HTMLInputElement | null = null;
-    private physicsGravityDirYSlider: HTMLInputElement | null = null;
-    private physicsGravityDirZSlider: HTMLInputElement | null = null;
-    private physicsSimulationRateSelect: HTMLSelectElement | null = null;
-    private physicsSimulationRateValueEl: HTMLElement | null = null;
-    private dofFocusSlider: HTMLInputElement | null = null;
-    private dofFocusValueEl: HTMLElement | null = null;
-    private dofFStopValueEl: HTMLElement | null = null;
-    private dofFocalLengthSlider: HTMLInputElement | null = null;
-    private dofFocalLengthValueEl: HTMLElement | null = null;
-    private dofTargetModelSelect: HTMLSelectElement | null = null;
-    private dofTargetBoneSelect: HTMLSelectElement | null = null;
     private lensDistortionSlider: HTMLInputElement | null = null;
     private lensDistortionValueEl: HTMLElement | null = null;
     private shortcutEdgeWidthRestore = 1;
-    private accessorySelect: HTMLSelectElement | null = null;
-    private accessoryParentModelSelect: HTMLSelectElement | null = null;
-    private accessoryParentBoneSelect: HTMLSelectElement | null = null;
-    private btnAccessoryVisibility: HTMLButtonElement | null = null;
-    private btnAccessoryDelete: HTMLButtonElement | null = null;
-    private accessoryEmptyStateEl: HTMLElement | null = null;
-    private readonly accessoryTransformSliders = new Map<AccessoryTransformSliderKey, HTMLInputElement>();
-    private readonly accessoryTransformValueEls = new Map<AccessoryTransformSliderKey, HTMLElement>();
     private readonly rangeNumberInputs = new WeakMap<HTMLInputElement, HTMLInputElement>();
-    private isSyncingAccessoryUi = false;
-    private isSyncingAccessoryParentUi = false;
     private syncingBoneSelection = false;
     private selectedBoneTrackCategory: TrackCategory | null = null;
     private readonly sectionKeyframeDirtyKeys: Record<SectionKeyframeSection, Set<string>> = {
@@ -308,21 +221,13 @@ export class UIController {
     private readonly interpolationChannelBindings = new Map<string, InterpolationChannelBinding>();
     private interpolationDragState: InterpolationDragState | null = null;
     private lastObservedFrame: number | null = null;
-    private appRootEl: HTMLElement;
-    private busyOverlayEl: HTMLElement | null = null;
-    private busyTextEl: HTMLElement | null = null;
-    private pngSequenceExportStateUnsubscribe: (() => void) | null = null;
-    private pngSequenceExportProgressUnsubscribe: (() => void) | null = null;
-    private webmExportStateUnsubscribe: (() => void) | null = null;
-    private webmExportProgressUnsubscribe: (() => void) | null = null;
-    private isPngSequenceExportActive = false;
-    private pngSequenceExportActiveCount = 0;
-    private latestPngSequenceExportProgress: PngSequenceExportProgress | null = null;
-    private isWebmExportActive = false;
-    private webmExportActiveCount = 0;
-    private latestWebmExportProgress: WebmExportProgress | null = null;
-    private backgroundExportMonitorIntervalId: number | null = null;
-    private isUiFullscreenActive = false;
+    private accessoryPanelController: AccessoryPanelController | null = null;
+    private dofPanelController: DofPanelController | null = null;
+    private exportUiController: ExportUiController | null = null;
+    private layoutUiController: LayoutUiController | null = null;
+    private runtimeFeatureUiController: RuntimeFeatureUiController | null = null;
+    private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
+    private shaderPanelController: ShaderPanelController | null = null;
     private postFxLutExternalPath: string | null = null;
     private postFxLutExternalText: string | null = null;
     private postFxLutExternalRuntimeText: string | null = null;
@@ -330,15 +235,9 @@ export class UIController {
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
     private currentProjectFilePath: string | null = null;
-    private bundledWgslShaderFiles: { name: string; path: string }[] = [];
-    private bundledWgslScanInFlight = false;
-    private bundledWgslLastScanMs = 0;
-    private refreshAaToggleUi: (() => void) | null = null;
-    private refreshShadowToggleUi: (() => void) | null = null;
-    private refreshGiToggleUi: (() => void) | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
-        this.refreshDofFocusTargetControls();
+        this.dofPanelController?.refreshFocusTargetControls();
         this.refreshShaderPanel();
     };
 
@@ -365,34 +264,7 @@ export class UIController {
         this.btnExportPng = document.getElementById("btn-export-png")!;
         this.btnExportPngSeq = document.getElementById("btn-export-png-seq");
         this.btnExportWebm = document.getElementById("btn-export-webm");
-        this.outputAspectSelect = document.getElementById("output-aspect") as HTMLSelectElement | null;
-        this.outputSizePresetSelect = document.getElementById("output-size-preset") as HTMLSelectElement | null;
-        this.outputWidthInput = document.getElementById("output-width") as HTMLInputElement | null;
-        this.outputHeightInput = document.getElementById("output-height") as HTMLInputElement | null;
-        this.outputLockAspectInput = document.getElementById("output-lock-aspect") as HTMLInputElement | null;
-        this.outputQualitySelect = document.getElementById("output-quality") as HTMLSelectElement | null;
-        this.outputFpsSelect = document.getElementById("output-fps") as HTMLSelectElement | null;
-        this.outputWebmCodecSelect = document.getElementById("output-webm-codec") as HTMLSelectElement | null;
-        this.outputIncludeAudioInput = document.getElementById("output-include-audio") as HTMLInputElement | null;
-        this.btnToggleGround = document.getElementById("btn-toggle-ground")!;
-        this.groundToggleText = document.getElementById("ground-toggle-text")!;
-        this.btnToggleBackground = document.getElementById("btn-toggle-background")!;
-        this.backgroundToggleText = document.getElementById("background-toggle-text")!;
-        this.btnToggleSkydome = document.getElementById("btn-toggle-skydome")!;
-        this.skydomeToggleText = document.getElementById("skydome-toggle-text")!;
-        this.btnTogglePhysics = document.getElementById("btn-toggle-physics")!;
-        this.physicsToggleText = document.getElementById("physics-toggle-text")!;
-        this.btnToggleShadow = document.getElementById("btn-toggle-shadow")!;
-        this.shadowToggleText = document.getElementById("shadow-toggle-text")!;
-        this.btnToggleRigidBodies = document.getElementById("btn-toggle-rigid-bodies")!;
-        this.rigidBodiesToggleText = document.getElementById("rigid-bodies-toggle-text")!;
-        this.btnToggleGi = document.getElementById("btn-toggle-gi")!;
-        this.giToggleText = document.getElementById("gi-toggle-text")!;
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
-        this.btnToggleShaderPanel = document.getElementById("btn-toggle-shader-panel") as HTMLButtonElement | null;
-        this.shaderPanelToggleText = document.getElementById("shader-panel-toggle-text");
-        this.btnToggleFullscreenUi = document.getElementById("btn-toggle-fullscreen-ui") as HTMLButtonElement | null;
-        this.fullscreenUiToggleText = document.getElementById("fullscreen-ui-toggle-text");
         this.btnPlay = document.getElementById("btn-play")!;
         this.btnPause = document.getElementById("btn-pause")!;
         this.btnStop = document.getElementById("btn-stop")!;
@@ -403,8 +275,6 @@ export class UIController {
         this.statusText = document.getElementById("status-text")!;
         this.statusDot = document.querySelector(".status-dot")!;
         this.viewportOverlay = document.getElementById("viewport-overlay")!;
-        this.viewportContainerEl = document.getElementById("viewport-container");
-        this.renderCanvasEl = document.getElementById("render-canvas") as HTMLCanvasElement | null;
         this.btnKeyframeAdd = document.getElementById("btn-kf-add") as HTMLButtonElement;
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
@@ -425,57 +295,83 @@ export class UIController {
         this.shaderResetButton = document.getElementById("btn-shader-reset") as HTMLButtonElement | null;
         this.shaderPanelNote = document.getElementById("shader-panel-note");
         this.shaderMaterialList = document.getElementById("shader-material-list");
-        this.accessorySelect = document.getElementById("accessory-select") as HTMLSelectElement | null;
-        this.accessoryParentModelSelect = document.getElementById("accessory-parent-model") as HTMLSelectElement | null;
-        this.accessoryParentBoneSelect = document.getElementById("accessory-parent-bone") as HTMLSelectElement | null;
-        this.btnAccessoryVisibility = document.getElementById("btn-accessory-visibility") as HTMLButtonElement | null;
-        this.btnAccessoryDelete = document.getElementById("btn-accessory-delete") as HTMLButtonElement | null;
-        this.accessoryEmptyStateEl = document.getElementById("accessory-empty-state");
-        this.appRootEl = document.getElementById("app") as HTMLElement;
-        this.busyOverlayEl = document.getElementById("ui-busy-overlay");
-        this.busyTextEl = document.getElementById("ui-busy-text");
-        this.mainContentEl = document.getElementById("main-content") as HTMLElement;
-        this.timelinePanelEl = document.getElementById("timeline-panel");
-        this.timelineResizerEl = document.getElementById("timeline-resizer");
-        this.shaderResizerEl = document.getElementById("shader-resizer");
-        this.shaderPanelEl = document.getElementById("shader-panel");
-        this.bottomPanelEl = document.getElementById("bottom-panel");
-        this.bottomPanelResizerEl = document.getElementById("bottom-panel-resizer");
-        this.cameraControlsEl = document.getElementById("camera-controls");
-        this.cameraDofControlsEl = document.getElementById("camera-dof-controls");
 
         this.setupEventListeners();
         this.setupCallbacks();
         this.setupKeyboard();
         this.setupFileDrop();
-        this.setupPngSequenceExportStateBridge();
-        this.setupWebmExportStateBridge();
-        this.startBackgroundExportMonitor();
+        this.exportUiController = new ExportUiController({
+            mmdManager: this.mmdManager,
+            buildProjectState: () => this.buildProjectStateForPersistence(),
+            setStatus: (text, loading) => this.setStatus(text, loading),
+            showToast: (message, type) => this.showToast(message, type),
+            isPlaybackActive: () => this.mmdManager.isPlaying,
+            onPausePlayback: () => this.pause(false),
+            getViewportSize: () => ({
+                width: document.getElementById("viewport-container")?.clientWidth ?? 0,
+                height: document.getElementById("viewport-container")?.clientHeight ?? 0,
+            }),
+            onOutputAspectChanged: () => {
+                this.layoutUiController?.applyViewportAspectPresentation();
+                this.layoutUiController?.syncMainWindowPresentationAspect();
+            },
+        });
+        this.layoutUiController = new LayoutUiController({
+            mmdManager: this.mmdManager,
+            exportUiController: this.exportUiController,
+            showToast: (message, type) => this.showToast(message, type),
+        });
+        this.sceneEnvironmentUiController = new SceneEnvironmentUiController({
+            mmdManager: this.mmdManager,
+            setStatus: (text, loading) => this.setStatus(text, loading),
+            showToast: (message, type) => this.showToast(message, type),
+        });
+        this.runtimeFeatureUiController = new RuntimeFeatureUiController({
+            mmdManager: this.mmdManager,
+            showToast: (message, type) => this.showToast(message, type),
+        });
+        this.accessoryPanelController = new AccessoryPanelController({
+            mmdManager: this.mmdManager,
+            showToast: (message, type) => this.showToast(message, type),
+            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
+            onAccessoryTransformChanged: (accessoryIndex) => {
+                this.markSectionKeyframeDirty("accessory", this.getAccessoryKeyframeContextKey(accessoryIndex));
+                this.updateSectionKeyframeButtons();
+            },
+            onSelectionChanged: () => this.updateSectionKeyframeButtons(),
+        });
+        this.dofPanelController = new DofPanelController({
+            mmdManager: this.mmdManager,
+            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
+            isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
+        });
+        this.shaderPanelController = new ShaderPanelController({
+            mmdManager: this.mmdManager,
+            getInfoModelSelectState: () => ({
+                innerHTML: this.modelSelect.innerHTML,
+                value: this.modelSelect.value,
+                disabled: this.modelSelect.disabled,
+            }),
+            onModelTargetSelected: (value, showToast) => this.handleModelTargetSelection(value, showToast),
+            renderCameraPostEffectsPanel: () => this.renderShaderCameraPostEffectsPanel(),
+            restoreCameraDofControlsToCameraPanel: () => this.dofPanelController?.restoreControlsToCameraPanel(),
+            getBaseNameForRenderer: (filePath) => this.getBaseNameForRenderer(filePath),
+            showToast: (message, type) => this.showToast(message, type),
+            onExternalWgslToonChanged: (path, text) => {
+                this.postFxWgslToonPath = path;
+                this.postFxWgslToonText = text;
+            },
+        });
         this.setupPerfDisplay();
         this.showStartupRenderingDiagnostics();
-        this.setupViewportAspectSync();
         this.refreshModelSelector();
-        this.refreshAccessoryPanel();
-        this.updateGroundToggleButton(this.mmdManager.isGroundVisible());
-        this.updateBackgroundToggleButton();
-        this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
-        this.updatePhysicsToggleButton(
-            this.mmdManager.getPhysicsEnabled(),
-            this.mmdManager.isPhysicsAvailable()
-        );
-        this.updateShadowToggleButton();
-        this.updateRigidBodyToggleButton();
-        this.updateGiToggleButton();
+        this.accessoryPanelController?.refresh();
+        this.sceneEnvironmentUiController?.refresh();
+        this.runtimeFeatureUiController?.refresh();
         this.updateInfoActionButtons();
-        this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
-        this.updateFullscreenUiToggleButton(false);
-        this.setupTimelineResizer();
-        this.setupShaderResizer();
-        this.setupBottomPanelResizer();
-        this.clampBottomPanelHeightToLayout();
         this.refreshShaderPanel();
         this.installRangeNumberInputs();
-        void this.reloadBundledWgslShaderFiles();
+        void this.shaderPanelController.reloadBundledWgslShaderFiles();
         this.updateTimelineEditState();
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
         this.applyLocalizedUiState();
@@ -487,20 +383,8 @@ export class UIController {
                 event.returnValue = "";
                 return;
             }
-            this.pngSequenceExportStateUnsubscribe?.();
-            this.pngSequenceExportStateUnsubscribe = null;
-            this.pngSequenceExportProgressUnsubscribe?.();
-            this.pngSequenceExportProgressUnsubscribe = null;
-            this.webmExportStateUnsubscribe?.();
-            this.webmExportStateUnsubscribe = null;
-            this.webmExportProgressUnsubscribe?.();
-            this.webmExportProgressUnsubscribe = null;
-            if (this.backgroundExportMonitorIntervalId !== null) {
-                window.clearInterval(this.backgroundExportMonitorIntervalId);
-                this.backgroundExportMonitorIntervalId = null;
-            }
-            this.viewportAspectResizeObserver?.disconnect();
-            this.viewportAspectResizeObserver = null;
+            this.exportUiController?.dispose();
+            this.layoutUiController?.dispose();
             document.removeEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
         });
     }
@@ -512,101 +396,16 @@ export class UIController {
         });
         this.btnSaveProject.addEventListener("click", () => this.saveProject(true));
         this.btnLoadProject.addEventListener("click", () => this.loadProject());
-        this.btnExportPng.addEventListener("click", () => this.exportPNG());
+        this.btnExportPng.addEventListener("click", () => {
+            void this.exportUiController?.exportPNG();
+        });
         this.btnExportPngSeq?.addEventListener("click", () => {
-            void this.exportPNGSequence();
+            void this.exportUiController?.exportPNGSequence();
         });
         this.btnExportWebm?.addEventListener("click", () => {
-            void this.exportWebm();
+            void this.exportUiController?.exportWebm();
         });
-        this.setupOutputControls();
         this.interpolationTypeSelect.addEventListener("change", () => this.updateTimelineEditState());
-        this.btnToggleGround.addEventListener("click", () => {
-            const visible = this.mmdManager.toggleGroundVisible();
-            this.updateGroundToggleButton(visible);
-            this.showToast(visible ? t("toast.ground.on") : t("toast.ground.off"), "info");
-        });
-        this.btnToggleBackground.addEventListener("click", () => {
-            const visible = this.mmdManager.toggleBackgroundMediaVisible();
-            this.updateBackgroundToggleButton();
-            this.showToast(visible ? t("toast.backgroundMedia.on") : t("toast.backgroundMedia.off"), "info");
-        });
-        this.btnToggleSkydome.addEventListener("click", () => {
-            const visible = this.mmdManager.toggleSkydomeVisible();
-            this.updateSkydomeToggleButton(visible);
-            this.showToast(visible ? t("toast.sky.on") : t("toast.sky.off"), "info");
-        });
-        const btnToggleAa = document.getElementById("btn-toggle-aa") as HTMLButtonElement | null;
-        const aaToggleText = document.getElementById("aa-toggle-text");
-        if (btnToggleAa && aaToggleText) {
-            const updateAaButton = () => {
-                const enabled = this.mmdManager.antialiasEnabled;
-                aaToggleText.textContent = t("toolbar.aa.short");
-                btnToggleAa.setAttribute("aria-pressed", enabled ? "true" : "false");
-                btnToggleAa.classList.toggle("toggle-on", enabled);
-                btnToggleAa.title = enabled
-                    ? t("toolbar.aa.title.on")
-                    : t("toolbar.aa.title.off");
-            };
-            this.refreshAaToggleUi = updateAaButton;
-            updateAaButton();
-            btnToggleAa.addEventListener("click", () => {
-                this.mmdManager.antialiasEnabled = !this.mmdManager.antialiasEnabled;
-                updateAaButton();
-                this.showToast(this.mmdManager.antialiasEnabled ? t("toast.aa.on") : t("toast.aa.off"), "info");
-            });
-        }
-        this.btnTogglePhysics.addEventListener("click", () => {
-            if (!this.mmdManager.isPhysicsAvailable()) {
-                this.updatePhysicsToggleButton(false, false);
-                this.showToast(t("toast.physics.unavailable"), "error");
-                return;
-            }
-
-            const enabled = this.mmdManager.togglePhysicsEnabled();
-            this.updatePhysicsToggleButton(enabled, true);
-            this.showToast(enabled ? t("toast.physics.on") : t("toast.physics.off"), "info");
-        });
-        this.btnToggleShadow.addEventListener("click", () => {
-            const enabled = !this.mmdManager.getShadowEnabled();
-            this.mmdManager.setShadowEnabled(enabled);
-            this.updateShadowToggleButton();
-            this.showToast(enabled ? t("toast.shadow.on") : t("toast.shadow.off"), "info");
-        });
-        this.btnToggleRigidBodies.addEventListener("click", () => {
-            if (!this.mmdManager.isRigidBodyVisualizerAvailable()) {
-                this.updateRigidBodyToggleButton();
-                this.showToast(t("toast.rigidBodies.unavailable"), "error");
-                return;
-            }
-
-            const enabled = this.mmdManager.toggleRigidBodyVisualizerEnabled();
-            this.updateRigidBodyToggleButton();
-            this.showToast(enabled ? t("toast.rigidBodies.on") : t("toast.rigidBodies.off"), "info");
-        });
-        this.btnToggleGi.addEventListener("click", () => {
-            const wasEnabled = this.mmdManager.isGlobalIlluminationEnabled();
-            const enabled = this.mmdManager.toggleGlobalIlluminationEnabled();
-            this.updateGiToggleButton();
-            this.showToast(
-                this.mmdManager.isGlobalIlluminationPending()
-                    ? t("toast.gi.loading")
-                    : !wasEnabled && !enabled
-                    ? t("toast.gi.unavailable")
-                    : enabled
-                        ? t("toast.gi.on")
-                        : t("toast.gi.off"),
-                this.mmdManager.isGlobalIlluminationPending() || (!wasEnabled && !enabled) ? "info" : "info",
-            );
-        });
-        this.btnToggleShaderPanel?.addEventListener("click", () => {
-            const nextVisible = !this.isShaderPanelExpanded();
-            this.setShaderPanelVisible(nextVisible);
-            this.showToast(nextVisible ? t("toast.fx.shown") : t("toast.fx.hidden"), "info");
-        });
-        this.btnToggleFullscreenUi?.addEventListener("click", () => {
-            this.toggleUiFullscreenMode();
-        });
         this.toolbarLocaleSelect?.addEventListener("change", () => {
             const nextLocale = this.getSelectedToolbarLocale();
             if (!nextLocale || nextLocale === getLocale()) {
@@ -615,74 +414,6 @@ export class UIController {
             }
             setLocale(nextLocale);
         });
-        const physicsGravityAccel = document.getElementById("physics-gravity-accel") as HTMLInputElement | null;
-        const physicsGravityAccelVal = document.getElementById("physics-gravity-accel-val");
-        const physicsGravityDirX = document.getElementById("physics-gravity-dir-x") as HTMLInputElement | null;
-        const physicsGravityDirXVal = document.getElementById("physics-gravity-dir-x-val");
-        const physicsGravityDirY = document.getElementById("physics-gravity-dir-y") as HTMLInputElement | null;
-        const physicsGravityDirYVal = document.getElementById("physics-gravity-dir-y-val");
-        const physicsGravityDirZ = document.getElementById("physics-gravity-dir-z") as HTMLInputElement | null;
-        const physicsGravityDirZVal = document.getElementById("physics-gravity-dir-z-val");
-        const physicsSimulationRate = document.getElementById("physics-step-rate") as HTMLSelectElement | null;
-        const physicsSimulationRateVal = document.getElementById("physics-step-rate-val");
-        this.physicsGravityAccelSlider = physicsGravityAccel;
-        this.physicsGravityDirXSlider = physicsGravityDirX;
-        this.physicsGravityDirYSlider = physicsGravityDirY;
-        this.physicsGravityDirZSlider = physicsGravityDirZ;
-        this.physicsSimulationRateSelect = physicsSimulationRate;
-        this.physicsSimulationRateValueEl = physicsSimulationRateVal;
-
-        if (physicsSimulationRate) {
-            physicsSimulationRate.value = String(this.mmdManager.getPhysicsSimulationRateHz());
-            this.refreshPhysicsSimulationRateUi();
-            physicsSimulationRate.addEventListener("change", () => {
-                const next = this.mmdManager.setPhysicsSimulationRateHz(Number(physicsSimulationRate.value));
-                physicsSimulationRate.value = String(next);
-                this.refreshPhysicsSimulationRateUi();
-            });
-        }
-
-        if (physicsGravityAccel && physicsGravityAccelVal) {
-            const initialAccel = Math.round(this.mmdManager.getPhysicsGravityAcceleration());
-            physicsGravityAccel.value = String(initialAccel);
-            physicsGravityAccelVal.textContent = String(initialAccel);
-            physicsGravityAccel.addEventListener("input", () => {
-                const next = Number(physicsGravityAccel.value);
-                this.mmdManager.setPhysicsGravityAcceleration(next);
-                physicsGravityAccelVal.textContent = String(Math.round(next));
-            });
-        }
-
-        if (
-            physicsGravityDirX &&
-            physicsGravityDirXVal &&
-            physicsGravityDirY &&
-            physicsGravityDirYVal &&
-            physicsGravityDirZ &&
-            physicsGravityDirZVal
-        ) {
-            const initialDir = this.mmdManager.getPhysicsGravityDirection();
-            physicsGravityDirX.value = String(Math.round(initialDir.x));
-            physicsGravityDirY.value = String(Math.round(initialDir.y));
-            physicsGravityDirZ.value = String(Math.round(initialDir.z));
-            physicsGravityDirXVal.textContent = String(Math.round(initialDir.x));
-            physicsGravityDirYVal.textContent = String(Math.round(initialDir.y));
-            physicsGravityDirZVal.textContent = String(Math.round(initialDir.z));
-
-            const applyGravityDirection = () => {
-                const x = Number(physicsGravityDirX.value);
-                const y = Number(physicsGravityDirY.value);
-                const z = Number(physicsGravityDirZ.value);
-                this.mmdManager.setPhysicsGravityDirection(x, y, z);
-                physicsGravityDirXVal.textContent = String(Math.round(x));
-                physicsGravityDirYVal.textContent = String(Math.round(y));
-                physicsGravityDirZVal.textContent = String(Math.round(z));
-            };
-
-            physicsGravityDirX.addEventListener("input", applyGravityDirection);
-            physicsGravityDirY.addEventListener("input", applyGravityDirection);
-            physicsGravityDirZ.addEventListener("input", applyGravityDirection);
-        }
         // Playback
         this.btnPlay.addEventListener("click", () => this.play());
         this.btnPause.addEventListener("click", () => this.pause());
@@ -696,16 +427,13 @@ export class UIController {
         this.modelSelect.addEventListener("change", () => {
             this.handleModelTargetSelection(this.modelSelect.value, true);
         });
-        this.shaderModelSelect?.addEventListener("change", () => {
-            this.handleModelTargetSelection(this.shaderModelSelect?.value ?? "", true);
-        });
 
         this.btnModelVisibility.addEventListener("click", () => {
             if (this.mmdManager.getTimelineTarget() !== "model") return;
             const visible = this.mmdManager.toggleActiveModelVisibility();
             this.markSectionKeyframeDirty("info", this.getInfoKeyframeContextKey());
             this.updateInfoActionButtons();
-            this.updateRigidBodyToggleButton();
+            this.runtimeFeatureUiController?.refreshRigidBodies();
             this.updateSectionKeyframeButtons();
             this.showToast(visible ? "Model visible" : "Model hidden", "info");
         });
@@ -729,18 +457,6 @@ export class UIController {
             this.refreshModelSelector();
             this.refreshShaderPanel();
             this.showToast("Model deleted", "success");
-        });
-
-        this.setupAccessoryControls();
-
-        this.shaderApplySelectedButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(false, "selected");
-        });
-        this.shaderApplyAllButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(false, "all");
-        });
-        this.shaderResetButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(true, "auto");
         });
 
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
@@ -792,7 +508,7 @@ export class UIController {
                 this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
                 this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
                 this.updateSectionKeyframeButtons();
-                this.refreshDofAutoFocusReadout();
+                this.dofPanelController?.refreshAutoFocusReadout();
             });
         }
         // Initialize camera UI from runtime values
@@ -917,28 +633,6 @@ export class UIController {
         const valEffectLensDistortionInfluence = document.getElementById("effect-lens-distortion-influence-val");
         const elEffectLensEdgeBlur = document.getElementById("effect-lens-edge-blur") as HTMLInputElement | null;
         const valEffectLensEdgeBlur = document.getElementById("effect-lens-edge-blur-val");
-        const elEffectDofEnabled = document.getElementById("effect-dof-enabled") as HTMLInputElement | null;
-        const valEffectDofEnabled = document.getElementById("effect-dof-enabled-val");
-        const elEffectDofQuality = document.getElementById("effect-dof-quality") as HTMLSelectElement | null;
-        const valEffectDofQuality = document.getElementById("effect-dof-quality-val");
-        const elEffectDofFocus = document.getElementById("effect-dof-focus") as HTMLInputElement | null;
-        const valEffectDofFocus = document.getElementById("effect-dof-focus-val");
-        const elEffectDofTargetModel = document.getElementById("effect-dof-target-model") as HTMLSelectElement | null;
-        const elEffectDofTargetBone = document.getElementById("effect-dof-target-bone") as HTMLSelectElement | null;
-        const elEffectDofFocusOffset = document.getElementById("effect-dof-focus-offset") as HTMLInputElement | null;
-        const valEffectDofFocusOffset = document.getElementById("effect-dof-focus-offset-val");
-        const elEffectDofFStop = document.getElementById("effect-dof-fstop") as HTMLInputElement | null;
-        const valEffectDofFStop = document.getElementById("effect-dof-fstop-val");
-        const elEffectDofNearSuppression = document.getElementById("effect-dof-near-suppression") as HTMLInputElement | null;
-        const valEffectDofNearSuppression = document.getElementById("effect-dof-near-suppression-val");
-        const elEffectDofFocalInvert = document.getElementById("effect-dof-focal-invert") as HTMLInputElement | null;
-        const valEffectDofFocalInvert = document.getElementById("effect-dof-focal-invert-val");
-        const elEffectDofLensBlur = document.getElementById("effect-dof-lens-blur") as HTMLInputElement | null;
-        const valEffectDofLensBlur = document.getElementById("effect-dof-lens-blur-val");
-        const elEffectDofLensSize = document.getElementById("effect-dof-lens-size") as HTMLInputElement | null;
-        const valEffectDofLensSize = document.getElementById("effect-dof-lens-size-val");
-        const elEffectDofFocalLength = document.getElementById("effect-dof-focal-length") as HTMLInputElement | null;
-        const valEffectDofFocalLength = document.getElementById("effect-dof-focal-length-val");
         const elEffectFogEnabled = document.getElementById("effect-fog-enabled") as HTMLInputElement | null;
         const valEffectFogEnabled = document.getElementById("effect-fog-enabled-val");
         const elEffectFogMode = document.getElementById("effect-fog-mode") as HTMLSelectElement | null;
@@ -1210,200 +904,6 @@ export class UIController {
         }
 
         if (
-            elEffectDofEnabled &&
-            valEffectDofEnabled &&
-            elEffectDofQuality &&
-            valEffectDofQuality &&
-            elEffectDofFocus &&
-            valEffectDofFocus &&
-            elEffectDofFocusOffset &&
-            valEffectDofFocusOffset &&
-            elEffectDofFStop &&
-            valEffectDofFStop &&
-            elEffectDofNearSuppression &&
-            valEffectDofNearSuppression &&
-            elEffectDofFocalInvert &&
-            valEffectDofFocalInvert &&
-            elEffectDofLensSize &&
-            valEffectDofLensSize &&
-            elEffectDofFocalLength &&
-            valEffectDofFocalLength
-        ) {
-            const blurLabels = [t("option.low"), t("option.medium"), t("option.high")];
-            const autoFocusEnabled = this.mmdManager.dofAutoFocusEnabled;
-            const focalLengthLinkedToFov = this.mmdManager.dofFocalLengthLinkedToCameraFov;
-            this.dofFocusSlider = elEffectDofFocus;
-            this.dofFocusValueEl = valEffectDofFocus;
-            this.dofFStopValueEl = valEffectDofFStop;
-            this.dofFocalLengthSlider = elEffectDofFocalLength;
-            this.dofFocalLengthValueEl = valEffectDofFocalLength;
-            this.dofTargetModelSelect = elEffectDofTargetModel;
-            this.dofTargetBoneSelect = elEffectDofTargetBone;
-
-            const applyDofEnabled = () => {
-                this.mmdManager.dofEnabled = elEffectDofEnabled.checked;
-                elEffectDofEnabled.checked = this.mmdManager.dofEnabled;
-                valEffectDofEnabled.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
-            };
-            const applyDofQuality = () => {
-                const level = Number(elEffectDofQuality.value);
-                this.mmdManager.dofBlurLevel = level;
-                valEffectDofQuality.textContent = blurLabels[this.mmdManager.dofBlurLevel] ?? t("option.high");
-            };
-            const applyDofFocus = () => {
-                if (autoFocusEnabled) {
-                    this.refreshDofAutoFocusReadout();
-                    return;
-                }
-                const mm = Number(elEffectDofFocus.value);
-                this.mmdManager.dofFocusDistanceMm = mm;
-                valEffectDofFocus.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
-            };
-            const applyDofFocusOffset = () => {
-                const mm = Number(elEffectDofFocusOffset.value);
-                this.mmdManager.dofAutoFocusNearOffsetMm = mm;
-                valEffectDofFocusOffset.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
-                if (autoFocusEnabled) {
-                    this.refreshDofAutoFocusReadout();
-                }
-            };
-            const applyDofFStop = () => {
-                const fStop = Number(elEffectDofFStop.value) / 100;
-                this.mmdManager.dofFStop = fStop;
-                if (autoFocusEnabled) {
-                    this.refreshDofAutoFocusReadout();
-                    return;
-                }
-                valEffectDofFStop.textContent = this.mmdManager.dofFStop.toFixed(2);
-            };
-            const applyDofNearSuppression = () => {
-                const scale = Number(elEffectDofNearSuppression.value) / 100;
-                this.mmdManager.dofNearSuppressionScale = scale;
-                valEffectDofNearSuppression.textContent = `${Math.round(this.mmdManager.dofNearSuppressionScale * 100)}%`;
-                if (autoFocusEnabled) {
-                    this.refreshDofAutoFocusReadout();
-                }
-            };
-            const applyDofFocalInvert = () => {
-                this.mmdManager.dofFocalLengthDistanceInverted = elEffectDofFocalInvert.checked;
-                valEffectDofFocalInvert.textContent = this.mmdManager.dofFocalLengthDistanceInverted ? t("status.on") : t("status.off");
-                if (focalLengthLinkedToFov) {
-                    elEffectDofFocalLength.title = this.mmdManager.dofFocalLengthDistanceInverted
-                        ? "Auto focal length (linked to camera FoV, inverted)"
-                        : "Auto focal length (linked to camera FoV)";
-                    this.refreshDofAutoFocusReadout();
-                }
-            };
-            const applyDofLensSize = () => {
-                const lensSize = Number(elEffectDofLensSize.value);
-                this.mmdManager.dofLensSize = lensSize;
-                valEffectDofLensSize.textContent = `${Math.round(this.mmdManager.dofLensSize)}`;
-                if (autoFocusEnabled) {
-                    this.refreshDofAutoFocusReadout();
-                }
-            };
-            const applyDofFocalLength = () => {
-                if (focalLengthLinkedToFov) {
-                    this.refreshDofAutoFocusReadout();
-                    return;
-                }
-                const focalLength = Number(elEffectDofFocalLength.value);
-                this.mmdManager.dofFocalLength = focalLength;
-                valEffectDofFocalLength.textContent = `${Math.round(this.mmdManager.dofFocalLength)}`;
-                if (autoFocusEnabled) {
-                    this.refreshDofAutoFocusReadout();
-                }
-            };
-            const applyDofTargetModel = () => {
-                if (!elEffectDofTargetModel) return;
-                const modelIndex = Number.parseInt(elEffectDofTargetModel.value, 10);
-                if (Number.isNaN(modelIndex)) {
-                    this.mmdManager.setDofFocusTargetByIndex(null, null);
-                    this.refreshDofFocusTargetControls();
-                    this.refreshDofAutoFocusReadout();
-                    return;
-                }
-                const preferredBoneName = this.mmdManager.getPreferredDofFocusBoneName(modelIndex);
-                this.mmdManager.setDofFocusTargetByIndex(modelIndex, preferredBoneName);
-                this.refreshDofFocusTargetControls();
-                this.refreshDofAutoFocusReadout();
-            };
-            const applyDofTargetBone = () => {
-                if (!elEffectDofTargetModel || !elEffectDofTargetBone) return;
-                const modelIndex = Number.parseInt(elEffectDofTargetModel.value, 10);
-                if (Number.isNaN(modelIndex)) {
-                    this.mmdManager.setDofFocusTargetByIndex(null, null);
-                    this.refreshDofFocusTargetControls();
-                    this.refreshDofAutoFocusReadout();
-                    return;
-                }
-                const boneName = elEffectDofTargetBone.value || null;
-                this.mmdManager.setDofFocusTargetByIndex(modelIndex, boneName);
-                this.refreshDofFocusTargetControls();
-                this.refreshDofAutoFocusReadout();
-            };
-
-            elEffectDofEnabled.checked = this.mmdManager.dofEnabled;
-            elEffectDofQuality.value = String(this.mmdManager.dofBlurLevel);
-            elEffectDofFocus.value = String(Math.round(this.mmdManager.dofFocusDistanceMm));
-            elEffectDofFocusOffset.value = String(Math.round(this.mmdManager.dofAutoFocusNearOffsetMm));
-            elEffectDofFStop.value = String(Math.round(this.mmdManager.dofFStop * 100));
-            elEffectDofNearSuppression.value = String(Math.round(this.mmdManager.dofNearSuppressionScale * 100));
-            elEffectDofFocalInvert.checked = this.mmdManager.dofFocalLengthDistanceInverted;
-            elEffectDofLensSize.value = String(Math.round(this.mmdManager.dofLensSize));
-            elEffectDofFocalLength.value = String(Math.round(this.mmdManager.dofFocalLength));
-            if (elEffectDofLensBlur && valEffectDofLensBlur) {
-                elEffectDofLensBlur.value = String(Math.round(this.mmdManager.dofLensBlurStrength * 100));
-                valEffectDofLensBlur.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
-            }
-            if (autoFocusEnabled) {
-                elEffectDofFocus.disabled = true;
-                elEffectDofFocus.title = "Auto focus";
-            }
-            if (focalLengthLinkedToFov) {
-                elEffectDofFocalLength.disabled = true;
-                elEffectDofFocalLength.title = "Auto focal length (linked to camera FoV)";
-            }
-
-            applyDofEnabled();
-            applyDofQuality();
-            applyDofFocus();
-            applyDofFocusOffset();
-            applyDofFStop();
-            applyDofNearSuppression();
-            applyDofFocalInvert();
-            applyDofLensSize();
-            applyDofFocalLength();
-            this.refreshDofFocusTargetControls();
-            this.refreshDofAutoFocusReadout();
-
-            elEffectDofEnabled.addEventListener("change", applyDofEnabled);
-            elEffectDofQuality.addEventListener("change", applyDofQuality);
-            if (!autoFocusEnabled) {
-                elEffectDofFocus.addEventListener("input", applyDofFocus);
-            }
-            elEffectDofTargetModel?.addEventListener("change", applyDofTargetModel);
-            elEffectDofTargetBone?.addEventListener("change", applyDofTargetBone);
-            elEffectDofFocusOffset.addEventListener("input", applyDofFocusOffset);
-            elEffectDofFStop.addEventListener("input", applyDofFStop);
-            elEffectDofNearSuppression.addEventListener("input", applyDofNearSuppression);
-            elEffectDofFocalInvert.addEventListener("change", applyDofFocalInvert);
-            elEffectDofLensSize.addEventListener("input", applyDofLensSize);
-            if (!focalLengthLinkedToFov) {
-                elEffectDofFocalLength.addEventListener("input", applyDofFocalLength);
-            }
-            if (elEffectDofLensBlur && valEffectDofLensBlur) {
-                const applyDofLensBlur = () => {
-                    const strength = Number(elEffectDofLensBlur.value) / 100;
-                    this.mmdManager.dofLensBlurStrength = strength;
-                    valEffectDofLensBlur.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
-                };
-                applyDofLensBlur();
-                elEffectDofLensBlur.addEventListener("input", applyDofLensBlur);
-            }
-        }
-
-        if (
             elEffectFogEnabled &&
             valEffectFogEnabled &&
             elEffectFogStart &&
@@ -1570,7 +1070,7 @@ export class UIController {
                 this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
                 this.syncRangeNumberInput(this.camDistanceSlider);
             }
-            this.refreshDofAutoFocusReadout();
+            this.dofPanelController?.refreshAutoFocusReadout();
             this.refreshLensDistortionAutoReadout();
 
             if (this.mmdManager.isPlaying && total > 0 && frame >= total) {
@@ -1588,9 +1088,9 @@ export class UIController {
                 this.applyActiveModelSelectionUI();
             }
             this.refreshModelSelector();
-            this.refreshDofFocusTargetControls();
+            this.dofPanelController?.refreshFocusTargetControls();
             this.refreshShaderPanel();
-            this.updateRigidBodyToggleButton();
+            this.runtimeFeatureUiController?.refreshRigidBodies();
         };
 
         // Any model loaded into scene
@@ -1601,16 +1101,16 @@ export class UIController {
                 this.applyActiveModelSelectionUI();
             }
             this.refreshModelSelector();
-            this.refreshDofFocusTargetControls();
+            this.dofPanelController?.refreshFocusTargetControls();
             this.refreshShaderPanel();
-            this.updateRigidBodyToggleButton();
+            this.runtimeFeatureUiController?.refreshRigidBodies();
             const activeLabel = active ? " [active]" : "";
             this.showToast(`Loaded model: ${info.name} (${totalCount})${activeLabel}`, "success");
         };
 
         this.mmdManager.onDofFocusTargetChanged = () => {
-            this.refreshDofFocusTargetControls();
-            this.refreshDofAutoFocusReadout();
+            this.dofPanelController?.refreshFocusTargetControls();
+            this.dofPanelController?.refreshAutoFocusReadout();
         };
 
         // Motion loaded
@@ -1656,13 +1156,13 @@ export class UIController {
             this.showToast(message, "error");
         };
 
-        this.mmdManager.onPhysicsStateChanged = (enabled: boolean, available: boolean) => {
-            this.updatePhysicsToggleButton(enabled, available);
-            this.updateRigidBodyToggleButton();
+        this.mmdManager.onPhysicsStateChanged = () => {
+            this.runtimeFeatureUiController?.refreshPhysics();
+            this.runtimeFeatureUiController?.refreshRigidBodies();
         };
 
         this.mmdManager.onGlobalIlluminationStateChanged = () => {
-            this.updateGiToggleButton();
+            this.runtimeFeatureUiController?.refreshGi();
         };
 
         this.mmdManager.onBoneVisualizerBonePicked = (boneName: string) => {
@@ -1677,155 +1177,8 @@ export class UIController {
         };
     }
 
-    private setupPngSequenceExportStateBridge(): void {
-        this.pngSequenceExportStateUnsubscribe?.();
-        this.pngSequenceExportStateUnsubscribe = window.electronAPI.onPngSequenceExportState((state) => {
-            this.applyPngSequenceExportState(state);
-        });
-        this.pngSequenceExportProgressUnsubscribe?.();
-        this.pngSequenceExportProgressUnsubscribe = window.electronAPI.onPngSequenceExportProgress((progress) => {
-            this.applyPngSequenceExportProgress(progress);
-        });
-    }
-
-    private applyPngSequenceExportState(state: PngSequenceExportState): void {
-        this.isPngSequenceExportActive = Boolean(state?.active);
-        this.pngSequenceExportActiveCount = Math.max(0, Math.floor(state?.activeCount ?? 0));
-        if (!this.isPngSequenceExportActive) {
-            this.latestPngSequenceExportProgress = null;
-        }
-        this.refreshBackgroundExportLock();
-    }
-
-    private applyPngSequenceExportProgress(progress: PngSequenceExportProgress): void {
-        if (!this.isPngSequenceExportActive) return;
-        this.latestPngSequenceExportProgress = progress;
-        this.refreshBackgroundExportLock();
-    }
-
-    private setupWebmExportStateBridge(): void {
-        this.webmExportStateUnsubscribe?.();
-        this.webmExportStateUnsubscribe = window.electronAPI.onWebmExportState((state) => {
-            this.applyWebmExportState(state);
-        });
-        this.webmExportProgressUnsubscribe?.();
-        this.webmExportProgressUnsubscribe = window.electronAPI.onWebmExportProgress((progress) => {
-            this.applyWebmExportProgress(progress);
-        });
-    }
-
-    private startBackgroundExportMonitor(): void {
-        if (this.backgroundExportMonitorIntervalId !== null) return;
-        this.backgroundExportMonitorIntervalId = window.setInterval(() => {
-            if (!this.hasBackgroundExportActive()) return;
-            this.refreshBackgroundExportLock();
-        }, 500);
-    }
-
-    private applyWebmExportState(state: WebmExportState): void {
-        this.isWebmExportActive = Boolean(state?.active);
-        this.webmExportActiveCount = Math.max(0, Math.floor(state?.activeCount ?? 0));
-        if (!this.isWebmExportActive) {
-            this.latestWebmExportProgress = null;
-        }
-        this.refreshBackgroundExportLock();
-    }
-
-    private applyWebmExportProgress(progress: WebmExportProgress): void {
-        if (!this.isWebmExportActive) return;
-        this.latestWebmExportProgress = progress;
-        this.refreshBackgroundExportLock();
-    }
-
-    private formatWebmExportPhaseLabel(phase: WebmExportProgress["phase"]): string {
-        switch (phase) {
-            case "initializing": return t("webm.phase.initializing");
-            case "loading-project": return t("webm.phase.loadingProject");
-            case "checking-codec": return t("webm.phase.checkingCodec");
-            case "opening-output": return t("webm.phase.openingOutput");
-            case "encoding": return t("webm.phase.encoding");
-            case "closing-track": return t("webm.phase.closingTrack");
-            case "finalizing": return t("webm.phase.finalizing");
-            case "finishing-job": return t("webm.phase.finishingJob");
-            case "completed": return t("webm.phase.completed");
-            case "failed": return t("webm.phase.failed");
-            default: return phase;
-        }
-    }
-
-    private formatExportAge(timestampMs: number | undefined): string {
-        if (!timestampMs || !Number.isFinite(timestampMs)) return "n/a";
-        const seconds = Math.max(0, (Date.now() - timestampMs) / 1000);
-        return `${seconds.toFixed(seconds >= 10 ? 0 : 1)}s ago`;
-    }
-
     private hasBackgroundExportActive(): boolean {
-        return this.isPngSequenceExportActive || this.isWebmExportActive;
-    }
-
-    private refreshBackgroundExportLock(): void {
-        const active = this.hasBackgroundExportActive();
-        this.appRootEl.classList.toggle("ui-export-lock", active);
-        this.busyOverlayEl?.classList.toggle("hidden", !active);
-        this.busyOverlayEl?.setAttribute("aria-hidden", active ? "false" : "true");
-
-        if (!active) {
-            if (this.busyTextEl) {
-                this.busyTextEl.textContent = t("busy.backgroundExportFinished");
-            }
-            return;
-        }
-
-        if (this.mmdManager.isPlaying) {
-            this.pause(false);
-        }
-        this.updateBackgroundExportBusyMessage();
-    }
-
-    private updateBackgroundExportBusyMessage(): void {
-        if (!this.busyTextEl) return;
-
-        if (this.isWebmExportActive) {
-            const progress = this.latestWebmExportProgress;
-            if (progress) {
-                const total = Math.max(0, Math.floor(progress.total));
-                const encoded = Math.max(0, Math.floor(progress.encoded));
-                const frame = Math.max(0, Math.floor(progress.frame));
-                const phaseLabel = this.formatWebmExportPhaseLabel(progress.phase);
-                if (total > 0) {
-                    const ratio = Math.min(100, Math.max(0, (encoded / total) * 100));
-                    this.busyTextEl.textContent = t("busy.webmProgress", { phase: phaseLabel, encoded, total, ratio: ratio.toFixed(1), frame });
-                    return;
-                }
-                this.busyTextEl.textContent = t("busy.webmExportRunning");
-                return;
-            }
-            if (this.webmExportActiveCount > 1) {
-                this.busyTextEl.textContent = t("busy.webmExportActive", { count: this.webmExportActiveCount });
-                return;
-            }
-            this.busyTextEl.textContent = t("busy.webmExportRunning");
-            return;
-        }
-
-        if (this.isPngSequenceExportActive) {
-            const progress = this.latestPngSequenceExportProgress;
-            if (progress) {
-                const total = Math.max(0, Math.floor(progress.total));
-                const saved = Math.max(0, Math.floor(progress.saved));
-                const frame = Math.max(0, Math.floor(progress.frame));
-                if (total > 0) {
-                    const ratio = Math.min(100, Math.max(0, (saved / total) * 100));
-                    this.busyTextEl.textContent = t("busy.webmProgress", { phase: "PNG", encoded: saved, total, ratio: ratio.toFixed(1), frame });
-                    return;
-                }
-            }
-            if (this.pngSequenceExportActiveCount > 1) {
-                this.busyTextEl.textContent = t("busy.webmExportActive", { count: this.pngSequenceExportActiveCount });
-                return;
-            }
-            this.busyTextEl.textContent = t("busy.exportingPngSequence");
-        }
+        return this.exportUiController?.hasBackgroundExportActive() ?? false;
     }
 
     private setupFileDrop(): void {
@@ -1918,9 +1271,9 @@ export class UIController {
 
     private setupKeyboard(): void {
         document.addEventListener("keydown", (e) => {
-            if (e.key === "Escape" && this.isUiFullscreenActive) {
+            if (e.key === "Escape" && this.layoutUiController?.isUiFullscreenModeActive()) {
                 e.preventDefault();
-                this.exitUiFullscreenMode();
+                this.layoutUiController.exitUiFullscreenMode();
                 return;
             }
 
@@ -1938,7 +1291,7 @@ export class UIController {
             // Alt+Enter: MMD-like fullscreen toggle (mapped to UI fullscreen mode).
             if (!e.ctrlKey && !e.metaKey && e.altKey && e.key === "Enter") {
                 e.preventDefault();
-                this.toggleUiFullscreenMode();
+                this.layoutUiController?.toggleUiFullscreenMode();
                 return;
             }
 
@@ -2017,9 +1370,7 @@ export class UIController {
 
                 if (lowerKey === "g") {
                     e.preventDefault();
-                    const visible = this.mmdManager.toggleGroundVisible();
-                    this.updateGroundToggleButton(visible);
-                    this.showToast(visible ? t("toast.ground.on") : t("toast.ground.off"), "info");
+                    this.sceneEnvironmentUiController?.toggleGround();
                     return;
                 }
 
@@ -2031,11 +1382,7 @@ export class UIController {
 
                 if (lowerKey === "b") {
                     e.preventDefault();
-                    const enabled = this.mmdManager.toggleBackgroundBlack();
-                    this.showToast(
-                        enabled ? t("toast.background.black") : t("toast.background.default"),
-                        "info"
-                    );
+                    this.sceneEnvironmentUiController?.toggleBackgroundBlack();
                     return;
                 }
             }
@@ -2102,7 +1449,7 @@ export class UIController {
             // Ctrl+Shift+S = export PNG
             if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "S" || e.key === "s")) {
                 e.preventDefault();
-                void this.exportPNG();
+                void this.exportUiController?.exportPNG();
             }
         });
     }
@@ -2277,7 +1624,7 @@ export class UIController {
                 : fps >= 30 ? "var(--accent-amber)"
                     : "var(--accent-red)";
             updatePerfBadges();
-            this.refreshDofAutoFocusReadout();
+            this.dofPanelController?.refreshAutoFocusReadout();
         }, 1000);
 
         // Volume fader
@@ -2327,76 +1674,21 @@ export class UIController {
     }
 
     private exportOutputProjectState(): ProjectOutputState {
-        const outputSettings = this.getOutputSettings();
-        const qualityRaw = Number.parseFloat(this.outputQualitySelect?.value ?? "1");
-        const fpsRaw = Number.parseInt(this.outputFpsSelect?.value ?? "30", 10);
-
-        return {
-            aspectPreset: this.outputAspectSelect?.value ?? "16:9",
-            sizePreset: this.outputSizePresetSelect?.value ?? "1920",
-            width: outputSettings.width,
-            height: outputSettings.height,
-            lockAspect: Boolean(this.outputLockAspectInput?.checked),
-            qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
-            fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
-            includeAudio: Boolean(this.outputIncludeAudioInput?.checked),
-            webmCodec: (this.outputWebmCodecSelect?.value as "auto" | "vp8" | "vp9" | undefined) ?? "vp9",
+        return this.exportUiController?.exportProjectState() ?? {
+            aspectPreset: "16:9",
+            sizePreset: "1920",
+            width: 1920,
+            height: 1080,
+            lockAspect: false,
+            qualityScale: 1,
+            fps: 30,
+            includeAudio: false,
+            webmCodec: "vp9",
         };
     }
 
     private applyOutputProjectState(state: ProjectOutputState | null | undefined): void {
-        if (!state) return;
-
-        const hasOption = (select: HTMLSelectElement, value: string): boolean =>
-            Array.from(select.options).some((option) => option.value === value);
-
-        if (this.outputAspectSelect && typeof state.aspectPreset === "string" && hasOption(this.outputAspectSelect, state.aspectPreset)) {
-            this.outputAspectSelect.value = state.aspectPreset;
-        }
-        if (this.outputSizePresetSelect && typeof state.sizePreset === "string" && hasOption(this.outputSizePresetSelect, state.sizePreset)) {
-            this.outputSizePresetSelect.value = state.sizePreset;
-        }
-        if (this.outputWidthInput && Number.isFinite(state.width)) {
-            this.outputWidthInput.value = String(this.clampOutputWidth(state.width));
-        }
-        if (this.outputHeightInput && Number.isFinite(state.height)) {
-            this.outputHeightInput.value = String(this.clampOutputHeight(state.height));
-        }
-        if (this.outputLockAspectInput) {
-            this.outputLockAspectInput.checked = Boolean(state.lockAspect);
-        }
-        if (
-            this.outputQualitySelect &&
-            Number.isFinite(state.qualityScale) &&
-            hasOption(this.outputQualitySelect, String(state.qualityScale))
-        ) {
-            this.outputQualitySelect.value = String(state.qualityScale);
-        }
-        if (
-            this.outputFpsSelect &&
-            Number.isFinite(state.fps) &&
-            hasOption(this.outputFpsSelect, String(state.fps))
-        ) {
-            this.outputFpsSelect.value = String(state.fps);
-        }
-        if (this.outputIncludeAudioInput) {
-            this.outputIncludeAudioInput.checked = Boolean(state.includeAudio);
-        }
-        if (
-            this.outputWebmCodecSelect &&
-            typeof state.webmCodec === "string" &&
-            hasOption(this.outputWebmCodecSelect, state.webmCodec)
-        ) {
-            this.outputWebmCodecSelect.value = state.webmCodec;
-        }
-
-        const width = this.clampOutputWidth(Number.parseInt(this.outputWidthInput?.value ?? "1920", 10));
-        const height = this.clampOutputHeight(Number.parseInt(this.outputHeightInput?.value ?? "1080", 10));
-        this.outputAspectRatio = height > 0
-            ? Math.max(0.1, width / height)
-            : this.resolveSelectedOutputAspectRatio();
-        this.applyViewportAspectPresentation();
-        this.syncMainWindowPresentationAspect();
+        this.exportUiController?.applyProjectState(state);
     }
 
     private async saveProject(forceChoosePath = false): Promise<void> {
@@ -2554,7 +1846,7 @@ export class UIController {
                     : this.resolveProjectRelativePath(filePath, normalizedPath);
                 const wgslText = await window.electronAPI.readTextFile(resolvedWgslToonPath);
                 if (wgslText) {
-                    const validationError = this.validateExternalWgslToonSnippet(wgslText);
+                    const validationError = this.shaderPanelController?.validateExternalWgslToonSnippet(wgslText) ?? null;
                     if (validationError) {
                         wgslToonWarning = `WGSL shader invalid (${requestedWgslToonPath}): ${validationError}`;
                         resolvedWgslToonPath = null;
@@ -2572,6 +1864,7 @@ export class UIController {
 
             this.postFxWgslToonPath = resolvedWgslToonPath;
             this.postFxWgslToonText = resolvedWgslToonText;
+            this.shaderPanelController?.setExternalWgslToonAsset(resolvedWgslToonPath, resolvedWgslToonText);
             this.mmdManager.setExternalWgslToonShader(resolvedWgslToonPath, resolvedWgslToonText);
             this.postFxLutExternalPath = resolvedExternalLutPath;
             this.postFxLutExternalText = resolvedExternalLutText;
@@ -2594,8 +1887,8 @@ export class UIController {
             this.applyLocalizedUiState();
             this.refreshCameraUiFromRuntime();
             this.refreshLightingUiFromRuntime();
-            this.refreshPhysicsSimulationRateUi();
-            this.refreshAccessoryPanel();
+            this.runtimeFeatureUiController?.refreshPhysics();
+            this.accessoryPanelController?.refresh();
             if (this.mmdManager.getTimelineTarget() === "camera") {
                 this.applyCameraSelectionUI();
             } else {
@@ -2631,56 +1924,6 @@ export class UIController {
 
         if (!filePath) return;
         await this.loadFileByPath(filePath, "dialog");
-    }
-
-    private async loadBackgroundImageFromDialog(): Promise<void> {
-        const filePath = await window.electronAPI.openFileDialog([
-            { name: "Image files", extensions: ["png", "jpg", "jpeg", "bmp", "webp"] },
-            { name: "All files", extensions: ["*"] },
-        ]);
-        if (!filePath) return;
-
-        await this.applyBackgroundImage(filePath);
-    }
-
-    private async loadBackgroundVideoFromDialog(): Promise<void> {
-        const filePath = await window.electronAPI.openFileDialog([
-            { name: "Video files", extensions: ["webm", "mp4", "avi"] },
-            { name: "All files", extensions: ["*"] },
-        ]);
-        if (!filePath) return;
-
-        await this.applyBackgroundVideo(filePath);
-    }
-
-    private async applyBackgroundImage(filePath: string): Promise<void> {
-        this.setStatus("Loading background image...", true);
-        try {
-            await this.mmdManager.setBackgroundImageFromPath(filePath);
-            this.updateBackgroundToggleButton();
-            this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
-            this.setStatus("Background image loaded", false);
-            this.showToast(`${t("toast.backgroundImage.loaded")}: ${this.getBaseNameForRenderer(filePath)}`, "success");
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.setStatus("Background image load failed", false);
-            this.showToast(`${t("toast.backgroundImage.failed")}: ${message}`, "error");
-        }
-    }
-
-    private async applyBackgroundVideo(filePath: string): Promise<void> {
-        this.setStatus("Loading background video...", true);
-        try {
-            await this.mmdManager.setBackgroundVideoFromPath(filePath);
-            this.updateBackgroundToggleButton();
-            this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
-            this.setStatus("Background video loaded", false);
-            this.showToast(`${t("toast.backgroundVideo.loaded")}: ${this.getBaseNameForRenderer(filePath)}`, "success");
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.setStatus("Background video load failed", false);
-            this.showToast(`${t("toast.backgroundVideo.failed")}: ${message}`, "error");
-        }
     }
 
     private getFileExtension(filePath: string): string {
@@ -2827,7 +2070,7 @@ export class UIController {
                 const ok = await this.mmdManager.loadX(filePath);
                 if (ok) {
                     this.setStatus("X model loaded", false);
-                    this.refreshAccessoryPanel();
+                    this.accessoryPanelController?.refresh();
                     this.showToast(`Loaded X model: ${filePath.replace(/^.*[\\/]/, "")}`, "success");
                 } else {
                     this.setStatus("X model load failed", false);
@@ -2876,12 +2119,12 @@ export class UIController {
             case "jpeg":
             case "bmp":
             case "webp":
-                await this.applyBackgroundImage(filePath);
+                await this.sceneEnvironmentUiController?.applyBackgroundImage(filePath);
                 return;
             case "webm":
             case "mp4":
             case "avi":
-                await this.applyBackgroundVideo(filePath);
+                await this.sceneEnvironmentUiController?.applyBackgroundVideo(filePath);
                 return;
             case "glb":
                 this.showToast("GLB import is currently disabled", "error");
@@ -2944,347 +2187,6 @@ export class UIController {
         await this.mmdManager.loadMP3(filePath);
     }
 
-    private setupOutputControls(): void {
-        if (
-            !this.outputAspectSelect ||
-            !this.outputSizePresetSelect ||
-            !this.outputWidthInput ||
-            !this.outputHeightInput ||
-            !this.outputQualitySelect ||
-            !this.outputFpsSelect
-        ) {
-            return;
-        }
-
-        const applyPreset = (): void => {
-            const ratio = this.resolveSelectedOutputAspectRatio();
-            const longEdgeRaw = Number.parseInt(this.outputSizePresetSelect?.value ?? "1920", 10);
-            const longEdge = Number.isFinite(longEdgeRaw) ? Math.max(320, Math.min(8192, longEdgeRaw)) : 1920;
-
-            let nextWidth = longEdge;
-            let nextHeight = Math.max(180, Math.round(longEdge / Math.max(0.1, ratio)));
-            if (ratio < 1) {
-                nextHeight = longEdge;
-                nextWidth = Math.max(320, Math.round(longEdge * ratio));
-            }
-
-            this.isSyncingOutputSettings = true;
-            this.outputWidthInput.value = String(this.clampOutputWidth(nextWidth));
-            this.outputHeightInput.value = String(this.clampOutputHeight(nextHeight));
-            this.isSyncingOutputSettings = false;
-
-            const width = Number.parseInt(this.outputWidthInput.value, 10);
-            const height = Number.parseInt(this.outputHeightInput.value, 10);
-            if (Number.isFinite(width) && Number.isFinite(height) && height > 0) {
-                this.outputAspectRatio = Math.max(0.1, width / height);
-            }
-
-            this.applyViewportAspectPresentation();
-            this.syncMainWindowPresentationAspect();
-        };
-
-        const syncDimensionWithLock = (source: "width" | "height"): void => {
-            if (!this.outputWidthInput || !this.outputHeightInput) return;
-            if (this.isSyncingOutputSettings) return;
-
-            let width = this.clampOutputWidth(Number.parseInt(this.outputWidthInput.value, 10));
-            let height = this.clampOutputHeight(Number.parseInt(this.outputHeightInput.value, 10));
-            const locked = this.outputLockAspectInput?.checked === true;
-            const ratio = Math.max(0.1, this.outputAspectRatio);
-
-            if (locked) {
-                if (source === "width") {
-                    height = this.clampOutputHeight(Math.round(width / ratio));
-                } else {
-                    width = this.clampOutputWidth(Math.round(height * ratio));
-                }
-            } else if (height > 0) {
-                this.outputAspectRatio = Math.max(0.1, width / height);
-            }
-
-            this.isSyncingOutputSettings = true;
-            this.outputWidthInput.value = String(width);
-            this.outputHeightInput.value = String(height);
-            this.isSyncingOutputSettings = false;
-        };
-
-        this.outputAspectSelect.addEventListener("change", applyPreset);
-        this.outputSizePresetSelect.addEventListener("change", applyPreset);
-        this.outputWidthInput.addEventListener("input", () => syncDimensionWithLock("width"));
-        this.outputHeightInput.addEventListener("input", () => syncDimensionWithLock("height"));
-        this.outputLockAspectInput?.addEventListener("change", () => {
-            if (!this.outputLockAspectInput) return;
-            if (this.outputLockAspectInput.checked) {
-                this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
-                syncDimensionWithLock("width");
-            }
-        });
-
-        this.outputQualitySelect.value = this.outputQualitySelect.value || "1";
-        this.outputFpsSelect.value = this.outputFpsSelect.value || "30";
-        this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
-        applyPreset();
-        this.applyViewportAspectPresentation();
-    }
-
-    private resolveSelectedOutputAspectRatio(): number {
-        if (!this.outputAspectSelect) return this.outputAspectRatio > 0 ? this.outputAspectRatio : 16 / 9;
-        const value = this.outputAspectSelect.value;
-        if (value === "viewport") {
-            const width = this.viewportContainerEl?.clientWidth ?? 0;
-            const height = this.viewportContainerEl?.clientHeight ?? 0;
-            if (width > 0 && height > 0) {
-                return Math.max(0.1, width / height);
-            }
-            return 16 / 9;
-        }
-
-        const parts = value.split(":");
-        if (parts.length === 2) {
-            const w = Number.parseFloat(parts[0]);
-            const h = Number.parseFloat(parts[1]);
-            if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-                return Math.max(0.1, w / h);
-            }
-        }
-
-        return this.outputAspectRatio > 0 ? this.outputAspectRatio : 16 / 9;
-    }
-
-    private getOutputSettings(): OutputSettings {
-        const widthRaw = Number.parseInt(this.outputWidthInput?.value ?? "1920", 10);
-        const heightRaw = Number.parseInt(this.outputHeightInput?.value ?? "1080", 10);
-        const qualityRaw = Number.parseFloat(this.outputQualitySelect?.value ?? "1");
-        const fpsRaw = Number.parseInt(this.outputFpsSelect?.value ?? "30", 10);
-
-        return {
-            width: this.clampOutputWidth(widthRaw),
-            height: this.clampOutputHeight(heightRaw),
-            qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
-            fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
-        };
-    }
-
-    private clampOutputWidth(value: number): number {
-        if (!Number.isFinite(value)) return 1920;
-        return Math.max(320, Math.min(8192, Math.round(value)));
-    }
-
-    private clampOutputHeight(value: number): number {
-        if (!Number.isFinite(value)) return 1080;
-        return Math.max(180, Math.min(8192, Math.round(value)));
-    }
-
-    private async exportPNG(): Promise<void> {
-        this.setStatus("Exporting PNG...", true);
-
-        const outputSettings = this.getOutputSettings();
-        const captureWidth = Math.max(320, Math.round(outputSettings.width * outputSettings.qualityScale));
-        const captureHeight = Math.max(180, Math.round(outputSettings.height * outputSettings.qualityScale));
-        const dataUrl = await this.mmdManager.capturePngDataUrl({
-            width: captureWidth,
-            height: captureHeight,
-            precision: 1,
-        });
-        if (!dataUrl) {
-            this.setStatus("PNG export failed", false);
-            return;
-        }
-
-        const now = new Date();
-        const pad = (v: number) => String(v).padStart(2, "0");
-        const fileName = `mmd_capture_${captureWidth}x${captureHeight}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
-
-        const savedPath = await window.electronAPI.savePngFile(dataUrl, fileName);
-        if (!savedPath) {
-            this.setStatus("Ready", false);
-            this.showToast("PNG export canceled", "info");
-            return;
-        }
-
-        const basename = savedPath.replace(/^.*[\\/]/, "");
-        this.setStatus("PNG saved", false);
-        this.showToast(`Saved PNG: ${basename}`, "success");
-    }
-
-    private async exportPNGSequence(): Promise<void> {
-        const directoryPath = await window.electronAPI.openDirectoryDialog();
-        if (!directoryPath) {
-            this.showToast("PNG sequence export canceled", "info");
-            return;
-        }
-
-        const startFrame = Math.max(0, this.mmdManager.currentFrame);
-        const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
-        const step = 1;
-        const outputSettings = this.getOutputSettings();
-        const prefix = `mmd_seq_${outputSettings.width}x${outputSettings.height}`;
-
-        const frameList: number[] = [];
-        for (let frame = startFrame; frame <= endFrame; frame += step) {
-            frameList.push(frame);
-        }
-        if (frameList.length === 0) {
-            this.showToast("No frames to export", "error");
-            return;
-        }
-
-        const outputFolderName = this.buildPngSequenceFolderName(
-            prefix,
-            startFrame,
-            endFrame,
-            step
-        );
-        const outputDirectoryPath = this.joinPathForRenderer(directoryPath, outputFolderName);
-
-        const project = this.buildProjectStateForPersistence();
-        project.assets.audioPath = null;
-
-        this.setStatus("Launching PNG sequence export window...", true);
-        const result = await window.electronAPI.startPngSequenceExportWindow({
-            project,
-            outputDirectoryPath,
-            startFrame,
-            endFrame,
-            step,
-            prefix,
-            fps: outputSettings.fps,
-            precision: outputSettings.qualityScale,
-            outputWidth: outputSettings.width,
-            outputHeight: outputSettings.height,
-        });
-
-        if (!result) {
-            this.setStatus("PNG sequence export launch failed", false);
-            this.showToast("Failed to start PNG sequence export window", "error");
-            return;
-        }
-
-        this.setStatus("PNG sequence export started", false);
-        this.showToast(`PNG sequence export started (${frameList.length} files)`, "success");
-    }
-
-    private async exportWebm(): Promise<void> {
-        if (!window.isSecureContext) {
-            logError("webm", "export blocked by insecure context");
-            this.showToast("WebM export requires a secure context", "error");
-            return;
-        }
-
-        const startFrame = Math.max(0, this.mmdManager.currentFrame);
-        const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
-        const totalTimelineFrames = endFrame - startFrame + 1;
-        if (totalTimelineFrames <= 0) {
-            logError("webm", "export blocked because no frames are available", {
-                startFrame,
-                endFrame,
-            });
-            this.showToast("No frames to export", "error");
-            return;
-        }
-
-        const outputSettings = this.getOutputSettings();
-        const totalOutputFrames = Math.max(1, Math.round((totalTimelineFrames / 30) * outputSettings.fps));
-        logInfo("webm", "export requested", {
-            startFrame,
-            endFrame,
-            totalTimelineFrames,
-            totalOutputFrames,
-            fps: outputSettings.fps,
-            outputWidth: outputSettings.width,
-            outputHeight: outputSettings.height,
-            qualityScale: outputSettings.qualityScale,
-        });
-        const defaultFileName = this.buildWebmFileName(
-            outputSettings.width,
-            outputSettings.height,
-            startFrame,
-            endFrame,
-        );
-        const outputFilePath = await window.electronAPI.saveWebmDialog(defaultFileName);
-        if (!outputFilePath) {
-            logInfo("webm", "export canceled before launch", { defaultFileName });
-            this.showToast(t("toast.webmExportCanceled"), "info");
-            return;
-        }
-
-        const project = this.buildProjectStateForPersistence();
-        const audioFilePath = project.assets.audioPath;
-        const includeAudio = Boolean(this.outputIncludeAudioInput?.checked) && typeof audioFilePath === "string" && audioFilePath.length > 0;
-        const preferredVideoCodec = (this.outputWebmCodecSelect?.value as "auto" | "vp8" | "vp9" | undefined) ?? "vp9";
-        if (Boolean(this.outputIncludeAudioInput?.checked) && !includeAudio) {
-            this.showToast(t("toast.audioMissingForWebm"), "info");
-        }
-        project.assets.audioPath = null;
-        logInfo("webm", "export launching", {
-            outputFilePath,
-            startFrame,
-            endFrame,
-            fps: outputSettings.fps,
-            outputWidth: outputSettings.width,
-            outputHeight: outputSettings.height,
-            includeAudio,
-            audioFilePath: includeAudio ? audioFilePath : null,
-            preferredVideoCodec,
-        });
-
-        this.setStatus(t("busy.webmExportLaunching"), true);
-        const result = await window.electronAPI.startWebmExportWindow({
-            project,
-            outputFilePath,
-            startFrame,
-            endFrame,
-            fps: outputSettings.fps,
-            outputWidth: outputSettings.width,
-            outputHeight: outputSettings.height,
-            includeAudio,
-            audioFilePath: includeAudio ? audioFilePath : null,
-            preferredVideoCodec,
-        });
-
-        if (!result) {
-            logError("webm", "export launch failed", { outputFilePath });
-            this.setStatus("WebM export launch failed", false);
-            this.showToast("Failed to start WebM export window", "error");
-            return;
-        }
-
-        logInfo("webm", "export launch completed", {
-            jobId: result.jobId,
-            totalOutputFrames,
-        });
-        this.setStatus("WebM export started", false);
-        this.showToast(`WebM export started (${totalOutputFrames} frames)`, "success");
-    }
-
-    private sanitizeFileNameSegment(value: string): string {
-        const source = value.replace(/\s+/g, "_");
-        let sanitized = "";
-        for (const ch of source) {
-            const code = ch.charCodeAt(0);
-            if (code <= 31 || '<>:"/\\|?*'.includes(ch)) {
-                sanitized += "_";
-            } else {
-                sanitized += ch;
-            }
-        }
-        return sanitized.length > 0 ? sanitized : "mmd_seq";
-    }
-
-    private buildPngSequenceFolderName(prefix: string, startFrame: number, endFrame: number, step: number): string {
-        const now = new Date();
-        const pad = (value: number): string => String(value).padStart(2, "0");
-        const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-        return this.sanitizeFileNameSegment(`${prefix}_${timestamp}_${startFrame}-${endFrame}_s${step}`);
-    }
-
-    private buildWebmFileName(width: number, height: number, startFrame: number, endFrame: number): string {
-        const now = new Date();
-        const pad = (value: number): string => String(value).padStart(2, "0");
-        const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-        return `${this.sanitizeFileNameSegment(`mmd_capture_${width}x${height}_${timestamp}_${startFrame}-${endFrame}`)}.webm`;
-    }
-
     private joinPathForRenderer(basePath: string, childName: string): string {
         const separator = basePath.includes("\\") ? "\\" : "/";
         const normalizedBase = basePath.replace(/[\\/]+$/, "");
@@ -3321,59 +2223,11 @@ export class UIController {
         return this.joinPathForRenderer(projectDir, normalizedRelative.replace(/\//g, "\\"));
     }
 
-    private makeExternalWgslPresetValue(filePath: string): string {
-        return `${UIController.EXTERNAL_WGSL_PRESET_PREFIX}${filePath}`;
-    }
-
-    private parseExternalWgslPresetPath(value: string): string | null {
-        if (!value.startsWith(UIController.EXTERNAL_WGSL_PRESET_PREFIX)) {
-            return null;
-        }
-        const path = value.slice(UIController.EXTERNAL_WGSL_PRESET_PREFIX.length).trim();
-        return path.length > 0 ? path : null;
-    }
-
-    private validateExternalWgslToonSnippet(source: string): string | null {
-        const text = source.trim();
-        if (text.length === 0) {
-            return "WGSL shader file is empty";
-        }
-        if (/\bfragmentOutputs\b/.test(text)) {
-            return "WGSL snippet must not include fragmentOutputs";
-        }
-        if (/\breturn\b/.test(text)) {
-            return "WGSL snippet must not contain return statements";
-        }
-        if (/@fragment\b|@vertex\b/.test(text) || /\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(text)) {
-            return "Use a toon snippet, not a full WGSL module";
-        }
-        if (!/diffuseBase\s*\+=/.test(text)) {
-            return "WGSL snippet must write to diffuseBase";
-        }
-        return null;
-    }
-
     private isSamePathForRenderer(a: string, b: string): boolean {
         const norm = (v: string): string => v.replace(/[\\/]+/g, "\\").toLowerCase();
         return norm(a) === norm(b);
     }
-    private async reloadBundledWgslShaderFiles(triggerRefresh = true): Promise<void> {
-        if (this.bundledWgslScanInFlight) {
-            return;
-        }
-        this.bundledWgslScanInFlight = true;
-        try {
-            this.bundledWgslShaderFiles = await window.electronAPI.listBundledWgslFiles();
-        } catch {
-            this.bundledWgslShaderFiles = [];
-        } finally {
-            this.bundledWgslScanInFlight = false;
-            this.bundledWgslLastScanMs = Date.now();
-        }
-        if (triggerRefresh) {
-            this.refreshShaderPanel();
-        }
-    }
+
     private getCameraPanelInfo(): ModelInfo {
         return {
             name: "Camera",
@@ -3466,8 +2320,8 @@ export class UIController {
         this.modelSelect.disabled = models.length === 0;
         this.syncShaderModelSelectorFromInfo();
         this.updateInfoActionButtons();
-        this.updateRigidBodyToggleButton();
-        this.refreshAccessoryPanel();
+        this.runtimeFeatureUiController?.refreshRigidBodies();
+        this.accessoryPanelController?.refresh();
     }
 
     private syncShaderModelSelectorFromInfo(): void {
@@ -3506,347 +2360,6 @@ export class UIController {
         if (showToast) {
             this.showToast("Active model switched", "success");
         }
-    }
-
-    private setupAccessoryControls(): void {
-        const select = this.accessorySelect;
-        const parentModelSelect = this.accessoryParentModelSelect;
-        const parentBoneSelect = this.accessoryParentBoneSelect;
-        const btnVisibility = this.btnAccessoryVisibility;
-        const btnDelete = this.btnAccessoryDelete;
-
-        const registerSlider = (
-            key: AccessoryTransformSliderKey,
-            sliderId: string,
-            valueId: string,
-        ): void => {
-            const slider = document.getElementById(sliderId) as HTMLInputElement | null;
-            const valueEl = document.getElementById(valueId);
-            if (!slider || !valueEl) return;
-            this.accessoryTransformSliders.set(key, slider);
-            this.accessoryTransformValueEls.set(key, valueEl);
-
-            slider.addEventListener("input", () => {
-                this.updateAccessoryValueLabelsFromSliders();
-                if (this.isSyncingAccessoryUi) return;
-
-                const selectedIndex = this.getSelectedAccessoryIndex();
-                if (selectedIndex === null) return;
-
-                const position = {
-                    x: Number(this.accessoryTransformSliders.get("px")?.value ?? 0),
-                    y: Number(this.accessoryTransformSliders.get("py")?.value ?? 0),
-                    z: Number(this.accessoryTransformSliders.get("pz")?.value ?? 0),
-                };
-                const rotationDeg = {
-                    x: Number(this.accessoryTransformSliders.get("rx")?.value ?? 0),
-                    y: Number(this.accessoryTransformSliders.get("ry")?.value ?? 0),
-                    z: Number(this.accessoryTransformSliders.get("rz")?.value ?? 0),
-                };
-                const scalePercent = Number(this.accessoryTransformSliders.get("s")?.value ?? 100);
-
-                this.mmdManager.setAccessoryTransform(selectedIndex, {
-                    position,
-                    rotationDeg,
-                    scale: scalePercent / 100,
-                });
-                this.markSectionKeyframeDirty("accessory", this.getAccessoryKeyframeContextKey(selectedIndex));
-                this.updateSectionKeyframeButtons();
-            });
-        };
-
-        registerSlider("px", "accessory-pos-x", "accessory-pos-x-val");
-        registerSlider("py", "accessory-pos-y", "accessory-pos-y-val");
-        registerSlider("pz", "accessory-pos-z", "accessory-pos-z-val");
-        registerSlider("rx", "accessory-rot-x", "accessory-rot-x-val");
-        registerSlider("ry", "accessory-rot-y", "accessory-rot-y-val");
-        registerSlider("rz", "accessory-rot-z", "accessory-rot-z-val");
-        registerSlider("s", "accessory-scale", "accessory-scale-val");
-
-        select?.addEventListener("change", () => {
-            this.syncAccessoryTransformSlidersFromSelection();
-            this.syncAccessoryParentControlsFromSelection();
-            this.updateAccessoryActionButtons();
-            this.updateSectionKeyframeButtons();
-        });
-
-        parentModelSelect?.addEventListener("change", () => {
-            if (this.isSyncingAccessoryParentUi) return;
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const modelIndex = this.parseAccessoryParentModelIndex();
-            this.refreshAccessoryParentBoneOptions(modelIndex, null);
-            this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, null);
-        });
-
-        parentBoneSelect?.addEventListener("change", () => {
-            if (this.isSyncingAccessoryParentUi) return;
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const modelIndex = this.parseAccessoryParentModelIndex();
-            if (modelIndex === null) {
-                this.mmdManager.setAccessoryParent(selectedIndex, null, null);
-                return;
-            }
-
-            const boneName = parentBoneSelect.value || null;
-            this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, boneName);
-        });
-
-        btnVisibility?.addEventListener("click", () => {
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-            const visible = this.mmdManager.toggleAccessoryVisibility(selectedIndex);
-            this.updateAccessoryActionButtons();
-            this.showToast(visible ? "Accessory visible" : "Accessory hidden", "info");
-        });
-
-        btnDelete?.addEventListener("click", () => {
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const accessories = this.mmdManager.getLoadedAccessories();
-            const current = accessories.find((item) => item.index === selectedIndex);
-            const targetName = current?.name ?? "Accessory";
-
-            const ok = window.confirm(`Delete accessory '${targetName}'?`);
-            if (!ok) return;
-
-            const removed = this.mmdManager.removeAccessory(selectedIndex);
-            if (!removed) {
-                this.showToast("Failed to delete accessory", "error");
-                return;
-            }
-
-            this.refreshAccessoryPanel();
-            this.showToast(`Accessory deleted: ${targetName}`, "success");
-        });
-
-        this.updateAccessoryValueLabelsFromSliders();
-        this.setAccessoryTransformControlsEnabled(false);
-        this.setAccessoryParentControlsEnabled(false);
-        this.updateAccessoryActionButtons();
-        this.updateSectionKeyframeButtons();
-    }
-
-    private refreshAccessoryPanel(): void {
-        const select = this.accessorySelect;
-        if (!select) return;
-
-        const accessories = this.mmdManager.getLoadedAccessories();
-        const previousValue = select.value;
-        select.innerHTML = "";
-
-        for (const accessory of accessories) {
-            const option = document.createElement("option");
-            option.value = String(accessory.index);
-            const kindLabel = accessory.kind === "glb" ? " [GLB]" : "";
-            option.textContent = `${accessory.index + 1}: ${accessory.name}${kindLabel}`;
-            option.title = accessory.path;
-            select.appendChild(option);
-        }
-
-        if (accessories.length === 0) {
-            const option = document.createElement("option");
-            option.value = "";
-            option.textContent = "-";
-            select.appendChild(option);
-        } else {
-            const restore = accessories.find((item) => String(item.index) === previousValue);
-            select.value = restore ? String(restore.index) : "0";
-        }
-
-        select.disabled = accessories.length === 0;
-        this.accessoryEmptyStateEl?.classList.toggle("hidden", accessories.length > 0);
-        this.setAccessoryTransformControlsEnabled(accessories.length > 0);
-        this.refreshAccessoryParentModelOptions();
-        this.syncAccessoryParentControlsFromSelection();
-        this.syncAccessoryTransformSlidersFromSelection();
-        this.updateAccessoryActionButtons();
-        this.updateSectionKeyframeButtons();
-    }
-
-    private getSelectedAccessoryIndex(): number | null {
-        const select = this.accessorySelect;
-        if (!select || select.disabled) return null;
-        const parsed = Number.parseInt(select.value, 10);
-        if (Number.isNaN(parsed)) return null;
-        return parsed;
-    }
-
-    private setAccessoryTransformControlsEnabled(enabled: boolean): void {
-        for (const slider of this.accessoryTransformSliders.values()) {
-            slider.disabled = !enabled;
-            this.syncRangeNumberInput(slider);
-        }
-    }
-
-    private setAccessoryParentControlsEnabled(enabled: boolean): void {
-        if (this.accessoryParentModelSelect) {
-            this.accessoryParentModelSelect.disabled = !enabled;
-        }
-        if (this.accessoryParentBoneSelect) {
-            this.accessoryParentBoneSelect.disabled = !enabled;
-        }
-    }
-
-    private parseAccessoryParentModelIndex(): number | null {
-        const select = this.accessoryParentModelSelect;
-        if (!select) return null;
-        const value = select.value;
-        if (value === "") return null;
-        const parsed = Number.parseInt(value, 10);
-        if (Number.isNaN(parsed)) return null;
-        return parsed;
-    }
-
-    private refreshAccessoryParentModelOptions(): void {
-        const select = this.accessoryParentModelSelect;
-        if (!select) return;
-
-        const previousValue = select.value;
-        const models = this.mmdManager.getLoadedModels();
-        select.innerHTML = "";
-
-        const worldOption = document.createElement("option");
-        worldOption.value = "";
-        worldOption.textContent = "World";
-        select.appendChild(worldOption);
-
-        for (const model of models) {
-            const option = document.createElement("option");
-            option.value = String(model.index);
-            option.textContent = `${model.index + 1}: ${model.name}`;
-            option.title = model.path;
-            select.appendChild(option);
-        }
-
-        const hasPrevious = Array.from(select.options).some((option) => option.value === previousValue);
-        select.value = hasPrevious ? previousValue : "";
-    }
-
-    private refreshAccessoryParentBoneOptions(modelIndex: number | null, selectedBoneName: string | null): void {
-        const select = this.accessoryParentBoneSelect;
-        if (!select) return;
-
-        select.innerHTML = "";
-
-        if (modelIndex === null) {
-            const option = document.createElement("option");
-            option.value = "";
-            option.textContent = "-";
-            select.appendChild(option);
-            select.value = "";
-            select.disabled = true;
-            return;
-        }
-
-        const modelOption = document.createElement("option");
-        modelOption.value = "";
-        modelOption.textContent = "(ãƒ¢ãƒEƒ«ä¸­å¿E";
-        select.appendChild(modelOption);
-
-        const boneNames = this.mmdManager.getModelBoneNames(modelIndex);
-        for (const boneName of boneNames) {
-            const option = document.createElement("option");
-            option.value = boneName;
-            option.textContent = boneName;
-            select.appendChild(option);
-        }
-
-        const target = selectedBoneName ?? "";
-        const hasTarget = Array.from(select.options).some((option) => option.value === target);
-        select.value = hasTarget ? target : "";
-        select.disabled = false;
-    }
-
-    private syncAccessoryParentControlsFromSelection(): void {
-        const selectedIndex = this.getSelectedAccessoryIndex();
-        if (selectedIndex === null) {
-            this.isSyncingAccessoryParentUi = true;
-            try {
-                if (this.accessoryParentModelSelect) this.accessoryParentModelSelect.value = "";
-                this.refreshAccessoryParentBoneOptions(null, null);
-                this.setAccessoryParentControlsEnabled(false);
-            } finally {
-                this.isSyncingAccessoryParentUi = false;
-            }
-            return;
-        }
-
-        const parentState = this.mmdManager.getAccessoryParent(selectedIndex);
-        const modelIndex = parentState?.modelIndex ?? null;
-        const boneName = parentState?.boneName ?? null;
-
-        this.isSyncingAccessoryParentUi = true;
-        try {
-            this.setAccessoryParentControlsEnabled(true);
-            if (this.accessoryParentModelSelect) {
-                const modelValue = modelIndex === null ? "" : String(modelIndex);
-                const hasValue = Array.from(this.accessoryParentModelSelect.options)
-                    .some((option) => option.value === modelValue);
-                this.accessoryParentModelSelect.value = hasValue ? modelValue : "";
-            }
-            this.refreshAccessoryParentBoneOptions(modelIndex, boneName);
-        } finally {
-            this.isSyncingAccessoryParentUi = false;
-        }
-    }
-
-    private syncAccessoryTransformSlidersFromSelection(): void {
-        const selectedIndex = this.getSelectedAccessoryIndex();
-        if (selectedIndex === null) {
-            this.resetAccessoryTransformSliders();
-            return;
-        }
-
-        const transform = this.mmdManager.getAccessoryTransform(selectedIndex);
-        if (!transform) {
-            this.resetAccessoryTransformSliders();
-            return;
-        }
-
-        this.isSyncingAccessoryUi = true;
-        try {
-            this.setSliderValueClamped("px", transform.position.x);
-            this.setSliderValueClamped("py", transform.position.y);
-            this.setSliderValueClamped("pz", transform.position.z);
-            this.setSliderValueClamped("rx", transform.rotationDeg.x);
-            this.setSliderValueClamped("ry", transform.rotationDeg.y);
-            this.setSliderValueClamped("rz", transform.rotationDeg.z);
-            this.setSliderValueClamped("s", transform.scale * 100);
-            this.updateAccessoryValueLabelsFromSliders();
-        } finally {
-            this.isSyncingAccessoryUi = false;
-        }
-    }
-
-    private resetAccessoryTransformSliders(): void {
-        this.isSyncingAccessoryUi = true;
-        try {
-            this.setSliderValueClamped("px", 0);
-            this.setSliderValueClamped("py", 0);
-            this.setSliderValueClamped("pz", 0);
-            this.setSliderValueClamped("rx", 0);
-            this.setSliderValueClamped("ry", 0);
-            this.setSliderValueClamped("rz", 0);
-            this.setSliderValueClamped("s", 100);
-            this.updateAccessoryValueLabelsFromSliders();
-        } finally {
-            this.isSyncingAccessoryUi = false;
-        }
-    }
-
-    private setSliderValueClamped(key: AccessoryTransformSliderKey, value: number): void {
-        const slider = this.accessoryTransformSliders.get(key);
-        if (!slider || !Number.isFinite(value)) return;
-        const min = Number(slider.min);
-        const max = Number(slider.max);
-        const clamped = Math.max(min, Math.min(max, value));
-        slider.value = String(clamped);
-        this.syncRangeNumberInput(slider);
     }
 
     private installRangeNumberInputs(root: ParentNode = document): void {
@@ -4000,566 +2513,8 @@ export class UIController {
         return decimalIndex >= 0 ? normalized.length - decimalIndex - 1 : 0;
     }
 
-    private updateAccessoryValueLabelsFromSliders(): void {
-        const getValue = (key: AccessoryTransformSliderKey): number =>
-            Number(this.accessoryTransformSliders.get(key)?.value ?? 0);
-
-        const px = getValue("px");
-        const py = getValue("py");
-        const pz = getValue("pz");
-        const rx = getValue("rx");
-        const ry = getValue("ry");
-        const rz = getValue("rz");
-        const s = getValue("s");
-
-        const setText = (key: AccessoryTransformSliderKey, text: string): void => {
-            const valueEl = this.accessoryTransformValueEls.get(key);
-            if (valueEl) valueEl.textContent = text;
-        };
-
-        setText("px", px.toFixed(2));
-        setText("py", py.toFixed(2));
-        setText("pz", pz.toFixed(2));
-        setText("rx", `${rx.toFixed(1)}°`);
-        setText("ry", `${ry.toFixed(1)}°`);
-        setText("rz", `${rz.toFixed(1)}°`);
-        setText("s", `${Math.round(s)}%`);
-    }
-
-    private updateAccessoryActionButtons(): void {
-        const btnVisibility = this.btnAccessoryVisibility;
-        const btnDelete = this.btnAccessoryDelete;
-        if (!btnVisibility || !btnDelete) return;
-
-        const selectedIndex = this.getSelectedAccessoryIndex();
-        const enabled = selectedIndex !== null;
-        btnVisibility.disabled = !enabled;
-        btnDelete.disabled = !enabled;
-
-        if (!enabled) {
-            btnVisibility.textContent = t("button.hide");
-            return;
-        }
-
-        const accessories = this.mmdManager.getLoadedAccessories();
-        const current = accessories.find((item) => item.index === selectedIndex);
-        const visible = current?.visible ?? true;
-        btnVisibility.textContent = visible ? t("button.hide") : t("button.show");
-    }
-
-    private isShaderPanelExpanded(): boolean {
-        return !this.mainContentEl.classList.contains("shader-panel-collapsed");
-    }
-
-    private setShaderPanelVisible(visible: boolean): void {
-        this.mainContentEl.classList.toggle("shader-panel-collapsed", !visible);
-        this.clampTimelineWidthToLayout();
-        this.clampShaderWidthToLayout();
-        this.applyViewportAspectPresentation();
-        this.updateShaderPanelToggleButton(visible);
-    }
-
-    private updateShaderPanelToggleButton(visible: boolean): void {
-        if (!this.btnToggleShaderPanel) return;
-        this.btnToggleShaderPanel.setAttribute("aria-pressed", visible ? "true" : "false");
-        this.btnToggleShaderPanel.classList.toggle("toggle-on", visible);
-        this.btnToggleShaderPanel.title = visible
-            ? t("toolbar.fx.title.on")
-            : t("toolbar.fx.title.off");
-        if (this.shaderPanelToggleText) {
-            this.shaderPanelToggleText.textContent = t("toolbar.fx.short");
-        }
-    }
-
-    private toggleUiFullscreenMode(): void {
-        if (this.isUiFullscreenActive) {
-            this.exitUiFullscreenMode();
-            return;
-        }
-        this.enterUiFullscreenMode();
-    }
-
-    private enterUiFullscreenMode(): void {
-        this.setUiFullscreenVisualState(true);
-        this.showToast(t("toast.ui.hidden"), "info");
-    }
-
-    private exitUiFullscreenMode(): void {
-        this.setUiFullscreenVisualState(false);
-    }
-
-    private setUiFullscreenVisualState(active: boolean): void {
-        this.isUiFullscreenActive = active;
-        this.appRootEl.classList.toggle("ui-presentation-mode", active);
-        this.updateFullscreenUiToggleButton(active);
-        this.syncMainWindowPresentationAspect();
-    }
-
-    private updateFullscreenUiToggleButton(active: boolean): void {
-        if (!this.btnToggleFullscreenUi) return;
-        this.btnToggleFullscreenUi.setAttribute("aria-pressed", active ? "true" : "false");
-        this.btnToggleFullscreenUi.classList.toggle("toggle-on", active);
-        this.btnToggleFullscreenUi.title = active
-            ? t("toolbar.ui.title.on")
-            : t("toolbar.ui.title.off");
-        if (this.fullscreenUiToggleText) {
-            this.fullscreenUiToggleText.textContent = t("toolbar.ui.short");
-        }
-    }
-
-    private setupTimelineResizer(): void {
-        if (!this.timelineResizerEl || !this.timelinePanelEl) return;
-
-        let startX = 0;
-        let startWidth = 0;
-
-        const stopResize = (): void => {
-            if (!this.isTimelineResizing) return;
-            this.isTimelineResizing = false;
-            document.body.classList.remove("timeline-resizing");
-            window.removeEventListener("pointermove", onPointerMove);
-            window.removeEventListener("pointerup", onPointerUp);
-            window.removeEventListener("pointercancel", onPointerUp);
-        };
-
-        const onPointerMove = (event: PointerEvent): void => {
-            if (!this.isTimelineResizing) return;
-
-            const delta = event.clientX - startX;
-            const maxWidth = this.computeTimelineMaxWidth();
-            const nextWidth = Math.max(
-                UIController.MIN_TIMELINE_WIDTH,
-                Math.min(maxWidth, startWidth + delta)
-            );
-
-            document.documentElement.style.setProperty("--timeline-width", `${Math.round(nextWidth)}px`);
-            this.applyViewportAspectPresentation();
-        };
-
-        const onPointerUp = (): void => {
-            stopResize();
-        };
-
-        this.timelineResizerEl.addEventListener("pointerdown", (event: PointerEvent) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            startX = event.clientX;
-            startWidth = this.timelinePanelEl?.getBoundingClientRect().width ?? UIController.MIN_TIMELINE_WIDTH;
-            this.isTimelineResizing = true;
-            document.body.classList.add("timeline-resizing");
-            window.addEventListener("pointermove", onPointerMove);
-            window.addEventListener("pointerup", onPointerUp);
-            window.addEventListener("pointercancel", onPointerUp);
-        });
-
-        window.addEventListener("resize", () => {
-            this.clampTimelineWidthToLayout();
-            this.clampShaderWidthToLayout();
-            this.clampBottomPanelHeightToLayout();
-            this.applyViewportAspectPresentation();
-            this.syncMainWindowPresentationAspect();
-        });
-    }
-
-    private setupShaderResizer(): void {
-        if (!this.shaderResizerEl || !this.shaderPanelEl) return;
-
-        let startX = 0;
-        let startWidth = 0;
-
-        const stopResize = (): void => {
-            if (!this.isShaderResizing) return;
-            this.isShaderResizing = false;
-            document.body.classList.remove("shader-resizing");
-            window.removeEventListener("pointermove", onPointerMove);
-            window.removeEventListener("pointerup", onPointerUp);
-            window.removeEventListener("pointercancel", onPointerUp);
-        };
-
-        const onPointerMove = (event: PointerEvent): void => {
-            if (!this.isShaderResizing || !this.isShaderPanelExpanded()) return;
-
-            const delta = startX - event.clientX;
-            const maxWidth = this.computeShaderMaxWidth();
-            const nextWidth = Math.max(
-                UIController.MIN_SHADER_PANEL_WIDTH,
-                Math.min(maxWidth, startWidth + delta)
-            );
-
-            document.documentElement.style.setProperty("--shader-panel-width", `${Math.round(nextWidth)}px`);
-            this.applyViewportAspectPresentation();
-        };
-
-        const onPointerUp = (): void => {
-            stopResize();
-        };
-
-        this.shaderResizerEl.addEventListener("pointerdown", (event: PointerEvent) => {
-            if (event.button !== 0 || !this.isShaderPanelExpanded()) return;
-            event.preventDefault();
-            startX = event.clientX;
-            startWidth = this.shaderPanelEl?.getBoundingClientRect().width ?? UIController.MIN_SHADER_PANEL_WIDTH;
-            this.isShaderResizing = true;
-            document.body.classList.add("shader-resizing");
-            window.addEventListener("pointermove", onPointerMove);
-            window.addEventListener("pointerup", onPointerUp);
-            window.addEventListener("pointercancel", onPointerUp);
-        });
-    }
-
-    private setupBottomPanelResizer(): void {
-        if (!this.bottomPanelResizerEl || !this.bottomPanelEl) return;
-
-        let startY = 0;
-        let startHeight = 0;
-
-        const stopResize = (): void => {
-            if (!this.isBottomPanelResizing) return;
-            this.isBottomPanelResizing = false;
-            document.body.classList.remove("bottom-panel-resizing");
-            window.removeEventListener("pointermove", onPointerMove);
-            window.removeEventListener("pointerup", onPointerUp);
-            window.removeEventListener("pointercancel", onPointerUp);
-        };
-
-        const onPointerMove = (event: PointerEvent): void => {
-            if (!this.isBottomPanelResizing) return;
-
-            const delta = event.clientY - startY;
-            const maxHeight = this.computeBottomPanelMaxHeight();
-            const nextHeight = Math.max(
-                UIController.MIN_BOTTOM_PANEL_HEIGHT,
-                Math.min(maxHeight, startHeight - delta)
-            );
-
-            document.documentElement.style.setProperty("--bottom-panel-height", `${Math.round(nextHeight)}px`);
-            this.applyViewportAspectPresentation();
-        };
-
-        const onPointerUp = (): void => {
-            stopResize();
-        };
-
-        this.bottomPanelResizerEl.addEventListener("pointerdown", (event: PointerEvent) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            startY = event.clientY;
-            startHeight = this.bottomPanelEl?.getBoundingClientRect().height ?? UIController.MIN_BOTTOM_PANEL_HEIGHT;
-            this.isBottomPanelResizing = true;
-            document.body.classList.add("bottom-panel-resizing");
-            window.addEventListener("pointermove", onPointerMove);
-            window.addEventListener("pointerup", onPointerUp);
-            window.addEventListener("pointercancel", onPointerUp);
-        });
-    }
-
-    private setupViewportAspectSync(): void {
-        if (!this.viewportContainerEl) return;
-        this.viewportAspectResizeObserver = new ResizeObserver(() => {
-            this.applyViewportAspectPresentation();
-        });
-        this.viewportAspectResizeObserver.observe(this.viewportContainerEl);
-    }
-
-    private applyViewportAspectPresentation(): void {
-        if (!this.renderCanvasEl || !this.viewportContainerEl) return;
-
-        const selectedAspect = this.outputAspectSelect?.value ?? "16:9";
-        if (selectedAspect === "viewport") {
-            this.renderCanvasEl.style.width = "100%";
-            this.renderCanvasEl.style.height = "100%";
-            this.mmdManager.resize();
-            return;
-        }
-
-        const ratio = this.resolveSelectedOutputAspectRatio();
-        const containerWidth = Math.max(1, Math.floor(this.viewportContainerEl.clientWidth));
-        const containerHeight = Math.max(1, Math.floor(this.viewportContainerEl.clientHeight));
-
-        let renderWidth = containerWidth;
-        let renderHeight = Math.max(1, Math.round(renderWidth / Math.max(0.1, ratio)));
-        if (renderHeight > containerHeight) {
-            renderHeight = containerHeight;
-            renderWidth = Math.max(1, Math.round(renderHeight * ratio));
-        }
-
-        this.renderCanvasEl.style.width = `${renderWidth}px`;
-        this.renderCanvasEl.style.height = `${renderHeight}px`;
-        this.mmdManager.resize();
-    }
-
-    private syncMainWindowPresentationAspect(): void {
-        if (!this.isUiFullscreenActive) return;
-
-        const selectedAspect = this.outputAspectSelect?.value ?? "16:9";
-        if (selectedAspect === "viewport") return;
-
-        const ratio = this.resolveSelectedOutputAspectRatio();
-        if (Math.abs(ratio - 16 / 9) > 0.001) return;
-
-        void window.electronAPI.snapMainWindowContentAspect(ratio);
-    }
-
-    private computeTimelineMaxWidth(): number {
-        const panelWidth = this.mainContentEl.clientWidth;
-        const resizerWidth = this.timelineResizerEl?.getBoundingClientRect().width ?? 6;
-        const shaderResizerWidth = this.isShaderPanelExpanded()
-            ? (this.shaderResizerEl?.getBoundingClientRect().width ?? 6)
-            : 0;
-        const shaderWidth = this.isShaderPanelExpanded()
-            ? (this.shaderPanelEl?.getBoundingClientRect().width ?? 0)
-            : 0;
-        return Math.max(
-            UIController.MIN_TIMELINE_WIDTH,
-            panelWidth - resizerWidth - shaderResizerWidth - shaderWidth - UIController.MIN_VIEWPORT_WIDTH
-        );
-    }
-
-    private clampTimelineWidthToLayout(): void {
-        if (!this.timelinePanelEl) return;
-        const currentWidth = this.timelinePanelEl.getBoundingClientRect().width;
-        const maxWidth = this.computeTimelineMaxWidth();
-        const nextWidth = Math.max(
-            UIController.MIN_TIMELINE_WIDTH,
-            Math.min(maxWidth, currentWidth)
-        );
-        document.documentElement.style.setProperty("--timeline-width", `${Math.round(nextWidth)}px`);
-    }
-
-    private computeShaderMaxWidth(): number {
-        if (!this.isShaderPanelExpanded()) {
-            return UIController.MIN_SHADER_PANEL_WIDTH;
-        }
-        const panelWidth = this.mainContentEl.clientWidth;
-        const timelineWidth = this.timelinePanelEl?.getBoundingClientRect().width ?? UIController.MIN_TIMELINE_WIDTH;
-        const timelineResizerWidth = this.timelineResizerEl?.getBoundingClientRect().width ?? 6;
-        const shaderResizerWidth = this.shaderResizerEl?.getBoundingClientRect().width ?? 6;
-        return Math.max(
-            UIController.MIN_SHADER_PANEL_WIDTH,
-            panelWidth - timelineWidth - timelineResizerWidth - shaderResizerWidth - UIController.MIN_VIEWPORT_WIDTH
-        );
-    }
-
-    private clampShaderWidthToLayout(): void {
-        if (!this.shaderPanelEl || !this.isShaderPanelExpanded()) return;
-        const currentWidth = this.shaderPanelEl.getBoundingClientRect().width;
-        const maxWidth = this.computeShaderMaxWidth();
-        const nextWidth = Math.max(
-            UIController.MIN_SHADER_PANEL_WIDTH,
-            Math.min(maxWidth, currentWidth)
-        );
-        document.documentElement.style.setProperty("--shader-panel-width", `${Math.round(nextWidth)}px`);
-    }
-
-    private computeBottomPanelMaxHeight(): number {
-        const appHeight = this.appRootEl.clientHeight;
-        const toolbarHeight = document.getElementById("toolbar")?.getBoundingClientRect().height ?? 0;
-        const resizerHeight = this.bottomPanelResizerEl?.getBoundingClientRect().height ?? 6;
-        return Math.max(
-            UIController.MIN_BOTTOM_PANEL_HEIGHT,
-            appHeight - toolbarHeight - resizerHeight - UIController.MIN_MAIN_CONTENT_HEIGHT
-        );
-    }
-
-    private clampBottomPanelHeightToLayout(): void {
-        if (!this.bottomPanelEl) return;
-        const currentHeight = this.bottomPanelEl.getBoundingClientRect().height;
-        const maxHeight = this.computeBottomPanelMaxHeight();
-        const nextHeight = Math.max(
-            UIController.MIN_BOTTOM_PANEL_HEIGHT,
-            Math.min(maxHeight, currentHeight)
-        );
-        document.documentElement.style.setProperty("--bottom-panel-height", `${Math.round(nextHeight)}px`);
-    }
-
     private refreshShaderPanel(): void {
-        if (
-            !this.shaderModelSelect ||
-            !this.shaderPresetSelect ||
-            !this.shaderApplySelectedButton ||
-            !this.shaderApplyAllButton ||
-            !this.shaderResetButton ||
-            !this.shaderPanelNote ||
-            !this.shaderMaterialList
-        ) {
-            return;
-        }
-
-        this.syncShaderModelSelectorFromInfo();
-
-        if (this.mmdManager.getTimelineTarget() === "camera") {
-            this.renderShaderCameraPostEffectsPanel();
-            return;
-        }
-        this.restoreCameraDofControlsToCameraPanel();
-
-        if (!this.bundledWgslScanInFlight) {
-            void this.reloadBundledWgslShaderFiles(false);
-        }
-
-        const isAvailable = this.mmdManager.isWgslMaterialShaderAssignmentAvailable();
-        const presets = this.mmdManager.getWgslMaterialShaderPresets()
-            .filter((preset) => !UIController.HIDDEN_SHADER_PRESET_IDS.has(preset.id));
-        const models = this.mmdManager.getWgslModelShaderStates();
-
-        this.shaderPresetSelect.innerHTML = "";
-        for (const preset of presets) {
-            const option = document.createElement("option");
-            option.value = preset.id;
-            option.textContent = preset.label;
-            this.shaderPresetSelect.appendChild(option);
-        }
-
-        if (!isAvailable) {
-            this.shaderModelSelect.innerHTML = '<option value="">-</option>';
-            this.shaderModelSelect.disabled = true;
-            this.shaderPresetSelect.disabled = true;
-            this.shaderApplySelectedButton.disabled = true;
-            this.shaderApplyAllButton.disabled = true;
-            this.shaderResetButton.disabled = true;
-            this.shaderPanelNote.textContent = t("shader.note.wgslUnavailable");
-            this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.wgslUnavailable")}</div>`;
-            return;
-        }
-
-        if (models.length === 0) {
-            this.shaderModelSelect.innerHTML = '<option value="">-</option>';
-            this.shaderModelSelect.disabled = true;
-            this.shaderPresetSelect.disabled = true;
-            this.shaderApplySelectedButton.disabled = true;
-            this.shaderApplyAllButton.disabled = true;
-            this.shaderResetButton.disabled = true;
-            this.shaderPanelNote.textContent = t("shader.note.loadModel");
-            this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
-            return;
-        }
-
-        const timelineTarget = this.mmdManager.getTimelineTarget();
-        let selectedModelIndex = Number.parseInt(this.modelSelect.value, 10);
-        if (
-            timelineTarget !== "model" ||
-            Number.isNaN(selectedModelIndex) ||
-            !models.some((model) => model.modelIndex === selectedModelIndex)
-        ) {
-            selectedModelIndex = models.find((model) => model.active)?.modelIndex ?? models[0].modelIndex;
-        }
-
-        const selectedModel = models.find((model) => model.modelIndex === selectedModelIndex) ?? models[0];
-        this.shaderModelSelect.value = String(selectedModel.modelIndex);
-        this.shaderModelSelect.disabled = false;
-
-        if (selectedModel.materials.length === 0) {
-            this.shaderPresetSelect.disabled = true;
-            this.shaderApplySelectedButton.disabled = true;
-            this.shaderApplyAllButton.disabled = true;
-            this.shaderResetButton.disabled = true;
-            this.shaderPanelNote.textContent = t("shader.note.noMaterial");
-            this.shaderMaterialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.noMaterial")}</div>`;
-            return;
-        }
-
-        const rememberedMaterialKey = this.shaderSelectedMaterialKeys.get(selectedModel.modelIndex);
-        const selectedMaterial = rememberedMaterialKey
-            ? selectedModel.materials.find((material) => material.key === rememberedMaterialKey) ?? null
-            : null;
-        if (rememberedMaterialKey && !selectedMaterial) {
-            this.shaderSelectedMaterialKeys.delete(selectedModel.modelIndex);
-        }
-
-        let selectedPresetId = presets[0]?.id ?? "wgsl-mmd-standard";
-        let mixedPresets = false;
-        if (selectedMaterial) {
-            selectedPresetId = selectedMaterial.presetId;
-        } else {
-            const allPresetIds = Array.from(new Set(selectedModel.materials.map((material) => material.presetId)));
-            if (allPresetIds.length === 1) {
-                selectedPresetId = allPresetIds[0];
-            } else {
-                mixedPresets = true;
-            }
-        }
-        if (!presets.some((preset) => preset.id === selectedPresetId)) {
-            selectedPresetId = presets[0]?.id ?? "wgsl-mmd-standard";
-        }
-
-        const selectedExternalWgslPath = selectedMaterial
-            ? selectedMaterial.externalWgslPath
-            : (() => {
-                const paths = new Set(
-                    selectedModel.materials
-                        .map((material) => material.externalWgslPath)
-                        .filter((value): value is string => typeof value === "string" && value.length > 0),
-                );
-                return paths.size === 1 ? Array.from(paths)[0] : null;
-            })();
-
-        let selectedShaderValue: string = selectedPresetId;
-        if (!Array.from(this.shaderPresetSelect.options).some((option) => option.value === selectedShaderValue)) {
-            selectedShaderValue = presets[0]?.id ?? "wgsl-mmd-standard";
-        }
-        this.shaderPresetSelect.value = selectedShaderValue;
-
-        const presetLabelById = new Map(presets.map((preset) => [preset.id, preset.label]));
-        this.shaderMaterialList.innerHTML = "";
-
-        for (const material of selectedModel.materials) {
-            const item = document.createElement("div");
-            item.className = "shader-material-item";
-            if (selectedMaterial?.key === material.key) {
-                item.classList.add("active");
-            }
-            item.title = material.key;
-            item.addEventListener("click", () => {
-                const current = this.shaderSelectedMaterialKeys.get(selectedModel.modelIndex);
-                if (current === material.key) {
-                    this.shaderSelectedMaterialKeys.delete(selectedModel.modelIndex);
-                } else {
-                    this.shaderSelectedMaterialKeys.set(selectedModel.modelIndex, material.key);
-                }
-                this.refreshShaderPanel();
-            });
-
-            const nameEl = document.createElement("span");
-            nameEl.className = "shader-material-name";
-            nameEl.textContent = material.name;
-            item.appendChild(nameEl);
-
-            const presetEl = document.createElement("span");
-            presetEl.className = "shader-material-preset";
-            presetEl.textContent = material.externalWgslPath
-                ? `WGSL: ${this.getBaseNameForRenderer(material.externalWgslPath)}`
-                : (presetLabelById.get(material.presetId) ?? material.presetId);
-            item.appendChild(presetEl);
-
-            this.shaderMaterialList.appendChild(item);
-        }
-
-        this.shaderApplySelectedButton.textContent = t("shader.apply.selected");
-        this.shaderApplyAllButton.textContent = t("shader.apply.all");
-        this.shaderResetButton.textContent = selectedMaterial
-            ? t("shader.reset.selected")
-            : t("shader.reset.all");
-
-        if (selectedExternalWgslPath) {
-            this.shaderPanelNote.textContent = t("shader.note.externalWgslActive", {
-                name: this.getBaseNameForRenderer(selectedExternalWgslPath),
-            });
-        } else if (selectedMaterial) {
-            this.shaderPanelNote.textContent = t("shader.note.selectedMaterial", {
-                name: selectedMaterial.name,
-            });
-        } else if (mixedPresets) {
-            this.shaderPanelNote.textContent = t("shader.note.mixedPresets");
-        } else {
-            const selectedPreset = presets.find((preset) => preset.id === selectedPresetId);
-            this.shaderPanelNote.textContent = selectedPreset?.description ?? t("shader.note.applyAll");
-        }
-
-        const hasSelectableOption = Array.from(this.shaderPresetSelect.options).some((option) => !option.disabled && option.value.length > 0);
-        this.shaderPresetSelect.disabled = !hasSelectableOption;
-        this.shaderApplySelectedButton.disabled = !hasSelectableOption || !selectedMaterial;
-        this.shaderApplyAllButton.disabled = !hasSelectableOption;
-        this.shaderResetButton.disabled = false;
+        this.shaderPanelController?.refresh();
     }
 
     private renderShaderCameraPostEffectsPanel(): void {
@@ -4738,7 +2693,7 @@ export class UIController {
 
         const postFxControls = this.shaderMaterialList.querySelector<HTMLElement>(".shader-postfx-controls");
         if (postFxControls) {
-            this.attachCameraDofControlsToShaderPanel(postFxControls);
+            this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
         }
         const contrastInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="contrast"]');
         const contrastVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="contrast"]');
@@ -5219,123 +3174,12 @@ export class UIController {
         edgeWidthInput.addEventListener("input", applyEdgeWidth);
     }
 
-    private attachCameraDofControlsToShaderPanel(host: HTMLElement): void {
-        if (!this.cameraDofControlsEl) {
-            return;
-        }
-        this.cameraDofControlsEl.classList.add("shader-postfx-dof-controls");
-        if (this.cameraDofControlsEl.parentElement !== host) {
-            host.appendChild(this.cameraDofControlsEl);
-        }
-    }
-
-    private restoreCameraDofControlsToCameraPanel(): void {
-        if (!this.cameraDofControlsEl) {
-            return;
-        }
-        this.cameraDofControlsEl.classList.remove("shader-postfx-dof-controls");
-        if (this.cameraControlsEl && this.cameraDofControlsEl.parentElement !== this.cameraControlsEl) {
-            this.cameraControlsEl.appendChild(this.cameraDofControlsEl);
-        }
-    }
-
-    private async applyShaderPresetFromPanel(resetToDefault: boolean, target: "auto" | "selected" | "all"): Promise<void> {
-        if (!this.shaderPresetSelect) {
-            return;
-        }
-        if (!this.mmdManager.isWgslMaterialShaderAssignmentAvailable()) {
-            this.showToast("WGSL effect assignment is unavailable", "error");
-            return;
-        }
-        if (this.modelSelect.value === UIController.CAMERA_SELECT_VALUE) {
-            this.showToast("Select a model in the info panel first", "error");
-            return;
-        }
-
-        const models = this.mmdManager.getWgslModelShaderStates();
-        let modelIndex = Number.parseInt(this.modelSelect.value, 10);
-        if (Number.isNaN(modelIndex) || !models.some((model) => model.modelIndex === modelIndex)) {
-            modelIndex = models.find((model) => model.active)?.modelIndex ?? -1;
-        }
-        if (modelIndex < 0) {
-            this.showToast("Model is not selected", "error");
-            return;
-        }
-
-        const selectedMaterialKey = this.shaderSelectedMaterialKeys.get(modelIndex) ?? null;
-        if (target === "selected" && selectedMaterialKey === null) {
-            this.showToast("No material selected", "error");
-            return;
-        }
-        const materialKey = target === "all" ? null : selectedMaterialKey;
-        const selectedValue = resetToDefault ? "wgsl-mmd-standard" : this.shaderPresetSelect.value;
-        if (!selectedValue) {
-            this.showToast("Effect preset is not selected", "error");
-            return;
-        }
-
-        if (resetToDefault || !this.parseExternalWgslPresetPath(selectedValue)) {
-            this.postFxWgslToonPath = null;
-            this.postFxWgslToonText = null;
-            this.mmdManager.setExternalWgslToonShaderForModel(modelIndex, materialKey, null, null);
-        }
-
-        const externalWgslPath = this.parseExternalWgslPresetPath(selectedValue);
-        if (externalWgslPath) {
-            const shaderText = await window.electronAPI.readTextFile(externalWgslPath);
-            if (!shaderText) {
-                this.showToast(`WGSL shader load failed: ${this.getBaseNameForRenderer(externalWgslPath)}`, "error");
-                return;
-            }
-            const validationError = this.validateExternalWgslToonSnippet(shaderText);
-            if (validationError) {
-                this.showToast(`WGSL invalid: ${validationError}`, "error");
-                return;
-            }
-
-            const ok = this.mmdManager.setExternalWgslToonShaderForModel(modelIndex, materialKey, externalWgslPath, shaderText);
-            if (!ok) {
-                this.showToast("WGSL shader assignment failed", "error");
-                return;
-            }
-
-            this.postFxWgslToonPath = externalWgslPath;
-            this.postFxWgslToonText = shaderText;
-            this.refreshShaderPanel();
-            this.showToast(`WGSL shader selected: ${this.getBaseNameForRenderer(externalWgslPath)}`, "success");
-            return;
-        }
-
-        const ok = this.mmdManager.setWgslMaterialShaderPreset(
-            modelIndex,
-            materialKey,
-            selectedValue as WgslMaterialShaderPresetId,
-        );
-        if (!ok) {
-            this.showToast("Effect assignment failed", "error");
-            return;
-        }
-
-        this.refreshShaderPanel();
-        const targetLabel = materialKey === null ? "all materials" : "selected material";
-        this.showToast(`Effect assigned (${targetLabel})`, "success");
-    }
-
     private applyLocalizedUiState(): void {
-        this.refreshAaToggleUi?.();
-        this.refreshShadowToggleUi?.();
-        this.refreshGiToggleUi?.();
-        this.updateGroundToggleButton(this.mmdManager.isGroundVisible());
-        this.updateBackgroundToggleButton();
-        this.updateSkydomeToggleButton(this.mmdManager.isSkydomeVisible());
-        this.updatePhysicsToggleButton(
-            this.mmdManager.getPhysicsEnabled(),
-            this.mmdManager.isPhysicsAvailable()
-        );
-        this.updateRigidBodyToggleButton();
-        this.updateShaderPanelToggleButton(this.isShaderPanelExpanded());
-        this.updateFullscreenUiToggleButton(this.isUiFullscreenActive);
+        this.sceneEnvironmentUiController?.refresh();
+        this.runtimeFeatureUiController?.refresh();
+        this.layoutUiController?.refreshLocalizedState();
         this.updateInfoActionButtons();
+        this.exportUiController?.refreshLocalizedState();
         this.syncToolbarLocaleSelect();
     }
 
@@ -5356,109 +3200,6 @@ export class UIController {
         const locale = getLocale();
         if (this.toolbarLocaleSelect.value !== locale) {
             this.toolbarLocaleSelect.value = locale;
-        }
-    }
-
-    private updateGroundToggleButton(visible: boolean): void {
-        this.groundToggleText.textContent = t("toolbar.ground.short");
-        this.btnToggleGround.setAttribute("aria-pressed", visible ? "true" : "false");
-        this.btnToggleGround.classList.toggle("toggle-on", visible);
-        this.btnToggleGround.title = visible
-            ? t("toolbar.ground.title.on")
-            : t("toolbar.ground.title.off");
-    }
-
-    private updateBackgroundToggleButton(): void {
-        const hasBackground = this.mmdManager.hasBackgroundMedia();
-        const visible = this.mmdManager.isBackgroundMediaVisible();
-        this.backgroundToggleText.textContent = t("toolbar.background.short");
-        this.btnToggleBackground.setAttribute("aria-pressed", visible ? "true" : "false");
-        this.btnToggleBackground.classList.toggle("toggle-on", visible);
-        (this.btnToggleBackground as HTMLButtonElement).disabled = !hasBackground;
-        this.btnToggleBackground.title = hasBackground
-            ? (visible ? t("toolbar.background.title.on") : t("toolbar.background.title.off"))
-            : t("toolbar.background.title.unavailable");
-    }
-
-    private updateSkydomeToggleButton(visible: boolean): void {
-        this.skydomeToggleText.textContent = t("toolbar.sky.short");
-        this.btnToggleSkydome.setAttribute("aria-pressed", visible ? "true" : "false");
-        this.btnToggleSkydome.classList.toggle("toggle-on", visible);
-        this.btnToggleSkydome.title = visible
-            ? t("toolbar.sky.title.on")
-            : t("toolbar.sky.title.off");
-    }
-
-    private updatePhysicsToggleButton(enabled: boolean, available: boolean): void {
-        const active = available && enabled;
-        this.physicsToggleText.textContent = available
-            ? t("toolbar.physics.short")
-            : t("toolbar.physics.naShort");
-        this.btnTogglePhysics.setAttribute("aria-pressed", active ? "true" : "false");
-        this.btnTogglePhysics.classList.toggle("toggle-on", active);
-        (this.btnTogglePhysics as HTMLButtonElement).disabled = !available;
-        this.btnTogglePhysics.title = available
-            ? (active ? t("toolbar.physics.title.on") : t("toolbar.physics.title.off"))
-            : t("toolbar.physics.title.unavailable");
-        if (this.physicsGravityAccelSlider) {
-            this.physicsGravityAccelSlider.disabled = !available;
-        }
-        if (this.physicsGravityDirXSlider) this.physicsGravityDirXSlider.disabled = !available;
-        if (this.physicsGravityDirYSlider) this.physicsGravityDirYSlider.disabled = !available;
-        if (this.physicsGravityDirZSlider) this.physicsGravityDirZSlider.disabled = !available;
-        if (this.physicsSimulationRateSelect) this.physicsSimulationRateSelect.disabled = !available;
-        this.refreshPhysicsSimulationRateUi();
-    }
-
-    private updateShadowToggleButton(): void {
-        this.refreshShadowToggleUi = () => {
-            const enabled = this.mmdManager.getShadowEnabled();
-            this.shadowToggleText.textContent = t("toolbar.shadow.short");
-            this.btnToggleShadow.setAttribute("aria-pressed", enabled ? "true" : "false");
-            this.btnToggleShadow.classList.toggle("toggle-on", enabled);
-            this.btnToggleShadow.title = enabled
-                ? t("toolbar.shadow.title.on")
-                : t("toolbar.shadow.title.off");
-        };
-        this.refreshShadowToggleUi();
-    }
-
-    private updateRigidBodyToggleButton(): void {
-        const available = this.mmdManager.isRigidBodyVisualizerAvailable();
-        const active = available && this.mmdManager.isRigidBodyVisualizerEnabled();
-        this.rigidBodiesToggleText.textContent = t("button.rigidBodies");
-        this.btnToggleRigidBodies.setAttribute("aria-pressed", active ? "true" : "false");
-        this.btnToggleRigidBodies.classList.toggle("camera-view-btn--active", active);
-        (this.btnToggleRigidBodies as HTMLButtonElement).disabled = !available;
-        this.btnToggleRigidBodies.title = available
-            ? (active ? t("button.rigidBodies.title.on") : t("button.rigidBodies.title.off"))
-            : t("button.rigidBodies.title.unavailable");
-    }
-
-    private updateGiToggleButton(): void {
-        this.refreshGiToggleUi = () => {
-            const active = this.mmdManager.isGlobalIlluminationEnabled();
-            const pending = this.mmdManager.isGlobalIlluminationPending();
-            this.giToggleText.textContent = t("toolbar.gi.short");
-            this.btnToggleGi.setAttribute("aria-pressed", active || pending ? "true" : "false");
-            this.btnToggleGi.classList.toggle("toggle-on", active);
-            this.btnToggleGi.classList.toggle("toggle-loading", pending && !active);
-            this.btnToggleGi.title = pending && !active
-                ? t("toolbar.gi.title.loading")
-                : active
-                    ? t("toolbar.gi.title.on")
-                    : t("toolbar.gi.title.off");
-        };
-        this.refreshGiToggleUi();
-    }
-
-    private refreshPhysicsSimulationRateUi(): void {
-        const rate = this.mmdManager.getPhysicsSimulationRateHz();
-        if (this.physicsSimulationRateSelect) {
-            this.physicsSimulationRateSelect.value = String(rate);
-        }
-        if (this.physicsSimulationRateValueEl) {
-            this.physicsSimulationRateValueEl.textContent = `${rate}Hz`;
         }
     }
 
@@ -5625,114 +3366,6 @@ export class UIController {
         this.camViewTopBtn?.setAttribute("aria-pressed", top ? "true" : "false");
         this.camViewBackBtn?.setAttribute("aria-pressed", back ? "true" : "false");
         this.camViewBottomBtn?.setAttribute("aria-pressed", bottom ? "true" : "false");
-    }
-
-    private refreshDofFocusTargetControls(): void {
-        if (!this.dofTargetModelSelect || !this.dofTargetBoneSelect) {
-            return;
-        }
-
-        const modelSelect = this.dofTargetModelSelect;
-        const boneSelect = this.dofTargetBoneSelect;
-        const loadedModels = this.mmdManager.getLoadedModels();
-        const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
-        const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
-        const resolvedModel = targetModelPath
-            ? loadedModels.find((model) => model.path === targetModelPath) ?? null
-            : null;
-
-        modelSelect.innerHTML = "";
-        const cameraOption = document.createElement("option");
-        cameraOption.value = "";
-        cameraOption.textContent = t("option.cameraTarget");
-        modelSelect.appendChild(cameraOption);
-
-        for (const model of loadedModels) {
-            const option = document.createElement("option");
-            option.value = String(model.index);
-            option.textContent = model.name;
-            modelSelect.appendChild(option);
-        }
-
-        if (targetModelPath && !resolvedModel) {
-            this.mmdManager.setDofFocusTargetByIndex(null, null);
-            return;
-        }
-
-        modelSelect.value = resolvedModel ? String(resolvedModel.index) : "";
-        modelSelect.disabled = loadedModels.length === 0;
-
-        boneSelect.innerHTML = "";
-        if (!resolvedModel) {
-            const option = document.createElement("option");
-            option.value = "";
-            option.textContent = t("option.none");
-            boneSelect.appendChild(option);
-            boneSelect.value = "";
-            boneSelect.disabled = true;
-            return;
-        }
-
-        const boneNames = this.mmdManager.getModelBoneNames(resolvedModel.index);
-        for (const boneName of boneNames) {
-            const option = document.createElement("option");
-            option.value = boneName;
-            option.textContent = boneName;
-            boneSelect.appendChild(option);
-        }
-
-        const fallbackBoneName =
-            targetBoneName && boneNames.includes(targetBoneName)
-                ? targetBoneName
-                : this.mmdManager.getPreferredDofFocusBoneName(resolvedModel.index);
-
-        boneSelect.value = fallbackBoneName && boneNames.includes(fallbackBoneName) ? fallbackBoneName : (boneNames[0] ?? "");
-        boneSelect.disabled = boneNames.length === 0;
-    }
-
-    private refreshDofAutoFocusReadout(): void {
-        if (!this.mmdManager.dofAutoFocusEnabled) return;
-
-        if (this.dofFocusSlider && this.dofFocusValueEl && !this.isRangeInputEditing(this.dofFocusSlider)) {
-            const focusMm = this.mmdManager.dofFocusDistanceMm;
-            const sliderMin = Number(this.dofFocusSlider.min);
-            const sliderMax = Number(this.dofFocusSlider.max);
-            const clamped = Math.max(sliderMin, Math.min(sliderMax, focusMm));
-            this.dofFocusSlider.value = String(Math.round(clamped));
-            this.dofFocusValueEl.textContent = `${(focusMm / 1000).toFixed(1)}m (auto)`;
-            const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
-            const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
-            this.dofFocusSlider.title = targetModelPath
-                ? `Auto focus (${targetBoneName ?? "target"}, ${this.mmdManager.dofAutoFocusRangeMeters.toFixed(1)}m radius in focus)`
-                : `Auto focus (camera target, ${this.mmdManager.dofAutoFocusRangeMeters.toFixed(1)}m radius in focus)`;
-            this.syncRangeNumberInput(this.dofFocusSlider);
-        }
-
-        if (this.dofFStopValueEl) {
-            const baseFStop = this.mmdManager.dofFStop;
-            const effectiveFStop = this.mmdManager.dofEffectiveFStop;
-            const hasCompensation = effectiveFStop > baseFStop + 0.01;
-            this.dofFStopValueEl.textContent = hasCompensation
-                ? `${baseFStop.toFixed(2)} -> ${effectiveFStop.toFixed(2)}`
-                : effectiveFStop.toFixed(2);
-        }
-
-        if (
-            this.mmdManager.dofFocalLengthLinkedToCameraFov &&
-            this.dofFocalLengthSlider &&
-            this.dofFocalLengthValueEl &&
-            !this.isRangeInputEditing(this.dofFocalLengthSlider)
-        ) {
-            const focalLength = this.mmdManager.dofFocalLength;
-            const sliderMin = Number(this.dofFocalLengthSlider.min);
-            const sliderMax = Number(this.dofFocalLengthSlider.max);
-            const clamped = Math.max(sliderMin, Math.min(sliderMax, focalLength));
-            this.dofFocalLengthSlider.value = String(Math.round(clamped));
-            this.dofFocalLengthValueEl.textContent = this.mmdManager.dofFocalLengthDistanceInverted
-                ? `${Math.round(focalLength)} (auto, inv)`
-                : `${Math.round(focalLength)} (auto)`;
-            this.syncRangeNumberInput(this.dofFocalLengthSlider);
-        }
     }
 
     private refreshLensDistortionAutoReadout(): void {
@@ -6153,7 +3786,9 @@ export class UIController {
         return `${this.getSectionKeyframeContextPrefix("morph")}:frame:${frameIndex}:key:${this.mmdManager.currentFrame}`;
     }
 
-    private getAccessoryKeyframeContextKey(accessoryIndex: number | null = this.getSelectedAccessoryIndex()): string | null {
+    private getAccessoryKeyframeContextKey(
+        accessoryIndex: number | null = this.accessoryPanelController?.getSelectedAccessoryIndex() ?? null,
+    ): string | null {
         if (accessoryIndex === null || accessoryIndex < 0) return null;
         return `${this.getSectionKeyframeContextPrefix("accessory")}:${accessoryIndex}:frame:${this.mmdManager.currentFrame}`;
     }
@@ -6560,7 +4195,7 @@ export class UIController {
     }
 
     private getAccessoryKeyframeButtonState(): SectionKeyframeButtonState {
-        const accessoryIndex = this.getSelectedAccessoryIndex();
+        const accessoryIndex = this.accessoryPanelController?.getSelectedAccessoryIndex() ?? null;
         const contextKey = this.getAccessoryKeyframeContextKey(accessoryIndex);
         if (accessoryIndex === null || !contextKey) return "none";
 
@@ -7278,7 +4913,7 @@ export class UIController {
     }
 
     private registerAccessoryTransformKeyframe(): void {
-        const accessoryIndex = this.getSelectedAccessoryIndex();
+        const accessoryIndex = this.accessoryPanelController?.getSelectedAccessoryIndex() ?? null;
         if (accessoryIndex === null) {
             this.showToast("Please select an accessory", "error");
             return;
