@@ -21,6 +21,7 @@ import { DofPanelController } from "./ui/dof-panel-controller";
 import { ExportUiController } from "./ui/export-ui-controller";
 import { LayoutUiController } from "./ui/layout-ui-controller";
 import { LutPanelController } from "./ui/lut-panel-controller";
+import { ModelEdgeController } from "./ui/model-edge-controller";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
@@ -220,6 +221,7 @@ export class UIController {
     private exportUiController: ExportUiController | null = null;
     private layoutUiController: LayoutUiController | null = null;
     private lutPanelController: LutPanelController | null = null;
+    private modelEdgeController: ModelEdgeController | null = null;
     private runtimeFeatureUiController: RuntimeFeatureUiController | null = null;
     private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
     private shaderPanelController: ShaderPanelController | null = null;
@@ -287,6 +289,10 @@ export class UIController {
         this.shaderPanelNote = document.getElementById("shader-panel-note");
         this.shaderMaterialList = document.getElementById("shader-material-list");
 
+        this.modelEdgeController = new ModelEdgeController({
+            mmdManager: this.mmdManager,
+            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
+        });
         this.setupEventListeners();
         this.setupCallbacks();
         this.setupKeyboard();
@@ -652,8 +658,6 @@ export class UIController {
         const valEffectFogColorG = document.getElementById("effect-fog-color-g-val");
         const elEffectFogColorB = document.getElementById("effect-fog-color-b") as HTMLInputElement | null;
         const valEffectFogColorB = document.getElementById("effect-fog-color-b-val");
-        const elEffectEdgeWidth = document.getElementById("effect-edge-width") as HTMLInputElement | null;
-        const valEffectEdgeWidth = document.getElementById("effect-edge-width-val");
 
         const updateDir = () => {
             const x = Number(elLightDirectionX.value);
@@ -1005,18 +1009,6 @@ export class UIController {
             elEffectFogColorR.addEventListener("input", applyFogColor);
             elEffectFogColorG.addEventListener("input", applyFogColor);
             elEffectFogColorB.addEventListener("input", applyFogColor);
-        }
-
-        if (elEffectEdgeWidth && valEffectEdgeWidth) {
-            const applyEdgeWidth = () => {
-                const sliderValue = Number(elEffectEdgeWidth.value);
-                const scale = sliderValue / 100;
-                this.mmdManager.modelEdgeWidth = scale;
-                valEffectEdgeWidth.textContent = `${Math.round(this.mmdManager.modelEdgeWidth * 100)}%`;
-            };
-            elEffectEdgeWidth.value = String(Math.round(this.mmdManager.modelEdgeWidth * 100));
-            applyEdgeWidth();
-            elEffectEdgeWidth.addEventListener("input", applyEdgeWidth);
         }
 
         // Initialize direction from HTML default values
@@ -1530,31 +1522,7 @@ export class UIController {
             this.mmdManager.modelEdgeWidth = restore;
             this.showToast(t("toast.edge.on"), "info");
         }
-        this.syncEdgeWidthUiFromRuntime();
-    }
-
-    private syncEdgeWidthUiFromRuntime(): void {
-        const edgePercent = Math.round(this.mmdManager.modelEdgeWidth * 100);
-
-        const staticInput = document.getElementById("effect-edge-width") as HTMLInputElement | null;
-        const staticValue = document.getElementById("effect-edge-width-val");
-        if (staticInput) {
-            staticInput.value = String(edgePercent);
-            this.syncRangeNumberInput(staticInput);
-        }
-        if (staticValue) {
-            staticValue.textContent = `${edgePercent}%`;
-        }
-
-        const panelInput = this.shaderMaterialList?.querySelector<HTMLInputElement>('input[data-postfx="edge-width"]');
-        const panelValue = this.shaderMaterialList?.querySelector<HTMLElement>('span[data-postfx-val="edge-width"]');
-        if (panelInput) {
-            panelInput.value = String(edgePercent);
-            this.syncRangeNumberInput(panelInput);
-        }
-        if (panelValue) {
-            panelValue.textContent = `${edgePercent}%`;
-        }
+        this.modelEdgeController?.refresh();
     }
 
     private setupPerfDisplay(): void {
@@ -2574,7 +2542,8 @@ export class UIController {
         if (
             !postFxControls ||
             !this.colorPostFxController?.connect(postFxControls) ||
-            !this.lutPanelController?.connect(postFxControls)
+            !this.lutPanelController?.connect(postFxControls) ||
+            !this.modelEdgeController?.connect(postFxControls)
         ) {
             return;
         }
@@ -2602,8 +2571,6 @@ export class UIController {
         const distortionVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="distortion-influence"]');
         const lensEdgeBlurInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="lens-edge-blur"]');
         const lensEdgeBlurVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="lens-edge-blur"]');
-        const edgeWidthInput = this.shaderMaterialList.querySelector<HTMLInputElement>('input[data-postfx="edge-width"]');
-        const edgeWidthVal = this.shaderMaterialList.querySelector<HTMLElement>('span[data-postfx-val="edge-width"]');
 
         if (
             !toneMappingTypeSelect ||
@@ -2628,9 +2595,7 @@ export class UIController {
             !distortionInput ||
             !distortionVal ||
             !lensEdgeBlurInput ||
-            !lensEdgeBlurVal ||
-            !edgeWidthInput ||
-            !edgeWidthVal
+            !lensEdgeBlurVal
         ) {
             return;
         }
@@ -2741,12 +2706,6 @@ export class UIController {
             lensEdgeBlurVal.textContent = `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`;
         };
 
-        const applyEdgeWidth = (): void => {
-            const scale = Number(edgeWidthInput.value) / 100;
-            this.mmdManager.modelEdgeWidth = scale;
-            edgeWidthVal.textContent = `${Math.round(this.mmdManager.modelEdgeWidth * 100)}%`;
-        };
-
         toneMappingTypeSelect.value = this.mmdManager.postEffectToneMappingEnabled
             ? String(this.mmdManager.postEffectToneMappingType)
             : "-1";
@@ -2777,7 +2736,6 @@ export class UIController {
         );
         distortionInput.value = String(Math.round(this.mmdManager.dofLensDistortionInfluence * 100));
         lensEdgeBlurInput.value = String(Math.round(this.mmdManager.dofLensEdgeBlur * 100));
-        edgeWidthInput.value = String(Math.round(this.mmdManager.modelEdgeWidth * 100));
 
         applyToneMapping();
         applyBloom();
@@ -2789,7 +2747,6 @@ export class UIController {
         applyVls();
         applyDistortionInfluence();
         applyLensEdgeBlur();
-        applyEdgeWidth();
         if (postFxControls) {
             this.installRangeNumberInputs(postFxControls);
         }
@@ -2806,7 +2763,6 @@ export class UIController {
         vlsExposureInput.addEventListener("input", applyVls);
         distortionInput.addEventListener("input", applyDistortionInfluence);
         lensEdgeBlurInput.addEventListener("input", applyLensEdgeBlur);
-        edgeWidthInput.addEventListener("input", applyEdgeWidth);
     }
 
     private applyLocalizedUiState(): void {
