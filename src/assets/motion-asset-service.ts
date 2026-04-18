@@ -203,9 +203,7 @@ export async function loadCameraVMD(host: any, filePath: string): Promise<Motion
         host.cameraKeyframeFrames = new Uint32Array(animation.cameraTrack.frameNumbers);
         host.emitMergedKeyframeTracks();
 
-        host._currentFrame = 0;
-        host.mmdRuntime.seekAnimation(0, true);
-        host.onFrameUpdate?.(host._currentFrame, host._totalFrames);
+        host.seekTo(0);
 
         const motionInfo: MotionInfo = {
             name: fileName.replace(/\.vmd$/i, ""),

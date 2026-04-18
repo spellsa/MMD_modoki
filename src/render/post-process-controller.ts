@@ -926,7 +926,12 @@ export function computeAutoFocusMinFStop(host: any, focusDistanceMm: number): nu
 }
 
 export function configureDofDepthRenderer(host: any): void {
-    const depthRenderer = host.scene.enableDepthRenderer(host.camera, false);
+    const depthRenderer = host.scene.enableDepthRenderer(
+        host.camera,
+        false,
+        false,
+        Texture.NEAREST_SAMPLINGMODE,
+    );
     depthRenderer.useOnlyInActiveCamera = true;
     depthRenderer.forceDepthWriteTransparentMeshes = true;
     host.depthRenderer = depthRenderer;

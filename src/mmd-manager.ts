@@ -2829,19 +2829,14 @@ ${beforeFogAppendBlock}
             const deltaMs = Math.max(0, Math.min(100, nowMs - this.lastRenderTimestampMs));
             this.lastRenderTimestampMs = nowMs;
 
+            const advancedManualPlayback = this.advanceManualPlaybackWithoutAudio(deltaMs);
+
             this.updateSimpleMotionBlurState(deltaMs);
             this.syncBackgroundVideoFrame();
             this.scene.render();
             if (!this._isPlaying) return;
 
-            if (this.manualPlaybackWithoutAudio) {
-                const deltaFrames = (deltaMs / (1000 / 30)) * this._playbackSpeed;
-                this.manualPlaybackFrameCursor = Math.min(this._totalFrames, this.manualPlaybackFrameCursor + deltaFrames);
-                const nextFrame = Math.floor(this.manualPlaybackFrameCursor);
-                if (nextFrame !== this._currentFrame) {
-                    this._currentFrame = nextFrame;
-                    this.mmdRuntime.seekAnimation(this._currentFrame, true);
-                }
+            if (advancedManualPlayback) {
                 this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
                 return;
             }
@@ -3695,6 +3690,7 @@ ${beforeFogAppendBlock}
         this.mmdRuntime.pauseAnimation();
         this.refreshActiveRuntimeAnimationHandles();
         this.mmdRuntime.seekAnimation(0, true);
+        this.syncViewportCameraFromMmdCameraAfterSeek();
         this.applyPhysicsStateToAllModels();
         this._currentFrame = 0;
         this.syncBackgroundVideoFrame(true);
@@ -3708,6 +3704,7 @@ ${beforeFogAppendBlock}
         }
         this._currentFrame = targetFrame;
         this.mmdRuntime.seekAnimation(this._currentFrame, true);
+        this.syncViewportCameraFromMmdCameraAfterSeek();
         if (!this._isPlaying && this.getPhysicsEnabled()) {
             this.applyPhysicsStateToAllModels();
         }
@@ -6343,6 +6340,26 @@ ${beforeFogAppendBlock}
         emitMergedKeyframeTracksImpl(this);
     }
 
+    private advanceManualPlaybackWithoutAudio(deltaMs: number): boolean {
+        if (!this._isPlaying || !this.manualPlaybackWithoutAudio) return false;
+
+        const deltaFrames = (deltaMs / (1000 / 30)) * this._playbackSpeed;
+        this.manualPlaybackFrameCursor = Math.min(this._totalFrames, this.manualPlaybackFrameCursor + deltaFrames);
+        const nextFrame = Math.floor(this.manualPlaybackFrameCursor);
+        if (nextFrame !== this._currentFrame) {
+            this._currentFrame = nextFrame;
+            this.mmdRuntime.seekAnimation(this._currentFrame, true);
+            this.syncViewportCameraFromMmdCameraAfterSeek();
+        }
+        return true;
+    }
+
+    private syncViewportCameraFromMmdCameraAfterSeek(): void {
+        if (!this.hasActiveCameraAnimation()) return;
+        if (!this._isPlaying && this.timelineTarget !== "camera") return;
+        this.syncViewportCameraFromMmdCamera();
+    }
+
     resize(): void {
         this.resizeToCanvasClientSize();
     }
@@ -6361,19 +6378,14 @@ ${beforeFogAppendBlock}
         this.nextRenderDueTimestampMs = now;
         const engineWithDelta = this.engine as typeof this.engine & { _deltaTime?: number };
         engineWithDelta._deltaTime = clampedDeltaMs;
+        const advancedManualPlayback = this.advanceManualPlaybackWithoutAudio(clampedDeltaMs);
+
         this.updateSimpleMotionBlurState(clampedDeltaMs);
         this.syncBackgroundVideoFrame();
         this.scene.render();
         if (!this._isPlaying) return;
 
-        if (this.manualPlaybackWithoutAudio) {
-            const deltaFrames = (clampedDeltaMs / (1000 / 30)) * this._playbackSpeed;
-            this.manualPlaybackFrameCursor = Math.min(this._totalFrames, this.manualPlaybackFrameCursor + deltaFrames);
-            const nextFrame = Math.floor(this.manualPlaybackFrameCursor);
-            if (nextFrame !== this._currentFrame) {
-                this._currentFrame = nextFrame;
-                this.mmdRuntime.seekAnimation(this._currentFrame, true);
-            }
+        if (advancedManualPlayback) {
             this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
             return;
         }
@@ -6549,6 +6561,13 @@ ${beforeFogAppendBlock}
         if (this.engine.getRenderWidth() !== renderWidth || this.engine.getRenderHeight() !== renderHeight) {
             this.engine.setSize(renderWidth, renderHeight);
             this.resizeGlobalIllumination();
+            if (this.depthRenderer) {
+                const depthMap = this.depthRenderer.getDepthMap();
+                depthMap.resize({ width: renderWidth, height: renderHeight });
+                if (this.defaultRenderingPipeline) {
+                    this.defaultRenderingPipeline.depthOfField.depthTexture = depthMap;
+                }
+            }
             if (this.ssaoDepthRenderer) {
                 this.disposeSsaoDepthRenderer();
                 if (this.postEffectSsaoEnabledValue) {
