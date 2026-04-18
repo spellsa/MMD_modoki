@@ -84,6 +84,7 @@
 - [依存関係ブートストラップメモ](./dependency-bootstrap-2026-03-13.md)
 - [ライト / フェイス回りの調査メモ](./full-light-face-investigation-2026-03-13.md)
 - [重いモデルの読み込みメモ](./heavy-model-loading.md)
+- [WebGPU 重量モデル顔モーフ既知制限メモ](./webgpu-heavy-model-face-morph-limit-2026-04-18.md)
 - [キー登録表示の調査メモ](./keyframe-registration-display-research.md)
 - [モデル透過の調査メモ](./model-transparency-investigation.md)
 - [MMD キーフレーム機能の整理メモ](./mmd-keyframe-features-survey.md)

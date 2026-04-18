@@ -3023,10 +3023,77 @@ ${beforeFogAppendBlock}
                 modelInternal._physicsModel?.syncBones?.();
             }
             modelInternal._update?.(true);
+            this.syncCpuSkinnedMorphSourceBuffers(model);
             modelInternal.mesh?.metadata?.skeleton?._markAsDirty?.();
         };
 
         this.physicsAfterPhysicsPatchedModels.add(modelObject);
+    }
+
+    private syncCpuSkinnedMorphSourceBuffers(model: MmdModel): void {
+        const metadataMeshes = (model.mesh.metadata as { meshes?: readonly Mesh[] } | null)?.meshes;
+        const meshes = Array.isArray(metadataMeshes)
+            ? metadataMeshes
+            : ([model.mesh, ...model.mesh.getChildMeshes()] as Mesh[]);
+
+        for (const mesh of meshes) {
+            const morphTargetManager = mesh.morphTargetManager;
+            if (!morphTargetManager) continue;
+            if (mesh.computeBonesUsingShaders) continue;
+            if (!mesh.useBones || mesh.numBoneInfluencers <= 0 || !mesh.skeleton) continue;
+
+            const meshInternal = mesh as unknown as {
+                _internalMeshDataInfo?: {
+                    _sourcePositions?: Float32Array | null;
+                    _sourceNormals?: Float32Array | null;
+                    _mmdMorphCpuBasePositions?: Float32Array | null;
+                    _mmdMorphCpuBaseNormals?: Float32Array | null;
+                };
+                geometry?: { _softwareSkinningFrameId?: number };
+                setPositionsForCPUSkinning?: () => Float32Array | null | undefined;
+                setNormalsForCPUSkinning?: () => Float32Array | null | undefined;
+            };
+            const internalData = meshInternal._internalMeshDataInfo;
+            if (!internalData) continue;
+
+            if (morphTargetManager.hasPositions) {
+                const sourcePositions = internalData._sourcePositions
+                    ?? meshInternal.setPositionsForCPUSkinning?.()
+                    ?? null;
+                if (sourcePositions) {
+                    if (!internalData._mmdMorphCpuBasePositions || internalData._mmdMorphCpuBasePositions.length !== sourcePositions.length) {
+                        internalData._mmdMorphCpuBasePositions = new Float32Array(sourcePositions);
+                    }
+                    const morphedPositions = mesh.getPositionData(
+                        false,
+                        true,
+                        new Float32Array(internalData._mmdMorphCpuBasePositions),
+                    );
+                    if (morphedPositions && morphedPositions.length === sourcePositions.length) {
+                        sourcePositions.set(morphedPositions);
+                    }
+                }
+            }
+
+            if (morphTargetManager.hasNormals) {
+                const sourceNormals = internalData._sourceNormals
+                    ?? meshInternal.setNormalsForCPUSkinning?.()
+                    ?? null;
+                if (sourceNormals) {
+                    if (!internalData._mmdMorphCpuBaseNormals || internalData._mmdMorphCpuBaseNormals.length !== sourceNormals.length) {
+                        internalData._mmdMorphCpuBaseNormals = new Float32Array(sourceNormals);
+                    }
+                    const morphedNormals = mesh.getNormalsData(false, true);
+                    if (morphedNormals && morphedNormals.length === sourceNormals.length) {
+                        sourceNormals.set(morphedNormals);
+                    }
+                }
+            }
+
+            if (meshInternal.geometry) {
+                meshInternal.geometry._softwareSkinningFrameId = -1;
+            }
+        }
     }
 
     private normalizeRuntimeBoneTransformStages(model: MmdModel): void {
@@ -3415,7 +3482,12 @@ ${beforeFogAppendBlock}
         }
 
         let affectedMeshCount = 0;
-        let skippedPositionMorphMeshCount = 0;
+        let positionMorphMeshCount = 0;
+        const positionMorphMeshes: Array<{
+            mesh: string;
+            material: string[];
+            morphTargetCount: number;
+        }> = [];
         for (const mesh of meshes) {
             if (!mesh.useBones || mesh.numBoneInfluencers <= 0) {
                 continue;
@@ -3427,25 +3499,44 @@ ${beforeFogAppendBlock}
                 continue;
             }
             if (mesh.morphTargetManager?.hasPositions) {
-                skippedPositionMorphMeshCount += 1;
-                continue;
+                positionMorphMeshCount += 1;
+                const material = mesh.material as { name?: string; subMaterials?: Array<{ name?: string } | null> } | null;
+                const materialNames = Array.isArray(material?.subMaterials)
+                    ? material.subMaterials
+                        .map((subMaterial) => (typeof subMaterial?.name === "string" && subMaterial.name.length > 0) ? subMaterial.name : null)
+                        .filter((name): name is string => name !== null)
+                    : ((typeof material?.name === "string" && material.name.length > 0) ? [material.name] : []);
+                positionMorphMeshes.push({
+                    mesh: mesh.name || "(unnamed mesh)",
+                    material: materialNames,
+                    morphTargetCount: mesh.morphTargetManager?.numTargets ?? 0,
+                });
             }
 
             mesh.computeBonesUsingShaders = false;
             affectedMeshCount += 1;
         }
 
-        if (affectedMeshCount === 0 && skippedPositionMorphMeshCount === 0) {
+        if (affectedMeshCount === 0 && positionMorphMeshCount === 0) {
             return;
         }
 
-        console.warn(`[PMX] CPU skinning fallback evaluated for WebGPU SDEF meshes. ${modelLabel}: ${affectedMeshCount} fallback mesh(es), ${skippedPositionMorphMeshCount} position-morph mesh(es) kept on GPU.`, {
+        console.warn(`[PMX] CPU skinning fallback evaluated for WebGPU SDEF meshes. ${modelLabel}: ${affectedMeshCount} fallback mesh(es), ${positionMorphMeshCount} position-morph mesh(es) forced to CPU.`, {
             model: modelLabel,
             affectedMeshCount,
-            skippedPositionMorphMeshCount,
+            positionMorphMeshCount,
+            positionMorphMeshes,
             engine: this.getEngineType(),
         });
-        this.addRuntimeDiagnostic(`CPU skinning fallback for WebGPU SDEF: ${modelLabel} (${affectedMeshCount} fallback, ${skippedPositionMorphMeshCount} morph-preserved)`);
+        for (const positionMorphMesh of positionMorphMeshes) {
+            console.warn(`[PMX] Position-morph mesh forced to CPU: ${JSON.stringify({
+                model: modelLabel,
+                mesh: positionMorphMesh.mesh,
+                material: positionMorphMesh.material,
+                morphTargetCount: positionMorphMesh.morphTargetCount,
+            })}`);
+        }
+        this.addRuntimeDiagnostic(`CPU skinning fallback for WebGPU SDEF: ${modelLabel} (${affectedMeshCount} fallback, ${positionMorphMeshCount} morph-forced)`);
     }
 
     private suspendSceneRendering(): void {
@@ -5721,6 +5812,7 @@ ${beforeFogAppendBlock}
         const clampedWeight = Math.max(0, Math.min(1, weight));
         try {
             modelMorph.setMorphWeight(morphName, clampedWeight);
+            this.refreshCurrentModelAfterMorphEdit();
         } catch { /* ignore */ }
     }
     setMorphWeightByIndex(morphIndex: number, weight: number): void {
@@ -5730,8 +5822,18 @@ ${beforeFogAppendBlock}
         const clampedWeight = Math.max(0, Math.min(1, weight));
         try {
             modelMorph.setMorphWeightFromIndex(morphIndex, clampedWeight);
+            this.refreshCurrentModelAfterMorphEdit();
         } catch { /* ignore */ }
     }
+
+    private refreshCurrentModelAfterMorphEdit(): void {
+        this.recomputeCurrentModelPoseAfterManualEdit();
+        this.currentMesh?.computeWorldMatrix(true);
+        this.currentMesh?.metadata?.skeleton?.computeAbsoluteMatrices(true);
+        this.boneVisualizerTarget?.mesh?.computeWorldMatrix(true);
+        this.boneVisualizerTarget?.skeleton?.computeAbsoluteMatrices(true);
+    }
+
     private getRuntimeBoneByName(boneName: string): EditorRuntimeBone | null {
         const runtimeBones = this.currentModel?.runtimeBones;
         if (!runtimeBones) return null;
