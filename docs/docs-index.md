@@ -72,6 +72,10 @@
 - [コードレビュー 2026-04](./code-review-2026-04.md)
 - [ui-controller.ts 分割方針メモ](./ui-controller-split-plan.md)
 
+- [左パネル UI 案メモ](./left-panel-ui-ideas-2026-04-18.md)
+- [キー登録 UI 配置メモ](./key-registration-ui-note-2026-04-18.md)
+- [設定画面メモ](./settings-screen-note-2026-04-18.md)
+
 ## WGSL
 - [WGSL シェーダーでできること / できないこと](./wgsl-shader-capabilities.md)
 
