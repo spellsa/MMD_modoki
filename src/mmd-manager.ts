@@ -1217,6 +1217,14 @@ ${beforeFogAppendBlock}
         lastClientX: number;
         lastClientY: number;
     } | null = null;
+    private lastViewportCameraSyncState:
+        | {
+            position: Vector3;
+            target: Vector3;
+            radius: number;
+            fov: number;
+        }
+        | null = null;
     private boneGizmoManager: GizmoManager | null = null;
     private boneGizmoRuntimeBone: EditorRuntimeBone | null = null;
     private boneGizmoProxyNode: TransformNode | null = null;
@@ -2631,8 +2639,8 @@ ${beforeFogAppendBlock}
         this.camera = new ArcRotateCamera(
             "camera",
             -Math.PI / 2,
-            Math.PI / 2.2,
-            50,
+            Math.PI / 2,
+            40,
             new Vector3(0, 10, 0),
             this.scene
         );
@@ -2653,6 +2661,7 @@ ${beforeFogAppendBlock}
         canvas.addEventListener("auxclick", this.onCanvasAuxClick);
         canvas.addEventListener("contextmenu", this.onCanvasContextMenu);
         this.syncCameraRotationFromCurrentView();
+        this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
         this.dofFocusDistanceMmValue = this.getDofAutoFocusDistanceMm();
         this.initializeDofPipeline();
@@ -2805,6 +2814,7 @@ ${beforeFogAppendBlock}
             if (this.shouldApplyCameraMotionToViewport()) {
                 this.syncViewportCameraFromMmdCamera();
             }
+            this.syncViewportCameraDrivenStateFromNativeInputs();
             this.handleBoneGizmoBeforeRender();
             this.updateBoneVisualizer();
             this.updateRigidBodyVisualizer();
@@ -5968,44 +5978,32 @@ ${beforeFogAppendBlock}
     }
 
     setCameraView(view: "left" | "front" | "right" | "top" | "back" | "bottom"): void {
-        const target = this.camera.target.clone();
-        const horizontalDistance = Math.max(
-            5,
-            Math.hypot(this.camera.position.x - target.x, this.camera.position.z - target.z)
-        );
-        const yOffset = Math.max(2, Math.abs(this.camera.position.y - target.y));
-
-        const nextPosition = target.clone();
+        const distance = Math.max(5, this.getCameraDistance());
+        const fovDeg = (this.camera.fov * 180) / Math.PI;
+        let rotationDeg = { x: 0, y: 0, z: 0 };
         switch (view) {
             case "left":
-                nextPosition.x -= horizontalDistance;
+                rotationDeg = { x: 0, y: -90, z: 0 };
                 break;
             case "right":
-                nextPosition.x += horizontalDistance;
+                rotationDeg = { x: 0, y: 90, z: 0 };
                 break;
             case "back":
-                nextPosition.z += horizontalDistance;
+                rotationDeg = { x: 0, y: 180, z: 0 };
                 break;
             case "top":
-                nextPosition.y += Math.max(horizontalDistance, yOffset);
+                rotationDeg = { x: -90, y: 0, z: 0 };
                 break;
             case "bottom":
-                nextPosition.y -= Math.max(horizontalDistance, yOffset);
+                rotationDeg = { x: 90, y: 0, z: 0 };
                 break;
             case "front":
             default:
-                nextPosition.z -= horizontalDistance;
+                rotationDeg = { x: 0, y: 0, z: 0 };
                 break;
         }
-        if (view !== "top" && view !== "bottom") {
-            nextPosition.y += yOffset;
-        }
 
-        this.camera.upVector = new Vector3(0, 1, 0);
-        this.camera.setPosition(nextPosition);
-        this.camera.setTarget(target);
-        this.syncCameraRotationFromCurrentView();
-        this.syncMmdCameraFromViewportCamera();
+        this.applyCameraTrackPose({ x: 0, y: 10, z: 0 }, rotationDeg, distance, fovDeg);
     }
 
     private syncMmdCameraFromViewportCamera(force = false): void {
@@ -6016,6 +6014,7 @@ ${beforeFogAppendBlock}
         this.mmdCamera.target.copyFrom(this.camera.target);
         this.mmdCamera.position = this.camera.position.clone();
         this.mmdCamera.fov = this.camera.fov;
+        this.recordViewportCameraSyncState();
     }
     private syncViewportCameraFromMmdCamera(): void {
         // MmdCamera is not the active scene camera, so keep its position up to date explicitly.
@@ -6025,7 +6024,40 @@ ${beforeFogAppendBlock}
         this.camera.fov = this.mmdCamera.fov;
         this.camera.upVector.copyFrom(this.mmdCamera.upVector);
         this.syncCameraRotationFromCurrentView();
+        this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
+    }
+
+    private recordViewportCameraSyncState(): void {
+        this.lastViewportCameraSyncState = {
+            position: this.camera.position.clone(),
+            target: this.camera.target.clone(),
+            radius: this.camera.radius,
+            fov: this.camera.fov,
+        };
+    }
+
+    private hasViewportCameraChangedSinceLastSync(): boolean {
+        const previous = this.lastViewportCameraSyncState;
+        if (!previous) return true;
+        const epsilon = 1e-4;
+        return Vector3.DistanceSquared(previous.position, this.camera.position) > epsilon
+            || Vector3.DistanceSquared(previous.target, this.camera.target) > epsilon
+            || Math.abs(previous.radius - this.camera.radius) > epsilon
+            || Math.abs(previous.fov - this.camera.fov) > epsilon;
+    }
+
+    private syncViewportCameraDrivenStateFromNativeInputs(): void {
+        if (!this.shouldSyncViewportCameraToMmdCamera()) {
+            this.recordViewportCameraSyncState();
+            return;
+        }
+        if (!this.hasViewportCameraChangedSinceLastSync()) return;
+
+        this.syncCameraRotationFromCurrentView();
+        this.syncMmdCameraFromViewportCamera(true);
+        this.updateDofFocalLengthFromCameraFov();
+        this.onCameraTransformEdited?.();
     }
 
     private applyCameraRotationFromEuler(): void {

@@ -6,6 +6,7 @@ type BoneSliderKey = "tx" | "ty" | "tz" | "rx" | "ry" | "rz" | "camDistance" | "
 type BonePoseSnapshot = {
     position: { x: number; y: number; z: number };
     rotation: { x: number; y: number; z: number };
+    target?: { x: number; y: number; z: number };
     distance?: number;
     fov?: number;
 };
@@ -21,6 +22,7 @@ export class BottomPanel {
     private morphSliders: Map<string, HTMLInputElement> = new Map();
     private morphFrames: MorphDisplayFrameInfo[] = [];
     private boneControlMap: Map<string, BoneControlInfo> = new Map();
+    private activeSliderInteractions: WeakSet<HTMLInputElement> = new WeakSet();
     private currentBoneName: string | null = null;
     private currentMorphFrameIndex: number | null = null;
     private mmdManager: MmdManager | null = null;
@@ -167,18 +169,23 @@ export class BottomPanel {
 
         const isCameraControl = this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME;
         if (isCameraControl) {
-            const position = this.mmdManager?.getCameraPosition() ?? { x: 0, y: 0, z: 0 };
+            const target = this.mmdManager?.getCameraTarget() ?? { x: 0, y: 0, z: 0 };
             const rotation = this.mmdManager?.getCameraRotation() ?? { x: 0, y: 0, z: 0 };
             return {
                 position: {
-                    x: position.x,
-                    y: position.y,
-                    z: position.z,
+                    x: target.x,
+                    y: target.y,
+                    z: target.z,
                 },
                 rotation: {
                     x: rotation.x,
                     y: rotation.y,
                     z: rotation.z,
+                },
+                target: {
+                    x: target.x,
+                    y: target.y,
+                    z: target.z,
                 },
                 distance: this.mmdManager?.getCameraDistance() ?? 45,
                 fov: this.mmdManager?.getCameraFov() ?? 30,
@@ -291,7 +298,7 @@ export class BottomPanel {
         const isCameraControl = this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME;
         const transform = isCameraControl
             ? {
-                position: this.mmdManager?.getCameraPosition() ?? { x: 0, y: 0, z: 0 },
+                position: this.mmdManager?.getCameraTarget() ?? { x: 0, y: 0, z: 0 },
                 rotation: this.mmdManager?.getCameraRotation() ?? { x: 0, y: 0, z: 0 },
             }
             : this.mmdManager?.getBoneTransform(this.currentBoneName) ?? {
@@ -361,6 +368,17 @@ export class BottomPanel {
             slider.value = this.clamp(def.value, def.min, def.max).toFixed(def.step < 1 ? 2 : 0);
             slider.className = "bone-slider";
 
+            const beginSliderInteraction = (): void => {
+                this.activeSliderInteractions.add(slider);
+            };
+            const endSliderInteraction = (): void => {
+                this.activeSliderInteractions.delete(slider);
+            };
+            slider.addEventListener("pointerdown", beginSliderInteraction);
+            slider.addEventListener("pointerup", endSliderInteraction);
+            slider.addEventListener("pointercancel", endSliderInteraction);
+            slider.addEventListener("blur", endSliderInteraction);
+
             const valueDisplay = document.createElement("span");
             valueDisplay.className = "bone-slider-value";
             valueDisplay.textContent = this.formatSliderValue(Number(slider.value), def.step);
@@ -373,6 +391,7 @@ export class BottomPanel {
                     this.onBoneTransformEdited?.(this.currentBoneName);
                 }
             });
+            slider.addEventListener("change", endSliderInteraction);
 
             this.boneSliders.set(def.key, slider);
             this.boneSliderValues.set(def.key, valueDisplay);
@@ -392,8 +411,9 @@ export class BottomPanel {
 
         if (this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME) {
             this.syncSelectedBoneSlidersFromSnapshot({
-                position: this.mmdManager.getCameraPosition(),
+                position: this.mmdManager.getCameraTarget(),
                 rotation: this.mmdManager.getCameraRotation(),
+                target: this.mmdManager.getCameraTarget(),
                 distance: this.mmdManager.getCameraDistance(),
                 fov: this.mmdManager.getCameraFov(),
             }, force);
@@ -441,9 +461,12 @@ export class BottomPanel {
             this.onRangeSliderSynced?.(slider);
         };
 
-        updateSlider("tx", snapshot.position.x);
-        updateSlider("ty", snapshot.position.y);
-        updateSlider("tz", snapshot.position.z);
+        const cameraTranslation = this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME
+            ? snapshot.target ?? snapshot.position
+            : snapshot.position;
+        updateSlider("tx", cameraTranslation.x);
+        updateSlider("ty", cameraTranslation.y);
+        updateSlider("tz", cameraTranslation.z);
         updateSlider("rx", snapshot.rotation.x);
         updateSlider("ry", snapshot.rotation.y);
         updateSlider("rz", snapshot.rotation.z);
@@ -466,7 +489,7 @@ export class BottomPanel {
             const rz = this.getBoneSliderNumber("rz");
             const distance = this.getBoneSliderNumber("camDistance");
             const fov = this.getBoneSliderNumber("camFov");
-            this.mmdManager.setCameraPosition(tx, ty, tz);
+            this.mmdManager.setCameraTarget(tx, ty, tz);
             this.mmdManager.setCameraRotation(rx, ry, rz);
             this.mmdManager.setCameraDistance(distance);
             this.mmdManager.setCameraFov(fov);
@@ -567,7 +590,9 @@ export class BottomPanel {
 
     private isSliderEditing(slider: HTMLInputElement): boolean {
         const activeElement = document.activeElement;
-        return activeElement === slider || activeElement === this.getAttachedNumberInput(slider);
+        return this.activeSliderInteractions.has(slider)
+            || activeElement === slider
+            || activeElement === this.getAttachedNumberInput(slider);
     }
 
     private getAttachedNumberInput(slider: HTMLInputElement): HTMLInputElement | null {
