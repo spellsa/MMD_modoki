@@ -56,6 +56,15 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
         keyframes.accessoryTransformAnimations = accessoryTransformAnimations;
     }
 
+    const serializedLightDirection = typeof host.getSerializedLightDirection === "function"
+        ? host.getSerializedLightDirection()
+        : host.getLightDirection();
+    const lightDirection = {
+        x: Number(serializedLightDirection?.x ?? 0),
+        y: Number(serializedLightDirection?.y ?? 0),
+        z: Number(serializedLightDirection?.z ?? 0),
+    };
+
     return {
         format: "mmd_modoki_project",
         version: 1,
@@ -91,7 +100,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             distance: host.getCameraDistance(),
         },
         lighting: {
-            ...host.getLightDirection(),
+            ...lightDirection,
             intensity: host.lightIntensity,
             ambientIntensity: host.ambientIntensity,
             temperatureKelvin: host.lightColorTemperature,
@@ -133,12 +142,18 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             dofFocusOffsetMm: host.dofAutoFocusNearOffsetMm,
             dofTargetModelPath: host.getDofFocusTargetModelPath?.() ?? null,
             dofTargetBoneName: host.getDofFocusTargetBoneName?.() ?? null,
+            dofBlurLevel: host.dofBlurLevel,
             dofFStop: host.dofFStop,
+            dofNearSuppressionScale: host.dofNearSuppressionScale,
             dofLensSize: host.dofLensSize,
+            dofFocalLength: host.dofFocalLength,
+            dofFocalLengthDistanceInverted: host.dofFocalLengthDistanceInverted,
             dofLensBlurStrength: host.dofLensBlurStrength,
             dofLensEdgeBlur: host.dofLensEdgeBlur,
+            dofLensDistortion: host.dofLensDistortion,
             dofLensDistortionInfluence: host.dofLensDistortionInfluence,
             modelEdgeWidth: host.modelEdgeWidth,
+            contrast: host.postEffectContrast,
             gamma: host.postEffectGamma,
             exposure: host.postEffectExposure,
             toneMappingEnabled: host.postEffectToneMappingEnabled,

@@ -247,11 +247,14 @@ export async function loadMP3(host: any, filePath: string): Promise<boolean> {
             return false;
         }
 
+        if (host.audioPlayer) {
+            await host.mmdRuntime.setAudioPlayer(null);
+            host.audioPlayer.dispose();
+            host.audioPlayer = null;
+        }
         if (host.audioBlobUrl) {
             URL.revokeObjectURL(host.audioBlobUrl);
-        }
-        if (host.audioPlayer) {
-            host.audioPlayer.dispose();
+            host.audioBlobUrl = null;
         }
 
         const uint8 = new Uint8Array(buffer as unknown as ArrayBuffer);
@@ -262,6 +265,10 @@ export async function loadMP3(host: any, filePath: string): Promise<boolean> {
         host.audioPlayer.source = host.audioBlobUrl;
         await host.mmdRuntime.setAudioPlayer(host.audioPlayer);
         host.audioSourcePath = filePath;
+        host.audioPlayer.onDurationChangedObservable.add(() => {
+            host.refreshTotalFramesFromContent?.();
+        });
+        host.refreshTotalFramesFromContent?.();
 
         host.onAudioLoaded?.(fileName.replace(/\.(mp3|wav|wave|ogg)$/i, ""));
         return true;

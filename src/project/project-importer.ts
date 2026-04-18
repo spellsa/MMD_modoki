@@ -6,11 +6,71 @@ function normalizePathForCompare(value: string): string {
     return value.replace(/\\/g, "/").toLowerCase();
 }
 
+function readFiniteNumber(value: unknown, fallback: number): number {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function readLightingDirectionComponent(
+    lighting: { x?: unknown; y?: unknown; z?: unknown; _x?: unknown; _y?: unknown; _z?: unknown },
+    key: "x" | "y" | "z",
+): number | null {
+    const direct = lighting[key];
+    if (typeof direct === "number" && Number.isFinite(direct)) {
+        return direct;
+    }
+
+    const legacyKey = (`_${key}`) as "_x" | "_y" | "_z";
+    const legacy = lighting[legacyKey];
+    if (typeof legacy === "number" && Number.isFinite(legacy)) {
+        return legacy;
+    }
+
+    return null;
+}
+
 function isProjectFileV1(value: unknown): value is MmdModokiProjectFileV1 {
     return !!value
         && typeof value === "object"
         && (value as MmdModokiProjectFileV1).format === "mmd_modoki_project"
         && (value as MmdModokiProjectFileV1).version === 1;
+}
+
+function finalizeImportedRenderState(
+    host: any,
+    data: MmdModokiProjectFileV1,
+    warnings: string[],
+): void {
+    const lightDirectionX = readLightingDirectionComponent(data.lighting, "x");
+    const lightDirectionY = readLightingDirectionComponent(data.lighting, "y");
+    const lightDirectionZ = readLightingDirectionComponent(data.lighting, "z");
+    for (let modelIndex = 0; modelIndex < data.scene.models.length; modelIndex += 1) {
+        const modelState = data.scene.models[modelIndex];
+        host.applyImportedMaterialShaderStates(modelIndex, modelState.materialShaders, warnings, modelState.path);
+    }
+
+    if (
+        lightDirectionX !== null
+        && lightDirectionY !== null
+        && lightDirectionZ !== null
+    ) {
+        host.setLightDirection(lightDirectionX, lightDirectionY, lightDirectionZ);
+    }
+
+    host.setDofFocusTargetByPath?.(
+        typeof data.effects.dofTargetModelPath === "string" && data.effects.dofTargetModelPath.length > 0
+            ? data.effects.dofTargetModelPath
+            : null,
+        typeof data.effects.dofTargetBoneName === "string" && data.effects.dofTargetBoneName.length > 0
+            ? data.effects.dofTargetBoneName
+            : null,
+    );
+    host.updateEditorDofFocusAndFStop?.();
+    host.applyEditorDofSettings?.();
+    host.applyDofLensBlurSettings?.();
+    host.applyLightColorTemperature?.();
+    host.applyToonShadowInfluenceToAllModels?.();
+    host.syncLuminousGlowLayer?.();
+    host.engine?.releaseEffects?.();
 }
 
 export async function importProjectState(
@@ -24,6 +84,9 @@ export async function importProjectState(
 
     const warnings: string[] = [];
     const isExportImport = options.forExport === true;
+    const lightDirectionX = readLightingDirectionComponent(data.lighting, "x");
+    const lightDirectionY = readLightingDirectionComponent(data.lighting, "y");
+    const lightDirectionZ = readLightingDirectionComponent(data.lighting, "z");
     host.clearProjectForImport();
 
     let loadedModels = 0;
@@ -64,7 +127,6 @@ export async function importProjectState(
         }
 
         const targetModel = targetEntry.model;
-        host.applyImportedMaterialShaderStates(modelIndex, modelState.materialShaders, warnings, modelState.path);
 
         let restoredEmbeddedAnimation = false;
         const embeddedAnimationData = embeddedModelAnimationsByPath.get(
@@ -315,7 +377,9 @@ export async function importProjectState(
         host.clearBackgroundMedia();
     }
 
-    host.setLightDirection(data.lighting.x, data.lighting.y, data.lighting.z);
+    if (lightDirectionX !== null && lightDirectionY !== null && lightDirectionZ !== null) {
+        host.setLightDirection(lightDirectionX, lightDirectionY, lightDirectionZ);
+    }
     host.lightIntensity = data.lighting.intensity;
     host.ambientIntensity = data.lighting.ambientIntensity;
     host.lightColorTemperature = data.lighting.temperatureKelvin;
@@ -382,10 +446,9 @@ export async function importProjectState(
     }
 
     host.dofEnabled = Boolean(data.effects.dofEnabled);
-    host.dofFocusDistanceMm = data.effects.dofFocusDistanceMm;
-    host.dofAutoFocusNearOffsetMm = typeof data.effects.dofFocusOffsetMm === "number" && Number.isFinite(data.effects.dofFocusOffsetMm)
-        ? data.effects.dofFocusOffsetMm
-        : 0;
+    host.dofFocusDistanceMm = readFiniteNumber(data.effects.dofFocusDistanceMm, 10000);
+    host.dofAutoFocusNearOffsetMm = readFiniteNumber(data.effects.dofFocusOffsetMm, 0);
+    host.dofBlurLevel = readFiniteNumber(data.effects.dofBlurLevel, 1);
     host.setDofFocusTargetByPath?.(
         typeof data.effects.dofTargetModelPath === "string" && data.effects.dofTargetModelPath.length > 0
             ? data.effects.dofTargetModelPath
@@ -394,13 +457,20 @@ export async function importProjectState(
             ? data.effects.dofTargetBoneName
             : null,
     );
-    host.dofFStop = data.effects.dofFStop;
-    host.dofLensSize = data.effects.dofLensSize;
-    host.dofLensBlurStrength = data.effects.dofLensBlurStrength;
-    host.dofLensEdgeBlur = data.effects.dofLensEdgeBlur;
-    host.dofLensDistortionInfluence = data.effects.dofLensDistortionInfluence;
-    host.modelEdgeWidth = data.effects.modelEdgeWidth;
-    const importedGamma = data.effects.gamma;
+    host.dofFStop = readFiniteNumber(data.effects.dofFStop, 5.6);
+    host.dofNearSuppressionScale = readFiniteNumber(data.effects.dofNearSuppressionScale, 4);
+    host.dofLensSize = readFiniteNumber(data.effects.dofLensSize, 50);
+    host.dofFocalLengthDistanceInverted = typeof data.effects.dofFocalLengthDistanceInverted === "boolean"
+        ? data.effects.dofFocalLengthDistanceInverted
+        : false;
+    host.dofFocalLength = readFiniteNumber(data.effects.dofFocalLength, 50);
+    host.dofLensBlurStrength = readFiniteNumber(data.effects.dofLensBlurStrength, 0);
+    host.dofLensEdgeBlur = readFiniteNumber(data.effects.dofLensEdgeBlur, 0);
+    host.dofLensDistortion = readFiniteNumber(data.effects.dofLensDistortion, 0);
+    host.dofLensDistortionInfluence = readFiniteNumber(data.effects.dofLensDistortionInfluence, 0);
+    host.modelEdgeWidth = readFiniteNumber(data.effects.modelEdgeWidth, 1);
+    host.postEffectContrast = readFiniteNumber(data.effects.contrast, 1);
+    const importedGamma = readFiniteNumber(data.effects.gamma, 1);
     const gammaEncodingVersion = (data.effects as { gammaEncodingVersion?: unknown }).gammaEncodingVersion;
     host.postEffectGamma = gammaEncodingVersion === 2 ? importedGamma : importedGamma * 0.5;
     host.postEffectExposure = typeof data.effects.exposure === "number" && Number.isFinite(data.effects.exposure)
@@ -447,11 +517,21 @@ export async function importProjectState(
     host.postEffectSharpenEdge = typeof data.effects.sharpenEdge === "number" && Number.isFinite(data.effects.sharpenEdge)
         ? data.effects.sharpenEdge
         : 0;
-    host.postEffectSsaoStrength = 0;
-    host.postEffectSsaoRadius = 2;
-    host.postEffectSsaoFadeEnd = 200;
-    host.postEffectSsaoDebugView = false;
-    host.postEffectSsaoEnabled = false;
+    host.postEffectSsaoStrength = typeof data.effects.ssaoStrength === "number" && Number.isFinite(data.effects.ssaoStrength)
+        ? data.effects.ssaoStrength
+        : 1;
+    host.postEffectSsaoRadius = typeof data.effects.ssaoRadius === "number" && Number.isFinite(data.effects.ssaoRadius)
+        ? data.effects.ssaoRadius
+        : 2;
+    host.postEffectSsaoFadeEnd = typeof data.effects.ssaoFadeEnd === "number" && Number.isFinite(data.effects.ssaoFadeEnd)
+        ? data.effects.ssaoFadeEnd
+        : 200;
+    host.postEffectSsaoDebugView = typeof data.effects.ssaoDebugView === "boolean"
+        ? data.effects.ssaoDebugView
+        : false;
+    host.postEffectSsaoEnabled = typeof data.effects.ssaoEnabled === "boolean"
+        ? data.effects.ssaoEnabled
+        : false;
     host.postEffectColorCurvesEnabled = typeof data.effects.colorCurvesEnabled === "boolean"
         ? data.effects.colorCurvesEnabled
         : false;
@@ -487,6 +567,12 @@ export async function importProjectState(
         null,
         null,
     );
+    host.postEffectLutIntensity = typeof data.effects.lutIntensity === "number" && Number.isFinite(data.effects.lutIntensity)
+        ? data.effects.lutIntensity
+        : 1;
+    host.postEffectLutEnabled = typeof data.effects.lutEnabled === "boolean"
+        ? data.effects.lutEnabled
+        : false;
     host.setExternalWgslToonShader(
         typeof data.effects.wgslToonShaderPath === "string" ? data.effects.wgslToonShaderPath : null,
         null,
@@ -554,6 +640,7 @@ export async function importProjectState(
     host.seekTo(Math.max(0, Math.floor(data.scene.currentFrame ?? 0)));
     host.setPlaybackSpeed(Math.max(0.01, data.scene.playbackSpeed));
     host.setTimelineTarget(data.scene.timelineTarget === "camera" ? "camera" : "model");
+    finalizeImportedRenderState(host, data, warnings);
 
     return { loadedModels, warnings };
 }

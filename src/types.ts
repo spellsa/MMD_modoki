@@ -278,12 +278,18 @@ export interface ProjectEffectState {
     dofFocusOffsetMm?: number;
     dofTargetModelPath?: string | null;
     dofTargetBoneName?: string | null;
+    dofBlurLevel?: number;
     dofFStop: number;
+    dofNearSuppressionScale?: number;
     dofLensSize: number;
+    dofFocalLength?: number;
+    dofFocalLengthDistanceInverted?: boolean;
     dofLensBlurStrength: number;
     dofLensEdgeBlur: number;
+    dofLensDistortion?: number;
     dofLensDistortionInfluence: number;
     modelEdgeWidth: number;
+    contrast?: number;
     gamma: number;
     exposure?: number;
     toneMappingEnabled?: boolean;

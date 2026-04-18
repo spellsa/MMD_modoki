@@ -269,7 +269,7 @@ export function setShadowFrustumSize(host: any, v: number): void {
     host.shadowFrustumSizeValue = clampShadowFrustumSize(v);
     applyShadowFrustumSize(host);
     if (host.dirLight) {
-        const direction = getLightDirection(host);
+        const direction = getSerializedLightDirection(host);
         setLightDirection(host, direction.x, direction.y, direction.z);
     }
 }
@@ -282,7 +282,7 @@ export function setShadowMaxZ(host: any, v: number): void {
     host.shadowMaxZValue = clampShadowMaxZ(v);
     applyShadowFrustumSize(host);
     if (host.dirLight) {
-        const direction = getLightDirection(host);
+        const direction = getSerializedLightDirection(host);
         setLightDirection(host, direction.x, direction.y, direction.z);
     }
 }
@@ -438,14 +438,17 @@ export function applyShadowEdgeSoftness(host: any): void {
 export function setLightDirection(host: any, x: number, y: number, z: number): void {
     if (!host.dirLight) return;
 
-    const direction = new Vector3(
+    const rawDirection = new Vector3(
         Number.isFinite(x) ? x : DEFAULT_LIGHT_DIRECTION.x,
         Number.isFinite(y) ? y : DEFAULT_LIGHT_DIRECTION.y,
         Number.isFinite(z) ? z : DEFAULT_LIGHT_DIRECTION.z,
     );
-    if (direction.lengthSquared() < 0.0001) {
-        direction.copyFrom(DEFAULT_LIGHT_DIRECTION);
+    if (rawDirection.lengthSquared() < 0.0001) {
+        rawDirection.copyFrom(DEFAULT_LIGHT_DIRECTION);
     }
+    host.lightDirectionInputValue = rawDirection.clone();
+
+    const direction = rawDirection.clone();
     direction.normalize();
     host.dirLight.direction = direction;
     const dist = host.shadowGenerator instanceof CascadedShadowGenerator
@@ -473,6 +476,24 @@ export function getLightDirection(host: any): Vector3 {
         return DEFAULT_LIGHT_DIRECTION.clone();
     }
     return direction.clone().normalize();
+}
+
+export function getSerializedLightDirection(host: any): Vector3 {
+    const rawDirection = host.lightDirectionInputValue;
+    if (
+        rawDirection
+        && typeof rawDirection === "object"
+        && Number.isFinite(rawDirection.x)
+        && Number.isFinite(rawDirection.y)
+        && Number.isFinite(rawDirection.z)
+    ) {
+        const serialized = new Vector3(rawDirection.x, rawDirection.y, rawDirection.z);
+        if (serialized.lengthSquared() >= 0.0001) {
+            return serialized;
+        }
+    }
+
+    return getLightDirection(host);
 }
 
 export function applyLightColorTemperature(host: any): void {

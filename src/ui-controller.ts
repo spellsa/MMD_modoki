@@ -10,6 +10,7 @@ import type {
     MmdModokiProjectFileV1,
     ModelInfo,
     MotionInfo,
+    ProjectLightingState,
     ProjectOutputState,
     UiLocale,
     TrackCategory,
@@ -612,7 +613,7 @@ export class UIController {
         elLightDirectionY.addEventListener("input", updateDir);
         elLightDirectionZ.addEventListener("input", updateDir);
 
-        const initialLightDirection = this.mmdManager.getLightDirection();
+        const initialLightDirection = this.mmdManager.getSerializedLightDirection();
         elLightDirectionX.value = this.formatRangeInputValue(elLightDirectionX, initialLightDirection.x);
         elLightDirectionY.value = this.formatRangeInputValue(elLightDirectionY, initialLightDirection.y);
         elLightDirectionZ.value = this.formatRangeInputValue(elLightDirectionZ, initialLightDirection.z);
@@ -1425,6 +1426,28 @@ export class UIController {
         this.exportUiController?.applyProjectState(state);
     }
 
+    private reapplyImportedLightingState(lighting: Partial<ProjectLightingState> | null | undefined): void {
+        if (!lighting) return;
+
+        if (
+            typeof lighting.x === "number"
+            && Number.isFinite(lighting.x)
+            && typeof lighting.y === "number"
+            && Number.isFinite(lighting.y)
+            && typeof lighting.z === "number"
+            && Number.isFinite(lighting.z)
+        ) {
+            this.mmdManager.setLightDirection(lighting.x, lighting.y, lighting.z);
+        }
+
+        if (typeof lighting.shadowFrustumSize === "number" && Number.isFinite(lighting.shadowFrustumSize)) {
+            this.mmdManager.shadowFrustumSize = lighting.shadowFrustumSize;
+        }
+        if (typeof lighting.shadowMaxZ === "number" && Number.isFinite(lighting.shadowMaxZ)) {
+            this.mmdManager.shadowMaxZ = lighting.shadowMaxZ;
+        }
+    }
+
     private async saveProject(forceChoosePath = false): Promise<void> {
         this.setStatus("Saving project...", true);
         try {
@@ -1624,6 +1647,8 @@ export class UIController {
                     this.mmdManager.setActiveModelByIndex(activeModel.index);
                 }
             }
+            this.reapplyImportedLightingState(parsedProject.lighting);
+            this.refreshLightingUiFromRuntime();
             this.updateTimelineEditState();
 
             if (result.warnings.length > 0) {
@@ -2323,7 +2348,7 @@ export class UIController {
             this.syncRangeNumberInput(slider);
         };
 
-        const lightDirection = this.mmdManager.getLightDirection();
+        const lightDirection = this.mmdManager.getSerializedLightDirection();
         setSliderValue("light-direction-x", "light-direction-x-val", lightDirection.x, (value) => value.toFixed(2));
         setSliderValue("light-direction-y", "light-direction-y-val", lightDirection.y, (value) => value.toFixed(2));
         setSliderValue("light-direction-z", "light-direction-z-val", lightDirection.z, (value) => value.toFixed(2));

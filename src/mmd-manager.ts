@@ -201,6 +201,7 @@ import {
     getLightColor as getLightColorImpl,
     getLightColorTemperature as getLightColorTemperatureImpl,
     getLightDirection as getLightDirectionImpl,
+    getSerializedLightDirection as getSerializedLightDirectionImpl,
     getLightFlatColorInfluence as getLightFlatColorInfluenceImpl,
     getLightFlatStrength as getLightFlatStrengthImpl,
     getLightIntensity as getLightIntensityImpl,
@@ -693,6 +694,7 @@ export class MmdManager {
     private static externalWgslToonFragmentReplacement: string | null = null;
     private static externalWgslToonSourcePath: string | null = null;
     private static readonly externalWgslToonFragmentByMaterial = new WeakMap<object, string>();
+    private static readonly presetWgslToonFragmentByMaterial = new WeakMap<object, string>();
 
     private static shadowSoftnessToToonBoundaryWidth(v: number): number {
         if (!Number.isFinite(v)) return 0.09;
@@ -803,24 +805,28 @@ diffuseBase+=mix(info.diffuse*shadow,toonNdl*info.diffuse,info.isToon);
 #endif`;
 
                 const pluginMaterial = (this as { _material?: unknown })._material;
-                const externalReplacementLine = isWgsl && pluginMaterial && typeof pluginMaterial === "object"
-                    ? (MmdManager.externalWgslToonFragmentByMaterial.get(pluginMaterial as object) ?? null)
+                const replacementLine = isWgsl && pluginMaterial && typeof pluginMaterial === "object"
+                    ? (
+                        MmdManager.externalWgslToonFragmentByMaterial.get(pluginMaterial as object)
+                        ?? MmdManager.presetWgslToonFragmentByMaterial.get(pluginMaterial as object)
+                        ?? null
+                    )
                     : null;
-                const applyWithoutToonTexture = typeof externalReplacementLine === "string"
-                    && externalReplacementLine.includes("@apply-without-toon");
-                const replacementBlock = isWgsl && externalReplacementLine && applyWithoutToonTexture
+                const applyWithoutToonTexture = typeof replacementLine === "string"
+                    && replacementLine.includes("@apply-without-toon");
+                const replacementBlock = isWgsl && replacementLine && applyWithoutToonTexture
                     ? `#ifdef TOON_TEXTURE
 toonNdl=vec3f(clamp(info.ndl*shadow,0.02,0.98));
 toonNdl.r=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonNdl.r)).r;
 toonNdl.g=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonNdl.g)).g;
 toonNdl.b=textureSample(toonSampler,toonSamplerSampler,vec2f(0.5,toonNdl.b)).b;
-${externalReplacementLine}
+${replacementLine}
 #elif defined(IGNORE_DIFFUSE_WHEN_TOON_TEXTURE_DISABLED)
-${externalReplacementLine}
+${replacementLine}
 #else
-${externalReplacementLine}
+${replacementLine}
 #endif`
-                    : (externalReplacementLine ?? defaultReplacementLine);
+                    : (replacementLine ?? defaultReplacementLine);
 
                 const codeMap = codes as Record<string, unknown>;
                 const contactAoDefinitions = isWgsl
@@ -3968,13 +3974,14 @@ ${beforeFogAppendBlock}
         this.cameraMotionPath = null;
         this.cameraSourceAnimation = null;
 
+        if (this.audioPlayer) {
+            void this.mmdRuntime.setAudioPlayer(null);
+            this.audioPlayer.dispose();
+            this.audioPlayer = null;
+        }
         if (this.audioBlobUrl) {
             URL.revokeObjectURL(this.audioBlobUrl);
             this.audioBlobUrl = null;
-        }
-        if (this.audioPlayer) {
-            this.audioPlayer.dispose();
-            this.audioPlayer = null;
         }
         this.audioSourcePath = null;
 
@@ -5048,7 +5055,7 @@ ${beforeFogAppendBlock}
         this.shadowFrustumSizeValue = this.clampShadowFrustumSize(v);
         this.applyShadowFrustumSize();
         if (this.dirLight) {
-            const direction = this.getLightDirection();
+            const direction = this.getSerializedLightDirection();
             this.setLightDirection(direction.x, direction.y, direction.z);
         }
     }
@@ -5136,6 +5143,11 @@ ${beforeFogAppendBlock}
     /** Current normalized directional light vector. */
     getLightDirection(): Vector3 {
         return getLightDirectionImpl(this);
+    }
+
+    /** Current editor light vector before normalization. */
+    getSerializedLightDirection(): Vector3 {
+        return getSerializedLightDirectionImpl(this);
     }
 
     applyLightColorTemperature(): void {
@@ -5938,6 +5950,23 @@ ${beforeFogAppendBlock}
         this.syncViewportCameraFromMmdCamera();
     }
 
+    applyCameraAnimation(animation: MmdAnimation, sourcePath: string | null): void {
+        if (this.cameraAnimationHandle !== null) {
+            this.mmdCamera.destroyRuntimeAnimation(this.cameraAnimationHandle);
+            this.cameraAnimationHandle = null;
+        }
+
+        this.cameraAnimationHandle = this.mmdCamera.createRuntimeAnimation(
+            animation as unknown as IMmdBindableCameraAnimation,
+        );
+        this.mmdCamera.setRuntimeAnimation(this.cameraAnimationHandle);
+        this.hasCameraMotion = true;
+        this.cameraMotionPath = sourcePath;
+        this.cameraSourceAnimation = animation;
+        this.cameraKeyframeFrames = new Uint32Array(animation.cameraTrack.frameNumbers);
+        this.emitMergedKeyframeTracks();
+    }
+
     setCameraView(view: "left" | "front" | "right" | "top" | "back" | "bottom"): void {
         const target = this.camera.target.clone();
         const horizontalDistance = Math.max(
@@ -6423,9 +6452,12 @@ ${beforeFogAppendBlock}
         }
         if (this.audioBlobUrl) {
             URL.revokeObjectURL(this.audioBlobUrl);
+            this.audioBlobUrl = null;
         }
         if (this.audioPlayer) {
+            void this.mmdRuntime.setAudioPlayer(null);
             this.audioPlayer.dispose();
+            this.audioPlayer = null;
         }
         for (const sceneModel of this.sceneModels) {
             try {

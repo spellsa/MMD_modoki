@@ -183,6 +183,18 @@ function markMaterialShaderDirty(material: any): void {
     }
 }
 
+function setPresetWgslToonFragmentForMaterial(host: any, material: any, source: string | null): void {
+    const key = getMaterialKey(material);
+    if (!key) return;
+
+    if (typeof source === "string" && source.length > 0) {
+        host.constructor.presetWgslToonFragmentByMaterial.set(key, source);
+        return;
+    }
+
+    host.constructor.presetWgslToonFragmentByMaterial.delete(key);
+}
+
 function getPresetFallbackShadowToonTexture(host: any): Texture | null {
     const scene = host?.scene;
     if (!scene || typeof scene !== "object") return null;
@@ -416,6 +428,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
 
     const defaults = ensureMaterialShaderDefaults(host, material);
     restoreMaterialShaderDefaults(host, material, defaults);
+    setPresetWgslToonFragmentForMaterial(host, material, null);
 
     switch (presetId) {
         case "wgsl-unlit": {
@@ -497,7 +510,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
             if ("disableLighting" in material) {
                 material.disableLighting = false;
             }
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, debugWhiteWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, debugWhiteWgslText);
             break;
         }
         case "wgsl-full-light": {
@@ -526,7 +539,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 ),
             );
             ensurePresetFallbackToonTexture(host, material);
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, fullLightWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, fullLightWgslText);
             break;
         }
         case "wgsl-full-light-add": {
@@ -554,7 +567,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                     Math.min(1, baseEmissive.b + diffuse.b * emissiveBoost),
                 ),
             );
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, fullLightAddWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, fullLightAddWgslText);
             break;
         }
         case "wgsl-full-alpha-test": {
@@ -593,7 +606,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 material.specularPower = 0;
             }
             ensurePresetFallbackToonTexture(host, material);
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, fullShadowWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, fullShadowWgslText);
             break;
         }
         case "wgsl-light-and-shadow": {
@@ -611,7 +624,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 const base = defaults.specularPower ?? 32;
                 material.specularPower = Math.min(768, Math.max(96, base * 3.1));
             }
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, glossHighlightWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, glossHighlightWgslText);
             break;
         }
         case "wgsl-semi-matte-highlight": {
@@ -622,7 +635,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 const base = defaults.specularPower ?? 32;
                 material.specularPower = Math.min(256, Math.max(28, base * 1.2));
             }
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, semiMatteHighlightWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, semiMatteHighlightWgslText);
             break;
         }
         case "wgsl-matte-highlight": {
@@ -633,7 +646,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 const base = defaults.specularPower ?? 32;
                 material.specularPower = Math.max(6, Math.min(48, base * 0.35));
             }
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, matteHighlightWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, matteHighlightWgslText);
             break;
         }
         case "wgsl-specular": {
@@ -675,7 +688,7 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
                 material.specularPower = Math.max(4, base * 0.14);
             }
             ensurePresetFallbackToonTexture(host, material);
-            host.constructor.externalWgslToonFragmentByMaterial.set(material as object, toonHardShadowWgslText);
+            setPresetWgslToonFragmentForMaterial(host, material, toonHardShadowWgslText);
             break;
         }
         case "wgsl-accessory-toon": {
