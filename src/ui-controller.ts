@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { AccessoryPanelController } from "./ui/accessory-panel-controller";
 import { BloomToneMapController } from "./ui/bloom-tone-map-controller";
+import { CameraPanelController } from "./ui/camera-panel-controller";
 import { ColorPostFxController } from "./ui/color-postfx-controller";
 import { DofPanelController } from "./ui/dof-panel-controller";
 import { ExperimentalPostFxController } from "./ui/experimental-postfx-controller";
@@ -25,12 +26,12 @@ import { FogPanelController } from "./ui/fog-panel-controller";
 import { LayoutUiController } from "./ui/layout-ui-controller";
 import { LensEffectController } from "./ui/lens-effect-controller";
 import { LutPanelController } from "./ui/lut-panel-controller";
+import { ModelInfoPanelController, MODEL_INFO_CAMERA_SELECT_VALUE, type ModelInfoSelectState } from "./ui/model-info-panel-controller";
 import { ModelEdgeController } from "./ui/model-edge-controller";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
 
-type CameraViewPreset = "left" | "front" | "right" | "top" | "back" | "bottom";
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
 type NumericArrayLike = ArrayLike<number> | null | undefined;
@@ -143,7 +144,6 @@ type MmdManagerInternalView = {
 };
 
 export class UIController {
-    private static readonly CAMERA_SELECT_VALUE = "__camera__";
     private static readonly DEBUG_KEYFRAME_FLOW = false;
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 90;
@@ -179,9 +179,6 @@ export class UIController {
     private interpolationTypeSelect: HTMLSelectElement;
     private interpolationStatusLabel: HTMLElement;
     private interpolationCurveList: HTMLElement;
-    private modelSelect: HTMLSelectElement;
-    private btnModelVisibility: HTMLButtonElement;
-    private btnModelDelete: HTMLButtonElement;
     private shaderModelSelect: HTMLSelectElement | null = null;
     private shaderPresetSelect: HTMLSelectElement | null = null;
     private shaderApplySelectedButton: HTMLButtonElement | null = null;
@@ -189,14 +186,6 @@ export class UIController {
     private shaderResetButton: HTMLButtonElement | null = null;
     private shaderPanelNote: HTMLElement | null = null;
     private shaderMaterialList: HTMLElement | null = null;
-    private camDistanceSlider: HTMLInputElement | null = null;
-    private camDistanceValueEl: HTMLElement | null = null;
-    private camViewLeftBtn: HTMLButtonElement | null = null;
-    private camViewFrontBtn: HTMLButtonElement | null = null;
-    private camViewRightBtn: HTMLButtonElement | null = null;
-    private camViewTopBtn: HTMLButtonElement | null = null;
-    private camViewBackBtn: HTMLButtonElement | null = null;
-    private camViewBottomBtn: HTMLButtonElement | null = null;
     private btnInfoKeyframe: HTMLButtonElement | null = null;
     private btnInterpolationKeyframe: HTMLButtonElement | null = null;
     private btnBoneKeyframe: HTMLButtonElement | null = null;
@@ -219,6 +208,7 @@ export class UIController {
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
     private bloomToneMapController: BloomToneMapController | null = null;
+    private cameraPanelController: CameraPanelController | null = null;
     private colorPostFxController: ColorPostFxController | null = null;
     private dofPanelController: DofPanelController | null = null;
     private experimentalPostFxController: ExperimentalPostFxController | null = null;
@@ -228,6 +218,7 @@ export class UIController {
     private lensEffectController: LensEffectController | null = null;
     private lutPanelController: LutPanelController | null = null;
     private modelEdgeController: ModelEdgeController | null = null;
+    private modelInfoPanelController: ModelInfoPanelController | null = null;
     private runtimeFeatureUiController: RuntimeFeatureUiController | null = null;
     private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
     private shaderPanelController: ShaderPanelController | null = null;
@@ -284,9 +275,6 @@ export class UIController {
         this.interpolationTypeSelect = document.getElementById("interp-type") as HTMLSelectElement;
         this.interpolationStatusLabel = document.getElementById("interp-status")!;
         this.interpolationCurveList = document.getElementById("interp-curve-list")!;
-        this.modelSelect = document.getElementById("info-model-select") as HTMLSelectElement;
-        this.btnModelVisibility = document.getElementById("btn-model-visibility") as HTMLButtonElement;
-        this.btnModelDelete = document.getElementById("btn-model-delete") as HTMLButtonElement;
         this.shaderModelSelect = document.getElementById("shader-model-select") as HTMLSelectElement | null;
         this.shaderPresetSelect = document.getElementById("shader-preset-select") as HTMLSelectElement | null;
         this.shaderApplySelectedButton = document.getElementById("btn-shader-apply-selected") as HTMLButtonElement | null;
@@ -309,6 +297,34 @@ export class UIController {
             syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             normalizeRangeInputValue: (slider, value) => this.normalizeRangeInputValue(slider, value),
             formatRangeInputValue: (slider, value) => this.formatRangeInputValue(slider, value),
+        });
+        this.modelInfoPanelController = new ModelInfoPanelController({
+            mmdManager: this.mmdManager,
+            showToast: (message, type) => this.showToast(message, type),
+            onTargetSelected: (value, showToast) => this.handleModelTargetSelection(value, showToast),
+            onModelVisibilityChanged: () => {
+                this.markSectionKeyframeDirty("info", this.getInfoKeyframeContextKey());
+                this.runtimeFeatureUiController?.refreshRigidBodies();
+                this.updateSectionKeyframeButtons();
+            },
+            onModelDeleted: (hasRemainingModels) => {
+                if (!hasRemainingModels) {
+                    this.mmdManager.setTimelineTarget("camera");
+                    this.applyCameraSelectionUI();
+                } else {
+                    this.applyActiveModelSelectionUI();
+                }
+                this.refreshModelSelector();
+                this.refreshShaderPanel();
+            },
+        });
+        this.cameraPanelController = new CameraPanelController({
+            mmdManager: this.mmdManager,
+            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
+            normalizeRangeInputValue: (slider, value) => this.normalizeRangeInputValue(slider, value),
+            formatRangeInputValue: (slider, value) => this.formatRangeInputValue(slider, value),
+            isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
+            onCameraEdited: () => this.handleCameraControlEdited(),
         });
         this.setupEventListeners();
         this.setupCallbacks();
@@ -377,11 +393,7 @@ export class UIController {
         });
         this.shaderPanelController = new ShaderPanelController({
             mmdManager: this.mmdManager,
-            getInfoModelSelectState: () => ({
-                innerHTML: this.modelSelect.innerHTML,
-                value: this.modelSelect.value,
-                disabled: this.modelSelect.disabled,
-            }),
+            getInfoModelSelectState: () => this.getInfoModelSelectState(),
             onModelTargetSelected: (value, showToast) => this.handleModelTargetSelection(value, showToast),
             renderCameraPostEffectsPanel: () => this.renderShaderCameraPostEffectsPanel(),
             restoreCameraDofControlsToCameraPanel: () => this.dofPanelController?.restoreControlsToCameraPanel(),
@@ -453,42 +465,6 @@ export class UIController {
             this.mmdManager.seekToBoundary(this.mmdManager.totalFrames)
         );
 
-        // Active model selector
-        this.modelSelect.addEventListener("change", () => {
-            this.handleModelTargetSelection(this.modelSelect.value, true);
-        });
-
-        this.btnModelVisibility.addEventListener("click", () => {
-            if (this.mmdManager.getTimelineTarget() !== "model") return;
-            const visible = this.mmdManager.toggleActiveModelVisibility();
-            this.markSectionKeyframeDirty("info", this.getInfoKeyframeContextKey());
-            this.updateInfoActionButtons();
-            this.runtimeFeatureUiController?.refreshRigidBodies();
-            this.updateSectionKeyframeButtons();
-            this.showToast(visible ? "Model visible" : "Model hidden", "info");
-        });
-
-        this.btnModelDelete.addEventListener("click", () => {
-            if (this.mmdManager.getTimelineTarget() !== "model") return;
-            const ok = window.confirm("Delete selected model?");
-            if (!ok) return;
-
-            const removed = this.mmdManager.removeActiveModel();
-            if (!removed) {
-                this.showToast("Failed to delete model", "error");
-                return;
-            }
-
-            if (this.mmdManager.getLoadedModels().length === 0) {
-                this.mmdManager.setTimelineTarget("camera");
-                this.applyCameraSelectionUI();
-            }
-
-            this.refreshModelSelector();
-            this.refreshShaderPanel();
-            this.showToast("Model deleted", "success");
-        });
-
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
         this.btnInterpolationKeyframe = document.getElementById("btn-interpolation-keyframe") as HTMLButtonElement | null;
         this.btnBoneKeyframe = document.getElementById("btn-bone-keyframe") as HTMLButtonElement | null;
@@ -499,58 +475,6 @@ export class UIController {
         this.btnBoneKeyframe?.addEventListener("click", () => this.registerBoneKeyframeAtCurrentFrame());
         this.btnMorphKeyframe?.addEventListener("click", () => this.registerMorphKeyframesAtCurrentFrame());
         this.btnAccessoryKeyframe?.addEventListener("click", () => this.registerAccessoryTransformKeyframe());
-
-        // Camera controls
-        const btnCamLeft = document.getElementById("btn-cam-left") as HTMLButtonElement | null;
-        const btnCamFront = document.getElementById("btn-cam-front") as HTMLButtonElement | null;
-        const btnCamRight = document.getElementById("btn-cam-right") as HTMLButtonElement | null;
-        const btnCamTop = document.getElementById("btn-cam-top") as HTMLButtonElement | null;
-        const btnCamBack = document.getElementById("btn-cam-back") as HTMLButtonElement | null;
-        const btnCamBottom = document.getElementById("btn-cam-bottom") as HTMLButtonElement | null;
-        const camDistance = document.getElementById("cam-distance") as HTMLInputElement | null;
-        const camDistanceVal = document.getElementById("cam-distance-value");
-        this.camViewLeftBtn = btnCamLeft;
-        this.camViewFrontBtn = btnCamFront;
-        this.camViewRightBtn = btnCamRight;
-        this.camViewTopBtn = btnCamTop;
-        this.camViewBackBtn = btnCamBack;
-        this.camViewBottomBtn = btnCamBottom;
-        this.camDistanceSlider = camDistance;
-        this.camDistanceValueEl = camDistanceVal;
-        const switchCameraView = (view: CameraViewPreset) => {
-            this.mmdManager.setCameraView(view);
-            this.updateCameraViewButtons(view);
-            this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
-            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
-            this.updateSectionKeyframeButtons();
-        };
-        btnCamLeft?.addEventListener("click", () => switchCameraView("left"));
-        btnCamFront?.addEventListener("click", () => switchCameraView("front"));
-        btnCamRight?.addEventListener("click", () => switchCameraView("right"));
-        btnCamTop?.addEventListener("click", () => switchCameraView("top"));
-        btnCamBack?.addEventListener("click", () => switchCameraView("back"));
-        btnCamBottom?.addEventListener("click", () => switchCameraView("bottom"));
-        if (camDistance && camDistanceVal) {
-            camDistance.addEventListener("input", () => {
-                const val = Number(camDistance.value);
-                this.mmdManager.setCameraDistance(val);
-                camDistanceVal.textContent = `${this.mmdManager.getCameraDistance().toFixed(1)}m`;
-                this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
-                this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
-                this.updateSectionKeyframeButtons();
-                this.dofPanelController?.refreshAutoFocusReadout();
-            });
-        }
-        // Initialize camera UI from runtime values
-        this.updateCameraViewButtons("front");
-        if (camDistance && camDistanceVal) {
-            const initialDistance = this.mmdManager.getCameraDistance();
-            const min = Number(camDistance.min);
-            const max = Number(camDistance.max);
-            const clamped = Math.max(min, Math.min(max, initialDistance));
-            camDistance.value = String(Math.round(clamped));
-            camDistanceVal.textContent = `${initialDistance.toFixed(1)}m`;
-        }
 
         // Timeline seek
         this.timeline.onSeek = (frame) => {
@@ -903,13 +827,7 @@ export class UIController {
             }
             this.bottomPanel.syncSelectedMorphFrameSlidersFromRuntime(true);
 
-            if (this.camDistanceSlider && this.camDistanceValueEl) {
-                const distance = sourcePose?.distance ?? this.mmdManager.getCameraDistance();
-                const clamped = Math.max(Number(this.camDistanceSlider.min), Math.min(Number(this.camDistanceSlider.max), distance));
-                this.camDistanceSlider.value = String(Math.round(clamped));
-                this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
-                this.syncRangeNumberInput(this.camDistanceSlider);
-            }
+            this.cameraPanelController?.refresh(false, sourcePose?.distance ?? this.mmdManager.getCameraDistance());
             this.dofPanelController?.refreshAutoFocusReadout();
             this.lensEffectController?.refreshAutoReadout();
 
@@ -1961,72 +1879,28 @@ export class UIController {
     }
 
     private updateInfoActionButtons(): void {
-        const isModelTarget = this.mmdManager.getTimelineTarget() === "model";
-        const hasModel = this.mmdManager.getLoadedModels().length > 0;
-        const enabled = isModelTarget && hasModel;
-
-        this.btnModelVisibility.disabled = !enabled;
-        this.btnModelDelete.disabled = !enabled;
-
-        if (!enabled) {
-            this.btnModelVisibility.textContent = t("button.hide");
-            this.updateSectionKeyframeButtons();
-            return;
-        }
-
-        const visible = this.mmdManager.getActiveModelVisibility();
-        this.btnModelVisibility.textContent = visible ? t("button.hide") : t("button.show");
+        this.modelInfoPanelController?.updateActionButtons();
         this.updateSectionKeyframeButtons();
     }
 
     private refreshModelSelector(): void {
-        const models = this.mmdManager.getLoadedModels();
-        const timelineTarget = this.mmdManager.getTimelineTarget();
-        this.modelSelect.innerHTML = "";
-
-        const cameraOption = document.createElement("option");
-        cameraOption.value = UIController.CAMERA_SELECT_VALUE;
-        cameraOption.textContent = "0: Camera";
-        this.modelSelect.appendChild(cameraOption);
-
-        let selected = false;
-        if (timelineTarget === "camera") {
-            cameraOption.selected = true;
-            selected = true;
-        }
-
-        for (const model of models) {
-            const option = document.createElement("option");
-            option.value = String(model.index);
-            option.textContent = `${model.index + 1}: ${model.name}`;
-            option.title = model.path;
-            if (!selected && timelineTarget === "model" && model.active) {
-                option.selected = true;
-                selected = true;
-            }
-            this.modelSelect.appendChild(option);
-        }
-
-        if (!selected) {
-            cameraOption.selected = true;
-        }
-
-        this.modelSelect.disabled = models.length === 0;
-        this.syncShaderModelSelectorFromInfo();
+        this.modelInfoPanelController?.refresh();
+        this.shaderPanelController?.syncModelSelectorFromInfo();
         this.updateInfoActionButtons();
         this.runtimeFeatureUiController?.refreshRigidBodies();
         this.accessoryPanelController?.refresh();
     }
 
-    private syncShaderModelSelectorFromInfo(): void {
-        if (!this.shaderModelSelect) return;
-        this.shaderModelSelect.innerHTML = this.modelSelect.innerHTML;
-        this.shaderModelSelect.value = this.modelSelect.value;
-        this.shaderModelSelect.disabled = this.modelSelect.disabled;
+    private getInfoModelSelectState(): ModelInfoSelectState {
+        return this.modelInfoPanelController?.getSelectState() ?? {
+            innerHTML: '<option value="">-</option>',
+            value: "",
+            disabled: true,
+        };
     }
 
     private handleModelTargetSelection(value: string, showToast: boolean): void {
-        if (value === UIController.CAMERA_SELECT_VALUE) {
+        if (value === MODEL_INFO_CAMERA_SELECT_VALUE) {
             this.mmdManager.setTimelineTarget("camera");
             this.applyCameraSelectionUI();
             this.refreshModelSelector();
@@ -2224,9 +2098,10 @@ export class UIController {
             return;
         }
 
-        this.syncShaderModelSelectorFromInfo();
-        this.shaderModelSelect.value = UIController.CAMERA_SELECT_VALUE;
-        this.shaderModelSelect.disabled = this.modelSelect.disabled;
+        this.shaderPanelController?.syncModelSelectorFromInfo();
+        const infoModelState = this.getInfoModelSelectState();
+        this.shaderModelSelect.value = MODEL_INFO_CAMERA_SELECT_VALUE;
+        this.shaderModelSelect.disabled = infoModelState.disabled;
         this.shaderPresetSelect.innerHTML = `<option value="postfx">${t("shader.camera.postfx")}</option>`;
         this.shaderPresetSelect.value = "postfx";
         this.shaderPresetSelect.disabled = true;
@@ -2496,39 +2371,17 @@ export class UIController {
         );
     }
 
-    private refreshCameraUiFromRuntime(force = false): void {
-        if (this.camDistanceSlider && this.camDistanceValueEl) {
-            const distance = this.mmdManager.getCameraDistance();
-            if (force || !this.isRangeInputEditing(this.camDistanceSlider)) {
-                const clamped = this.normalizeRangeInputValue(this.camDistanceSlider, distance);
-                this.camDistanceSlider.value = this.formatRangeInputValue(this.camDistanceSlider, clamped);
-                this.camDistanceValueEl.textContent = `${distance.toFixed(1)}m`;
-                this.syncRangeNumberInput(this.camDistanceSlider);
-            }
-        }
-        this.lensEffectController?.refresh();
-        this.fogPanelController?.refresh();
+    private handleCameraControlEdited(): void {
+        this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
+        this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+        this.updateSectionKeyframeButtons();
+        this.dofPanelController?.refreshAutoFocusReadout();
     }
 
-    private updateCameraViewButtons(active: CameraViewPreset): void {
-        const left = active === "left";
-        const front = active === "front";
-        const right = active === "right";
-        const top = active === "top";
-        const back = active === "back";
-        const bottom = active === "bottom";
-        this.camViewLeftBtn?.classList.toggle("camera-view-btn--active", left);
-        this.camViewFrontBtn?.classList.toggle("camera-view-btn--active", front);
-        this.camViewRightBtn?.classList.toggle("camera-view-btn--active", right);
-        this.camViewTopBtn?.classList.toggle("camera-view-btn--active", top);
-        this.camViewBackBtn?.classList.toggle("camera-view-btn--active", back);
-        this.camViewBottomBtn?.classList.toggle("camera-view-btn--active", bottom);
-        this.camViewLeftBtn?.setAttribute("aria-pressed", left ? "true" : "false");
-        this.camViewFrontBtn?.setAttribute("aria-pressed", front ? "true" : "false");
-        this.camViewRightBtn?.setAttribute("aria-pressed", right ? "true" : "false");
-        this.camViewTopBtn?.setAttribute("aria-pressed", top ? "true" : "false");
-        this.camViewBackBtn?.setAttribute("aria-pressed", back ? "true" : "false");
-        this.camViewBottomBtn?.setAttribute("aria-pressed", bottom ? "true" : "false");
+    private refreshCameraUiFromRuntime(force = false): void {
+        this.cameraPanelController?.refresh(force);
+        this.lensEffectController?.refresh();
+        this.fogPanelController?.refresh();
     }
 
     private getSelectedTimelineTrack(): KeyframeTrack | null {
