@@ -1571,12 +1571,12 @@ ${beforeFogAppendBlock}
     }
 
     private shouldApplyCameraMotionToViewport(): boolean {
-        return this.hasActiveCameraAnimation() && this._isPlaying;
+        return this.hasActiveCameraAnimation() && (this._isPlaying || this.externalPlaybackSimulationEnabled);
     }
 
     private shouldSyncViewportCameraToMmdCamera(): boolean {
         if (!this.hasActiveCameraAnimation()) return true;
-        if (this._isPlaying) return false;
+        if (this._isPlaying || this.externalPlaybackSimulationEnabled) return false;
         return this.timelineTarget === "camera";
     }
 

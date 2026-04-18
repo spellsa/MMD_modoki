@@ -355,6 +355,8 @@ export interface ProjectOutputState {
     fps?: number;
     includeAudio?: boolean;
     webmCodec?: "auto" | "vp8" | "vp9";
+    startFrame?: number;
+    endFrame?: number;
 }
 
 export interface ProjectAccessoryState {

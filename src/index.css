@@ -1893,6 +1893,10 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   gap: 4px;
 }
 
+.output-frame-range {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
 .output-dim-sep {
   font-size: 10px;
   color: var(--text-tertiary);

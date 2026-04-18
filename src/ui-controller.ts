@@ -831,6 +831,7 @@ export class UIController {
             this.cameraPanelController?.refresh(false, sourcePose?.distance ?? this.mmdManager.getCameraDistance());
             this.dofPanelController?.refreshAutoFocusReadout();
             this.lensEffectController?.refreshAutoReadout();
+            this.exportUiController?.syncFrameRangeFromTimeline();
 
             if (this.mmdManager.isPlaying && total > 0 && frame >= total) {
                 this.stopAtPlaybackEnd();
@@ -877,6 +878,7 @@ export class UIController {
             this.setStatus("Motion loaded", false);
             this.timeline.setTotalFrames(info.frameCount);
             this.totalFramesEl.textContent = String(info.frameCount);
+            this.exportUiController?.syncFrameRangeFromTimeline();
             this.showToast(`Loaded motion: ${info.name}`, "success");
         };
 
@@ -884,6 +886,7 @@ export class UIController {
             this.setStatus("Camera motion loaded", false);
             this.timeline.setTotalFrames(info.frameCount);
             this.totalFramesEl.textContent = String(info.frameCount);
+            this.exportUiController?.syncFrameRangeFromTimeline();
             this.showToast(`Loaded camera motion: ${info.name}`, "success");
         };
 
@@ -1419,6 +1422,8 @@ export class UIController {
             fps: 30,
             includeAudio: false,
             webmCodec: "vp9",
+            startFrame: 0,
+            endFrame: 0,
         };
     }
 

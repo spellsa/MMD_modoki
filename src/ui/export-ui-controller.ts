@@ -38,6 +38,8 @@ type ExportUiElements = {
     outputFpsSelect: HTMLSelectElement | null;
     outputWebmCodecSelect: HTMLSelectElement | null;
     outputIncludeAudioInput: HTMLInputElement | null;
+    outputStartFrameInput: HTMLInputElement | null;
+    outputEndFrameInput: HTMLInputElement | null;
 };
 
 export type ExportUiControllerDeps = {
@@ -65,6 +67,8 @@ function resolveExportUiElements(): ExportUiElements {
         outputFpsSelect: document.getElementById("output-fps") as HTMLSelectElement | null,
         outputWebmCodecSelect: document.getElementById("output-webm-codec") as HTMLSelectElement | null,
         outputIncludeAudioInput: document.getElementById("output-include-audio") as HTMLInputElement | null,
+        outputStartFrameInput: document.getElementById("output-start-frame") as HTMLInputElement | null,
+        outputEndFrameInput: document.getElementById("output-end-frame") as HTMLInputElement | null,
     };
 }
 
@@ -108,6 +112,8 @@ export class ExportUiController {
     private backgroundExportMonitorIntervalId: number | null = null;
     private outputAspectRatio = 16 / 9;
     private isSyncingOutputSettings = false;
+    private isSyncingFrameRange = false;
+    private isFrameRangeCustomized = false;
 
     constructor(deps: ExportUiControllerDeps) {
         this.elements = resolveExportUiElements();
@@ -152,6 +158,7 @@ export class ExportUiController {
 
     public exportProjectState(): ProjectOutputState {
         const outputSettings = this.getOutputSettings();
+        const frameRange = this.getOutputFrameRange();
         const qualityRaw = Number.parseFloat(this.elements.outputQualitySelect?.value ?? "1");
         const fpsRaw = Number.parseInt(this.elements.outputFpsSelect?.value ?? "30", 10);
 
@@ -165,6 +172,8 @@ export class ExportUiController {
             fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
             includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
+            startFrame: frameRange.startFrame,
+            endFrame: frameRange.endFrame,
         };
     }
 
@@ -221,6 +230,18 @@ export class ExportUiController {
         ) {
             this.elements.outputWebmCodecSelect.value = state.webmCodec;
         }
+        if (
+            this.elements.outputStartFrameInput &&
+            this.elements.outputEndFrameInput &&
+            Number.isFinite(state.startFrame) &&
+            Number.isFinite(state.endFrame)
+        ) {
+            this.isFrameRangeCustomized = true;
+            this.setOutputFrameRangeValues(state.startFrame ?? 0, state.endFrame ?? 0);
+        } else {
+            this.isFrameRangeCustomized = false;
+            this.syncFrameRangeFromTimeline(true);
+        }
 
         const width = this.clampOutputWidth(Number.parseInt(this.elements.outputWidthInput?.value ?? "1920", 10));
         const height = this.clampOutputHeight(Number.parseInt(this.elements.outputHeightInput?.value ?? "1080", 10));
@@ -228,6 +249,14 @@ export class ExportUiController {
             ? Math.max(0.1, width / height)
             : this.resolveSelectedOutputAspectRatio();
         this.onOutputAspectChanged();
+    }
+
+    public syncFrameRangeFromTimeline(force = false): void {
+        if (!this.elements.outputStartFrameInput || !this.elements.outputEndFrameInput) return;
+        if (!force && this.isFrameRangeCustomized) return;
+
+        const maxFrame = this.getMaxOutputFrame();
+        this.setOutputFrameRangeValues(0, maxFrame);
     }
 
     public getSelectedAspectPreset(): string {
@@ -321,8 +350,7 @@ export class ExportUiController {
             return;
         }
 
-        const startFrame = Math.max(0, this.mmdManager.currentFrame);
-        const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
+        const { startFrame, endFrame } = this.getOutputFrameRange();
         const step = 1;
         const outputSettings = this.getOutputSettings();
         const prefix = `mmd_seq_${outputSettings.width}x${outputSettings.height}`;
@@ -378,8 +406,7 @@ export class ExportUiController {
             return;
         }
 
-        const startFrame = Math.max(0, this.mmdManager.currentFrame);
-        const endFrame = Math.max(startFrame, this.mmdManager.totalFrames);
+        const { startFrame, endFrame } = this.getOutputFrameRange();
         const totalTimelineFrames = endFrame - startFrame + 1;
         if (totalTimelineFrames <= 0) {
             logError("webm", "export blocked because no frames are available", {
@@ -506,7 +533,9 @@ export class ExportUiController {
             !this.elements.outputWidthInput ||
             !this.elements.outputHeightInput ||
             !this.elements.outputQualitySelect ||
-            !this.elements.outputFpsSelect
+            !this.elements.outputFpsSelect ||
+            !this.elements.outputStartFrameInput ||
+            !this.elements.outputEndFrameInput
         ) {
             return;
         }
@@ -573,12 +602,75 @@ export class ExportUiController {
                 syncDimensionWithLock("width");
             }
         });
+        const markFrameRangeCustomized = (): void => {
+            if (this.isSyncingFrameRange) return;
+            this.isFrameRangeCustomized = true;
+        };
+        this.elements.outputStartFrameInput.addEventListener("input", markFrameRangeCustomized);
+        this.elements.outputEndFrameInput.addEventListener("input", markFrameRangeCustomized);
+        this.elements.outputStartFrameInput.addEventListener("change", () => {
+            this.sanitizeFrameRangeInputs("start");
+        });
+        this.elements.outputEndFrameInput.addEventListener("change", () => {
+            this.sanitizeFrameRangeInputs("end");
+        });
 
         this.elements.outputQualitySelect.value = this.elements.outputQualitySelect.value || "1";
         this.elements.outputFpsSelect.value = this.elements.outputFpsSelect.value || "30";
         this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
         applyPreset();
+        this.syncFrameRangeFromTimeline(true);
         this.onOutputAspectChanged();
+    }
+
+    private getMaxOutputFrame(): number {
+        const totalFrames = Math.floor(this.mmdManager.totalFrames);
+        return Number.isFinite(totalFrames) ? Math.max(0, totalFrames) : 0;
+    }
+
+    private getOutputFrameRange(): { startFrame: number; endFrame: number } {
+        const maxFrame = this.getMaxOutputFrame();
+        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? "0", 10);
+        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(maxFrame), 10);
+
+        let startFrame = Number.isFinite(startRaw) ? Math.floor(startRaw) : 0;
+        let endFrame = Number.isFinite(endRaw) ? Math.floor(endRaw) : maxFrame;
+
+        startFrame = Math.max(0, Math.min(maxFrame, startFrame));
+        endFrame = Math.max(startFrame, Math.min(maxFrame, endFrame));
+
+        this.setOutputFrameRangeValues(startFrame, endFrame);
+        return { startFrame, endFrame };
+    }
+
+    private sanitizeFrameRangeInputs(source: "start" | "end"): void {
+        const maxFrame = this.getMaxOutputFrame();
+        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? "0", 10);
+        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(maxFrame), 10);
+
+        let startFrame = Number.isFinite(startRaw) ? Math.floor(startRaw) : 0;
+        let endFrame = Number.isFinite(endRaw) ? Math.floor(endRaw) : maxFrame;
+
+        startFrame = Math.max(0, Math.min(maxFrame, startFrame));
+        endFrame = Math.max(0, Math.min(maxFrame, endFrame));
+
+        if (source === "start" && endFrame < startFrame) {
+            endFrame = startFrame;
+        } else if (source === "end" && startFrame > endFrame) {
+            startFrame = endFrame;
+        } else if (endFrame < startFrame) {
+            endFrame = startFrame;
+        }
+
+        this.setOutputFrameRangeValues(startFrame, endFrame);
+    }
+
+    private setOutputFrameRangeValues(startFrame: number, endFrame: number): void {
+        if (!this.elements.outputStartFrameInput || !this.elements.outputEndFrameInput) return;
+        this.isSyncingFrameRange = true;
+        this.elements.outputStartFrameInput.value = String(Math.max(0, Math.floor(startFrame)));
+        this.elements.outputEndFrameInput.value = String(Math.max(Math.floor(startFrame), Math.floor(endFrame)));
+        this.isSyncingFrameRange = false;
     }
 
     private clampOutputWidth(value: number): number {
