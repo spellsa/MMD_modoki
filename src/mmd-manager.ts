@@ -1149,6 +1149,7 @@ ${beforeFogAppendBlock}
     private _totalFrames = 300;
     private _playbackSpeed = 1;
     private manualPlaybackWithoutAudio = false;
+    private externalPlaybackSimulationEnabled = false;
     private manualPlaybackFrameCursor = 0;
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
@@ -2492,8 +2493,19 @@ ${beforeFogAppendBlock}
         return this.physicsAvailable && this.physicsEnabled;
     }
 
+    private isPhysicsSimulationActive(): boolean {
+        return this._isPlaying || this.externalPlaybackSimulationEnabled;
+    }
+
     private syncScenePhysicsSimulationState(): void {
-        this.scene.physicsEnabled = this.getPhysicsEnabled() && this._isPlaying;
+        this.scene.physicsEnabled = this.getPhysicsEnabled() && this.isPhysicsSimulationActive();
+    }
+
+    public setExternalPlaybackSimulationEnabled(enabled: boolean): boolean {
+        this.externalPlaybackSimulationEnabled = Boolean(enabled);
+        this.applyPhysicsStateToAllModels();
+        this.syncScenePhysicsSimulationState();
+        return this.externalPlaybackSimulationEnabled;
     }
 
     public setPhysicsEnabled(enabled: boolean): boolean {
@@ -2982,7 +2994,7 @@ ${beforeFogAppendBlock}
     private applyPhysicsStateToModel(model: MmdModel): void {
         if (model.rigidBodyStates.length === 0) return;
 
-        const shouldSimulatePhysics = this.getPhysicsEnabled() && this._isPlaying;
+        const shouldSimulatePhysics = this.getPhysicsEnabled() && this.isPhysicsSimulationActive();
         model.rigidBodyStates.fill(shouldSimulatePhysics ? 1 : 0);
         if (shouldSimulatePhysics) {
             this.mmdRuntime.initializeMmdModelPhysics(model);
@@ -3007,7 +3019,7 @@ ${beforeFogAppendBlock}
         }
 
         modelInternal.afterPhysics = () => {
-            if (this.getPhysicsEnabled() && this._isPlaying) {
+            if (this.getPhysicsEnabled() && this.isPhysicsSimulationActive()) {
                 modelInternal._physicsModel?.syncBones?.();
             }
             modelInternal._update?.(true);

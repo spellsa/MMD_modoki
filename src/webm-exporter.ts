@@ -424,6 +424,7 @@ export async function runWebmExportJob(
         mmdManager.pause();
         mmdManager.setAutoRenderEnabled(false);
         mmdManager.seekTo(startFrame);
+        mmdManager.setExternalPlaybackSimulationEnabled(true);
 
         const videoBitrate = estimateVideoBitrate(outputWidth, outputHeight, fps);
 
@@ -733,6 +734,7 @@ export async function runWebmExportJob(
             reusableFrameCapture.dispose();
         }
     } finally {
+        mmdManager.setExternalPlaybackSimulationEnabled(false);
         // This exporter runs in a dedicated hidden window. Synchronous Babylon / physics disposal can stall
         // the renderer after the file is already finalized, so let window teardown reclaim these resources.
     }
