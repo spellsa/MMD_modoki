@@ -355,6 +355,7 @@ export interface ProjectOutputState {
     fps?: number;
     includeAudio?: boolean;
     webmCodec?: "auto" | "vp8" | "vp9";
+    usePlaybackRange?: boolean;
     startFrame?: number;
     endFrame?: number;
     frameStartEnabled?: boolean;
@@ -504,6 +505,8 @@ export interface PngSequenceExportProgress {
     captured: number;
     total: number;
     frame: number;
+    startFrame?: number;
+    endFrame?: number;
 }
 
 export interface WebmExportRequest {
@@ -546,6 +549,8 @@ export interface WebmExportProgress {
     encoded: number;
     total: number;
     frame: number;
+    startFrame?: number;
+    endFrame?: number;
     captured?: number;
     message?: string;
     timestampMs: number;

@@ -4599,7 +4599,7 @@ export class UIController {
     }
 
     private getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
-        return this.exportUiController?.getOutputFrameRange() ?? {
+        return this.exportUiController?.getPlaybackFrameRange() ?? {
             startFrame: 0,
             endFrame: Math.max(0, Math.floor(this.mmdManager.totalFrames)),
         };

@@ -250,6 +250,8 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
             captured,
             total,
             frame,
+            startFrame: request.startFrame,
+            endFrame: request.endFrame,
           });
         }
       },
@@ -351,6 +353,8 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
         encoded: encodedFrames,
         total: totalOutputFrames,
         frame: currentFrame,
+        startFrame: request.startFrame,
+        endFrame: request.endFrame,
         captured: capturedFrames,
         message,
         timestampMs: Date.now(),
@@ -404,6 +408,8 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       encoded: 0,
       total: 0,
       frame: 0,
+      startFrame: request.startFrame,
+      endFrame: request.endFrame,
       captured: 0,
       message,
       timestampMs: Date.now(),

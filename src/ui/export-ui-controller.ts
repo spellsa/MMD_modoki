@@ -38,6 +38,7 @@ type ExportUiElements = {
     outputFpsSelect: HTMLSelectElement | null;
     outputWebmCodecSelect: HTMLSelectElement | null;
     outputIncludeAudioInput: HTMLInputElement | null;
+    outputUsePlaybackRangeInput: HTMLInputElement | null;
     outputStartFrameInput: HTMLInputElement | null;
     outputEndFrameInput: HTMLInputElement | null;
     playbackFrameStartToggleInput: HTMLInputElement | null;
@@ -69,6 +70,7 @@ function resolveExportUiElements(): ExportUiElements {
         outputFpsSelect: document.getElementById("output-fps") as HTMLSelectElement | null,
         outputWebmCodecSelect: document.getElementById("output-webm-codec") as HTMLSelectElement | null,
         outputIncludeAudioInput: document.getElementById("output-include-audio") as HTMLInputElement | null,
+        outputUsePlaybackRangeInput: document.getElementById("output-use-playback-range") as HTMLInputElement | null,
         outputStartFrameInput: document.getElementById("output-start-frame") as HTMLInputElement | null,
         outputEndFrameInput: document.getElementById("output-end-frame") as HTMLInputElement | null,
         playbackFrameStartToggleInput: document.getElementById("playback-frame-start-toggle") as HTMLInputElement | null,
@@ -90,6 +92,25 @@ function formatWebmExportPhaseLabel(phase: WebmExportProgress["phase"]): string 
         case "failed": return t("webm.phase.failed");
         default: return phase;
     }
+}
+
+function normalizeExportFrameProgress(frame: number, startFrame?: number, endFrame?: number): {
+    currentFrame: number;
+    progressCount: number;
+    totalCount: number;
+} {
+    const normalizedCurrent = Math.max(0, Math.floor(frame));
+    const normalizedStart = Math.max(0, Math.floor(startFrame ?? 0));
+    const fallbackEnd = Math.max(normalizedCurrent, normalizedStart);
+    const normalizedEnd = Math.max(normalizedStart, Math.floor(endFrame ?? fallbackEnd));
+    const clampedCurrent = Math.min(normalizedEnd, Math.max(normalizedStart, normalizedCurrent));
+    const totalCount = Math.max(1, normalizedEnd - normalizedStart + 1);
+    const progressCount = Math.min(totalCount, Math.max(1, clampedCurrent - normalizedStart + 1));
+    return {
+        currentFrame: clampedCurrent,
+        progressCount,
+        totalCount,
+    };
 }
 
 export class ExportUiController {
@@ -162,7 +183,7 @@ export class ExportUiController {
 
     public exportProjectState(): ProjectOutputState {
         const outputSettings = this.getOutputSettings();
-        const frameRange = this.getOutputFrameRange();
+        const playbackFrameRange = this.getPlaybackFrameRange();
         const qualityRaw = Number.parseFloat(this.elements.outputQualitySelect?.value ?? "1");
         const fpsRaw = Number.parseInt(this.elements.outputFpsSelect?.value ?? "30", 10);
 
@@ -176,8 +197,9 @@ export class ExportUiController {
             fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
             includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
-            startFrame: frameRange.startFrame,
-            endFrame: frameRange.endFrame,
+            usePlaybackRange: Boolean(this.elements.outputUsePlaybackRangeInput?.checked),
+            startFrame: playbackFrameRange.startFrame,
+            endFrame: playbackFrameRange.endFrame,
             frameStartEnabled: Boolean(this.elements.playbackFrameStartToggleInput?.checked),
             frameStopEnabled: Boolean(this.elements.playbackFrameStopToggleInput?.checked),
         };
@@ -228,6 +250,9 @@ export class ExportUiController {
         }
         if (this.elements.outputIncludeAudioInput) {
             this.elements.outputIncludeAudioInput.checked = Boolean(state.includeAudio);
+        }
+        if (this.elements.outputUsePlaybackRangeInput) {
+            this.elements.outputUsePlaybackRangeInput.checked = Boolean(state.usePlaybackRange);
         }
         if (
             this.elements.outputWebmCodecSelect &&
@@ -641,6 +666,19 @@ export class ExportUiController {
     }
 
     public getOutputFrameRange(): { startFrame: number; endFrame: number } {
+        if (!this.elements.outputUsePlaybackRangeInput?.checked) {
+            const maxFrame = this.getMaxOutputFrame();
+            return { startFrame: 0, endFrame: maxFrame };
+        }
+
+        return this.getPlaybackFrameRange();
+    }
+
+    public isUsingPlaybackRangeForOutput(): boolean {
+        return Boolean(this.elements.outputUsePlaybackRangeInput?.checked);
+    }
+
+    public getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
         const maxFrame = this.getMaxOutputFrame();
         const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? "0", 10);
         const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(maxFrame), 10);
@@ -789,13 +827,21 @@ export class ExportUiController {
         if (this.isWebmExportActive) {
             const progress = this.latestWebmExportProgress;
             if (progress) {
-                const total = Math.max(0, Math.floor(progress.total));
-                const encoded = Math.max(0, Math.floor(progress.encoded));
-                const frame = Math.max(0, Math.floor(progress.frame));
+                const { currentFrame, progressCount, totalCount } = normalizeExportFrameProgress(
+                    progress.frame,
+                    progress.startFrame,
+                    progress.endFrame,
+                );
                 const phaseLabel = formatWebmExportPhaseLabel(progress.phase);
-                if (total > 0) {
-                    const ratio = Math.min(100, Math.max(0, (encoded / total) * 100));
-                    busyText.textContent = t("busy.webmProgress", { phase: phaseLabel, encoded, total, ratio: ratio.toFixed(1), frame });
+                if (totalCount > 0) {
+                    const ratio = Math.min(100, Math.max(0, (progressCount / totalCount) * 100));
+                    busyText.textContent = t("busy.webmProgress", {
+                        phase: phaseLabel,
+                        encoded: progressCount,
+                        total: totalCount,
+                        ratio: ratio.toFixed(1),
+                        frame: currentFrame,
+                    });
                     return;
                 }
                 busyText.textContent = t("busy.webmExportRunning");
@@ -812,12 +858,20 @@ export class ExportUiController {
         if (this.isPngSequenceExportActive) {
             const progress = this.latestPngSequenceExportProgress;
             if (progress) {
-                const total = Math.max(0, Math.floor(progress.total));
-                const saved = Math.max(0, Math.floor(progress.saved));
-                const frame = Math.max(0, Math.floor(progress.frame));
-                if (total > 0) {
-                    const ratio = Math.min(100, Math.max(0, (saved / total) * 100));
-                    busyText.textContent = t("busy.webmProgress", { phase: "PNG", encoded: saved, total, ratio: ratio.toFixed(1), frame });
+                const { currentFrame, progressCount, totalCount } = normalizeExportFrameProgress(
+                    progress.frame,
+                    progress.startFrame,
+                    progress.endFrame,
+                );
+                if (totalCount > 0) {
+                    const ratio = Math.min(100, Math.max(0, (progressCount / totalCount) * 100));
+                    busyText.textContent = t("busy.webmProgress", {
+                        phase: "PNG",
+                        encoded: progressCount,
+                        total: totalCount,
+                        ratio: ratio.toFixed(1),
+                        frame: currentFrame,
+                    });
                     return;
                 }
             }

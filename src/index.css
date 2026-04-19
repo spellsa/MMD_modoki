@@ -594,8 +594,8 @@ body.shader-resizing #shader-resizer::before {
 #timeline-edit-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 0 0;
+  gap: 3px;
+  padding: 6px 0 2px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
@@ -621,7 +621,7 @@ body.shader-resizing #shader-resizer::before {
   margin-top: -2px;
   margin-bottom: -1px;
   position: relative;
-  min-height: 20px;
+  min-height: 24px;
 }
 
 .timeline-waveform-spacer {
@@ -640,7 +640,7 @@ body.shader-resizing #shader-resizer::before {
   grid-row: 1;
   display: block;
   width: 100%;
-  height: 20px;
+  height: 24px;
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-left: none;
@@ -664,8 +664,8 @@ body.shader-resizing #shader-resizer::before {
   justify-content: flex-start;
   gap: 3px;
   min-width: 0;
-  margin-left: 3px;
-  padding: 0 2px 0 0;
+  margin-left: 0;
+  padding: 0 2px 0 6px;
   border-radius: 4px;
   background: transparent;
   opacity: 0.72;
@@ -822,7 +822,7 @@ body.shader-resizing #shader-resizer::before {
 }
 
 #timeline-action-toolbar {
-  padding: 7px 8px 8px;
+  padding: 6px 8px;
   border-top: 1px solid var(--border-color);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0));
 }
@@ -1716,10 +1716,10 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 #timeline-panel #playback-controls {
-  padding: 7px 8px 9px;
-  margin-bottom: 7px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
   align-items: stretch;
-  gap: 5px;
+  gap: 6px;
 }
 
 #timeline-panel .playback-compact-row {
@@ -1788,8 +1788,8 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 #timeline-panel .transport-btn.play-btn {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
 }
 
 #timeline-panel .volume-control {
@@ -3520,7 +3520,7 @@ body.bottom-panel-resizing {
 
   #timeline-edit-toolbar {
     gap: 4px;
-    padding: 6px 0 1px;
+    padding: 8px 0 2px;
   }
 
   :root {
@@ -3529,7 +3529,7 @@ body.bottom-panel-resizing {
 
   .timeline-waveform-spacer,
   #timeline-waveform-canvas {
-    height: 20px;
+    height: 24px;
   }
 
   .timeline-edit-btn {
@@ -3538,7 +3538,7 @@ body.bottom-panel-resizing {
   }
 
   #timeline-panel #playback-controls {
-    padding: 10px 10px 11px;
+    padding: 8px 10px;
     margin-bottom: 8px;
     gap: 8px;
   }
@@ -3559,8 +3559,8 @@ body.bottom-panel-resizing {
   }
 
   #timeline-panel .transport-btn.play-btn {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
   }
 
   #timeline-panel .frame-label {

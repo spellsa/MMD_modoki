@@ -162,7 +162,7 @@
                     <path d="M5 3l12 7-12 7V3z" />
                   </svg>
                 </button>
-                <button id="btn-pause" class="transport-btn" title="一時停止 (P / Space)" data-i18n-title="playback.pause.title" style="display:none;">
+                <button id="btn-pause" class="transport-btn play-btn" title="一時停止 (P / Space)" data-i18n-title="playback.pause.title" style="display:none;">
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                     <rect x="4" y="3" width="4" height="14" />
                     <rect x="12" y="3" width="4" height="14" />
@@ -294,6 +294,12 @@
               <div id="timeline-tracks-scroll">
                 <canvas id="timeline-canvas"></canvas>
               </div>
+            </div>
+          </div>
+          <div id="timeline-action-toolbar">
+            <div class="timeline-edit-buttons">
+              <button id="btn-kf-add" class="timeline-edit-btn" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
+              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
             </div>
           </div>
         </section>
@@ -896,6 +902,13 @@
                 <span data-i18n="output.webm.label">WebM動画</span>
               </button>
             </div>
+            <div class="output-row output-row-toggle">
+              <span class="output-label" data-i18n="label.range">範囲</span>
+              <label class="output-toggle-label">
+                <input id="output-use-playback-range" type="checkbox">
+                <span data-i18n="output.usePlaybackRange">再生範囲を使う</span>
+              </label>
+            </div>
             <div class="output-row">
               <span class="output-label" data-i18n="label.aspect">比率</span>
               <select id="output-aspect" class="output-select">
@@ -945,12 +958,6 @@
                   <span data-i18n="label.audioIncluded">音声あり</span>
                 </label>
               </div>
-            </div>
-          </div>
-          <div id="timeline-action-toolbar">
-            <div class="timeline-edit-buttons">
-              <button id="btn-kf-add" class="timeline-edit-btn" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
-              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
             </div>
           </div>
         </section>
