@@ -168,32 +168,103 @@
                     <rect x="12" y="3" width="4" height="14" />
                   </svg>
                 </button>
-                <button id="btn-stop" class="transport-btn" title="停止" data-i18n-title="playback.stop.title">
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <rect x="3" y="3" width="10" height="10" />
-                  </svg>
-                </button>
                 <button id="btn-skip-end" class="transport-btn" title="末尾へ (End)" data-i18n-title="playback.skipEnd.title">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M10 2h2v12h-2V2zm-2 6L1 13V3l7 5z" />
                   </svg>
                 </button>
               </div>
-              <div class="playback-step-buttons">
-                <button id="btn-kf-nudge-left" class="transport-btn playback-step-btn" type="button" title="選択キーを1フレーム前へ (Alt+←)" data-i18n-title="playback.nudgeLeft.title">
-                  <span aria-hidden="true">&larr;</span>
-                </button>
-                <button id="btn-kf-nudge-right" class="transport-btn playback-step-btn" type="button" title="選択キーを1フレーム後へ (Alt+→)" data-i18n-title="playback.nudgeRight.title">
-                  <span aria-hidden="true">&rarr;</span>
-                </button>
+            </div>
+            <div class="playback-range-row">
+              <div class="playback-range-group">
+                <div class="playback-frame-range">
+                  <input
+                    id="output-start-frame"
+                    class="output-number playback-range-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="0"
+                    data-i18n-placeholder="output.range.start"
+                    placeholder="スタート"
+                  >
+                  <span class="playback-range-sep">～</span>
+                  <input
+                    id="output-end-frame"
+                    class="output-number playback-range-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="0"
+                    data-i18n-placeholder="output.range.end"
+                    placeholder="ストップ"
+                  >
+                </div>
               </div>
-              <div class="frame-display">
-                <span class="frame-label" data-i18n="label.frame">Frame</span>
-                <span id="current-frame" class="frame-number">0</span>
-                <span class="frame-separator">/</span>
-                <span id="total-frames" class="frame-number">0</span>
+            </div>
+            <div class="playback-toggle-row">
+              <label class="playback-toggle-label" title="再生を指定スタートフレームから始める" data-i18n-title="playback.frameStart.title">
+                <input id="playback-frame-start-toggle" type="checkbox">
+                <span data-i18n="playback.frameStart.label">フレ・スタート</span>
+              </label>
+              <label class="playback-toggle-label playback-toggle-label--right" title="停止時に現在フレームへ留まる" data-i18n-title="playback.frameStop.title">
+                <input id="playback-frame-stop-toggle" type="checkbox">
+                <span data-i18n="playback.frameStop.label">フレ・ストップ</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section id="timeline-section" class="left-panel-section left-panel-section--timeline">
+          <div class="panel-header">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+              <path d="M1 1h12v2H1V1zm0 4h12v2H1V5zm0 4h12v2H1V9z" />
+            </svg>
+            <span data-i18n="section.timeline">タイムライン</span>
+          </div>
+          <div id="timeline-edit-toolbar">
+            <div class="timeline-nav-row">
+              <div class="timeline-nav-main timeline-nav-main--mmd">
+                <div class="timeline-nav-group timeline-nav-group--left">
+                  <button id="btn-frame-range-start" class="timeline-nav-btn timeline-nav-btn--mmd" type="button" title="開始フレームへ">
+                    <span aria-hidden="true">|&lt;</span>
+                  </button>
+                  <button id="btn-kf-nudge-left" class="timeline-nav-btn timeline-nav-btn--mmd" type="button" title="前のキーへ">
+                    <span aria-hidden="true">.&lt;</span>
+                  </button>
+                  <button id="btn-frame-step-left" class="timeline-nav-btn timeline-nav-btn--mmd" type="button" title="1フレーム戻る">
+                    <span aria-hidden="true">&lt;</span>
+                  </button>
+                </div>
+                <div class="timeline-nav-frame-box">
+                  <input
+                    id="current-frame"
+                    class="timeline-nav-frame-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value="0"
+                    inputmode="numeric"
+                    aria-label="Current frame"
+                  >
+                  <span id="total-frames" hidden>0</span>
+                </div>
+                <div class="timeline-nav-group timeline-nav-group--right">
+                  <button id="btn-frame-step-right" class="timeline-nav-btn timeline-nav-btn--mmd" type="button" title="1フレーム進む">
+                    <span aria-hidden="true">&gt;</span>
+                  </button>
+                  <button id="btn-kf-nudge-right" class="timeline-nav-btn timeline-nav-btn--mmd" type="button" title="次のキーへ">
+                    <span aria-hidden="true">&gt;.</span>
+                  </button>
+                  <button id="btn-frame-range-end" class="timeline-nav-btn timeline-nav-btn--mmd" type="button" title="終了フレームへ">
+                    <span aria-hidden="true">&gt;|</span>
+                  </button>
+                </div>
               </div>
-              <div class="volume-control">
+            </div>
+            <div class="timeline-waveform-row">
+              <div class="timeline-waveform-spacer" aria-hidden="true"></div>
+              <div class="volume-control timeline-waveform-volume">
                 <button id="btn-mute" class="volume-mute-btn" title="ミュート切替" data-i18n-title="playback.mute.title">
                   <svg id="icon-volume-on" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
                     <path d="M2 5h3l4-3v10l-4-3H2V5zm8 .5a3 3 0 0 1 0 3" stroke="currentColor" stroke-width="1.2"
@@ -207,25 +278,10 @@
                   </svg>
                 </button>
                 <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" value="100" step="1">
-                <span id="volume-value" class="volume-value">100%</span>
+                <span id="volume-value" class="volume-value" hidden>100%</span>
               </div>
+              <canvas id="timeline-waveform-canvas" aria-label="Waveform preview"></canvas>
             </div>
-          </div>
-        </section>
-
-        <section id="timeline-section" class="left-panel-section left-panel-section--timeline">
-          <div class="panel-header">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-              <path d="M1 1h12v2H1V1zm0 4h12v2H1V5zm0 4h12v2H1V9z" />
-            </svg>
-            <span data-i18n="section.timeline">タイムライン</span>
-          </div>
-          <div id="timeline-edit-toolbar">
-            <div class="timeline-edit-buttons">
-              <button id="btn-kf-add" class="timeline-edit-btn" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
-              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
-            </div>
-            <span id="timeline-selection-label" class="timeline-selection-label" data-i18n="empty.trackNotSelected">トラック未選択</span>
           </div>
           <div id="timeline-container">
             <!-- Fixed left: frame labels -->
@@ -890,31 +946,11 @@
                 </label>
               </div>
             </div>
-            <div class="output-row output-row-dimensions">
-              <span class="output-label" data-i18n="label.frameRange">範囲</span>
-              <div class="output-dimensions output-frame-range">
-                <input
-                  id="output-start-frame"
-                  class="output-number"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value="0"
-                  data-i18n-placeholder="output.range.start"
-                  placeholder="開始"
-                >
-                <span class="output-dim-sep">-</span>
-                <input
-                  id="output-end-frame"
-                  class="output-number"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value="0"
-                  data-i18n-placeholder="output.range.end"
-                  placeholder="終了"
-                >
-              </div>
+          </div>
+          <div id="timeline-action-toolbar">
+            <div class="timeline-edit-buttons">
+              <button id="btn-kf-add" class="timeline-edit-btn" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
+              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
             </div>
           </div>
         </section>

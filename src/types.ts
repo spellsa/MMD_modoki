@@ -357,6 +357,8 @@ export interface ProjectOutputState {
     webmCodec?: "auto" | "vp8" | "vp9";
     startFrame?: number;
     endFrame?: number;
+    frameStartEnabled?: boolean;
+    frameStopEnabled?: boolean;
 }
 
 export interface ProjectAccessoryState {

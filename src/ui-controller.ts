@@ -148,6 +148,7 @@ export class UIController {
     private static readonly DEBUG_KEYFRAME_FLOW = false;
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 90;
+    private static readonly TIMELINE_WAVEFORM_FPS = 30;
     private mmdManager: MmdManager;
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
@@ -162,10 +163,10 @@ export class UIController {
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
-    private btnStop: HTMLElement;
+    private btnStop: HTMLElement | null;
     private btnSkipStart: HTMLElement;
     private btnSkipEnd: HTMLElement;
-    private currentFrameEl: HTMLElement;
+    private currentFrameEl: HTMLInputElement;
     private totalFramesEl: HTMLElement;
     private statusText: HTMLElement;
     private statusDot: HTMLElement;
@@ -174,7 +175,11 @@ export class UIController {
     private btnKeyframeDelete: HTMLButtonElement;
     private btnKeyframeNudgeLeft: HTMLButtonElement;
     private btnKeyframeNudgeRight: HTMLButtonElement;
-    private timelineSelectionLabel: HTMLElement;
+    private btnFrameStepLeft: HTMLButtonElement;
+    private btnFrameStepRight: HTMLButtonElement;
+    private btnFrameRangeStart: HTMLButtonElement;
+    private btnFrameRangeEnd: HTMLButtonElement;
+    private timelineSelectionLabel: HTMLElement | null;
     private interpolationTrackNameLabel: HTMLElement;
     private interpolationFrameLabel: HTMLElement;
     private interpolationTypeSelect: HTMLSelectElement;
@@ -206,6 +211,7 @@ export class UIController {
     private readonly pendingBonePoseSnapshots = new Map<string, { frame: number; snapshot: SelectedBonePoseSnapshot }>();
     private readonly interpolationChannelBindings = new Map<string, InterpolationChannelBinding>();
     private interpolationDragState: InterpolationDragState | null = null;
+    private timelineWaveformRequestId = 0;
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
     private bloomToneMapController: BloomToneMapController | null = null;
@@ -258,10 +264,10 @@ export class UIController {
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
         this.btnPlay = document.getElementById("btn-play")!;
         this.btnPause = document.getElementById("btn-pause")!;
-        this.btnStop = document.getElementById("btn-stop")!;
+        this.btnStop = document.getElementById("btn-stop");
         this.btnSkipStart = document.getElementById("btn-skip-start")!;
         this.btnSkipEnd = document.getElementById("btn-skip-end")!;
-        this.currentFrameEl = document.getElementById("current-frame")!;
+        this.currentFrameEl = document.getElementById("current-frame") as HTMLInputElement;
         this.totalFramesEl = document.getElementById("total-frames")!;
         this.statusText = document.getElementById("status-text")!;
         this.statusDot = document.querySelector(".status-dot")!;
@@ -270,7 +276,11 @@ export class UIController {
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
         this.btnKeyframeNudgeRight = document.getElementById("btn-kf-nudge-right") as HTMLButtonElement;
-        this.timelineSelectionLabel = document.getElementById("timeline-selection-label")!;
+        this.btnFrameStepLeft = document.getElementById("btn-frame-step-left") as HTMLButtonElement;
+        this.btnFrameStepRight = document.getElementById("btn-frame-step-right") as HTMLButtonElement;
+        this.btnFrameRangeStart = document.getElementById("btn-frame-range-start") as HTMLButtonElement;
+        this.btnFrameRangeEnd = document.getElementById("btn-frame-range-end") as HTMLButtonElement;
+        this.timelineSelectionLabel = document.getElementById("timeline-selection-label");
         this.interpolationTrackNameLabel = document.getElementById("interp-track-name")!;
         this.interpolationFrameLabel = document.getElementById("interp-frame")!;
         this.interpolationTypeSelect = document.getElementById("interp-type") as HTMLSelectElement;
@@ -416,6 +426,7 @@ export class UIController {
         this.installRangeNumberInputs();
         void this.shaderPanelController.reloadBundledWgslShaderFiles();
         this.updateTimelineEditState();
+        this.timeline.setWaveformPeaks(null);
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
         this.applyLocalizedUiState();
         document.addEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
@@ -460,11 +471,34 @@ export class UIController {
         // Playback
         this.btnPlay.addEventListener("click", () => this.play());
         this.btnPause.addEventListener("click", () => this.pause());
-        this.btnStop.addEventListener("click", () => this.stop());
-        this.btnSkipStart.addEventListener("click", () => this.mmdManager.seekToBoundary(0));
-        this.btnSkipEnd.addEventListener("click", () =>
-            this.mmdManager.seekToBoundary(this.mmdManager.totalFrames)
-        );
+        this.btnStop?.addEventListener("click", () => this.stop());
+        this.btnSkipStart.addEventListener("click", () => {
+            const { startFrame } = this.getPlaybackFrameRange();
+            this.mmdManager.seekToBoundary(startFrame);
+        });
+        this.btnSkipEnd.addEventListener("click", () => {
+            const { endFrame } = this.getPlaybackFrameRange();
+            this.mmdManager.seekToBoundary(endFrame);
+        });
+        this.currentFrameEl.addEventListener("focus", () => {
+            this.currentFrameEl.select();
+        });
+        this.currentFrameEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                this.commitCurrentFrameInput();
+                this.currentFrameEl.blur();
+                return;
+            }
+            if (event.key === "Escape") {
+                event.preventDefault();
+                this.currentFrameEl.value = String(this.mmdManager.currentFrame);
+                this.currentFrameEl.blur();
+            }
+        });
+        this.currentFrameEl.addEventListener("blur", () => {
+            this.commitCurrentFrameInput();
+        });
 
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
         this.btnInterpolationKeyframe = document.getElementById("btn-interpolation-keyframe") as HTMLButtonElement | null;
@@ -529,6 +563,18 @@ export class UIController {
         this.btnKeyframeDelete.addEventListener("click", () => this.deleteSelectedKeyframe());
         this.btnKeyframeNudgeLeft.addEventListener("click", () => this.nudgeSelectedKeyframe(-1));
         this.btnKeyframeNudgeRight.addEventListener("click", () => this.nudgeSelectedKeyframe(1));
+        this.btnFrameStepLeft.addEventListener("click", () => {
+            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame - 1);
+        });
+        this.btnFrameStepRight.addEventListener("click", () => {
+            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame + 1);
+        });
+        this.btnFrameRangeStart.addEventListener("click", () => {
+            this.mmdManager.seekToBoundary(0);
+        });
+        this.btnFrameRangeEnd.addEventListener("click", () => {
+            this.mmdManager.seekToBoundary(this.mmdManager.totalFrames);
+        });
 
         // Lighting controls
         const elLightDirectionX = document.getElementById("light-direction-x") as HTMLInputElement;
@@ -790,7 +836,9 @@ export class UIController {
     private setupCallbacks(): void {
         // Frame update
         this.mmdManager.onFrameUpdate = (frame, total) => {
-            this.currentFrameEl.textContent = String(frame);
+            if (document.activeElement !== this.currentFrameEl) {
+                this.currentFrameEl.value = String(frame);
+            }
             this.totalFramesEl.textContent = String(total);
             this.timeline.setTotalFrames(total);
             this.timeline.setCurrentFrame(frame);
@@ -833,8 +881,9 @@ export class UIController {
             this.lensEffectController?.refreshAutoReadout();
             this.exportUiController?.syncFrameRangeFromTimeline();
 
-            if (this.mmdManager.isPlaying && total > 0 && frame >= total) {
-                this.stopAtPlaybackEnd();
+            const { endFrame } = this.getPlaybackFrameRange();
+            if (this.mmdManager.isPlaying && this.isPlaybackFrameStopEnabled() && frame >= endFrame) {
+                this.stopAtPlaybackEnd(endFrame);
             }
         };
 
@@ -910,6 +959,7 @@ export class UIController {
         this.mmdManager.onAudioLoaded = (name: string) => {
             this.setStatus("Audio loaded", false);
             this.showToast(`Loaded audio: ${name}`, "success");
+            void this.refreshTimelineWaveformFromAudio();
         };
 
         // Error
@@ -937,6 +987,96 @@ export class UIController {
         this.mmdManager.onMaterialShaderStateChanged = () => {
             this.refreshShaderPanel();
         };
+    }
+
+    private async refreshTimelineWaveformFromAudio(): Promise<void> {
+        const requestId = ++this.timelineWaveformRequestId;
+        const audioPath = this.mmdManager.getAudioSourcePath();
+        if (!audioPath) {
+            this.timeline.setWaveformPeaks(null);
+            return;
+        }
+
+        try {
+            const arrayBuffer = await this.readRendererBinaryFileAsArrayBuffer(audioPath);
+            if (!arrayBuffer) {
+                if (requestId === this.timelineWaveformRequestId) {
+                    this.timeline.setWaveformPeaks(null);
+                }
+                return;
+            }
+
+            const audioContext = new AudioContext();
+            let audioBuffer: AudioBuffer;
+            try {
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            } finally {
+                try {
+                    await audioContext.close();
+                } catch {
+                    // ignore close failures
+                }
+            }
+
+            if (requestId !== this.timelineWaveformRequestId) {
+                return;
+            }
+
+            const peaks = this.buildTimelineWaveformPeaks(audioBuffer, UIController.TIMELINE_WAVEFORM_FPS);
+            this.timeline.setWaveformPeaks(peaks);
+        } catch (err: unknown) {
+            if (requestId !== this.timelineWaveformRequestId) {
+                return;
+            }
+            console.warn("Failed to refresh timeline waveform:", err);
+            this.timeline.setWaveformPeaks(null);
+        }
+    }
+
+    private async readRendererBinaryFileAsArrayBuffer(filePath: string): Promise<ArrayBuffer | null> {
+        const buffer = await window.electronAPI.readBinaryFile(filePath);
+        if (!buffer) {
+            return null;
+        }
+
+        const bytes = buffer instanceof Uint8Array
+            ? buffer
+            : new Uint8Array(buffer as unknown as ArrayBuffer);
+        const copy = new Uint8Array(bytes.byteLength);
+        copy.set(bytes);
+        return copy.buffer;
+    }
+
+    private buildTimelineWaveformPeaks(audioBuffer: AudioBuffer, fps: number): Float32Array {
+        const normalizedFps = Math.max(1, Math.floor(fps));
+        const sampleRate = Math.max(1, audioBuffer.sampleRate);
+        const frameCount = Math.max(1, Math.ceil(audioBuffer.duration * normalizedFps));
+        const peaks = new Float32Array(frameCount);
+        const channelData = Array.from({ length: audioBuffer.numberOfChannels }, (_, index) =>
+            audioBuffer.getChannelData(index)
+        );
+
+        for (let frame = 0; frame < frameCount; frame += 1) {
+            const startSample = Math.min(audioBuffer.length, Math.floor(frame * sampleRate / normalizedFps));
+            const nextStartSample = Math.min(audioBuffer.length, Math.floor((frame + 1) * sampleRate / normalizedFps));
+            const endSample = Math.max(startSample + 1, nextStartSample);
+
+            let peak = 0;
+            for (let channelIndex = 0; channelIndex < channelData.length; channelIndex += 1) {
+                const samples = channelData[channelIndex];
+                const sampleLimit = Math.min(endSample, samples.length);
+                for (let sampleIndex = startSample; sampleIndex < sampleLimit; sampleIndex += 1) {
+                    const amplitude = Math.abs(samples[sampleIndex] ?? 0);
+                    if (amplitude > peak) {
+                        peak = amplitude;
+                    }
+                }
+            }
+
+            peaks[frame] = peak;
+        }
+
+        return peaks;
     }
 
     private hasBackgroundExportActive(): boolean {
@@ -1159,10 +1299,10 @@ export class UIController {
                     }
                     break;
                 case "Home":
-                    this.mmdManager.seekToBoundary(0);
+                    this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().startFrame);
                     break;
                 case "End":
-                    this.mmdManager.seekToBoundary(this.mmdManager.totalFrames);
+                    this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().endFrame);
                     break;
                 case "ArrowLeft":
                     this.mmdManager.seekToBoundary(this.mmdManager.currentFrame - (e.shiftKey ? 10 : 1));
@@ -1222,6 +1362,24 @@ export class UIController {
         if (target instanceof HTMLSelectElement) return true;
         if (target instanceof HTMLTextAreaElement) return true;
         return target.isContentEditable || target.closest("[contenteditable='true']") !== null;
+    }
+
+    private commitCurrentFrameInput(): void {
+        const rawValue = this.currentFrameEl.value.trim();
+        if (rawValue.length === 0) {
+            this.currentFrameEl.value = String(this.mmdManager.currentFrame);
+            return;
+        }
+
+        const parsedFrame = Number.parseInt(rawValue, 10);
+        if (!Number.isFinite(parsedFrame)) {
+            this.currentFrameEl.value = String(this.mmdManager.currentFrame);
+            return;
+        }
+
+        const nextFrame = Math.max(0, parsedFrame);
+        this.currentFrameEl.value = String(nextFrame);
+        this.mmdManager.seekToBoundary(nextFrame);
     }
 
     private cycleActiveModelByShortcut(direction: 1 | -1): void {
@@ -1424,6 +1582,8 @@ export class UIController {
             webmCodec: "vp9",
             startFrame: 0,
             endFrame: 0,
+            frameStartEnabled: false,
+            frameStopEnabled: false,
         };
     }
 
@@ -2507,7 +2667,9 @@ export class UIController {
         const currentFrame = this.mmdManager.currentFrame;
 
         if (!track) {
-            this.timelineSelectionLabel.textContent = "No track selected";
+            if (this.timelineSelectionLabel) {
+                this.timelineSelectionLabel.textContent = "No track selected";
+            }
             this.interpolationTrackNameLabel.textContent = "-";
             this.interpolationFrameLabel.textContent = "-";
             this.resetInterpolationTypeSelect();
@@ -2523,7 +2685,9 @@ export class UIController {
 
         const frameLabel = selectedFrame !== null ? ` @${selectedFrame}` : "";
         const trackTypeLabel = this.getTrackTypeLabel(track);
-        this.timelineSelectionLabel.textContent = `[${trackTypeLabel}] ${track.name}${frameLabel}`;
+        if (this.timelineSelectionLabel) {
+            this.timelineSelectionLabel.textContent = `[${trackTypeLabel}] ${track.name}${frameLabel}`;
+        }
         const interpolationFrame = selectedFrame ?? currentFrame;
         this.interpolationTrackNameLabel.textContent = `${trackTypeLabel}: ${track.name}`;
         this.interpolationFrameLabel.textContent = String(interpolationFrame);
@@ -4434,7 +4598,27 @@ export class UIController {
         this.showToast(`Key moved: ${fromFrame} -> ${toFrame}`, "success");
     }
 
+    private getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
+        return this.exportUiController?.getOutputFrameRange() ?? {
+            startFrame: 0,
+            endFrame: Math.max(0, Math.floor(this.mmdManager.totalFrames)),
+        };
+    }
+
+    private isPlaybackFrameStartEnabled(): boolean {
+        return this.exportUiController?.isPlaybackFrameStartEnabled() ?? false;
+    }
+
+    private isPlaybackFrameStopEnabled(): boolean {
+        return this.exportUiController?.isPlaybackFrameStopEnabled() ?? false;
+    }
+
     private play(updateStatus = true): void {
+        const { startFrame } = this.getPlaybackFrameRange();
+        if (this.isPlaybackFrameStartEnabled()) {
+            this.mmdManager.pause();
+            this.mmdManager.seekTo(startFrame);
+        }
         this.mmdManager.play();
         this.btnPlay.style.display = "none";
         this.btnPause.style.display = "flex";
@@ -4449,15 +4633,18 @@ export class UIController {
     }
 
     private stop(): void {
-        this.mmdManager.stop();
+        this.mmdManager.pause();
+        if (!this.isPlaybackFrameStopEnabled()) {
+            this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().startFrame);
+        }
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
     }
 
-    private stopAtPlaybackEnd(): void {
+    private stopAtPlaybackEnd(endFrame: number): void {
         this.mmdManager.pause();
-        this.mmdManager.seekTo(this.mmdManager.totalFrames);
+        this.mmdManager.seekToBoundary(endFrame);
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);

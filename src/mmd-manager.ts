@@ -3898,6 +3898,10 @@ ${beforeFogAppendBlock}
         return this._currentFrame;
     }
 
+    getAudioSourcePath(): string | null {
+        return this.audioSourcePath;
+    }
+
     get totalFrames(): number {
         return this._totalFrames;
     }

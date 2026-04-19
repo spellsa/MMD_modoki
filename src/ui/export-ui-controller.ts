@@ -40,6 +40,8 @@ type ExportUiElements = {
     outputIncludeAudioInput: HTMLInputElement | null;
     outputStartFrameInput: HTMLInputElement | null;
     outputEndFrameInput: HTMLInputElement | null;
+    playbackFrameStartToggleInput: HTMLInputElement | null;
+    playbackFrameStopToggleInput: HTMLInputElement | null;
 };
 
 export type ExportUiControllerDeps = {
@@ -69,6 +71,8 @@ function resolveExportUiElements(): ExportUiElements {
         outputIncludeAudioInput: document.getElementById("output-include-audio") as HTMLInputElement | null,
         outputStartFrameInput: document.getElementById("output-start-frame") as HTMLInputElement | null,
         outputEndFrameInput: document.getElementById("output-end-frame") as HTMLInputElement | null,
+        playbackFrameStartToggleInput: document.getElementById("playback-frame-start-toggle") as HTMLInputElement | null,
+        playbackFrameStopToggleInput: document.getElementById("playback-frame-stop-toggle") as HTMLInputElement | null,
     };
 }
 
@@ -174,6 +178,8 @@ export class ExportUiController {
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
             startFrame: frameRange.startFrame,
             endFrame: frameRange.endFrame,
+            frameStartEnabled: Boolean(this.elements.playbackFrameStartToggleInput?.checked),
+            frameStopEnabled: Boolean(this.elements.playbackFrameStopToggleInput?.checked),
         };
     }
 
@@ -241,6 +247,12 @@ export class ExportUiController {
         } else {
             this.isFrameRangeCustomized = false;
             this.syncFrameRangeFromTimeline(true);
+        }
+        if (this.elements.playbackFrameStartToggleInput) {
+            this.elements.playbackFrameStartToggleInput.checked = Boolean(state.frameStartEnabled);
+        }
+        if (this.elements.playbackFrameStopToggleInput) {
+            this.elements.playbackFrameStopToggleInput.checked = Boolean(state.frameStopEnabled);
         }
 
         const width = this.clampOutputWidth(Number.parseInt(this.elements.outputWidthInput?.value ?? "1920", 10));
@@ -628,7 +640,7 @@ export class ExportUiController {
         return Number.isFinite(totalFrames) ? Math.max(0, totalFrames) : 0;
     }
 
-    private getOutputFrameRange(): { startFrame: number; endFrame: number } {
+    public getOutputFrameRange(): { startFrame: number; endFrame: number } {
         const maxFrame = this.getMaxOutputFrame();
         const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? "0", 10);
         const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(maxFrame), 10);
@@ -641,6 +653,14 @@ export class ExportUiController {
 
         this.setOutputFrameRangeValues(startFrame, endFrame);
         return { startFrame, endFrame };
+    }
+
+    public isPlaybackFrameStartEnabled(): boolean {
+        return Boolean(this.elements.playbackFrameStartToggleInput?.checked);
+    }
+
+    public isPlaybackFrameStopEnabled(): boolean {
+        return Boolean(this.elements.playbackFrameStopToggleInput?.checked);
     }
 
     private sanitizeFrameRangeInputs(source: "start" | "end"): void {

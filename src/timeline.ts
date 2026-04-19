@@ -22,6 +22,7 @@ const RULER_H = 20;
 const ROW_H = 18;
 const PX_PER_F = 6;
 const PLAYHEAD_X = 24;
+const WAVEFORM_H = 22;
 const CURRENT_FRAME_COLOR = "#ff4fa3";
 const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
@@ -93,6 +94,8 @@ export class Timeline {
     private overlayCtx: CanvasRenderingContext2D;
     private labelCanvas: HTMLCanvasElement;
     private labelCtx: CanvasRenderingContext2D;
+    private waveformCanvas: HTMLCanvasElement | null;
+    private waveformCtx: CanvasRenderingContext2D | null;
     private labelsEl: HTMLElement;
     private trackScrollEl: HTMLElement;
 
@@ -103,6 +106,7 @@ export class Timeline {
     private viewOffset = 0;   // currentFrame * PX_PER_F
     private selectedTrackIndex = -1;
     private selectedFrame: number | null = null;
+    private waveformPeaks: Float32Array | null = null;
 
     // Drag-seek
     private isDragging = false;
@@ -113,6 +117,7 @@ export class Timeline {
     private staticRaf: number | null = null;
     private overlayRaf: number | null = null;
     private labelRaf: number | null = null;
+    private waveformRaf: number | null = null;
 
     // Scroll sync guard
     private syncingScroll = false;
@@ -132,11 +137,13 @@ export class Timeline {
         this.overlayCanvas = document.getElementById("timeline-overlay-canvas") as HTMLCanvasElement;
         this.trackScrollEl = document.getElementById(trackScrollId) as HTMLElement;
         this.labelCanvas = document.getElementById(labelCanvasId) as HTMLCanvasElement;
+        this.waveformCanvas = document.getElementById("timeline-waveform-canvas") as HTMLCanvasElement | null;
         this.labelsEl = document.getElementById(labelsElId) as HTMLElement;
 
         this.staticCtx = this.staticCanvas.getContext("2d")!;
         this.overlayCtx = this.overlayCanvas.getContext("2d")!;
         this.labelCtx = this.labelCanvas.getContext("2d")!;
+        this.waveformCtx = this.waveformCanvas?.getContext("2d") ?? null;
 
         this.setupEvents();
         this.resize();
@@ -184,6 +191,7 @@ export class Timeline {
                 this.onSeek?.(frame);
                 this.scheduleOverlay();
                 this.scheduleStatic();
+                this.scheduleWaveform();
             }
         });
         window.addEventListener("mouseup", () => { this.isDragging = false; });
@@ -217,6 +225,7 @@ export class Timeline {
         this.onSeek?.(frame);
         this.scheduleOverlay();
         this.scheduleStatic();
+        this.scheduleWaveform();
     }
 
     // ── Public API ───────────────────────────────────────────────────
@@ -228,6 +237,7 @@ export class Timeline {
         this.viewOffset = normalized * PX_PER_F;
         this.scheduleOverlay(); // ruler + playhead
         this.scheduleStatic();  // keyframe dots scroll with playhead
+        this.scheduleWaveform();
     }
 
     setTotalFrames(total: number): void {
@@ -235,6 +245,12 @@ export class Timeline {
         if (this.totalFrames === normalized) return;
         this.totalFrames = normalized;
         this.scheduleOverlay();
+        this.scheduleWaveform();
+    }
+
+    setWaveformPeaks(peaks: Float32Array | null): void {
+        this.waveformPeaks = peaks;
+        this.scheduleWaveform();
     }
 
     setKeyframeTracks(tracks: KeyframeTrack[]): void {
@@ -328,9 +344,18 @@ export class Timeline {
         this.labelCanvas.style.height = `${totalH}px`;
         this.labelCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+        if (this.waveformCanvas && this.waveformCtx) {
+            this.waveformCanvas.width = tw * dpr;
+            this.waveformCanvas.height = WAVEFORM_H * dpr;
+            this.waveformCanvas.style.width = `${tw}px`;
+            this.waveformCanvas.style.height = `${WAVEFORM_H}px`;
+            this.waveformCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
         this.scheduleStatic();
         this.scheduleOverlay();
         this.scheduleLabel();
+        this.scheduleWaveform();
     }
 
     // ── RAF schedulers ────────────────────────────────────────────────
@@ -354,6 +379,13 @@ export class Timeline {
         this.labelRaf = requestAnimationFrame(() => {
             this.labelRaf = null;
             this.drawLabel();
+        });
+    }
+    private scheduleWaveform(): void {
+        if (this.waveformRaf !== null || !this.waveformCanvas || !this.waveformCtx) return;
+        this.waveformRaf = requestAnimationFrame(() => {
+            this.waveformRaf = null;
+            this.drawWaveform();
         });
     }
 
@@ -497,6 +529,67 @@ export class Timeline {
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillText(String(this.currentFrame), px, 3);
+    }
+
+    private drawWaveform(): void {
+        if (!this.waveformCanvas || !this.waveformCtx) return;
+
+        const ctx = this.waveformCtx;
+        const w = this.waveformCanvas.width / (window.devicePixelRatio || 1);
+        const h = this.waveformCanvas.height / (window.devicePixelRatio || 1);
+        const midY = h / 2;
+
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = "#0c0c14";
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.fillStyle = "rgba(255,255,255,0.05)";
+        ctx.fillRect(0, h - 1, w, 1);
+
+        const visStart = Math.max(0, Math.floor((this.viewOffset - PLAYHEAD_X) / PX_PER_F));
+        const visEnd = Math.min(this.totalFrames, visStart + Math.ceil(w / PX_PER_F) + 2);
+
+        for (let f = Math.ceil(visStart / 10) * 10; f <= visEnd; f += 10) {
+            const sx = f * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            ctx.fillStyle = "rgba(255,255,255,0.035)";
+            ctx.fillRect(sx, 0, 1, h);
+        }
+
+        ctx.fillStyle = "rgba(255,255,255,0.12)";
+        ctx.fillRect(0, Math.round(midY), w, 1);
+
+        if (this.waveformPeaks && this.waveformPeaks.length > 0) {
+            ctx.strokeStyle = "rgba(59,130,246,0.95)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            const peakEnd = Math.min(visEnd, this.waveformPeaks.length - 1);
+            for (let frame = Math.max(0, visStart); frame <= peakEnd; frame += 1) {
+                const peak = Math.max(0, Math.min(1, this.waveformPeaks[frame] ?? 0));
+                const amp = Math.max(1, peak * (midY - 2));
+                const sx = Math.round(frame * PX_PER_F - this.viewOffset + PLAYHEAD_X) + 0.5;
+                ctx.moveTo(sx, midY - amp);
+                ctx.lineTo(sx, midY + amp);
+            }
+            ctx.stroke();
+        } else {
+            ctx.font = `500 10px ${UI_FONT_FAMILY}`;
+            ctx.fillStyle = "rgba(255,255,255,0.24)";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText("Waveform", 8, midY);
+        }
+
+        ctx.save();
+        ctx.shadowColor = CURRENT_FRAME_GLOW;
+        ctx.shadowBlur = 6;
+        ctx.strokeStyle = CURRENT_FRAME_GLOW;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(PLAYHEAD_X, 0);
+        ctx.lineTo(PLAYHEAD_X, h);
+        ctx.stroke();
+        ctx.restore();
     }
 
     // ── Label column ─────────────────────────────────────────────────
