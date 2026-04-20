@@ -267,3 +267,9 @@
 - [glb-loading-investigation-2026-04-01.md](/d:/DevTools/Projects/MMD_modoki/docs/glb-loading-investigation-2026-04-01.md)
 - [generic-object-panel-design.md](/d:/DevTools/Projects/MMD_modoki/docs/generic-object-panel-design.md)
 - [sqlite-wasm-experiment-note.md](/d:/DevTools/Projects/MMD_modoki/docs/sqlite-wasm-experiment-note.md)
+
+## 2026-04-20 メモ
+
+- [ ] タイムライン対象項目の拡張方針整理（照明 / scene object / 非 Babylon-mmd 項目）
+
+- [ ] 材質非表示を選べるようにする
