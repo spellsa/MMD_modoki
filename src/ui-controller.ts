@@ -12,6 +12,7 @@ import type {
     MotionInfo,
     ProjectLightingState,
     ProjectOutputState,
+    TimelineRotationOverlay,
     UiLocale,
     TrackCategory,
     TimelineInterpolationPreview,
@@ -519,6 +520,7 @@ export class UIController {
         this.timeline.onSelectionChanged = (track) => {
             this.syncBoneVisualizerSelection(track);
             this.syncBottomBoneSelectionFromTimeline(track);
+            this.refreshSelectedTrackRotationOverlay();
             this.updateTimelineEditState();
             this.updateSectionKeyframeButtons();
         };
@@ -952,6 +954,7 @@ export class UIController {
             }
             this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
             this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
+            this.refreshSelectedTrackRotationOverlay();
             this.updateTimelineEditState();
         };
 
@@ -2659,6 +2662,113 @@ export class UIController {
 
         this.selectedBoneTrackCategory = null;
         this.mmdManager.setBoneVisualizerSelectedBone(null);
+    }
+
+    private refreshSelectedTrackRotationOverlay(): void {
+        const track = this.getSelectedTimelineTrack();
+        if (!this.isRotationOverlayTrack(track)) {
+            this.timeline.setSelectedTrackRotationOverlay(null);
+            return;
+        }
+
+        this.timeline.setSelectedTrackRotationOverlay(this.buildSelectedTrackRotationOverlay(track));
+    }
+
+    private isRotationOverlayTrack(track: KeyframeTrack | null): track is KeyframeTrack {
+        if (!track) return false;
+        return track.category === "root"
+            || track.category === "semi-standard"
+            || track.category === "bone"
+            || track.category === "camera";
+    }
+
+    private buildSelectedTrackRotationOverlay(track: KeyframeTrack): TimelineRotationOverlay | null {
+        if (track.frames.length === 0) return null;
+
+        const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
+
+        if (track.category === "camera") {
+            const cameraTrack = managerInternal.cameraSourceAnimation?.cameraTrack;
+            if (!cameraTrack) return null;
+
+            const firstFrame = Math.max(0, Math.floor(track.frames[0] ?? 0));
+            const lastFrame = Math.max(firstFrame, Math.floor(track.frames[track.frames.length - 1] ?? firstFrame));
+            const sampleCount = lastFrame - firstFrame + 1;
+            if (sampleCount <= 0) return null;
+
+            const frames = new Uint32Array(sampleCount);
+            const x = new Float32Array(sampleCount);
+            const y = new Float32Array(sampleCount);
+            const z = new Float32Array(sampleCount);
+            let maxAbsValue = 0;
+
+            for (let i = 0; i < sampleCount; i += 1) {
+                const frame = firstFrame + i;
+                const pose = this.sampleCameraPoseFromTrack(cameraTrack, frame);
+                const rotation = pose?.rotation ?? { x: 0, y: 0, z: 0 };
+
+                frames[i] = frame;
+                x[i] = rotation.x;
+                y[i] = rotation.y;
+                z[i] = rotation.z;
+                maxAbsValue = Math.max(maxAbsValue, Math.abs(rotation.x), Math.abs(rotation.y), Math.abs(rotation.z));
+            }
+
+            return {
+                trackName: track.name,
+                trackCategory: track.category,
+                frames,
+                x,
+                y,
+                z,
+                maxAbsValue,
+            };
+        }
+
+        const currentModel = managerInternal.currentModel;
+        if (!currentModel) return null;
+
+        const modelAnimation = managerInternal.modelSourceAnimationsByModel?.get(currentModel as object);
+        if (!modelAnimation) return null;
+
+        const movableTrack = modelAnimation.movableBoneTracks.find((runtimeTrack) => runtimeTrack.name === track.name) ?? null;
+        const boneTrack = modelAnimation.boneTracks.find((runtimeTrack) => runtimeTrack.name === track.name) ?? null;
+        if (!movableTrack && !boneTrack) return null;
+
+        const firstFrame = Math.max(0, Math.floor(track.frames[0] ?? 0));
+        const lastFrame = Math.max(firstFrame, Math.floor(track.frames[track.frames.length - 1] ?? firstFrame));
+        const sampleCount = lastFrame - firstFrame + 1;
+        if (sampleCount <= 0) return null;
+
+        const frames = new Uint32Array(sampleCount);
+        const x = new Float32Array(sampleCount);
+        const y = new Float32Array(sampleCount);
+        const z = new Float32Array(sampleCount);
+        let maxAbsValue = 0;
+
+        for (let i = 0; i < sampleCount; i += 1) {
+            const frame = firstFrame + i;
+            const pose = movableTrack
+                ? this.sampleMovableBonePoseFromTrack(movableTrack, frame)
+                : this.sampleBonePoseFromTrack(boneTrack, frame);
+            const rotation = pose?.rotation ?? { x: 0, y: 0, z: 0 };
+
+            frames[i] = frame;
+            x[i] = rotation.x;
+            y[i] = rotation.y;
+            z[i] = rotation.z;
+            maxAbsValue = Math.max(maxAbsValue, Math.abs(rotation.x), Math.abs(rotation.y), Math.abs(rotation.z));
+        }
+
+        return {
+            trackName: track.name,
+            trackCategory: track.category,
+            frames,
+            x,
+            y,
+            z,
+            maxAbsValue,
+        };
     }
 
     private updateTimelineEditState(): void {

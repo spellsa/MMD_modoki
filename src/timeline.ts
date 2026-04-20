@@ -15,7 +15,7 @@
  *   - Label canvas (#timeline-label-canvas): redraws on setKeyframeTracks / resize
  *   - Bidirectional scroll sync: labelsEl ↔ trackScrollEl
  */
-import type { KeyframeTrack, TrackCategory } from "./types";
+import type { KeyframeTrack, TimelineRotationOverlay, TrackCategory } from "./types";
 
 // ── Layout ─────────────────────────────────────────────────────────
 const RULER_H = 20;
@@ -24,6 +24,10 @@ const SELECTED_ROW_H = 36;
 const PX_PER_F = 6;
 const PLAYHEAD_X = 24;
 const WAVEFORM_H = 22;
+const ROTATION_OVERLAY_PAD_Y = 4;
+const ROTATION_OVERLAY_MIN_RANGE = 15;
+const TRACK_ROW_BG = "#1a1c22";
+const TRACK_ROW_BG_SELECTED = "rgba(255,255,255,0.07)";
 const CURRENT_FRAME_COLOR = "#ff4fa3";
 const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
@@ -87,6 +91,12 @@ function drawDiamondMarker(
     ctx.restore();
 }
 
+function resolveCssVarColor(name: string, fallback: string): string {
+    const rootStyle = getComputedStyle(document.documentElement);
+    const resolved = rootStyle.getPropertyValue(name).trim();
+    return resolved || fallback;
+}
+
 export class Timeline {
     // DOM
     private staticCanvas: HTMLCanvasElement;
@@ -108,6 +118,7 @@ export class Timeline {
     private selectedTrackIndex = -1;
     private selectedFrame: number | null = null;
     private waveformPeaks: Float32Array | null = null;
+    private rotationOverlay: TimelineRotationOverlay | null = null;
 
     // Drag-seek
     private isDragging = false;
@@ -259,6 +270,11 @@ export class Timeline {
         this.tracks = tracks;
         this.reconcileSelection(prevSelectedTrack);
         this.resize();
+    }
+
+    setSelectedTrackRotationOverlay(overlay: TimelineRotationOverlay | null): void {
+        this.rotationOverlay = overlay;
+        this.scheduleStatic();
     }
 
     getSelectedTrack(): KeyframeTrack | null {
@@ -421,22 +437,21 @@ export class Timeline {
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
 
-            ctx.fillStyle = col.bg;
+            ctx.fillStyle = TRACK_ROW_BG;
             ctx.fillRect(0, ry, w, rowH);
 
             if (isSelectedRow) {
-                ctx.fillStyle = "rgba(99,102,241,0.18)";
+                ctx.fillStyle = TRACK_ROW_BG_SELECTED;
                 ctx.fillRect(0, ry, w, rowH);
-            }
-
-            if (col.bar) {
-                ctx.fillStyle = col.bar;
-                ctx.fillRect(0, ry, 2, rowH);
             }
 
             // Row separator
             ctx.fillStyle = "rgba(255,255,255,0.04)";
             ctx.fillRect(0, ry + rowH - 1, w, 1);
+
+            if (isSelectedRow) {
+                this.drawSelectedTrackRotationOverlay(ctx, track, ry, rowH, visStart, visEnd, w);
+            }
 
             // Keyframe markers (binary search)
             const frames = track.frames;
@@ -747,6 +762,110 @@ export class Timeline {
         }
 
         this.emitSelectionChanged();
+    }
+
+    private drawSelectedTrackRotationOverlay(
+        ctx: CanvasRenderingContext2D,
+        track: KeyframeTrack,
+        rowTop: number,
+        rowHeight: number,
+        visStart: number,
+        visEnd: number,
+        width: number,
+    ): void {
+        const overlay = this.rotationOverlay;
+        if (!overlay) return;
+        if (overlay.trackName !== track.name || overlay.trackCategory !== track.category) return;
+        if (overlay.frames.length === 0) return;
+
+        const firstVisibleIndex = lowerBound(overlay.frames, visStart);
+        const lastVisibleIndex = upperBound(overlay.frames, visEnd);
+        if (firstVisibleIndex >= overlay.frames.length || lastVisibleIndex < 0) return;
+
+        const startIndex = Math.max(0, firstVisibleIndex - 1);
+        const endIndex = Math.min(overlay.frames.length - 1, Math.max(lastVisibleIndex + 1, startIndex));
+        const innerHeight = Math.max(1, rowHeight - ROTATION_OVERLAY_PAD_Y * 2);
+        const range = Math.max(ROTATION_OVERLAY_MIN_RANGE, overlay.maxAbsValue, 1);
+        const zeroY = rowTop + ROTATION_OVERLAY_PAD_Y + innerHeight / 2;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, rowTop, width, rowHeight);
+        ctx.clip();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.08)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, zeroY + 0.5);
+        ctx.lineTo(width, zeroY + 0.5);
+        ctx.stroke();
+
+        this.drawRotationAxisPolyline(
+            ctx,
+            overlay.frames,
+            overlay.x,
+            startIndex,
+            endIndex,
+            rowTop,
+            innerHeight,
+            range,
+            resolveCssVarColor("--axis-x-color", "#ff2b2b"),
+        );
+        this.drawRotationAxisPolyline(
+            ctx,
+            overlay.frames,
+            overlay.y,
+            startIndex,
+            endIndex,
+            rowTop,
+            innerHeight,
+            range,
+            resolveCssVarColor("--axis-y-color", "#00d83a"),
+        );
+        this.drawRotationAxisPolyline(
+            ctx,
+            overlay.frames,
+            overlay.z,
+            startIndex,
+            endIndex,
+            rowTop,
+            innerHeight,
+            range,
+            resolveCssVarColor("--axis-z-color", "#1b4dff"),
+        );
+
+        ctx.restore();
+    }
+
+    private drawRotationAxisPolyline(
+        ctx: CanvasRenderingContext2D,
+        frames: Uint32Array,
+        values: Float32Array,
+        startIndex: number,
+        endIndex: number,
+        rowTop: number,
+        innerHeight: number,
+        range: number,
+        strokeStyle: string,
+    ): void {
+        if (startIndex > endIndex) return;
+
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+
+        for (let i = startIndex; i <= endIndex; i += 1) {
+            const x = frames[i] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const normalized = (range - values[i]) / (range * 2);
+            const y = rowTop + ROTATION_OVERLAY_PAD_Y + normalized * innerHeight;
+            if (i === startIndex) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+
+        ctx.stroke();
+        ctx.restore();
     }
 
     private getRowHeight(index: number): number {

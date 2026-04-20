@@ -162,6 +162,16 @@ export interface KeyframeTrack {
     frames: Uint32Array;
 }
 
+export interface TimelineRotationOverlay {
+    trackName: string;
+    trackCategory: TrackCategory;
+    frames: Uint32Array;
+    x: Float32Array;
+    y: Float32Array;
+    z: Float32Array;
+    maxAbsValue: number;
+}
+
 export interface InterpolationCurve {
     x1: number;
     x2: number;
