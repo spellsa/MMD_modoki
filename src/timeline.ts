@@ -20,6 +20,7 @@ import type { KeyframeTrack, TrackCategory } from "./types";
 // ── Layout ─────────────────────────────────────────────────────────
 const RULER_H = 20;
 const ROW_H = 18;
+const SELECTED_ROW_H = 36;
 const PX_PER_F = 6;
 const PLAYHEAD_X = 24;
 const WAVEFORM_H = 22;
@@ -302,8 +303,7 @@ export class Timeline {
         const changed = this.selectedTrackIndex !== targetIndex || this.selectedFrame !== null;
         this.selectedTrackIndex = targetIndex;
         this.selectedFrame = null;
-        this.scheduleStatic();
-        this.scheduleLabel();
+        this.resize();
         if (changed) {
             this.emitSelectionChanged();
         }
@@ -317,7 +317,7 @@ export class Timeline {
         // Keep the track area scroll range aligned with the label column.
         // The label canvas includes the ruler row at the top, so the track canvas
         // gets a matching spacer at the bottom to avoid scroll drift near the end.
-        const trackRowsH = Math.max(1, this.tracks.length) * ROW_H;
+        const trackRowsH = this.getTrackRowsHeight();
         const trackContentH = trackRowsH + RULER_H;
         const tw = this.trackScrollEl.clientWidth || 400;
 
@@ -411,38 +411,39 @@ export class Timeline {
         // Vertical culling: only draw rows visible in the scroll viewport
         const scrollTop = this.trackScrollEl.scrollTop;
         const viewH = this.trackScrollEl.clientHeight || h;
-        const firstRow = Math.max(0, Math.floor(scrollTop / ROW_H) - 1);
-        const lastRow = Math.min(this.tracks.length - 1, Math.ceil((scrollTop + viewH) / ROW_H) + 1);
+        const firstRow = this.getRowIndexAtOffset(scrollTop, true);
+        const lastRow = this.getRowIndexAtOffset(scrollTop + viewH, true);
 
         for (let i = firstRow; i <= lastRow; i++) {
             const track = this.tracks[i];
-            const ry = i * ROW_H;   // NO ruler offset – ruler is outside scroll
+            const ry = this.getRowTop(i);   // NO ruler offset – ruler is outside scroll
+            const rowH = this.getRowHeight(i);
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
 
             ctx.fillStyle = col.bg;
-            ctx.fillRect(0, ry, w, ROW_H);
+            ctx.fillRect(0, ry, w, rowH);
 
             if (isSelectedRow) {
                 ctx.fillStyle = "rgba(99,102,241,0.18)";
-                ctx.fillRect(0, ry, w, ROW_H);
+                ctx.fillRect(0, ry, w, rowH);
             }
 
             if (col.bar) {
                 ctx.fillStyle = col.bar;
-                ctx.fillRect(0, ry, 2, ROW_H);
+                ctx.fillRect(0, ry, 2, rowH);
             }
 
             // Row separator
             ctx.fillStyle = "rgba(255,255,255,0.04)";
-            ctx.fillRect(0, ry + ROW_H - 1, w, 1);
+            ctx.fillRect(0, ry + rowH - 1, w, 1);
 
             // Keyframe markers (binary search)
             const frames = track.frames;
             const lo = lowerBound(frames, visStart);
             const hi = upperBound(frames, visEnd);
             const markerSize = track.category === "root" ? 9 : track.category === "camera" ? 8 : 6;
-            const midY = ry + ROW_H / 2;
+            const midY = ry + rowH / 2;
 
             for (let k = lo; k <= hi && k < frames.length; k++) {
                 const sx = frames[k] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
@@ -619,26 +620,27 @@ export class Timeline {
 
         for (let i = 0; i < this.tracks.length; i++) {
             const track = this.tracks[i];
-            const y = RULER_H + i * ROW_H;
+            const rowH = this.getRowHeight(i);
+            const y = RULER_H + this.getRowTop(i);
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
 
             ctx.fillStyle = col.bg;
-            ctx.fillRect(0, y, w, ROW_H);
+            ctx.fillRect(0, y, w, rowH);
 
             if (isSelectedRow) {
                 ctx.fillStyle = "rgba(99,102,241,0.18)";
-                ctx.fillRect(0, y, w, ROW_H);
+                ctx.fillRect(0, y, w, rowH);
             }
 
             if (col.bar) {
                 ctx.fillStyle = col.bar;
-                ctx.fillRect(0, y, 2, ROW_H);
+                ctx.fillRect(0, y, 2, rowH);
             }
 
             ctx.save();
             ctx.beginPath();
-            ctx.rect(4, y, w - 6, ROW_H);
+            ctx.rect(4, y, w - 6, rowH);
             ctx.clip();
             ctx.font = (track.category === "root" || track.category === "camera")
                 ? `600 10px ${UI_FONT_FAMILY}`
@@ -646,11 +648,11 @@ export class Timeline {
             ctx.fillStyle = col.text;
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            ctx.fillText(track.name, 6, y + ROW_H / 2);
+            ctx.fillText(track.name, 6, y + rowH / 2);
             ctx.restore();
 
             ctx.fillStyle = "rgba(255,255,255,0.04)";
-            ctx.fillRect(0, y + ROW_H - 1, w, 1);
+            ctx.fillRect(0, y + rowH - 1, w, 1);
         }
     }
 
@@ -658,27 +660,35 @@ export class Timeline {
         const rect = this.staticCanvas.getBoundingClientRect();
         const localX = e.clientX - rect.left;
         const localY = e.clientY - rect.top;
-        const row = Math.floor(localY / ROW_H);
+        const row = this.getRowIndexAtOffset(localY);
         if (row < 0 || row >= this.tracks.length) return;
 
+        const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         const pickedFrame = this.pickFrameOnTrackFromX(this.tracks[row], localX);
         this.selectedFrame = pickedFrame;
-        this.scheduleStatic();
-        this.scheduleLabel();
+        if (selectionChanged) this.resize();
+        else {
+            this.scheduleStatic();
+            this.scheduleLabel();
+        }
         this.emitSelectionChanged();
     }
 
     private selectTrackFromLabelEvent(e: MouseEvent): void {
         const rect = this.labelCanvas.getBoundingClientRect();
         const localY = e.clientY - rect.top;
-        const row = Math.floor((localY - RULER_H) / ROW_H);
+        const row = this.getRowIndexAtOffset(localY - RULER_H);
         if (row < 0 || row >= this.tracks.length) return;
 
+        const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         this.selectedFrame = null;
-        this.scheduleStatic();
-        this.scheduleLabel();
+        if (selectionChanged) this.resize();
+        else {
+            this.scheduleStatic();
+            this.scheduleLabel();
+        }
         this.emitSelectionChanged();
     }
 
@@ -737,6 +747,43 @@ export class Timeline {
         }
 
         this.emitSelectionChanged();
+    }
+
+    private getRowHeight(index: number): number {
+        return index >= 0 && index === this.selectedTrackIndex ? SELECTED_ROW_H : ROW_H;
+    }
+
+    private getTrackRowsHeight(): number {
+        if (this.tracks.length === 0) return ROW_H;
+
+        let total = 0;
+        for (let i = 0; i < this.tracks.length; i += 1) {
+            total += this.getRowHeight(i);
+        }
+        return total;
+    }
+
+    private getRowTop(index: number): number {
+        if (index <= 0) return 0;
+
+        let top = 0;
+        for (let i = 0; i < index; i += 1) {
+            top += this.getRowHeight(i);
+        }
+        return top;
+    }
+
+    private getRowIndexAtOffset(offsetY: number, clampToRange = false): number {
+        if (this.tracks.length === 0) return -1;
+        if (offsetY < 0) return clampToRange ? 0 : -1;
+
+        let top = 0;
+        for (let i = 0; i < this.tracks.length; i += 1) {
+            const rowH = this.getRowHeight(i);
+            if (offsetY < top + rowH) return i;
+            top += rowH;
+        }
+        return clampToRange ? this.tracks.length - 1 : -1;
     }
 
     private emitSelectionChanged(): void {
