@@ -114,6 +114,7 @@ export class ShaderPanelController {
         }
 
         const isAvailable = this.mmdManager.isWgslMaterialShaderAssignmentAvailable();
+        const previousSelectedShaderValue = elements.presetSelect.value;
         const presets = this.mmdManager.getWgslMaterialShaderPresets()
             .filter((preset) => !HIDDEN_SHADER_PRESET_IDS.has(preset.id));
         const models = this.mmdManager.getWgslModelShaderStates();
@@ -210,7 +211,10 @@ export class ShaderPanelController {
                 return paths.size === 1 ? Array.from(paths)[0] : null;
             })();
 
-        let selectedShaderValue: string = selectedPresetId;
+        let selectedShaderValue = previousSelectedShaderValue;
+        if (!selectedShaderValue || !Array.from(elements.presetSelect.options).some((option) => option.value === selectedShaderValue)) {
+            selectedShaderValue = selectedPresetId;
+        }
         if (!Array.from(elements.presetSelect.options).some((option) => option.value === selectedShaderValue)) {
             selectedShaderValue = presets[0]?.id ?? "wgsl-mmd-standard";
         }
@@ -225,6 +229,9 @@ export class ShaderPanelController {
             if (selectedMaterial?.key === material.key) {
                 item.classList.add("active");
             }
+            if (!material.visible) {
+                item.classList.add("shader-material-item--hidden");
+            }
             item.title = material.key;
             item.addEventListener("click", () => {
                 const current = this.selectedMaterialKeys.get(selectedModel.modelIndex);
@@ -235,6 +242,31 @@ export class ShaderPanelController {
                 }
                 this.refresh();
             });
+
+            const visibilityToggle = document.createElement("input");
+            visibilityToggle.className = "shader-material-toggle";
+            visibilityToggle.type = "checkbox";
+            visibilityToggle.checked = material.visible;
+            visibilityToggle.title = material.visible ? t("button.hide") : t("button.show");
+            visibilityToggle.setAttribute("aria-label", `${material.name} ${material.visible ? t("button.hide") : t("button.show")}`);
+            visibilityToggle.addEventListener("click", (event) => {
+                event.stopPropagation();
+            });
+            visibilityToggle.addEventListener("change", (event) => {
+                event.stopPropagation();
+                const visible = this.mmdManager.setModelMaterialVisibility(
+                    selectedModel.modelIndex,
+                    material.key,
+                    visibilityToggle.checked,
+                );
+                if (!visible) {
+                    visibilityToggle.checked = !visibilityToggle.checked;
+                    this.showToast("Material visibility update failed", "error");
+                    return;
+                }
+                this.refresh();
+            });
+            item.appendChild(visibilityToggle);
 
             const nameEl = document.createElement("span");
             nameEl.className = "shader-material-name";

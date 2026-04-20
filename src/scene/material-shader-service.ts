@@ -283,6 +283,9 @@ function collectLuminousMaterials(host: any): Set<object> {
     const luminousMaterials = new Set<object>();
     for (const entry of host.sceneModels ?? []) {
         for (const materialEntry of entry.materials ?? []) {
+            if (host.isMaterialVisible?.(materialEntry.material) === false) {
+                continue;
+            }
             if (getWgslMaterialShaderPresetForMaterial(host, materialEntry.material) !== "wgsl-autoluminous") {
                 continue;
             }
@@ -925,6 +928,7 @@ export function getWgslModelShaderStates(host: any): Array<{
         name: string;
         presetId: WgslMaterialShaderPresetId;
         externalWgslPath: string | null;
+        visible: boolean;
     }>;
 }> {
     return host.sceneModels.map((entry: any, modelIndex: number) => ({
@@ -937,6 +941,7 @@ export function getWgslModelShaderStates(host: any): Array<{
             name: material.name,
             presetId: getWgslMaterialShaderPresetForMaterial(host, material.material),
             externalWgslPath: getExternalWgslToonShaderPathForMaterial(host, material.material),
+            visible: host.isMaterialVisible?.(material.material) !== false,
         })),
     }));
 }

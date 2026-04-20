@@ -98,6 +98,8 @@
     "shader.note.noMaterial":  "このモデルには割り当て可能な材質がありません",
     "shader.apply.selected":  "選択へ割り当て",
     "shader.apply.all":  "全材質へ割り当て",
+    "shader.visibility.selected.hide":  "選択を非表示",
+    "shader.visibility.selected.show":  "選択を表示",
     "shader.reset.selected":  "選択を標準化",
     "shader.reset.all":  "全材質を標準化",
     "shader.note.selectedMaterial":  "選択材質: {name}",

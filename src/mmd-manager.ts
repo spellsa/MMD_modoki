@@ -488,6 +488,7 @@ export interface WgslMaterialShaderInfo {
     name: string;
     presetId: WgslMaterialShaderPresetId;
     externalWgslPath: string | null;
+    visible: boolean;
 }
 
 export interface WgslModelShaderInfo {
@@ -1326,9 +1327,11 @@ ${beforeFogAppendBlock}
     private readonly farDofFocusSharpRadiusMm = 1000;
     private modelEdgeWidthValue = 0;
     private readonly modelEdgeMaterialDefaults = new WeakMap<object, { enabled: boolean; width: number; alpha: number; colorR: number; colorG: number; colorB: number }>();
+    private readonly materialBaseAlphaByMaterial = new WeakMap<object, number>();
     private readonly materialShaderDefaultsByMaterial = new WeakMap<object, MaterialShaderDefaults>();
     private readonly materialShaderPresetByMaterial = new WeakMap<object, WgslMaterialShaderPresetId>();
     private readonly externalWgslToonShaderPathByMaterial = new WeakMap<object, string>();
+    private readonly materialHiddenByMaterial = new WeakMap<object, boolean>();
     private externalWgslToonShaderPathValue: string | null = null;
     private colorCorrectionPostProcess: PostProcess | null = null;
     private originFogPostProcess: PostProcess | null = null;
@@ -1663,6 +1666,37 @@ ${beforeFogAppendBlock}
         return getWgslModelShaderStatesImpl(this);
     }
 
+    public isMaterialVisible(material: any): boolean {
+        if (!material || typeof material !== "object") return true;
+        return this.materialHiddenByMaterial.get(material as object) !== true;
+    }
+
+    public toggleModelMaterialVisibility(modelIndex: number, materialKey: string | null): boolean | null {
+        const targetMaterial = this.findTargetSceneMaterials(modelIndex, materialKey)[0]?.material;
+        if (!targetMaterial) {
+            return null;
+        }
+
+        const nextVisible = !this.isMaterialVisible(targetMaterial);
+        const ok = this.setModelMaterialVisibility(modelIndex, materialKey, nextVisible);
+        return ok ? nextVisible : null;
+    }
+
+    public setModelMaterialVisibility(modelIndex: number, materialKey: string | null, visible: boolean): boolean {
+        const targets = this.findTargetSceneMaterials(modelIndex, materialKey);
+        if (targets.length === 0) {
+            return false;
+        }
+
+        for (const target of targets) {
+            this.setMaterialHiddenState(target.material, !visible);
+        }
+
+        syncLuminousGlowLayerImpl(this);
+        this.onMaterialShaderStateChanged?.();
+        return true;
+    }
+
     public getSerializedMaterialShaderStates(entry: SceneModelEntry): ProjectModelMaterialShaderState[] {
         return getSerializedMaterialShaderStatesImpl(this, entry);
     }
@@ -1673,6 +1707,77 @@ ${beforeFogAppendBlock}
         presetId: WgslMaterialShaderPresetId,
     ): boolean {
         return setWgslMaterialShaderPresetImpl(this, modelIndex, materialKey, presetId);
+    }
+
+    private findTargetSceneMaterials(modelIndex: number, materialKey: string | null): SceneModelMaterialEntry[] {
+        const entry = this.sceneModels[modelIndex];
+        if (!entry) {
+            return [];
+        }
+
+        if (materialKey === null) {
+            return entry.materials;
+        }
+
+        return entry.materials.filter((materialEntry) => materialEntry.key === materialKey);
+    }
+
+    private getMaterialBaseAlpha(material: any): number {
+        if (!material || typeof material !== "object") {
+            return 1;
+        }
+
+        const key = material as object;
+        const cached = this.materialBaseAlphaByMaterial.get(key);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        const alpha = Number(material.alpha);
+        const resolved = Number.isFinite(alpha) ? alpha : 1;
+        this.materialBaseAlphaByMaterial.set(key, resolved);
+        return resolved;
+    }
+
+    private setMaterialHiddenState(material: any, hidden: boolean): void {
+        if (!material || typeof material !== "object") {
+            return;
+        }
+
+        const key = material as object;
+        this.getMaterialBaseAlpha(material);
+
+        if (hidden) {
+            this.materialHiddenByMaterial.set(key, true);
+        } else {
+            this.materialHiddenByMaterial.delete(key);
+        }
+
+        if ("alpha" in material) {
+            material.alpha = hidden ? 0 : this.getMaterialBaseAlpha(material);
+        }
+
+        const outlineDefaults = this.modelEdgeMaterialDefaults.get(key);
+        if (hidden) {
+            if ("renderOutline" in material) {
+                material.renderOutline = false;
+            }
+            if ("outlineWidth" in material) {
+                material.outlineWidth = 0;
+            }
+            if ("outlineAlpha" in material) {
+                material.outlineAlpha = 0;
+            }
+        } else if (outlineDefaults && "renderOutline" in material && "outlineWidth" in material) {
+            const enabled = outlineDefaults.enabled && this.modelEdgeWidthValue > 0;
+            material.renderOutline = enabled;
+            material.outlineWidth = enabled ? outlineDefaults.width * this.modelEdgeWidthValue : 0;
+            if ("outlineAlpha" in material) {
+                material.outlineAlpha = outlineDefaults.alpha;
+            }
+        }
+
+        this.markMaterialShaderDirty(material);
     }
 
     private syncLuminousGlowLayer(): void {
@@ -3647,6 +3752,15 @@ ${beforeFogAppendBlock}
                     colorB: Number(mat.outlineColor?.b ?? 0),
                 };
                 this.modelEdgeMaterialDefaults.set(mat as object, defaults);
+            }
+
+            if (!this.isMaterialVisible(mat)) {
+                mat.renderOutline = false;
+                mat.outlineWidth = 0;
+                if ("outlineAlpha" in mat) {
+                    mat.outlineAlpha = 0;
+                }
+                continue;
             }
 
             const enabled = defaults.enabled && scale > 0;

@@ -100,6 +100,8 @@
     "shader.note.noMaterial":  "No assignable materials in this model",
     "shader.apply.selected":  "Assign selected",
     "shader.apply.all":  "Assign all materials",
+    "shader.visibility.selected.hide":  "Hide selected",
+    "shader.visibility.selected.show":  "Show selected",
     "shader.reset.selected":  "Reset selected",
     "shader.reset.all":  "Reset all materials",
     "shader.note.selectedMaterial":  "Selected material: {name}",

@@ -100,6 +100,8 @@
     "shader.note.noMaterial":  "이 모델에는 할당 가능한 재질이 없습니다",
     "shader.apply.selected":  "선택에 할당",
     "shader.apply.all":  "전체 재질에 할당",
+    "shader.visibility.selected.hide":  "선택 숨기기",
+    "shader.visibility.selected.show":  "선택 표시",
     "shader.reset.selected":  "선택을 표준화",
     "shader.reset.all":  "전체 재질을 표준화",
     "shader.note.selectedMaterial":  "선택 재질: {name}",

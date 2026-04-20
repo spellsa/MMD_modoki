@@ -100,6 +100,8 @@
     "shader.note.noMaterial":  "此模型没有可分配的材质",
     "shader.apply.selected":  "分配给选中材质",
     "shader.apply.all":  "分配给全部材质",
+    "shader.visibility.selected.hide":  "隐藏选中材质",
+    "shader.visibility.selected.show":  "显示选中材质",
     "shader.reset.selected":  "将选中项恢复标准",
     "shader.reset.all":  "将全部材质恢复标准",
     "shader.note.selectedMaterial":  "已选材质: {name}",
