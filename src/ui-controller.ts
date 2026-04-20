@@ -561,8 +561,8 @@ export class UIController {
 
         this.btnKeyframeAdd.addEventListener("click", () => this.addKeyframeAtCurrentFrame());
         this.btnKeyframeDelete.addEventListener("click", () => this.deleteSelectedKeyframe());
-        this.btnKeyframeNudgeLeft.addEventListener("click", () => this.nudgeSelectedKeyframe(-1));
-        this.btnKeyframeNudgeRight.addEventListener("click", () => this.nudgeSelectedKeyframe(1));
+        this.btnKeyframeNudgeLeft.addEventListener("click", () => this.seekToAdjacentKeyframePoint(-1));
+        this.btnKeyframeNudgeRight.addEventListener("click", () => this.seekToAdjacentKeyframePoint(1));
         this.btnFrameStepLeft.addEventListener("click", () => {
             this.mmdManager.seekToBoundary(this.mmdManager.currentFrame - 1);
         });

@@ -49,7 +49,7 @@
   --shader-resizer-width: 6px;
   --bottom-panel-resizer-height: 6px;
   --shader-panel-width: 280px;
-  --bottom-panel-height: 180px;
+  --bottom-panel-height: 220px;
 
   /* Typography */
   --font-sans: 'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
@@ -3457,7 +3457,7 @@ body.bottom-panel-resizing {
     --toolbar-height: 52px;
     --timeline-width: 304px;
     --shader-panel-width: 316px;
-    --bottom-panel-height: 232px;
+    --bottom-panel-height: 272px;
   }
 
   html,
@@ -3796,7 +3796,7 @@ body.bottom-panel-resizing {
 
 @media (max-height: 1120px) {
   :root {
-    --bottom-panel-height: 152px;
+    --bottom-panel-height: 188px;
   }
 
   #bottom-panel .section-header {
