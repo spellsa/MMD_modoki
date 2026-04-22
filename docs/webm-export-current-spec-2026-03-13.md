@@ -6,7 +6,8 @@
 - 出力 fps は `24 / 30 / 60`
 - `音声あり` を ON にすると、読み込み済み音声を mux する
 - codec 選択 UI は通常表示しない
-- 内部既定 codec は `VP9`
+- 内部既定 codec は `VP8`
+- キャプチャ方式は `readPixels (stable) / canvas / VideoFrame / WebGPU copy` を切り替え可能
 - 出力中は main UI を lock し、busy overlay に簡略進捗を表示する
 
 ## 2. UI
@@ -30,7 +31,9 @@
 
 - `PNG Seq` は UI から外している
 - codec 選択 UI も外している
-- 新規既定値では内部的に `VP9` を使う
+- 新規既定値では内部的に `VP8` を使う
+- キャプチャ方式の既定値は `readPixels (stable)`
+- `canvas / VideoFrame` と `WebGPU copy` は実験扱い
 
 ## 3. タイムライン基準
 MMD タイムラインは 30fps 基準で扱う。
@@ -139,9 +142,9 @@ MMD タイムラインは 30fps 基準で扱う。
 
 動画 codec:
 
-- 内部既定値: `VP9`
-- 実行時は `prefer-hardware` を優先
-- 非対応時は `no-preference` へ fallback
+- 内部既定値: `VP8`
+- 実行時は `no-preference` を使う
+- 非対応時は codec fallback (`VP9`) を試す
 
 既定 bitrate:
 
@@ -154,8 +157,20 @@ MMD タイムラインは 30fps 基準で扱う。
 
 補足:
 
-- `keyFrameInterval` は現状 `5`
+- `keyFrameInterval` は現状 `10`
 - この値はまだ調整中
+- 値を上げると encode 負荷は下がりやすいが、seek 性能と破損復帰性は少し下がる
+
+キャプチャ方式:
+
+- `readpixels`
+  - 既定値
+  - `RenderTargetTexture.readPixels()` で RGBA を取得する stable 経路
+- `canvas`
+  - `canvas / VideoFrame` を直接 `VideoSample` 化する experimental 経路
+- `webgpu-copy`
+  - `GPUTexture.copyTextureToBuffer()` を使う WebGPU 専用 experimental 経路
+  - WebGL / 非 WebGPU 環境では使えない
 
 ## 9. 保存方式
 対象:
@@ -208,4 +223,5 @@ UI では簡略表示のみ行う。
 ## 12. 既知の制約
 - capture は `readPixels()` 依存なので、まだ高速化余地がある
 - HDR 出力ではない
-- codec UI は隠しているが、内部選択は `VP9` 前提
+- codec UI は隠しているが、内部選択は `VP8` 前提
+- `canvas / VideoFrame` と `WebGPU copy` は比較用の experimental 経路で、環境差や黒画面 / 向きずれの再確認が必要

@@ -365,6 +365,7 @@ export interface ProjectOutputState {
     fps?: number;
     includeAudio?: boolean;
     webmCodec?: "auto" | "vp8" | "vp9";
+    webmCaptureMode?: WebmCaptureMode;
     usePlaybackRange?: boolean;
     startFrame?: number;
     endFrame?: number;
@@ -530,7 +531,10 @@ export interface WebmExportRequest {
     includeAudio?: boolean;
     audioFilePath?: string | null;
     preferredVideoCodec?: "auto" | "vp8" | "vp9";
+    captureMode?: WebmCaptureMode;
 }
+
+export type WebmCaptureMode = "readpixels" | "canvas" | "webgpu-copy";
 
 export interface WebmExportLaunchResult {
     jobId: string;

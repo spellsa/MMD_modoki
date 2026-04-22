@@ -12,6 +12,7 @@ import type {
     PngSequenceExportProgress,
     PngSequenceExportState,
     ProjectOutputState,
+    WebmCaptureMode,
     WebmExportProgress,
     WebmExportState,
 } from "../types";
@@ -21,6 +22,7 @@ export type OutputSettings = { width: number; height: number; qualityScale: numb
 export type WebmOutputOptions = {
     includeAudio: boolean;
     preferredVideoCodec: "auto" | "vp8" | "vp9";
+    captureMode: WebmCaptureMode;
 };
 
 type ToastType = "success" | "error" | "info";
@@ -37,6 +39,7 @@ type ExportUiElements = {
     outputQualitySelect: HTMLSelectElement | null;
     outputFpsSelect: HTMLSelectElement | null;
     outputWebmCodecSelect: HTMLSelectElement | null;
+    outputWebmCaptureModeSelect: HTMLSelectElement | null;
     outputIncludeAudioInput: HTMLInputElement | null;
     outputUsePlaybackRangeInput: HTMLInputElement | null;
     outputStartFrameInput: HTMLInputElement | null;
@@ -69,6 +72,7 @@ function resolveExportUiElements(): ExportUiElements {
         outputQualitySelect: document.getElementById("output-quality") as HTMLSelectElement | null,
         outputFpsSelect: document.getElementById("output-fps") as HTMLSelectElement | null,
         outputWebmCodecSelect: document.getElementById("output-webm-codec") as HTMLSelectElement | null,
+        outputWebmCaptureModeSelect: document.getElementById("output-webm-capture-mode") as HTMLSelectElement | null,
         outputIncludeAudioInput: document.getElementById("output-include-audio") as HTMLInputElement | null,
         outputUsePlaybackRangeInput: document.getElementById("output-use-playback-range") as HTMLInputElement | null,
         outputStartFrameInput: document.getElementById("output-start-frame") as HTMLInputElement | null,
@@ -197,6 +201,7 @@ export class ExportUiController {
             fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
             includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
+            webmCaptureMode: this.getWebmOutputOptions().captureMode,
             usePlaybackRange: Boolean(this.elements.outputUsePlaybackRangeInput?.checked),
             startFrame: playbackFrameRange.startFrame,
             endFrame: playbackFrameRange.endFrame,
@@ -260,6 +265,13 @@ export class ExportUiController {
             hasOption(this.elements.outputWebmCodecSelect, state.webmCodec)
         ) {
             this.elements.outputWebmCodecSelect.value = state.webmCodec;
+        }
+        if (
+            this.elements.outputWebmCaptureModeSelect &&
+            typeof state.webmCaptureMode === "string" &&
+            hasOption(this.elements.outputWebmCaptureModeSelect, state.webmCaptureMode)
+        ) {
+            this.elements.outputWebmCaptureModeSelect.value = state.webmCaptureMode;
         }
         if (
             this.elements.outputStartFrameInput &&
@@ -339,12 +351,19 @@ export class ExportUiController {
 
     public getWebmOutputOptions(): WebmOutputOptions {
         const selectedCodec = this.elements.outputWebmCodecSelect?.value;
+        const selectedCaptureMode = this.elements.outputWebmCaptureModeSelect?.value;
         const preferredVideoCodec = selectedCodec === "auto" || selectedCodec === "vp8" || selectedCodec === "vp9"
             ? selectedCodec
-            : "vp9";
+            : "vp8";
+        const captureMode: WebmCaptureMode = selectedCaptureMode === "canvas"
+            || selectedCaptureMode === "webgpu-copy"
+            || selectedCaptureMode === "readpixels"
+            ? selectedCaptureMode
+            : "readpixels";
         return {
             includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
             preferredVideoCodec,
+            captureMode,
         };
     }
 
@@ -484,6 +503,7 @@ export class ExportUiController {
         const webmOutputOptions = this.getWebmOutputOptions();
         const includeAudio = webmOutputOptions.includeAudio && typeof audioFilePath === "string" && audioFilePath.length > 0;
         const preferredVideoCodec = webmOutputOptions.preferredVideoCodec;
+        const captureMode = webmOutputOptions.captureMode;
         if (webmOutputOptions.includeAudio && !includeAudio) {
             this.showToast(t("toast.audioMissingForWebm"), "info");
         }
@@ -498,6 +518,7 @@ export class ExportUiController {
             includeAudio,
             audioFilePath: includeAudio ? audioFilePath : null,
             preferredVideoCodec,
+            captureMode,
         });
 
         this.setStatus(t("busy.webmExportLaunching"), true);
@@ -512,6 +533,7 @@ export class ExportUiController {
             includeAudio,
             audioFilePath: includeAudio ? audioFilePath : null,
             preferredVideoCodec,
+            captureMode,
         });
 
         if (!result) {
@@ -835,13 +857,19 @@ export class ExportUiController {
                 const phaseLabel = formatWebmExportPhaseLabel(progress.phase);
                 if (totalCount > 0) {
                     const ratio = Math.min(100, Math.max(0, (progressCount / totalCount) * 100));
-                    busyText.textContent = t("busy.webmProgress", {
+                    const baseText = t("busy.webmProgress", {
                         phase: phaseLabel,
                         encoded: progressCount,
                         total: totalCount,
                         ratio: ratio.toFixed(1),
                         frame: currentFrame,
                     });
+                    const detailText = typeof progress.message === "string" && progress.message.trim().length > 0
+                        ? progress.message.trim()
+                        : "";
+                    busyText.textContent = detailText.length > 0
+                        ? `${baseText}\n${detailText}`
+                        : baseText;
                     return;
                 }
                 busyText.textContent = t("busy.webmExportRunning");

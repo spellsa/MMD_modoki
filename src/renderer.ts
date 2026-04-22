@@ -374,8 +374,11 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
         encodedFrames = encoded;
         capturedFrames = captured;
         currentFrame = frame;
-        setStatus(`Encoding... ${encoded}/${total} (frame ${frame})`);
-        emitWebmProgress("encoding", `Encoding... ${encoded}/${total} (frame ${frame})`, encoded === total);
+        const progressMessage = lastPhase === "encoding" && lastMessage
+          ? lastMessage
+          : `Encoding... ${encoded}/${total} (frame ${frame})`;
+        setStatus(progressMessage);
+        emitWebmProgress("encoding", progressMessage, encoded === total);
       },
     });
 

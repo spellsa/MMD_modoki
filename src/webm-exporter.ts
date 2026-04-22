@@ -9,12 +9,13 @@ import {
     VideoSampleSource,
     WebMOutputFormat,
 } from "mediabunny";
+import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
 import { MmdManager } from "./mmd-manager";
-import type { WebmExportPhase, WebmExportRequest } from "./types";
+import type { WebmCaptureMode, WebmExportPhase, WebmExportRequest } from "./types";
 
 export interface WebmExportCallbacks {
     onStatus?: (message: string, phase: WebmExportPhase) => void;
@@ -29,10 +30,12 @@ export interface WebmExportResult {
 }
 
 type ExportPerformanceStats = {
-    renderMsTotal: number;
+    updateMsTotal: number;
+    drawMsTotal: number;
     captureMsTotal: number;
     encodeMsTotal: number;
-    renderSamples: number;
+    updateSamples: number;
+    drawSamples: number;
     captureSamples: number;
     encodeSamples: number;
 };
@@ -48,10 +51,23 @@ const updateStatus = (
 const formatMs = (value: number): string => `${value.toFixed(1)}ms`;
 
 const buildPerformanceSummary = (stats: ExportPerformanceStats): string => {
-    const renderAvg = stats.renderSamples > 0 ? stats.renderMsTotal / stats.renderSamples : 0;
+    const updateAvg = stats.updateSamples > 0 ? stats.updateMsTotal / stats.updateSamples : 0;
+    const drawAvg = stats.drawSamples > 0 ? stats.drawMsTotal / stats.drawSamples : 0;
     const captureAvg = stats.captureSamples > 0 ? stats.captureMsTotal / stats.captureSamples : 0;
     const encodeAvg = stats.encodeSamples > 0 ? stats.encodeMsTotal / stats.encodeSamples : 0;
-    return `avg render ${formatMs(renderAvg)} cap ${formatMs(captureAvg)} enc ${formatMs(encodeAvg)}`;
+    return `avg upd ${formatMs(updateAvg)} draw ${formatMs(drawAvg)} cap ${formatMs(captureAvg)} enc ${formatMs(encodeAvg)}`;
+};
+
+const formatCaptureModeLabel = (mode: WebmCaptureMode): string => {
+    switch (mode) {
+        case "canvas":
+            return "canvas / VideoFrame";
+        case "webgpu-copy":
+            return "WebGPU copy";
+        case "readpixels":
+        default:
+            return "readPixels stable";
+    }
 };
 
 type ExportRuntimeInternals = {
@@ -69,21 +85,22 @@ type ExportQueueItem = {
     videoSample: VideoSample;
 };
 
-type CapturedFrame = {
-    width: number;
-    height: number;
-    rgbaData: Uint8Array;
-};
-
 type WebmVideoCodec = "vp9" | "vp8";
 type WebmAudioCodec = "opus" | "vorbis";
-type VideoHardwareAccelerationHint = "prefer-hardware" | "no-preference";
+type VideoHardwareAccelerationHint = "no-preference";
 type SelectedWebmVideoEncoding = {
     codec: WebmVideoCodec;
     hardwareAcceleration: VideoHardwareAccelerationHint;
 };
 
+type FrameCapture = {
+    modeLabel: WebmCaptureMode;
+    captureFrameAsync: (timestamp: number, duration: number) => Promise<VideoSample | null>;
+    dispose: () => void;
+};
+
 const TIMELINE_FPS = 30;
+const CAPTURE_TIMEOUT_MS = 8_000;
 
 const waitForAnimationFrame = async (): Promise<void> => {
     await new Promise<void>((resolve) => {
@@ -120,11 +137,6 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
     }
 };
 
-type ReusableFrameCapture = {
-    captureFrameAsync: () => Promise<CapturedFrame | null>;
-    dispose: () => void;
-};
-
 const flipRgbaRowsInPlace = (bytes: Uint8Array, width: number, height: number): void => {
     const rowStride = width * 4;
     const swapBuffer = new Uint8Array(rowStride);
@@ -138,11 +150,11 @@ const flipRgbaRowsInPlace = (bytes: Uint8Array, width: number, height: number): 
     }
 };
 
-const createReusableFrameCapture = (
+const createCaptureRenderTarget = (
     exportInternals: ExportRuntimeInternals,
     width: number,
     height: number,
-): ReusableFrameCapture => {
+): RenderTargetTexture => {
     const renderTarget = new RenderTargetTexture(
         "webm-export-capture",
         { width, height },
@@ -155,32 +167,197 @@ const createReusableFrameCapture = (
     renderTarget.samples = 1;
     renderTarget.refreshRate = 1;
     renderTarget.ignoreCameraViewport = true;
+    return renderTarget;
+};
+
+const createRawRgbaVideoSample = (
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    timestamp: number,
+    duration: number,
+): VideoSample => {
+    return new VideoSample(rgbaData, {
+        format: "RGBA",
+        codedWidth: width,
+        codedHeight: height,
+        timestamp,
+        duration,
+    });
+};
+
+const createReadPixelsFrameCapture = (
+    callbacks: WebmExportCallbacks,
+    exportInternals: ExportRuntimeInternals,
+    width: number,
+    height: number,
+): FrameCapture => {
+    const renderTarget = createCaptureRenderTarget(exportInternals, width, height);
 
     return {
-        captureFrameAsync: async (): Promise<CapturedFrame | null> => {
+        modeLabel: "readpixels",
+        captureFrameAsync: async (timestamp: number, duration: number): Promise<VideoSample | null> => {
+            updateStatus(callbacks, "Capture readPixels stable | render", "encoding");
             renderTarget.resetRefreshCounter();
             renderTarget.render(true);
+            updateStatus(callbacks, "Capture readPixels stable | readPixels", "encoding");
             const pixelPromise = renderTarget.readPixels(0, 0, null, true, false, 0, 0, width, height);
             if (!pixelPromise) {
                 return null;
             }
 
-            const pixelData = await pixelPromise;
+            const pixelData = await withTimeout(pixelPromise, CAPTURE_TIMEOUT_MS, "readPixels capture");
             const source = pixelData instanceof Uint8Array
                 ? pixelData
                 : new Uint8Array(pixelData.buffer, pixelData.byteOffset, pixelData.byteLength);
             const rgbaData = new Uint8Array(source);
             flipRgbaRowsInPlace(rgbaData, width, height);
-            return {
-                width,
-                height,
-                rgbaData,
-            };
+            updateStatus(callbacks, "Capture readPixels stable | packed", "encoding");
+            return createRawRgbaVideoSample(rgbaData, width, height, timestamp, duration);
         },
         dispose: () => {
             renderTarget.dispose();
         },
     };
+};
+
+const createCanvasFrameCapture = (
+    callbacks: WebmExportCallbacks,
+    canvas: HTMLCanvasElement,
+): FrameCapture => {
+    return {
+        modeLabel: "canvas",
+        captureFrameAsync: async (timestamp: number, duration: number): Promise<VideoSample> => {
+            updateStatus(callbacks, "Capture canvas / VideoFrame | sample", "encoding");
+            return new VideoSample(canvas, {
+                timestamp,
+                duration,
+            });
+        },
+        dispose: () => {
+            // nothing to dispose
+        },
+    };
+};
+
+const createWebGpuCopyFrameCapture = (
+    callbacks: WebmExportCallbacks,
+    exportInternals: ExportRuntimeInternals,
+    width: number,
+    height: number,
+): FrameCapture => {
+    if (!(exportInternals.engine instanceof WebGPUEngine)) {
+        throw new Error("WebGPU copy capture requires a WebGPU engine");
+    }
+
+    const renderTarget = createCaptureRenderTarget(exportInternals, width, height);
+    const engine = exportInternals.engine as WebGPUEngine & {
+        _device?: GPUDevice;
+    };
+    const device = engine._device;
+    if (!device) {
+        throw new Error("WebGPU device is unavailable for capture");
+    }
+
+    const bytesPerPixel = 4;
+    const rowBytes = width * bytesPerPixel;
+    const paddedBytesPerRow = Math.ceil(rowBytes / 256) * 256;
+    const readBufferSize = paddedBytesPerRow * height;
+    const readMapMode = typeof GPUMapMode !== "undefined" ? GPUMapMode.READ : 1;
+    const readBuffer = device.createBuffer({
+        size: readBufferSize,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+
+    return {
+        modeLabel: "webgpu-copy",
+        captureFrameAsync: async (timestamp: number, duration: number): Promise<VideoSample | null> => {
+            updateStatus(callbacks, "Capture WebGPU copy | render", "encoding");
+            renderTarget.resetRefreshCounter();
+            renderTarget.render(true);
+            updateStatus(callbacks, "Capture WebGPU copy | flushFramebuffer", "encoding");
+            engine.flushFramebuffer();
+
+            const internalTexture = renderTarget.getInternalTexture() as {
+                _hardwareTexture?: {
+                    underlyingResource?: GPUTexture | null;
+                } | null;
+            } | null;
+            const gpuTexture = internalTexture?._hardwareTexture?.underlyingResource ?? null;
+            if (!gpuTexture) {
+                return null;
+            }
+
+            updateStatus(callbacks, "Capture WebGPU copy | encode copy command", "encoding");
+            const commandEncoder = device.createCommandEncoder({});
+            commandEncoder.copyTextureToBuffer(
+                {
+                    texture: gpuTexture,
+                    mipLevel: 0,
+                    origin: { x: 0, y: 0, z: 0 },
+                },
+                {
+                    buffer: readBuffer,
+                    bytesPerRow: paddedBytesPerRow,
+                    rowsPerImage: height,
+                },
+                {
+                    width,
+                    height,
+                    depthOrArrayLayers: 1,
+                },
+            );
+            updateStatus(callbacks, "Capture WebGPU copy | queue submit", "encoding");
+            device.queue.submit([commandEncoder.finish()]);
+
+            try {
+                updateStatus(callbacks, "Capture WebGPU copy | mapAsync", "encoding");
+                await withTimeout(readBuffer.mapAsync(readMapMode), CAPTURE_TIMEOUT_MS, "WebGPU copy capture");
+            } catch (error: unknown) {
+                const detail = error instanceof Error ? error.message : String(error);
+                throw new Error(`WebGPU copy capture stalled or failed: ${detail}. Try readPixels (stable) or canvas / VideoFrame.`);
+            }
+            try {
+                updateStatus(callbacks, "Capture WebGPU copy | mapped", "encoding");
+                const mappedRange = readBuffer.getMappedRange();
+                const mappedBytes = new Uint8Array(mappedRange);
+                const rgbaData = new Uint8Array(rowBytes * height);
+                for (let y = 0; y < height; y += 1) {
+                    const sourceOffset = y * paddedBytesPerRow;
+                    const targetOffset = y * rowBytes;
+                    rgbaData.set(mappedBytes.subarray(sourceOffset, sourceOffset + rowBytes), targetOffset);
+                }
+                flipRgbaRowsInPlace(rgbaData, width, height);
+                updateStatus(callbacks, "Capture WebGPU copy | packed", "encoding");
+                return createRawRgbaVideoSample(rgbaData, width, height, timestamp, duration);
+            } finally {
+                readBuffer.unmap();
+            }
+        },
+        dispose: () => {
+            renderTarget.dispose();
+            readBuffer.destroy();
+        },
+    };
+};
+
+const createFrameCapture = (
+    callbacks: WebmExportCallbacks,
+    captureMode: WebmCaptureMode,
+    canvas: HTMLCanvasElement,
+    exportInternals: ExportRuntimeInternals,
+    width: number,
+    height: number,
+): FrameCapture => {
+    switch (captureMode) {
+        case "canvas":
+            return createCanvasFrameCapture(callbacks, canvas);
+        case "webgpu-copy":
+            return createWebGpuCopyFrameCapture(callbacks, exportInternals, width, height);
+        case "readpixels":
+        default:
+            return createReadPixelsFrameCapture(callbacks, exportInternals, width, height);
+    }
 };
 
 const selectWebmVideoEncoding = async (
@@ -190,22 +367,8 @@ const selectWebmVideoEncoding = async (
     preferredCodec: "auto" | WebmVideoCodec,
 ): Promise<SelectedWebmVideoEncoding | null> => {
     const codecOrder: WebmVideoCodec[] = preferredCodec === "auto"
-        ? ["vp9", "vp8"]
+        ? ["vp8", "vp9"]
         : [preferredCodec];
-    for (const codec of codecOrder) {
-        if (await canEncodeVideo(codec, {
-            width,
-            height,
-            bitrate,
-            hardwareAcceleration: "prefer-hardware",
-        })) {
-            return {
-                codec,
-                hardwareAcceleration: "prefer-hardware",
-            };
-        }
-    }
-
     for (const codec of codecOrder) {
         if (await canEncodeVideo(codec, {
             width,
@@ -401,6 +564,11 @@ export async function runWebmExportJob(
     }
     const totalFrames = Math.max(1, Math.round((timelineFrameCount / TIMELINE_FPS) * fps));
     const exportDurationSeconds = totalFrames / fps;
+    const captureMode: WebmCaptureMode = request.captureMode === "canvas"
+        || request.captureMode === "webgpu-copy"
+        || request.captureMode === "readpixels"
+        ? request.captureMode
+        : "readpixels";
 
     const maxQueueLength = 16;
     const frameDuration = 1 / fps;
@@ -475,7 +643,14 @@ export async function runWebmExportJob(
         }
 
         const exportRuntimeInternals = mmdManager as unknown as ExportRuntimeInternals;
-        const reusableFrameCapture = createReusableFrameCapture(exportRuntimeInternals, outputWidth, outputHeight);
+        const frameCapture = createFrameCapture(
+            callbacks,
+            captureMode,
+            canvas,
+            exportRuntimeInternals,
+            outputWidth,
+            outputHeight,
+        );
         updateStatus(callbacks, "Opening WebM output file...", "opening-output");
         const saveSession = await window.electronAPI.beginWebmStreamSave(request.outputFilePath);
         if (!saveSession) {
@@ -526,14 +701,15 @@ export async function runWebmExportJob(
             format: new WebMOutputFormat(),
             target,
         });
-        let encoderConfigSummary = `${codec}/${hardwareAcceleration}`;
+        const captureModeLabel = formatCaptureModeLabel(frameCapture.modeLabel);
+        let encoderConfigSummary = `${codec}/${hardwareAcceleration} capture=${captureModeLabel}`;
         const videoSource = new VideoSampleSource({
             codec,
             bitrate: videoBitrate,
-            keyFrameInterval: 5,
+            keyFrameInterval: 10,
             hardwareAcceleration,
             onEncoderConfig: (config) => {
-                encoderConfigSummary = `${config.codec} ${config.width}x${config.height} ${config.hardwareAcceleration ?? "no-preference"}`;
+                encoderConfigSummary = `${config.codec} ${config.width}x${config.height} ${config.hardwareAcceleration ?? "no-preference"} capture=${captureModeLabel}`;
             },
         });
 
@@ -543,10 +719,12 @@ export async function runWebmExportJob(
         let encodedFrames = 0;
         let capturedFrames = 0;
         const performanceStats: ExportPerformanceStats = {
-            renderMsTotal: 0,
+            updateMsTotal: 0,
+            drawMsTotal: 0,
             captureMsTotal: 0,
             encodeMsTotal: 0,
-            renderSamples: 0,
+            updateSamples: 0,
+            drawSamples: 0,
             captureSamples: 0,
             encodeSamples: 0,
         };
@@ -554,7 +732,7 @@ export async function runWebmExportJob(
         const reportProgress = (frame: number): void => {
             updateStatus(
                 callbacks,
-                `Exporting ${encodedFrames}/${totalFrames} encoded (${capturedFrames}/${totalFrames} captured, q=${queue.length}) ${buildPerformanceSummary(performanceStats)} ${encoderConfigSummary}`,
+                `Capture ${captureModeLabel} | Exporting ${encodedFrames}/${totalFrames} encoded (${capturedFrames}/${totalFrames} captured, q=${queue.length}) ${buildPerformanceSummary(performanceStats)} ${encoderConfigSummary}`,
                 "encoding",
             );
             callbacks.onProgress?.(encodedFrames, totalFrames, frame, capturedFrames);
@@ -606,11 +784,11 @@ export async function runWebmExportJob(
                 audioSourceClosed = true;
             }
 
-            const videoPathLabel = hardwareAcceleration === "prefer-hardware"
-                ? `${codec} hw-preferred`
-                : `${codec} fallback`;
+            const videoPathLabel = hardwareAcceleration === "no-preference"
+                ? `${codec} no-preference`
+                : codec;
             const codecLabel = audioCodec ? `${videoPathLabel} + ${audioCodec}` : videoPathLabel;
-            updateStatus(callbacks, `Encoding ${totalFrames} frame(s) to WebM (${codecLabel})... ${encoderConfigSummary}`, "encoding");
+            updateStatus(callbacks, `Encoding ${totalFrames} frame(s) to WebM (${codecLabel}, capture=${captureModeLabel})... ${encoderConfigSummary}`, "encoding");
             const consumerPromise = consumeQueue();
 
             try {
@@ -627,32 +805,31 @@ export async function runWebmExportJob(
                         endFrame,
                         startFrame + Math.round((outputFrameIndex * TIMELINE_FPS) / fps),
                     );
-                    const renderStart = performance.now();
                     if (!playbackStarted) {
+                        const drawStart = performance.now();
                         mmdManager.renderOnce(0);
+                        performanceStats.drawMsTotal += performance.now() - drawStart;
+                        performanceStats.drawSamples += 1;
                         playbackStarted = true;
                     } else {
+                        const updateStart = performance.now();
                         await exportRuntimeInternals.mmdRuntime.playAnimation();
+                        performanceStats.updateMsTotal += performance.now() - updateStart;
+                        performanceStats.updateSamples += 1;
+
+                        const drawStart = performance.now();
                         mmdManager.renderOnce(1000 / fps);
+                        performanceStats.drawMsTotal += performance.now() - drawStart;
+                        performanceStats.drawSamples += 1;
                         exportRuntimeInternals.mmdRuntime.pauseAnimation();
                     }
-                    performanceStats.renderMsTotal += performance.now() - renderStart;
-                    performanceStats.renderSamples += 1;
 
                     const captureStart = performance.now();
                     let videoSample: VideoSample | null = null;
                     try {
-                        const capturedFrame = await reusableFrameCapture.captureFrameAsync();
-                        if (!capturedFrame) {
+                        videoSample = await frameCapture.captureFrameAsync(outputFrameIndex / fps, frameDuration);
+                        if (!videoSample) {
                             fatalError = new Error(`Failed to capture frame ${frame}`);
-                        } else {
-                            videoSample = new VideoSample(capturedFrame.rgbaData, {
-                                format: "RGBA",
-                                codedWidth: capturedFrame.width,
-                                codedHeight: capturedFrame.height,
-                                timestamp: outputFrameIndex / fps,
-                                duration: frameDuration,
-                            });
                         }
                     } catch (error: unknown) {
                         fatalError = error instanceof Error
@@ -731,7 +908,7 @@ export async function runWebmExportJob(
                 const queued = queue.shift();
                 queued?.videoSample.close();
             }
-            reusableFrameCapture.dispose();
+            frameCapture.dispose();
         }
     } finally {
         mmdManager.setExternalPlaybackSimulationEnabled(false);

@@ -961,6 +961,14 @@
                 </label>
               </div>
             </div>
+            <div class="output-row">
+              <span class="output-label">キャプチャ</span>
+              <select id="output-webm-capture-mode" class="output-select">
+                <option value="readpixels" selected>readPixels (stable)</option>
+                <option value="canvas">canvas / VideoFrame</option>
+                <option value="webgpu-copy">WebGPU copy (experimental)</option>
+              </select>
+            </div>
             <div class="output-row output-row-toggle">
               <span class="output-label" data-i18n="label.range">範囲</span>
               <label class="output-toggle-label">

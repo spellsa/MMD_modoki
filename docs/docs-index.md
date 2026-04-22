@@ -58,6 +58,7 @@
 - [WebCodecs API 調査](./webcodecs-api-research.md)
 - [WebCodecs + MediaBunny WebM 調査](./webcodecs-mediabunny-webm-research.md)
 - [WebM 出力 現行仕様 / 実装](./webm-export-current-spec-2026-03-13.md)
+- [WebGPU WebM Capture 実装メモ 2026-04-22](./webgpu-webm-capture-implementation-note-2026-04-22.md)
 - [WebM 動画書き出し速度調査レポート](./webm-export-performance-analysis-2026-04-21.md)
 - [動画書き出し最適化案の比較メモ](./video-export-optimization-options-2026-04-21.md)
 

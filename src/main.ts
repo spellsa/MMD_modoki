@@ -14,6 +14,7 @@ import type {
   PngSequenceExportProgress,
   PngSequenceExportRequest,
   PngSequenceExportState,
+  WebmCaptureMode,
   WebmExportLaunchResult,
   WebmExportProgress,
   WebmExportRequest,
@@ -381,6 +382,11 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
   const preferredVideoCodec = request.preferredVideoCodec === 'vp8' || request.preferredVideoCodec === 'vp9'
     ? request.preferredVideoCodec
     : 'auto';
+  const captureMode: WebmCaptureMode = request.captureMode === 'canvas'
+    || request.captureMode === 'webgpu-copy'
+    || request.captureMode === 'readpixels'
+    ? request.captureMode
+    : 'readpixels';
   const audioFilePath = includeAudio && typeof request.audioFilePath === 'string' && request.audioFilePath.trim().length > 0
     ? request.audioFilePath
     : null;
@@ -399,6 +405,7 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
     includeAudio,
     audioFilePath,
     preferredVideoCodec,
+    captureMode,
   };
 };
 
