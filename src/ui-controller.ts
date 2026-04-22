@@ -4258,6 +4258,7 @@ export class UIController {
                 if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
                     this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
                 }
+                this.refreshSelectedTrackRotationOverlay();
                 this.updateTimelineEditState();
                 this.updateSectionKeyframeButtons();
                 this.showToast(`Frame ${frame} keyframe updated`, "success");
@@ -4277,6 +4278,7 @@ export class UIController {
         if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
             this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
         }
+        this.refreshSelectedTrackRotationOverlay();
         this.updateTimelineEditState();
         this.updateSectionKeyframeButtons();
         this.showToast(`Frame ${frame}: keyframe added`, "success");

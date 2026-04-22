@@ -26,6 +26,8 @@ const PLAYHEAD_X = 24;
 const WAVEFORM_H = 22;
 const ROTATION_OVERLAY_PAD_Y = 4;
 const ROTATION_OVERLAY_MIN_RANGE = 15;
+const ROTATION_OVERLAY_WRAP_BOUNDARY = 180;
+const ROTATION_OVERLAY_WRAP_THRESHOLD = 180;
 const TRACK_ROW_BG = "#1a1c22";
 const TRACK_ROW_BG_SELECTED = "rgba(255,255,255,0.07)";
 const CURRENT_FRAME_COLOR = "#ff4fa3";
@@ -850,22 +852,77 @@ export class Timeline {
     ): void {
         if (startIndex > endIndex) return;
 
+        const topY = rowTop + ROTATION_OVERLAY_PAD_Y;
+        const bottomY = topY + innerHeight;
         ctx.save();
         ctx.globalAlpha = 0.6;
         ctx.strokeStyle = strokeStyle;
         ctx.lineWidth = 1.25;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
         ctx.beginPath();
 
         for (let i = startIndex; i <= endIndex; i += 1) {
             const x = frames[i] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
-            const normalized = (range - values[i]) / (range * 2);
-            const y = rowTop + ROTATION_OVERLAY_PAD_Y + normalized * innerHeight;
-            if (i === startIndex) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+            const y = this.getRotationOverlayValueY(values[i], topY, innerHeight, range);
+            if (i === startIndex) {
+                ctx.moveTo(x, y);
+                continue;
+            }
+
+            const prevX = frames[i - 1] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const prevValue = values[i - 1];
+            const nextValue = values[i];
+
+            if (!this.isRotationOverlayWrappedSegment(prevValue, nextValue)) {
+                ctx.lineTo(x, y);
+                continue;
+            }
+
+            const boundaryX = this.getRotationOverlayWrapBoundaryX(prevX, x, prevValue, nextValue);
+            const wrapsThroughTop = nextValue < prevValue;
+            ctx.lineTo(boundaryX, wrapsThroughTop ? topY : bottomY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(boundaryX, wrapsThroughTop ? bottomY : topY);
+            ctx.lineTo(x, y);
         }
 
         ctx.stroke();
         ctx.restore();
+    }
+
+    private getRotationOverlayValueY(value: number, topY: number, innerHeight: number, range: number): number {
+        const normalized = (range - value) / (range * 2);
+        return topY + normalized * innerHeight;
+    }
+
+    private isRotationOverlayWrappedSegment(previous: number, next: number): boolean {
+        return Math.abs(next - previous) > ROTATION_OVERLAY_WRAP_THRESHOLD;
+    }
+
+    private getRotationOverlayWrapBoundaryX(
+        previousX: number,
+        nextX: number,
+        previousValue: number,
+        nextValue: number,
+    ): number {
+        const span = nextX - previousX;
+        if (span === 0) return previousX;
+
+        if (nextValue < previousValue) {
+            const toUpper = Math.max(0, ROTATION_OVERLAY_WRAP_BOUNDARY - previousValue);
+            const fromLower = Math.max(0, nextValue + ROTATION_OVERLAY_WRAP_BOUNDARY);
+            const total = toUpper + fromLower;
+            const t = total > 0 ? toUpper / total : 0.5;
+            return previousX + span * t;
+        }
+
+        const toLower = Math.max(0, previousValue + ROTATION_OVERLAY_WRAP_BOUNDARY);
+        const fromUpper = Math.max(0, ROTATION_OVERLAY_WRAP_BOUNDARY - nextValue);
+        const total = toLower + fromUpper;
+        const t = total > 0 ? toLower / total : 0.5;
+        return previousX + span * t;
     }
 
     private getRowHeight(index: number): number {
