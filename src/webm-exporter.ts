@@ -40,12 +40,12 @@ const updateStatus = (
 const formatCaptureModeLabel = (mode: WebmCaptureMode): string => {
     switch (mode) {
         case "canvas":
-            return "canvas / VideoFrame";
+            return "Canvas";
         case "webgpu-copy":
-            return "WebGPU copy";
+            return "速度優先";
         case "readpixels":
         default:
-            return "readPixels stable";
+            return "安定";
     }
 };
 
@@ -567,7 +567,7 @@ export async function runWebmExportJob(
         || request.captureMode === "webgpu-copy"
         || request.captureMode === "readpixels"
         ? request.captureMode
-        : "readpixels";
+        : "webgpu-copy";
 
     const maxQueueLength = 16;
     const frameDuration = 1 / fps;

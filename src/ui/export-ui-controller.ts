@@ -359,7 +359,7 @@ export class ExportUiController {
             || selectedCaptureMode === "webgpu-copy"
             || selectedCaptureMode === "readpixels"
             ? selectedCaptureMode
-            : "readpixels";
+            : "webgpu-copy";
         return {
             includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
             preferredVideoCodec,

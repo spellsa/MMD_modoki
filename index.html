@@ -961,20 +961,19 @@
                 </label>
               </div>
             </div>
-            <div class="output-row">
-              <span class="output-label">キャプチャ</span>
-              <select id="output-webm-capture-mode" class="output-select">
-                <option value="readpixels" selected>readPixels (stable)</option>
-                <option value="canvas">canvas / VideoFrame</option>
-                <option value="webgpu-copy">WebGPU copy (experimental)</option>
-              </select>
-            </div>
             <div class="output-row output-row-toggle">
               <span class="output-label" data-i18n="label.range">範囲</span>
               <label class="output-toggle-label">
                 <input id="output-use-playback-range" type="checkbox">
                 <span data-i18n="output.usePlaybackRange">再生範囲を使う</span>
               </label>
+            </div>
+            <div class="output-row">
+              <span class="output-label">方式</span>
+              <select id="output-webm-capture-mode" class="output-select">
+                <option value="readpixels">安定</option>
+                <option value="webgpu-copy" selected>速度優先</option>
+              </select>
             </div>
           </div>
         </section>
