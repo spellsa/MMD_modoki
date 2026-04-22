@@ -138,6 +138,11 @@ type InterpolationDragState = {
     dirtyMarked: boolean;
 };
 
+type InterpolationCurveClipboard = {
+    curves: InterpolationCurve[];
+    sourceChannelCount: number;
+};
+
 type MmdManagerInternalView = {
     currentModel: (object & RuntimeAnimatableLike) | null;
     modelSourceAnimationsByModel: WeakMap<object, RuntimeModelAnimationLike>;
@@ -187,6 +192,9 @@ export class UIController {
     private interpolationTypeSelect: HTMLSelectElement;
     private interpolationStatusLabel: HTMLElement;
     private interpolationCurveList: HTMLElement;
+    private btnInterpolationCopy: HTMLButtonElement | null = null;
+    private btnInterpolationPaste: HTMLButtonElement | null = null;
+    private btnInterpolationLinear: HTMLButtonElement | null = null;
     private shaderModelSelect: HTMLSelectElement | null = null;
     private shaderPresetSelect: HTMLSelectElement | null = null;
     private shaderApplySelectedButton: HTMLButtonElement | null = null;
@@ -213,6 +221,8 @@ export class UIController {
     private readonly pendingBonePoseSnapshots = new Map<string, { frame: number; snapshot: SelectedBonePoseSnapshot }>();
     private readonly interpolationChannelBindings = new Map<string, InterpolationChannelBinding>();
     private interpolationDragState: InterpolationDragState | null = null;
+    private currentInterpolationPreview: TimelineInterpolationPreview | null = null;
+    private interpolationCurveClipboard: InterpolationCurveClipboard | null = null;
     private timelineWaveformRequestId = 0;
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
@@ -288,6 +298,9 @@ export class UIController {
         this.interpolationTypeSelect = document.getElementById("interp-type") as HTMLSelectElement;
         this.interpolationStatusLabel = document.getElementById("interp-status")!;
         this.interpolationCurveList = document.getElementById("interp-curve-list")!;
+        this.btnInterpolationCopy = document.getElementById("btn-interp-copy") as HTMLButtonElement | null;
+        this.btnInterpolationPaste = document.getElementById("btn-interp-paste") as HTMLButtonElement | null;
+        this.btnInterpolationLinear = document.getElementById("btn-interp-linear") as HTMLButtonElement | null;
         this.shaderModelSelect = document.getElementById("shader-model-select") as HTMLSelectElement | null;
         this.shaderPresetSelect = document.getElementById("shader-preset-select") as HTMLSelectElement | null;
         this.shaderApplySelectedButton = document.getElementById("btn-shader-apply-selected") as HTMLButtonElement | null;
@@ -462,6 +475,9 @@ export class UIController {
             void this.exportUiController?.exportWebm();
         });
         this.interpolationTypeSelect.addEventListener("change", () => this.updateTimelineEditState());
+        this.btnInterpolationCopy?.addEventListener("click", () => this.copyInterpolationCurves());
+        this.btnInterpolationPaste?.addEventListener("click", () => this.pasteInterpolationCurves());
+        this.btnInterpolationLinear?.addEventListener("click", () => this.resetInterpolationCurvesToLinear());
         this.toolbarLocaleSelect?.addEventListener("change", () => {
             const nextLocale = this.getSelectedToolbarLocale();
             if (!nextLocale || nextLocale === getLocale()) {
@@ -2785,7 +2801,9 @@ export class UIController {
             this.interpolationFrameLabel.textContent = "-";
             this.resetInterpolationTypeSelect();
             this.interpolationStatusLabel.textContent = "No track selected";
+            this.currentInterpolationPreview = null;
             this.renderInterpolationCurves(null);
+            this.updateInterpolationActionButtons();
             this.btnKeyframeAdd.disabled = true;
             this.btnKeyframeDelete.disabled = true;
             this.btnKeyframeNudgeLeft.disabled = false;
@@ -3514,6 +3532,7 @@ export class UIController {
 
     private updateInterpolationPreview(track: KeyframeTrack, frame: number): void {
         const preview = this.buildInterpolationPreviewFromRuntime(track, frame);
+        this.currentInterpolationPreview = preview;
         this.syncInterpolationTypeSelect(preview);
 
         if (preview.source === "morph") {
@@ -3527,6 +3546,7 @@ export class UIController {
         }
 
         this.renderInterpolationCurves(preview);
+        this.updateInterpolationActionButtons();
     }
 
     private buildInterpolationPreviewFromRuntime(track: KeyframeTrack, frame: number): TimelineInterpolationPreview {
@@ -3920,6 +3940,140 @@ export class UIController {
         }
 
         this.interpolationCurveList.appendChild(this.createInterpolationCurveCard(renderChannels));
+    }
+
+    private updateInterpolationActionButtons(): void {
+        const targetChannels = this.getActiveEditableInterpolationChannels();
+        const hasTargetChannels = targetChannels.length > 0 && !this.mmdManager.isPlaying;
+        if (this.btnInterpolationCopy) {
+            this.btnInterpolationCopy.disabled = !hasTargetChannels;
+        }
+        if (this.btnInterpolationLinear) {
+            this.btnInterpolationLinear.disabled = !hasTargetChannels;
+        }
+        if (this.btnInterpolationPaste) {
+            this.btnInterpolationPaste.disabled = !hasTargetChannels || !this.interpolationCurveClipboard;
+        }
+    }
+
+    private getActiveEditableInterpolationChannels(): InterpolationChannelPreview[] {
+        const preview = this.currentInterpolationPreview;
+        if (!preview) return [];
+        return this.getInterpolationChannelsForRender(preview)
+            .filter((channel) => channel.available && this.isInterpolationChannelEditable(channel.id));
+    }
+
+    private readCurrentInterpolationCurve(channel: InterpolationChannelPreview): InterpolationCurve {
+        const binding = this.interpolationChannelBindings.get(channel.id);
+        if (!binding) {
+            return { ...channel.curve };
+        }
+        return {
+            x1: binding.values[binding.offset + 0],
+            x2: binding.values[binding.offset + 1],
+            y1: binding.values[binding.offset + 2],
+            y2: binding.values[binding.offset + 3],
+        };
+    }
+
+    private writeInterpolationCurve(channelId: string, curve: InterpolationCurve): boolean {
+        const binding = this.interpolationChannelBindings.get(channelId);
+        if (!binding) return false;
+        binding.values[binding.offset + 0] = this.clampInterpolationValue(curve.x1, 0);
+        binding.values[binding.offset + 1] = this.clampInterpolationValue(curve.x2, 0);
+        binding.values[binding.offset + 2] = this.clampInterpolationValue(curve.y1, 0);
+        binding.values[binding.offset + 3] = this.clampInterpolationValue(curve.y2, 0);
+        return true;
+    }
+
+    private copyInterpolationCurves(): void {
+        const targetChannels = this.getActiveEditableInterpolationChannels();
+        if (targetChannels.length === 0) {
+            this.showToast("No interpolation curves available to copy", "info");
+            return;
+        }
+
+        this.interpolationCurveClipboard = {
+            curves: targetChannels.map((channel) => this.readCurrentInterpolationCurve(channel)),
+            sourceChannelCount: targetChannels.length,
+        };
+        this.updateInterpolationActionButtons();
+
+        const label = targetChannels.length === 1
+            ? `${targetChannels[0]?.label ?? "curve"}`
+            : `${targetChannels.length} curves`;
+        this.showToast(`Copied ${label}`, "success");
+    }
+
+    private pasteInterpolationCurves(): void {
+        const clipboard = this.interpolationCurveClipboard;
+        if (!clipboard || clipboard.curves.length === 0) {
+            this.showToast("No copied interpolation curves", "info");
+            return;
+        }
+
+        const targetChannels = this.getActiveEditableInterpolationChannels();
+        if (targetChannels.length === 0) {
+            this.showToast("No interpolation curves available to paste", "info");
+            return;
+        }
+
+        let changed = false;
+        if (clipboard.curves.length === 1) {
+            const sourceCurve = clipboard.curves[0];
+            for (const channel of targetChannels) {
+                changed = this.writeInterpolationCurve(channel.id, sourceCurve) || changed;
+            }
+        } else {
+            const count = Math.min(targetChannels.length, clipboard.curves.length);
+            for (let i = 0; i < count; i += 1) {
+                const channel = targetChannels[i];
+                const curve = clipboard.curves[i];
+                changed = this.writeInterpolationCurve(channel.id, curve) || changed;
+            }
+        }
+
+        if (!changed) {
+            this.showToast("Interpolation paste target is not editable", "info");
+            return;
+        }
+
+        this.finalizeInterpolationCurveEdit(
+            clipboard.curves.length === 1 && targetChannels.length > 1
+                ? `Pasted to ${targetChannels.length} curves`
+                : "Interpolation curves pasted",
+        );
+    }
+
+    private resetInterpolationCurvesToLinear(): void {
+        const targetChannels = this.getActiveEditableInterpolationChannels();
+        if (targetChannels.length === 0) {
+            this.showToast("No interpolation curves available to reset", "info");
+            return;
+        }
+
+        const linear = this.createLinearCurve();
+        let changed = false;
+        for (const channel of targetChannels) {
+            changed = this.writeInterpolationCurve(channel.id, linear) || changed;
+        }
+        if (!changed) {
+            this.showToast("Interpolation reset target is not editable", "info");
+            return;
+        }
+
+        this.finalizeInterpolationCurveEdit(
+            targetChannels.length === 1 ? "Interpolation reset to linear" : `${targetChannels.length} curves reset to linear`,
+        );
+    }
+
+    private finalizeInterpolationCurveEdit(message: string): void {
+        this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
+        this.refreshRuntimeAnimationFromInterpolationEdit();
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(message, "success");
     }
 
     private resetInterpolationTypeSelect(): void {

@@ -2414,10 +2414,6 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.interpolation-meta--side {
-  padding: 3px 4px;
-}
-
 .interp-type-row {
   display: grid;
   gap: 3px;
@@ -2576,25 +2572,6 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .interp-curve-hit-area {
   fill: transparent;
   pointer-events: auto;
-}
-
-.interp-auto-setting {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-  font-size: 9px;
-  color: var(--text-secondary);
-  white-space: normal;
-  line-height: 1.05;
-}
-
-.interp-auto-setting input[type="checkbox"] {
-  width: 10px;
-  height: 10px;
-  margin: 0;
-  accent-color: #8a8a8a;
-  flex: 0 0 auto;
 }
 
 .interp-placeholder-actions {
