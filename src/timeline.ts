@@ -22,7 +22,7 @@ const RULER_H = 20;
 const ROW_H = 18;
 const SELECTED_ROW_H = 36;
 const PX_PER_F = 6;
-const PLAYHEAD_X = 24;
+const PLAYHEAD_X_FALLBACK = 24;
 const WAVEFORM_H = 22;
 const ROTATION_OVERLAY_PAD_Y = 4;
 const ROTATION_OVERLAY_MIN_RANGE = 15;
@@ -228,11 +228,19 @@ export class Timeline {
         }, { passive: true });
     }
 
+    private getPlayheadX(): number {
+        const labelWidth = this.labelsEl.clientWidth;
+        const trackWidth = this.trackScrollEl.clientWidth;
+        if (labelWidth <= 0 || trackWidth <= 0) return PLAYHEAD_X_FALLBACK;
+        return Math.max(12, Math.round((trackWidth - labelWidth) / 2));
+    }
+
     private seekFromEvent(e: MouseEvent, canvas: HTMLCanvasElement): void {
         const rect = canvas.getBoundingClientRect();
+        const playheadX = this.getPlayheadX();
         const frame = Math.max(
             0,
-            Math.round(this.currentFrame + (e.clientX - rect.left - PLAYHEAD_X) / PX_PER_F)
+            Math.round(this.currentFrame + (e.clientX - rect.left - playheadX) / PX_PER_F)
         );
         this.currentFrame = frame;
         this.viewOffset = frame * PX_PER_F;
@@ -413,6 +421,7 @@ export class Timeline {
         const ctx = this.staticCtx;
         const w = this.staticCanvas.width / (window.devicePixelRatio || 1);
         const h = this.staticCanvas.height / (window.devicePixelRatio || 1);
+        const playheadX = this.getPlayheadX();
 
         ctx.fillStyle = "#12121a";
         ctx.fillRect(0, 0, w, h);
@@ -423,7 +432,7 @@ export class Timeline {
             return;
         }
 
-        const visStart = Math.max(0, Math.floor((this.viewOffset - PLAYHEAD_X) / PX_PER_F));
+        const visStart = Math.max(0, Math.floor((this.viewOffset - playheadX) / PX_PER_F));
         const visEnd = Math.min(this.totalFrames, visStart + Math.ceil(w / PX_PER_F) + 2);
 
         // Vertical culling: only draw rows visible in the scroll viewport
@@ -463,7 +472,7 @@ export class Timeline {
             const midY = ry + rowH / 2;
 
             for (let k = lo; k <= hi && k < frames.length; k++) {
-                const sx = frames[k] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+                const sx = frames[k] * PX_PER_F - this.viewOffset + playheadX;
                 if (sx < -markerSize || sx > w + markerSize) continue;
                 drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
 
@@ -477,7 +486,7 @@ export class Timeline {
         // Major frame vertical grid
         ctx.fillStyle = "rgba(255,255,255,0.03)";
         for (let f = Math.ceil(visStart / 10) * 10; f <= visEnd; f += 10) {
-            const sx = f * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const sx = f * PX_PER_F - this.viewOffset + playheadX;
             ctx.fillRect(sx, 0, 1, h);
         }
 
@@ -488,8 +497,8 @@ export class Timeline {
         ctx.strokeStyle = CURRENT_FRAME_GLOW;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(PLAYHEAD_X, 0);
-        ctx.lineTo(PLAYHEAD_X, h);
+        ctx.moveTo(playheadX, 0);
+        ctx.lineTo(playheadX, h);
         ctx.stroke();
         ctx.restore();
     }
@@ -499,6 +508,7 @@ export class Timeline {
     private drawOverlay(): void {
         const ctx = this.overlayCtx;
         const w = this.overlayCanvas.width / (window.devicePixelRatio || 1);
+        const playheadX = this.getPlayheadX();
 
         ctx.fillStyle = "#0e0e1a";
         ctx.fillRect(0, 0, w, RULER_H);
@@ -507,12 +517,12 @@ export class Timeline {
         ctx.fillStyle = "rgba(255,255,255,0.08)";
         ctx.fillRect(0, RULER_H - 1, w, 1);
 
-        const visStart = Math.max(0, Math.floor((this.viewOffset - PLAYHEAD_X) / PX_PER_F));
+        const visStart = Math.max(0, Math.floor((this.viewOffset - playheadX) / PX_PER_F));
         const visEnd = Math.min(this.totalFrames, visStart + Math.ceil(w / PX_PER_F) + 2);
 
         // Ruler ticks + labels
         for (let f = visStart; f <= visEnd; f++) {
-            const sx = f * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const sx = f * PX_PER_F - this.viewOffset + playheadX;
             const isMajor = f % 10 === 0;
             const isMid = f % 5 === 0 && !isMajor;
 
@@ -530,7 +540,7 @@ export class Timeline {
         }
 
         // Playhead diamond
-        const px = PLAYHEAD_X;
+        const px = playheadX;
         ctx.fillStyle = CURRENT_FRAME_COLOR;
         ctx.beginPath();
         ctx.moveTo(px - 6, 0);
@@ -556,6 +566,7 @@ export class Timeline {
         const w = this.waveformCanvas.width / (window.devicePixelRatio || 1);
         const h = this.waveformCanvas.height / (window.devicePixelRatio || 1);
         const midY = h / 2;
+        const playheadX = this.getPlayheadX();
 
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = "#0c0c14";
@@ -564,11 +575,11 @@ export class Timeline {
         ctx.fillStyle = "rgba(255,255,255,0.05)";
         ctx.fillRect(0, h - 1, w, 1);
 
-        const visStart = Math.max(0, Math.floor((this.viewOffset - PLAYHEAD_X) / PX_PER_F));
+        const visStart = Math.max(0, Math.floor((this.viewOffset - playheadX) / PX_PER_F));
         const visEnd = Math.min(this.totalFrames, visStart + Math.ceil(w / PX_PER_F) + 2);
 
         for (let f = Math.ceil(visStart / 10) * 10; f <= visEnd; f += 10) {
-            const sx = f * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const sx = f * PX_PER_F - this.viewOffset + playheadX;
             ctx.fillStyle = "rgba(255,255,255,0.035)";
             ctx.fillRect(sx, 0, 1, h);
         }
@@ -585,7 +596,7 @@ export class Timeline {
             for (let frame = Math.max(0, visStart); frame <= peakEnd; frame += 1) {
                 const peak = Math.max(0, Math.min(1, this.waveformPeaks[frame] ?? 0));
                 const amp = Math.max(1, peak * (midY - 2));
-                const sx = Math.round(frame * PX_PER_F - this.viewOffset + PLAYHEAD_X) + 0.5;
+                const sx = Math.round(frame * PX_PER_F - this.viewOffset + playheadX) + 0.5;
                 ctx.moveTo(sx, midY - amp);
                 ctx.lineTo(sx, midY + amp);
             }
@@ -604,8 +615,8 @@ export class Timeline {
         ctx.strokeStyle = CURRENT_FRAME_GLOW;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(PLAYHEAD_X, 0);
-        ctx.lineTo(PLAYHEAD_X, h);
+        ctx.moveTo(playheadX, 0);
+        ctx.lineTo(playheadX, h);
         ctx.stroke();
         ctx.restore();
     }
@@ -712,7 +723,8 @@ export class Timeline {
     private pickFrameOnTrackFromX(track: KeyframeTrack, localX: number): number | null {
         if (track.frames.length === 0) return null;
 
-        const frameAtCursor = this.currentFrame + (localX - PLAYHEAD_X) / PX_PER_F;
+        const playheadX = this.getPlayheadX();
+        const frameAtCursor = this.currentFrame + (localX - playheadX) / PX_PER_F;
         const nearestFrame = Math.round(frameAtCursor);
         const idx = lowerBound(track.frames, nearestFrame);
 
@@ -723,7 +735,7 @@ export class Timeline {
         let bestFrame: number | null = null;
         let bestDist = Number.POSITIVE_INFINITY;
         for (const frame of candidates) {
-            const sx = frame * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const sx = frame * PX_PER_F - this.viewOffset + playheadX;
             const dist = Math.abs(sx - localX);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -852,6 +864,7 @@ export class Timeline {
     ): void {
         if (startIndex > endIndex) return;
 
+        const playheadX = this.getPlayheadX();
         const topY = rowTop + ROTATION_OVERLAY_PAD_Y;
         const bottomY = topY + innerHeight;
         ctx.save();
@@ -863,14 +876,14 @@ export class Timeline {
         ctx.beginPath();
 
         for (let i = startIndex; i <= endIndex; i += 1) {
-            const x = frames[i] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const x = frames[i] * PX_PER_F - this.viewOffset + playheadX;
             const y = this.getRotationOverlayValueY(values[i], topY, innerHeight, range);
             if (i === startIndex) {
                 ctx.moveTo(x, y);
                 continue;
             }
 
-            const prevX = frames[i - 1] * PX_PER_F - this.viewOffset + PLAYHEAD_X;
+            const prevX = frames[i - 1] * PX_PER_F - this.viewOffset + playheadX;
             const prevValue = values[i - 1];
             const nextValue = values[i];
 
