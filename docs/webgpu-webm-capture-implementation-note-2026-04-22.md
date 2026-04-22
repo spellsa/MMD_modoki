@@ -208,3 +208,16 @@ const paddedBytesPerRow = Math.ceil(rowBytes / 256) * 256;
 - [WebM 出力 現行仕様 / 実装](./webm-export-current-spec-2026-03-13.md)
 - [WebM 動画書き出し速度調査レポート](./webm-export-performance-analysis-2026-04-21.md)
 - [動画書き出し最適化案メモ](./video-export-optimization-options-2026-04-21.md)
+## 2026-04-22 追記: readback リング化
+
+`WebGPU copy` では、`mapAsync` を毎フレームその場で待たないように readback を 3 本リング化した。
+
+- 現フレームは `render -> flushFramebuffer -> copyTextureToBuffer -> queue.submit` まで先に進める
+- `GPUBuffer.mapAsync()` と CPU 側の `RGBA` pack は 1〜2 フレーム前の slot を後で回収する
+- `captureFrameAsync()` は直前に完了した slot を返し、ループ末尾では `flushPendingAsync()` で未回収分を drain する
+
+目的は、従来の
+
+- `render -> copy -> submit -> mapAsync待ち -> CPU pack -> encode`
+
+という直列経路を少しでも崩して、GPU 側 copy と CPU 側 readback / pack を重ねることにある。

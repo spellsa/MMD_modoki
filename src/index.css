@@ -2341,8 +2341,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .ui-busy-card {
-  min-width: 240px;
-  max-width: min(420px, 90vw);
+  width: min(420px, 90vw);
   padding: 10px 12px;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-md);
@@ -2358,6 +2357,9 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   color: var(--text-primary);
   line-height: 1.35;
   white-space: pre-line;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
 }
 
 #app.ui-export-lock #toolbar,
