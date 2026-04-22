@@ -208,16 +208,12 @@ const paddedBytesPerRow = Math.ceil(rowBytes / 256) * 256;
 - [WebM 出力 現行仕様 / 実装](./webm-export-current-spec-2026-03-13.md)
 - [WebM 動画書き出し速度調査レポート](./webm-export-performance-analysis-2026-04-21.md)
 - [動画書き出し最適化案メモ](./video-export-optimization-options-2026-04-21.md)
-## 2026-04-22 追記: readback リング化
+## 2026-04-22 追記: リング化の試行結果
 
-`WebGPU copy` では、`mapAsync` を毎フレームその場で待たないように readback を 3 本リング化した。
+`WebGPU copy` では一度 `mapAsync` の直列待ちを崩すために readback のリング化も試したが、実測では改善が薄かった。
 
-- 現フレームは `render -> flushFramebuffer -> copyTextureToBuffer -> queue.submit` まで先に進める
-- `GPUBuffer.mapAsync()` と CPU 側の `RGBA` pack は 1〜2 フレーム前の slot を後で回収する
-- `captureFrameAsync()` は直前に完了した slot を返し、ループ末尾では `flushPendingAsync()` で未回収分を drain する
+- `copy -> submit` を先に複数フレーム積む形は動作した
+- ただし長尺実測では `mapAsync` 待ち自体が依然として支配的だった
+- そのため現時点では、実装は再び単純な直列 readback に戻している
 
-目的は、従来の
-
-- `render -> copy -> submit -> mapAsync待ち -> CPU pack -> encode`
-
-という直列経路を少しでも崩して、GPU 側 copy と CPU 側 readback / pack を重ねることにある。
+結論として、2026-04-22 時点の主ボトルネックは `GPU -> CPU readback 完了待ち` であり、リング化だけでは決定打にならなかった。

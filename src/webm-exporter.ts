@@ -29,57 +29,12 @@ export interface WebmExportResult {
     outputBytes: number;
 }
 
-type ExportPerformanceStats = {
-    updateMsTotal: number;
-    drawMsTotal: number;
-    captureMsTotal: number;
-    encodeMsTotal: number;
-    captureRenderMsTotal: number;
-    captureFlushMsTotal: number;
-    captureCopySubmitMsTotal: number;
-    captureMapMsTotal: number;
-    capturePackMsTotal: number;
-    updateSamples: number;
-    drawSamples: number;
-    captureSamples: number;
-    encodeSamples: number;
-    captureDetailSamples: number;
-};
-
-type CaptureMetrics = {
-    renderMs: number;
-    flushMs: number;
-    copySubmitMs: number;
-    mapMs: number;
-    packMs: number;
-};
-
 const updateStatus = (
     callbacks: WebmExportCallbacks,
     message: string,
     phase: WebmExportPhase,
 ): void => {
     callbacks.onStatus?.(message, phase);
-};
-
-const formatMs = (value: number): string => `${value.toFixed(1)}ms`;
-
-const buildPerformanceSummary = (stats: ExportPerformanceStats): string => {
-    const updateAvg = stats.updateSamples > 0 ? stats.updateMsTotal / stats.updateSamples : 0;
-    const drawAvg = stats.drawSamples > 0 ? stats.drawMsTotal / stats.drawSamples : 0;
-    const captureAvg = stats.captureSamples > 0 ? stats.captureMsTotal / stats.captureSamples : 0;
-    const encodeAvg = stats.encodeSamples > 0 ? stats.encodeMsTotal / stats.encodeSamples : 0;
-    const base = `avg upd ${formatMs(updateAvg)} drw ${formatMs(drawAvg)} cap ${formatMs(captureAvg)} enc ${formatMs(encodeAvg)}`;
-    if (stats.captureDetailSamples <= 0) {
-        return base;
-    }
-
-    const captureRenderAvg = stats.captureRenderMsTotal / stats.captureDetailSamples;
-    const captureFlushAvg = stats.captureFlushMsTotal / stats.captureDetailSamples;
-    const captureCopySubmitAvg = stats.captureCopySubmitMsTotal / stats.captureDetailSamples;
-    const captureMapAvg = stats.captureMapMsTotal / stats.captureDetailSamples;
-    const capturePackAvg = stats.capturePackMsTotal / stats.captureDetailSamples;
-    return `${base}\ncap rt ${formatMs(captureRenderAvg)} fl ${formatMs(captureFlushAvg)} cp ${formatMs(captureCopySubmitAvg)} mp ${formatMs(captureMapAvg)} pk ${formatMs(capturePackAvg)}`;
 };
 
 const formatCaptureModeLabel = (mode: WebmCaptureMode): string => {
@@ -107,7 +62,6 @@ type ExportRuntimeInternals = {
 type ExportQueueItem = {
     frame: number;
     videoSample: VideoSample;
-    captureMetrics?: CaptureMetrics | null;
     release?: (() => void) | null;
 };
 
@@ -128,14 +82,7 @@ type FrameCapture = {
 
 const TIMELINE_FPS = 30;
 const CAPTURE_TIMEOUT_MS = 8_000;
-const CAPTURE_DETAIL_STATUS_INTERVAL = 12;
 const PROGRESS_STATUS_MIN_INTERVAL_MS = 200;
-const WEBGPU_READBACK_RING_SIZE = 8;
-const WEBGPU_READBACK_BATCH_THRESHOLD = 6;
-
-const shouldEmitCaptureDetailStatus = (frame: number): boolean => {
-    return frame < 3 || frame % CAPTURE_DETAIL_STATUS_INTERVAL === 0;
-};
 
 const waitForAnimationFrame = async (): Promise<void> => {
     await new Promise<void>((resolve) => {
@@ -232,14 +179,8 @@ const createReadPixelsFrameCapture = (
     return {
         modeLabel: "readpixels",
         captureFrameAsync: async (frame: number, timestamp: number, duration: number): Promise<ExportQueueItem | null> => {
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture readPixels stable | render", "encoding");
-            }
             renderTarget.resetRefreshCounter();
             renderTarget.render(true);
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture readPixels stable | readPixels", "encoding");
-            }
             const pixelPromise = renderTarget.readPixels(0, 0, null, true, false, 0, 0, width, height);
             if (!pixelPromise) {
                 return null;
@@ -251,9 +192,6 @@ const createReadPixelsFrameCapture = (
                 : new Uint8Array(pixelData.buffer, pixelData.byteOffset, pixelData.byteLength);
             const rgbaData = new Uint8Array(source);
             flipRgbaRowsInPlace(rgbaData, width, height);
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture readPixels stable | packed", "encoding");
-            }
             return {
                 frame,
                 videoSample: createRawRgbaVideoSample(rgbaData, width, height, timestamp, duration),
@@ -274,9 +212,6 @@ const createCanvasFrameCapture = (
     return {
         modeLabel: "canvas",
         captureFrameAsync: async (frame: number, timestamp: number, duration: number): Promise<ExportQueueItem> => {
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture canvas / VideoFrame | sample", "encoding");
-            }
             return {
                 frame,
                 videoSample: new VideoSample(canvas, {
@@ -317,33 +252,10 @@ const createWebGpuCopyFrameCapture = (
     const paddedBytesPerRow = Math.ceil(rowBytes / 256) * 256;
     const readBufferSize = paddedBytesPerRow * height;
     const readMapMode = typeof GPUMapMode !== "undefined" ? GPUMapMode.READ : 1;
-    const ringSize = WEBGPU_READBACK_RING_SIZE;
-    type PendingReadbackSlot = {
-        readBuffer: GPUBuffer;
-        frame: number;
-        timestamp: number;
-        duration: number;
-        mapPromise: Promise<void> | null;
-        captureMetrics: CaptureMetrics;
-    };
-    const freeSlots: PendingReadbackSlot[] = Array.from({ length: ringSize }, () => ({
-        readBuffer: device.createBuffer({
-            size: readBufferSize,
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-        }),
-        frame: -1,
-        timestamp: 0,
-        duration: 0,
-        mapPromise: null,
-        captureMetrics: {
-            renderMs: 0,
-            flushMs: 0,
-            copySubmitMs: 0,
-            mapMs: 0,
-            packMs: 0,
-        },
-    }));
-    const pendingSlots: PendingReadbackSlot[] = [];
+    const readBuffer = device.createBuffer({
+        size: readBufferSize,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
     const freeRgbaBuffers: Uint8Array[] = [];
 
     const acquireRgbaBuffer = (): Uint8Array => {
@@ -354,93 +266,12 @@ const createWebGpuCopyFrameCapture = (
         return new Uint8Array(rowBytes * height);
     };
 
-    const finalizeSlotAsync = async (slot: PendingReadbackSlot): Promise<ExportQueueItem> => {
-        try {
-            if (shouldEmitCaptureDetailStatus(slot.frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | mapAsync", "encoding");
-            }
-            if (!slot.mapPromise) {
-                throw new Error("WebGPU copy capture slot is missing mapAsync work");
-            }
-            const mapStart = performance.now();
-            await slot.mapPromise;
-            slot.captureMetrics.mapMs += performance.now() - mapStart;
-        } catch (error: unknown) {
-            const detail = error instanceof Error ? error.message : String(error);
-            throw new Error(`WebGPU copy capture stalled or failed: ${detail}. Try readPixels (stable) or canvas / VideoFrame.`);
-        }
-
-        try {
-            if (shouldEmitCaptureDetailStatus(slot.frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | mapped", "encoding");
-            }
-            const packStart = performance.now();
-            const mappedRange = slot.readBuffer.getMappedRange();
-            const mappedBytes = new Uint8Array(mappedRange);
-            const rgbaData = acquireRgbaBuffer();
-            for (let y = 0; y < height; y += 1) {
-                const sourceOffset = y * paddedBytesPerRow;
-                const targetOffset = (height - 1 - y) * rowBytes;
-                rgbaData.set(mappedBytes.subarray(sourceOffset, sourceOffset + rowBytes), targetOffset);
-            }
-            if (shouldEmitCaptureDetailStatus(slot.frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | packed", "encoding");
-            }
-            slot.captureMetrics.packMs += performance.now() - packStart;
-            return {
-                frame: slot.frame,
-                videoSample: createRawRgbaVideoSample(rgbaData, width, height, slot.timestamp, slot.duration),
-                captureMetrics: {
-                    renderMs: slot.captureMetrics.renderMs,
-                    flushMs: slot.captureMetrics.flushMs,
-                    copySubmitMs: slot.captureMetrics.copySubmitMs,
-                    mapMs: slot.captureMetrics.mapMs,
-                    packMs: slot.captureMetrics.packMs,
-                },
-                release: () => {
-                    freeRgbaBuffers.push(rgbaData);
-                },
-            };
-        } finally {
-            slot.readBuffer.unmap();
-            slot.frame = -1;
-            slot.timestamp = 0;
-            slot.duration = 0;
-            slot.mapPromise = null;
-            slot.captureMetrics.renderMs = 0;
-            slot.captureMetrics.flushMs = 0;
-            slot.captureMetrics.copySubmitMs = 0;
-            slot.captureMetrics.mapMs = 0;
-            slot.captureMetrics.packMs = 0;
-            freeSlots.push(slot);
-        }
-    };
-
     return {
         modeLabel: "webgpu-copy",
         captureFrameAsync: async (frame: number, timestamp: number, duration: number): Promise<ExportQueueItem | null> => {
-            let completedItem: ExportQueueItem | null = null;
-            if (freeSlots.length === 0 && pendingSlots.length > 0) {
-                const pendingSlot = pendingSlots.shift();
-                if (!pendingSlot) {
-                    throw new Error("WebGPU copy capture lost a pending readback slot");
-                }
-                completedItem = await finalizeSlotAsync(pendingSlot);
-            }
-
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | render", "encoding");
-            }
-            const captureRenderStart = performance.now();
             renderTarget.resetRefreshCounter();
             renderTarget.render(true);
-            const captureRenderMs = performance.now() - captureRenderStart;
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | flushFramebuffer", "encoding");
-            }
-            const captureFlushStart = performance.now();
             engine.flushFramebuffer();
-            const captureFlushMs = performance.now() - captureFlushStart;
 
             const internalTexture = renderTarget.getInternalTexture() as {
                 _hardwareTexture?: {
@@ -452,23 +283,6 @@ const createWebGpuCopyFrameCapture = (
                 return null;
             }
 
-            const slot = freeSlots.pop();
-            if (!slot) {
-                throw new Error("WebGPU copy capture has no free readback slots");
-            }
-            slot.frame = frame;
-            slot.timestamp = timestamp;
-            slot.duration = duration;
-            slot.captureMetrics.renderMs = captureRenderMs;
-            slot.captureMetrics.flushMs = captureFlushMs;
-            slot.captureMetrics.copySubmitMs = 0;
-            slot.captureMetrics.mapMs = 0;
-            slot.captureMetrics.packMs = 0;
-
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | encode copy command", "encoding");
-            }
-            const captureCopySubmitStart = performance.now();
             const commandEncoder = device.createCommandEncoder({});
             commandEncoder.copyTextureToBuffer(
                 {
@@ -477,7 +291,7 @@ const createWebGpuCopyFrameCapture = (
                     origin: { x: 0, y: 0, z: 0 },
                 },
                 {
-                    buffer: slot.readBuffer,
+                    buffer: readBuffer,
                     bytesPerRow: paddedBytesPerRow,
                     rowsPerImage: height,
                 },
@@ -487,49 +301,40 @@ const createWebGpuCopyFrameCapture = (
                     depthOrArrayLayers: 1,
                 },
             );
-            if (shouldEmitCaptureDetailStatus(frame)) {
-                updateStatus(callbacks, "Capture WebGPU copy | queue submit", "encoding");
-            }
             device.queue.submit([commandEncoder.finish()]);
-            slot.captureMetrics.copySubmitMs = performance.now() - captureCopySubmitStart;
-
-            slot.mapPromise = withTimeout(slot.readBuffer.mapAsync(readMapMode), CAPTURE_TIMEOUT_MS, "WebGPU copy capture");
-            pendingSlots.push(slot);
-
-            if (!completedItem && pendingSlots.length >= WEBGPU_READBACK_BATCH_THRESHOLD) {
-                const pendingSlot = pendingSlots.shift();
-                if (!pendingSlot) {
-                    throw new Error("WebGPU copy capture lost a pending readback slot");
-                }
-                completedItem = await finalizeSlotAsync(pendingSlot);
+            try {
+                await withTimeout(readBuffer.mapAsync(readMapMode), CAPTURE_TIMEOUT_MS, "WebGPU copy capture");
+            } catch (error: unknown) {
+                const detail = error instanceof Error ? error.message : String(error);
+                throw new Error(`WebGPU copy capture stalled or failed: ${detail}. Try readPixels (stable) or canvas / VideoFrame.`);
             }
 
-            return completedItem;
+            try {
+                const mappedRange = readBuffer.getMappedRange();
+                const mappedBytes = new Uint8Array(mappedRange);
+                const rgbaData = acquireRgbaBuffer();
+                for (let y = 0; y < height; y += 1) {
+                    const sourceOffset = y * paddedBytesPerRow;
+                    const targetOffset = (height - 1 - y) * rowBytes;
+                    rgbaData.set(mappedBytes.subarray(sourceOffset, sourceOffset + rowBytes), targetOffset);
+                }
+                return {
+                    frame,
+                    videoSample: createRawRgbaVideoSample(rgbaData, width, height, timestamp, duration),
+                    release: () => {
+                        freeRgbaBuffers.push(rgbaData);
+                    },
+                };
+            } finally {
+                readBuffer.unmap();
+            }
         },
         flushPendingAsync: async (): Promise<ExportQueueItem[]> => {
-            const completed: ExportQueueItem[] = [];
-            while (pendingSlots.length > 0) {
-                const pendingSlot = pendingSlots.shift();
-                if (!pendingSlot) {
-                    break;
-                }
-                completed.push(await finalizeSlotAsync(pendingSlot));
-            }
-            return completed;
+            return [];
         },
         dispose: () => {
             renderTarget.dispose();
-            for (const slot of freeSlots) {
-                slot.readBuffer.destroy();
-            }
-            for (const slot of pendingSlots) {
-                try {
-                    slot.readBuffer.unmap();
-                } catch {
-                    // ignore cleanup failures for still-pending buffers
-                }
-                slot.readBuffer.destroy();
-            }
+            readBuffer.destroy();
             freeRgbaBuffers.length = 0;
         },
     };
@@ -896,14 +701,13 @@ export async function runWebmExportJob(
             target,
         });
         const captureModeLabel = formatCaptureModeLabel(frameCapture.modeLabel);
-        let encoderConfigSummary = `${codec}/${hardwareAcceleration} capture=${captureModeLabel}`;
         const videoSource = new VideoSampleSource({
             codec,
             bitrate: videoBitrate,
             keyFrameInterval: 10,
             hardwareAcceleration,
-            onEncoderConfig: (config) => {
-                encoderConfigSummary = `${config.codec} ${config.width}x${config.height} ${config.hardwareAcceleration ?? "no-preference"} capture=${captureModeLabel}`;
+            onEncoderConfig: () => {
+                // Keep encoder config internal; do not expose it in user-facing progress text.
             },
         });
 
@@ -913,22 +717,6 @@ export async function runWebmExportJob(
         let encodedFrames = 0;
         let capturedFrames = 0;
         let lastProgressStatusAt = 0;
-        const performanceStats: ExportPerformanceStats = {
-            updateMsTotal: 0,
-            drawMsTotal: 0,
-            captureMsTotal: 0,
-            encodeMsTotal: 0,
-            captureRenderMsTotal: 0,
-            captureFlushMsTotal: 0,
-            captureCopySubmitMsTotal: 0,
-            captureMapMsTotal: 0,
-            capturePackMsTotal: 0,
-            updateSamples: 0,
-            drawSamples: 0,
-            captureSamples: 0,
-            encodeSamples: 0,
-            captureDetailSamples: 0,
-        };
 
         const reportProgress = (frame: number): void => {
             const now = performance.now();
@@ -942,7 +730,7 @@ export async function runWebmExportJob(
             lastProgressStatusAt = now;
             updateStatus(
                 callbacks,
-                `Capture ${captureModeLabel} | Exporting ${encodedFrames}/${totalFrames} encoded (${capturedFrames}/${totalFrames} captured, q=${queue.length}) ${buildPerformanceSummary(performanceStats)} ${encoderConfigSummary}`,
+                `WebM出力中 | ${captureModeLabel} | ${encodedFrames}/${totalFrames} フレーム`,
                 "encoding",
             );
             callbacks.onProgress?.(encodedFrames, totalFrames, frame, capturedFrames);
@@ -958,10 +746,7 @@ export async function runWebmExportJob(
                 }
 
                 try {
-                    const encodeStart = performance.now();
                     await videoSource.add(item.videoSample);
-                    performanceStats.encodeMsTotal += performance.now() - encodeStart;
-                    performanceStats.encodeSamples += 1;
                 } finally {
                     item.videoSample.close();
                     item.release?.();
@@ -995,11 +780,7 @@ export async function runWebmExportJob(
                 audioSourceClosed = true;
             }
 
-            const videoPathLabel = hardwareAcceleration === "no-preference"
-                ? `${codec} no-preference`
-                : codec;
-            const codecLabel = audioCodec ? `${videoPathLabel} + ${audioCodec}` : videoPathLabel;
-            updateStatus(callbacks, `Encoding ${totalFrames} frame(s) to WebM (${codecLabel}, capture=${captureModeLabel})... ${encoderConfigSummary}`, "encoding");
+            updateStatus(callbacks, `WebM出力を開始します | ${captureModeLabel}`, "encoding");
             const consumerPromise = consumeQueue();
 
             try {
@@ -1017,25 +798,15 @@ export async function runWebmExportJob(
                         startFrame + Math.round((outputFrameIndex * TIMELINE_FPS) / fps),
                     );
                     if (!playbackStarted) {
-                        const drawStart = performance.now();
                         mmdManager.renderOnce(0);
-                        performanceStats.drawMsTotal += performance.now() - drawStart;
-                        performanceStats.drawSamples += 1;
                         playbackStarted = true;
                     } else {
-                        const updateStart = performance.now();
                         await exportRuntimeInternals.mmdRuntime.playAnimation();
-                        performanceStats.updateMsTotal += performance.now() - updateStart;
-                        performanceStats.updateSamples += 1;
 
-                        const drawStart = performance.now();
                         mmdManager.renderOnce(1000 / fps);
-                        performanceStats.drawMsTotal += performance.now() - drawStart;
-                        performanceStats.drawSamples += 1;
                         exportRuntimeInternals.mmdRuntime.pauseAnimation();
                     }
 
-                    const captureStart = performance.now();
                     let capturedItem: ExportQueueItem | null = null;
                     try {
                         capturedItem = await frameCapture.captureFrameAsync(frame, outputFrameIndex / fps, frameDuration);
@@ -1044,45 +815,23 @@ export async function runWebmExportJob(
                             ? error
                             : new Error(`Failed to capture frame ${frame}: ${String(error)}`);
                     }
-                    performanceStats.captureMsTotal += performance.now() - captureStart;
-                    performanceStats.captureSamples += 1;
                     if (capturedItem) {
                         queue.push(capturedItem);
                         capturedFrames += 1;
-                        if (capturedItem.captureMetrics) {
-                            performanceStats.captureRenderMsTotal += capturedItem.captureMetrics.renderMs;
-                            performanceStats.captureFlushMsTotal += capturedItem.captureMetrics.flushMs;
-                            performanceStats.captureCopySubmitMsTotal += capturedItem.captureMetrics.copySubmitMs;
-                            performanceStats.captureMapMsTotal += capturedItem.captureMetrics.mapMs;
-                            performanceStats.capturePackMsTotal += capturedItem.captureMetrics.packMs;
-                            performanceStats.captureDetailSamples += 1;
-                        }
                     }
                 }
             } finally {
                 if (!fatalError) {
-                    const drainStart = performance.now();
                     try {
                         const pendingItems = await frameCapture.flushPendingAsync();
                         for (const pendingItem of pendingItems) {
                             queue.push(pendingItem);
                             capturedFrames += 1;
-                            if (pendingItem.captureMetrics) {
-                                performanceStats.captureRenderMsTotal += pendingItem.captureMetrics.renderMs;
-                                performanceStats.captureFlushMsTotal += pendingItem.captureMetrics.flushMs;
-                                performanceStats.captureCopySubmitMsTotal += pendingItem.captureMetrics.copySubmitMs;
-                                performanceStats.captureMapMsTotal += pendingItem.captureMetrics.mapMs;
-                                performanceStats.capturePackMsTotal += pendingItem.captureMetrics.packMs;
-                                performanceStats.captureDetailSamples += 1;
-                            }
                         }
                     } catch (error: unknown) {
                         fatalError = error instanceof Error
                             ? error
                             : new Error(`Failed to flush pending capture frames: ${String(error)}`);
-                    } finally {
-                        performanceStats.captureMsTotal += performance.now() - drainStart;
-                        performanceStats.captureSamples += 1;
                     }
                 }
                 producerDone = true;
