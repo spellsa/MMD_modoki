@@ -135,6 +135,7 @@ type InterpolationDragState = {
     channelId: string;
     pointIndex: 1 | 2;
     changed: boolean;
+    dirtyMarked: boolean;
 };
 
 type MmdManagerInternalView = {
@@ -148,7 +149,7 @@ type MmdManagerInternalView = {
 export class UIController {
     private static readonly DEBUG_KEYFRAME_FLOW = false;
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
-    private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 90;
+    private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 120;
     private static readonly TIMELINE_WAVEFORM_FPS = 30;
     private mmdManager: MmdManager;
     private timeline: Timeline;
@@ -3721,7 +3722,7 @@ export class UIController {
         event.preventDefault();
         event.stopPropagation();
 
-        this.interpolationDragState = { channelId, pointIndex, changed: false };
+        this.interpolationDragState = { channelId, pointIndex, changed: false, dirtyMarked: false };
         const onMove = (moveEvent: PointerEvent) => this.handleInterpolationCurveDragMove(moveEvent, svg);
         const onUp = () => {
             window.removeEventListener("pointermove", onMove);
@@ -3730,6 +3731,7 @@ export class UIController {
             this.interpolationDragState = null;
             if (changed) {
                 this.refreshRuntimeAnimationFromInterpolationEdit();
+                this.updateTimelineEditState();
             }
         };
 
@@ -3770,9 +3772,64 @@ export class UIController {
         }
 
         dragState.changed = true;
-        this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
-        this.updateSectionKeyframeButtons();
-        this.updateTimelineEditState();
+        if (!dragState.dirtyMarked) {
+            dragState.dirtyMarked = true;
+            this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
+            this.updateSectionKeyframeButtons();
+        }
+        this.updateInterpolationCurveDragVisuals(svg, dragState.channelId);
+    }
+
+    private updateInterpolationCurveDragVisuals(svg: SVGSVGElement, channelId: string): void {
+        const binding = this.interpolationChannelBindings.get(channelId);
+        if (!binding) return;
+
+        const x1 = binding.values[binding.offset + 0];
+        const x2 = binding.values[binding.offset + 1];
+        const y1 = binding.values[binding.offset + 2];
+        const y2 = binding.values[binding.offset + 3];
+
+        const { left, right, top, bottom, innerWidth, innerHeight } =
+            this.getInterpolationCurveGeometry();
+
+        const px1 = left + (x1 / 127) * innerWidth;
+        const px2 = left + (x2 / 127) * innerWidth;
+        const py1 = bottom - (y1 / 127) * innerHeight;
+        const py2 = bottom - (y2 / 127) * innerHeight;
+
+        const svgElements = Array.from(svg.querySelectorAll<SVGElement>("[data-channel-id]"));
+        for (const element of svgElements) {
+            if (element.dataset.channelId !== channelId) continue;
+            switch (element.dataset.role) {
+                case "handle-line-start":
+                    element.setAttribute("x2", String(px1));
+                    element.setAttribute("y2", String(py1));
+                    break;
+                case "handle-line-end":
+                    element.setAttribute("x1", String(px2));
+                    element.setAttribute("y1", String(py2));
+                    break;
+                case "curve-path":
+                    element.setAttribute("d", `M ${left} ${bottom} C ${px1} ${py1}, ${px2} ${py2}, ${right} ${top}`);
+                    break;
+                case "point":
+                case "hit-area":
+                    if (element.dataset.pointIndex === "1") {
+                        element.setAttribute("cx", String(px1));
+                        element.setAttribute("cy", String(py1));
+                    } else if (element.dataset.pointIndex === "2") {
+                        element.setAttribute("cx", String(px2));
+                        element.setAttribute("cy", String(py2));
+                    }
+                    break;
+            }
+        }
+
+        const valueLabels = Array.from(this.interpolationCurveList.querySelectorAll<HTMLElement>(".interp-curve-value"));
+        const valueLabel = valueLabels.find((element) => element.dataset.channelId === channelId);
+        if (valueLabel) {
+            valueLabel.textContent = `${x1},${x2},${y1},${y2}`;
+        }
     }
 
     private refreshRuntimeAnimationFromInterpolationEdit(): void {
@@ -3941,6 +3998,7 @@ export class UIController {
 
             const value = document.createElement("span");
             value.className = "interp-curve-value";
+            value.dataset.channelId = channel.id;
             value.textContent = `${channel.curve.x1},${channel.curve.x2},${channel.curve.y1},${channel.curve.y2}`;
 
             item.appendChild(name);
@@ -4001,9 +4059,36 @@ export class UIController {
             const channelPy1 = bottom - (curve.y1 / 127) * innerHeight;
             const channelPy2 = bottom - (curve.y2 / 127) * innerHeight;
             const color = this.getCurveChannelColor(channel);
+            const editable = channel.available && this.isInterpolationChannelEditable(channel.id);
+
+            const handleLine1 = document.createElementNS(svgNs, "line");
+            handleLine1.classList.add("interp-curve-handle-line");
+            handleLine1.dataset.channelId = channel.id;
+            handleLine1.dataset.role = "handle-line-start";
+            handleLine1.setAttribute("x1", String(left));
+            handleLine1.setAttribute("y1", String(bottom));
+            handleLine1.setAttribute("x2", String(channelPx1));
+            handleLine1.setAttribute("y2", String(channelPy1));
+            handleLine1.style.stroke = color;
+
+            const handleLine2 = document.createElementNS(svgNs, "line");
+            handleLine2.classList.add("interp-curve-handle-line");
+            handleLine2.dataset.channelId = channel.id;
+            handleLine2.dataset.role = "handle-line-end";
+            handleLine2.setAttribute("x1", String(channelPx2));
+            handleLine2.setAttribute("y1", String(channelPy2));
+            handleLine2.setAttribute("x2", String(right));
+            handleLine2.setAttribute("y2", String(top));
+            handleLine2.style.stroke = color;
+            if (!channel.available) {
+                handleLine1.classList.add("interp-curve-handle-line--muted");
+                handleLine2.classList.add("interp-curve-handle-line--muted");
+            }
 
             const path = document.createElementNS(svgNs, "path");
             path.classList.add("interp-curve-path");
+            path.dataset.channelId = channel.id;
+            path.dataset.role = "curve-path";
             path.setAttribute("d", `M ${left} ${bottom} C ${channelPx1} ${channelPy1}, ${channelPx2} ${channelPy2}, ${right} ${top}`);
             path.setAttribute("stroke", color);
             if (!channel.available) {
@@ -4013,40 +4098,88 @@ export class UIController {
 
             const p1 = document.createElementNS(svgNs, "circle");
             p1.classList.add("interp-curve-point");
+            p1.dataset.channelId = channel.id;
+            p1.dataset.role = "point";
+            p1.dataset.pointIndex = "1";
             p1.setAttribute("cx", String(channelPx1));
             p1.setAttribute("cy", String(channelPy1));
-            p1.setAttribute("r", "2");
-            p1.setAttribute("fill", color);
+            p1.setAttribute("r", editable ? "3.3" : "2.7");
             if (!channel.available) {
                 p1.setAttribute("opacity", "0.5");
-            } else if (this.isInterpolationChannelEditable(channel.id)) {
+            } else if (editable) {
                 p1.classList.add("interp-curve-point--editable");
-                p1.style.cursor = "grab";
-                p1.addEventListener("pointerdown", (event) =>
-                    this.startInterpolationCurveDrag(event, channel.id, 1)
-                );
+                p1.style.fill = color;
             }
 
             const p2 = document.createElementNS(svgNs, "circle");
             p2.classList.add("interp-curve-point");
+            p2.dataset.channelId = channel.id;
+            p2.dataset.role = "point";
+            p2.dataset.pointIndex = "2";
             p2.setAttribute("cx", String(channelPx2));
             p2.setAttribute("cy", String(channelPy2));
-            p2.setAttribute("r", "2");
-            p2.setAttribute("fill", color);
+            p2.setAttribute("r", editable ? "3.3" : "2.7");
             if (!channel.available) {
                 p2.setAttribute("opacity", "0.5");
-            } else if (this.isInterpolationChannelEditable(channel.id)) {
+            } else if (editable) {
                 p2.classList.add("interp-curve-point--editable");
+                p2.style.fill = color;
+            }
+
+            const p1Hit = document.createElementNS(svgNs, "circle");
+            p1Hit.classList.add("interp-curve-hit-area");
+            p1Hit.dataset.channelId = channel.id;
+            p1Hit.dataset.role = "hit-area";
+            p1Hit.dataset.pointIndex = "1";
+            p1Hit.setAttribute("cx", String(channelPx1));
+            p1Hit.setAttribute("cy", String(channelPy1));
+            p1Hit.setAttribute("r", editable ? "8" : "6");
+
+            const p2Hit = document.createElementNS(svgNs, "circle");
+            p2Hit.classList.add("interp-curve-hit-area");
+            p2Hit.dataset.channelId = channel.id;
+            p2Hit.dataset.role = "hit-area";
+            p2Hit.dataset.pointIndex = "2";
+            p2Hit.setAttribute("cx", String(channelPx2));
+            p2Hit.setAttribute("cy", String(channelPy2));
+            p2Hit.setAttribute("r", editable ? "8" : "6");
+
+            if (editable) {
+                p1.style.cursor = "grab";
                 p2.style.cursor = "grab";
-                p2.addEventListener("pointerdown", (event) =>
+                p1Hit.style.cursor = "grab";
+                p2Hit.style.cursor = "grab";
+                p1Hit.addEventListener("pointerdown", (event) =>
+                    this.startInterpolationCurveDrag(event, channel.id, 1)
+                );
+                p2Hit.addEventListener("pointerdown", (event) =>
                     this.startInterpolationCurveDrag(event, channel.id, 2)
                 );
             }
 
+            svg.appendChild(handleLine1);
+            svg.appendChild(handleLine2);
             svg.appendChild(path);
             svg.appendChild(p1);
             svg.appendChild(p2);
+            svg.appendChild(p1Hit);
+            svg.appendChild(p2Hit);
         }
+
+        const startAnchor = document.createElementNS(svgNs, "circle");
+        startAnchor.classList.add("interp-curve-anchor");
+        startAnchor.setAttribute("cx", String(left));
+        startAnchor.setAttribute("cy", String(bottom));
+        startAnchor.setAttribute("r", "1.8");
+
+        const endAnchor = document.createElementNS(svgNs, "circle");
+        endAnchor.classList.add("interp-curve-anchor");
+        endAnchor.setAttribute("cx", String(right));
+        endAnchor.setAttribute("cy", String(top));
+        endAnchor.setAttribute("r", "1.8");
+
+        svg.appendChild(startAnchor);
+        svg.appendChild(endAnchor);
         return svg;
     }
 

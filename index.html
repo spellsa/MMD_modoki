@@ -417,17 +417,32 @@
           <div class="model-info interpolation-info">
             <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.target">対象</span><span id="interp-track-name" class="info-value">-</span></div>
             <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.frame">フレーム</span><span id="interp-frame" class="info-value">-</span></div>
-            <div class="interpolation-meta">
-              <div class="info-row">
-                <span class="info-label" data-i18n="label.type">種別</span>
+            <div class="interpolation-meta interpolation-meta--top">
+              <div class="interp-type-row">
+                <span class="info-label interpolation-side-label" data-i18n="label.type">種別</span>
                 <select id="interp-type" class="interp-type-select" disabled>
                   <option value="__all__" data-i18n="option.all">全て</option>
                 </select>
               </div>
               <div class="info-row interpolation-row--hidden"><span class="info-label" data-i18n="label.status">状態</span><span id="interp-status" class="info-value" data-i18n="status.preparing">準備中</span></div>
             </div>
-            <div id="interp-curve-list" class="interp-curve-list">
-              <div class="interp-curve-empty" data-i18n="empty.selectTrackToShow">トラックを選択すると表示されます</div>
+            <div class="interpolation-workbench">
+              <div id="interp-curve-list" class="interp-curve-list">
+                <div class="interp-curve-empty" data-i18n="empty.selectTrackToShow">トラックを選択すると表示されます</div>
+              </div>
+              <div class="interpolation-side">
+                <div class="interpolation-meta interpolation-meta--side">
+                  <label class="interp-auto-setting" for="interp-auto-setting">
+                    <input id="interp-auto-setting" type="checkbox">
+                    <span>自動設定</span>
+                  </label>
+                </div>
+                <div class="interp-placeholder-actions">
+                  <button class="info-action-btn interp-placeholder-btn" type="button">コピー</button>
+                  <button class="info-action-btn interp-placeholder-btn" type="button">ペースト</button>
+                  <button class="info-action-btn interp-placeholder-btn" type="button">線形</button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
