@@ -75,9 +75,9 @@ function ensureStandaloneLensBlurShader(): void {
                 float computeHighlightMask(vec3 color) {
                     float luminance = dot(color, vec3(0.2125, 0.7154, 0.0721));
                     float luminanceThreshold = highlightThreshold > 1.0
-                        ? 0.94 + 0.01 * highlightThreshold
-                        : 0.5 + 0.44 * highlightThreshold;
-                    float knee = max(0.04, (1.0 - clamp(luminanceThreshold, 0.0, 0.995)) * 0.75);
+                        ? 0.92 + 0.015 * (highlightThreshold - 1.0)
+                        : 0.42 + 0.38 * highlightThreshold;
+                    float knee = max(0.05, (1.0 - clamp(luminanceThreshold, 0.0, 0.995)) * 0.9);
                     float softMask = smoothstep(
                         max(0.0, luminanceThreshold - knee),
                         min(1.0, luminanceThreshold + knee * 3.6),
@@ -110,6 +110,18 @@ function ensureStandaloneLensBlurShader(): void {
                     return vec2(dir.x * c - dir.y * s, dir.x * s + dir.y * c);
                 }
 
+                float computeBackgroundBleedSuppression(float currentDistance, float sampleDistance) {
+                    float backgroundDelta = max(0.0, sampleDistance - currentDistance);
+                    float keep = 1.0 - smoothstep(40.0, 360.0, backgroundDelta);
+                    return 0.18 + 0.82 * keep;
+                }
+
+                float computeEdgeBlendBackAmount(float silhouetteSuppression) {
+                    float edgePresence = 1.0 - silhouetteSuppression;
+                    float edgeBlend = smoothstep(0.08, 0.55, edgePresence);
+                    return edgeBlend * (0.55 + 0.2 * blurStrength);
+                }
+
                 vec3 samplePrefilteredColor(vec2 uv) {
                     vec2 prefilterStep = texelSize * (0.7 + 0.9 * blurStrength);
                     vec3 color = texture2D(textureSampler, uv).rgb * 0.28;
@@ -120,7 +132,7 @@ function ensureStandaloneLensBlurShader(): void {
                     return color;
                 }
 
-                vec3 accumulateBokeh(vec2 uv, float currentCoc, float currentMask) {
+                vec3 accumulateBokeh(vec2 uv, float currentDistance, float currentCoc, float currentMask) {
                     const int DIR_COUNT = 16;
                     vec2 dirs[DIR_COUNT];
                     dirs[0] = vec2(1.0, 0.0);
@@ -170,11 +182,13 @@ function ensureStandaloneLensBlurShader(): void {
                             sampleOffset += tangentDir * texelSize * (0.18 + 0.35 * blurStrength) * (sampleRadiusJitter - 1.0);
                             vec2 sampleUv = clamp(uv + sampleOffset, vec2(0.001), vec2(0.999));
                             float sampleDepth = texture2D(depthSampler, sampleUv).r;
+                            float sampleDistance = computePixelDistance(sampleDepth);
                             float sampleCoc = computeCoC(sampleDepth);
                             float sampleMask = computeCocMask(sampleCoc);
                             vec3 sampleColor = samplePrefilteredColor(sampleUv);
                             float sampleHighlight = computeHighlightMask(sampleColor);
-                            float sampleWeight = baseWeight * sampleHighlight * sampleCoc * sampleMask * currentMask;
+                            float depthSuppression = computeBackgroundBleedSuppression(currentDistance, sampleDistance);
+                            float sampleWeight = baseWeight * sampleHighlight * sampleCoc * sampleMask * currentMask * depthSuppression;
                             accumulated += sampleColor * sampleWeight;
                             totalWeight += sampleWeight;
                         }
@@ -183,18 +197,18 @@ function ensureStandaloneLensBlurShader(): void {
                     return accumulated / totalWeight;
                 }
 
-                vec3 smoothBokeh(vec2 uv, float currentCoc, float currentMask, vec3 centerBokeh) {
+                vec3 smoothBokeh(vec2 uv, float currentDistance, float currentCoc, float currentMask, vec3 centerBokeh) {
                     vec2 softRadius = texelSize * (1.15 + 5.0 * blurStrength) * max(0.62, currentCoc);
                     vec2 diagRadius = softRadius * 0.78;
                     vec3 smoothed = centerBokeh * 0.16;
-                    smoothed += accumulateBokeh(clamp(uv + vec2(softRadius.x, 0.0), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed += accumulateBokeh(clamp(uv - vec2(softRadius.x, 0.0), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed += accumulateBokeh(clamp(uv + vec2(0.0, softRadius.y), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed += accumulateBokeh(clamp(uv - vec2(0.0, softRadius.y), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed += accumulateBokeh(clamp(uv + vec2(diagRadius.x, diagRadius.y), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.07;
-                    smoothed += accumulateBokeh(clamp(uv + vec2(-diagRadius.x, diagRadius.y), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.07;
-                    smoothed += accumulateBokeh(clamp(uv + vec2(diagRadius.x, -diagRadius.y), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.07;
-                    smoothed += accumulateBokeh(clamp(uv - vec2(diagRadius.x, diagRadius.y), vec2(0.001), vec2(0.999)), currentCoc, currentMask) * 0.07;
+                    smoothed += accumulateBokeh(clamp(uv + vec2(softRadius.x, 0.0), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed += accumulateBokeh(clamp(uv - vec2(softRadius.x, 0.0), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed += accumulateBokeh(clamp(uv + vec2(0.0, softRadius.y), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed += accumulateBokeh(clamp(uv - vec2(0.0, softRadius.y), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed += accumulateBokeh(clamp(uv + vec2(diagRadius.x, diagRadius.y), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
+                    smoothed += accumulateBokeh(clamp(uv + vec2(-diagRadius.x, diagRadius.y), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
+                    smoothed += accumulateBokeh(clamp(uv + vec2(diagRadius.x, -diagRadius.y), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
+                    smoothed += accumulateBokeh(clamp(uv - vec2(diagRadius.x, diagRadius.y), vec2(0.001), vec2(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
                     return smoothed;
                 }
 
@@ -209,15 +223,19 @@ function ensureStandaloneLensBlurShader(): void {
                     float currentDistance = computePixelDistance(depthMetric);
                     float coc = computeCoC(depthMetric);
                     float cocMask = computeCocMask(coc);
-                    cocMask *= computeSilhouetteSuppression(vUV, currentDistance);
+                    float silhouetteSuppression = computeSilhouetteSuppression(vUV, currentDistance);
+                    cocMask *= silhouetteSuppression;
                     if (cocMask <= 0.0001) {
                         gl_FragColor = baseColor;
                         return;
                     }
 
-                    vec3 bokeh = smoothBokeh(vUV, coc, cocMask, accumulateBokeh(vUV, coc, cocMask));
+                    vec3 bokeh = smoothBokeh(vUV, currentDistance, coc, cocMask, accumulateBokeh(vUV, currentDistance, coc, cocMask));
                     float addScale = highlightGain * (0.008 + 0.014 * blurStrength) * cocMask;
-                    gl_FragColor = vec4(baseColor.rgb + bokeh * addScale, baseColor.a);
+                    vec3 finalRgb = baseColor.rgb + bokeh * addScale;
+                    float edgeBlendBack = computeEdgeBlendBackAmount(silhouetteSuppression);
+                    finalRgb = mix(finalRgb, baseColor.rgb, clamp(edgeBlendBack, 0.0, 0.9));
+                    gl_FragColor = vec4(finalRgb, baseColor.a);
                 }
             `;
     }
@@ -254,11 +272,11 @@ function ensureStandaloneLensBlurShader(): void {
 
                 fn computeHighlightMask(color: vec3f) -> f32 {
                     let luminance = dot(color, vec3f(0.2125, 0.7154, 0.0721));
-                    var luminanceThreshold = 0.5 + 0.44 * uniforms.highlightThreshold;
+                    var luminanceThreshold = 0.42 + 0.38 * uniforms.highlightThreshold;
                     if (uniforms.highlightThreshold > 1.0) {
-                        luminanceThreshold = 0.94 + 0.01 * uniforms.highlightThreshold;
+                        luminanceThreshold = 0.92 + 0.015 * (uniforms.highlightThreshold - 1.0);
                     }
-                    let knee = max(0.04, (1.0 - clamp(luminanceThreshold, 0.0, 0.995)) * 0.75);
+                    let knee = max(0.05, (1.0 - clamp(luminanceThreshold, 0.0, 0.995)) * 0.9);
                     let softMask = smoothstep(
                         max(0.0, luminanceThreshold - knee),
                         min(1.0, luminanceThreshold + knee * 3.6),
@@ -289,6 +307,18 @@ function ensureStandaloneLensBlurShader(): void {
                     let s = sin(angle);
                     let c = cos(angle);
                     return vec2f(dir.x * c - dir.y * s, dir.x * s + dir.y * c);
+                }
+
+                fn computeBackgroundBleedSuppression(currentDistance: f32, sampleDistance: f32) -> f32 {
+                    let backgroundDelta = max(0.0, sampleDistance - currentDistance);
+                    let keep = 1.0 - smoothstep(40.0, 360.0, backgroundDelta);
+                    return 0.18 + 0.82 * keep;
+                }
+
+                fn computeEdgeBlendBackAmount(silhouetteSuppression: f32) -> f32 {
+                    let edgePresence = 1.0 - silhouetteSuppression;
+                    let edgeBlend = smoothstep(0.08, 0.55, edgePresence);
+                    return edgeBlend * (0.55 + 0.2 * uniforms.blurStrength);
                 }
 
                 fn samplePrefilteredColor(uv: vec2f) -> vec3f {
@@ -338,7 +368,7 @@ function ensureStandaloneLensBlurShader(): void {
                     }
                 }
 
-                fn accumulateBokeh(uv: vec2f, currentCoc: f32, currentMask: f32) -> vec3f {
+                fn accumulateBokeh(uv: vec2f, currentDistance: f32, currentCoc: f32, currentMask: f32) -> vec3f {
                     let radiusPixels = (1.2 + 10.5 * uniforms.blurStrength) * currentCoc;
                     let baseRadius = uniforms.texelSize * radiusPixels;
                     var accumulated = vec3f(0.0);
@@ -359,11 +389,13 @@ function ensureStandaloneLensBlurShader(): void {
                             sampleOffset = sampleOffset + tangentDir * uniforms.texelSize * (0.18 + 0.35 * uniforms.blurStrength) * (sampleRadiusJitter - 1.0);
                             let sampleUv = clamp(uv + sampleOffset, vec2f(0.001), vec2f(0.999));
                             let sampleDepth = textureSampleLevel(depthSampler, depthSamplerSampler, sampleUv, 0.0).r;
+                            let sampleDistance = computePixelDistance(sampleDepth);
                             let sampleCoc = computeCoC(sampleDepth);
                             let sampleMask = computeCocMask(sampleCoc);
                             let sampleColor = samplePrefilteredColor(sampleUv);
                             let sampleHighlight = computeHighlightMask(sampleColor);
-                            let sampleWeight = baseWeight * sampleHighlight * sampleCoc * sampleMask * currentMask;
+                            let depthSuppression = computeBackgroundBleedSuppression(currentDistance, sampleDistance);
+                            let sampleWeight = baseWeight * sampleHighlight * sampleCoc * sampleMask * currentMask * depthSuppression;
                             accumulated = accumulated + sampleColor * sampleWeight;
                             totalWeight = totalWeight + sampleWeight;
                         }
@@ -372,18 +404,18 @@ function ensureStandaloneLensBlurShader(): void {
                     return accumulated / totalWeight;
                 }
 
-                fn smoothBokeh(uv: vec2f, currentCoc: f32, currentMask: f32, centerBokeh: vec3f) -> vec3f {
+                fn smoothBokeh(uv: vec2f, currentDistance: f32, currentCoc: f32, currentMask: f32, centerBokeh: vec3f) -> vec3f {
                     let softRadius = uniforms.texelSize * (1.15 + 5.0 * uniforms.blurStrength) * max(0.62, currentCoc);
                     let diagRadius = softRadius * 0.78;
                     var smoothed = centerBokeh * 0.16;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(softRadius.x, 0.0), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv - vec2f(softRadius.x, 0.0), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(0.0, softRadius.y), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv - vec2f(0.0, softRadius.y), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.14;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(diagRadius.x, diagRadius.y), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.07;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(-diagRadius.x, diagRadius.y), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.07;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(diagRadius.x, -diagRadius.y), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.07;
-                    smoothed = smoothed + accumulateBokeh(clamp(uv - vec2f(diagRadius.x, diagRadius.y), vec2f(0.001), vec2f(0.999)), currentCoc, currentMask) * 0.07;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(softRadius.x, 0.0), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv - vec2f(softRadius.x, 0.0), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(0.0, softRadius.y), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv - vec2f(0.0, softRadius.y), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.14;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(diagRadius.x, diagRadius.y), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(-diagRadius.x, diagRadius.y), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv + vec2f(diagRadius.x, -diagRadius.y), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
+                    smoothed = smoothed + accumulateBokeh(clamp(uv - vec2f(diagRadius.x, diagRadius.y), vec2f(0.001), vec2f(0.999)), currentDistance, currentCoc, currentMask) * 0.07;
                     return smoothed;
                 }
 
@@ -402,12 +434,16 @@ function ensureStandaloneLensBlurShader(): void {
                         let currentDistance = computePixelDistance(depthMetric);
                         let coc = computeCoC(depthMetric);
                         var cocMask = computeCocMask(coc);
-                        cocMask = cocMask * computeSilhouetteSuppression(input.vUV, currentDistance);
+                        let silhouetteSuppression = computeSilhouetteSuppression(input.vUV, currentDistance);
+                        cocMask = cocMask * silhouetteSuppression;
 
                         if (cocMask > 0.0001) {
-                            let bokeh = smoothBokeh(input.vUV, coc, cocMask, accumulateBokeh(input.vUV, coc, cocMask));
+                            let bokeh = smoothBokeh(input.vUV, currentDistance, coc, cocMask, accumulateBokeh(input.vUV, currentDistance, coc, cocMask));
                             let addScale = uniforms.highlightGain * (0.008 + 0.014 * uniforms.blurStrength) * cocMask;
-                            finalColor = vec4f(baseColor.rgb + bokeh * addScale, baseColor.a);
+                            var finalRgb = baseColor.rgb + bokeh * addScale;
+                            let edgeBlendBack = computeEdgeBlendBackAmount(silhouetteSuppression);
+                            finalRgb = mix(finalRgb, baseColor.rgb, clamp(edgeBlendBack, 0.0, 0.9));
+                            finalColor = vec4f(finalRgb, baseColor.a);
                         }
                     }
 

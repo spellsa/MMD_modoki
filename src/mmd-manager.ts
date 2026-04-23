@@ -1373,8 +1373,8 @@ ${beforeFogAppendBlock}
     private dofLensDistortionInfluenceValue = 0;
     private readonly dofLensHighlightsBaseGain = 1.1;
     private readonly dofLensHighlightsGainRange = 8.0;
-    private readonly dofLensHighlightsBaseThreshold = 0.88;
-    private readonly dofLensHighlightsThresholdRange = 0.92;
+    private readonly dofLensHighlightsBaseThreshold = 0.62;
+    private readonly dofLensHighlightsThresholdRange = 0.72;
     private dofLensSizeValue = 30;
     private dofFocalLengthValue = 50;
     private readonly dofFocalLengthFollowsCameraFov = true;
