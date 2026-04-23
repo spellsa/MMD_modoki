@@ -2360,6 +2360,11 @@ export class UIController {
                     <span data-postfx-val="lens-edge-blur" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
+                    <span class="effect-label" data-i18n="shader.postfx.distortion">Distortion</span>
+                    <input data-postfx="distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                    <span data-postfx-val="distortion-influence" class="effect-value">0%</span>
+                </div>
+                <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.grain">Grain</span>
                     <input data-postfx="grain-intensity" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
                     <span data-postfx-val="grain-intensity" class="effect-value" data-i18n="status.off">OFF</span>
@@ -2407,11 +2412,6 @@ export class UIController {
                     <span class="effect-label" data-i18n="shader.postfx.volumetricLight">VLight</span>
                     <input data-postfx="vls-exposure" type="range" class="effect-slider" min="0" max="200" value="30" step="1">
                     <span data-postfx-val="vls-exposure" class="effect-value" data-i18n="status.off">OFF</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label" data-i18n="shader.postfx.distortion">Distortion</span>
-                    <input data-postfx="distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
-                    <span data-postfx-val="distortion-influence" class="effect-value">0%</span>
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.edge">Edge</span>

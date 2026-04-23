@@ -2542,23 +2542,22 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   height: auto;
   aspect-ratio: 1 / 1;
   touch-action: none;
-  border: 1px solid rgba(123, 123, 123, 0.45);
-  border-radius: 2px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(232, 236, 244, 0.94));
+  border: 1px solid rgba(112, 112, 112, 0.34);
+  border-radius: 6px;
+  background: rgb(30, 30, 30);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
-    inset 0 1px 6px rgba(31, 41, 55, 0.06);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 10px 18px rgba(0, 0, 0, 0.22);
 }
 
 .interp-curve-guide {
-  stroke: rgba(148, 163, 184, 0.35);
+  stroke: rgba(158, 158, 158, 0.22);
   stroke-width: 1;
   stroke-dasharray: 2 2;
 }
 
 .interp-curve-handle-line {
-  stroke: rgba(15, 23, 42, 0.5);
+  stroke: rgba(188, 188, 188, 0.42);
   stroke-width: 0.95;
 }
 
@@ -2573,13 +2572,13 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .interp-curve-anchor {
-  fill: rgba(15, 23, 42, 0.72);
+  fill: rgba(196, 196, 196, 0.78);
 }
 
 .interp-curve-point {
   pointer-events: none;
   fill: rgba(255, 255, 255, 0.92);
-  stroke: rgba(15, 23, 42, 0.88);
+  stroke: rgba(18, 18, 18, 0.92);
   stroke-width: 1;
 }
 
@@ -2894,7 +2893,7 @@ body.bottom-panel-resizing {
 .lighting-controls {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 3px;
   padding: var(--bottom-panel-content-pad-y) var(--bottom-panel-content-pad-x);
   flex: 1;
   min-height: 0;
@@ -2913,17 +2912,17 @@ body.bottom-panel-resizing {
 
 .light-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 40px;
+  grid-template-columns: 56px minmax(0, 1fr) 48px;
   align-items: center;
-  gap: 5px;
-  min-height: 18px;
-  padding: 0;
+  gap: 7px;
+  min-height: 22px;
+  padding: 1px 0;
   width: 100%;
   min-width: 0;
 }
 
 .light-row.range-has-number {
-  grid-template-columns: 44px minmax(0, 1fr) 64px;
+  grid-template-columns: 56px minmax(0, 1fr) 64px;
 }
 
 .light-row.range-has-number .light-value {
@@ -2939,8 +2938,8 @@ body.bottom-panel-resizing {
 }
 
 .light-row-select {
-  grid-template-columns: 44px minmax(0, 1fr);
-  padding: 0 0 4px;
+  grid-template-columns: 56px minmax(0, 1fr);
+  padding: 0 0 6px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--border-color);
 }
@@ -2970,7 +2969,7 @@ body.bottom-panel-resizing {
 .light-label {
   font-size: 10px;
   color: var(--text-secondary);
-  text-align: left;
+  text-align: right;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -3860,11 +3859,11 @@ body.bottom-panel-resizing {
   }
 
   .light-row.range-has-number {
-    grid-template-columns: 50px minmax(0, 1fr) 72px;
+    grid-template-columns: 60px minmax(0, 1fr) 72px;
   }
 
   .light-row-select {
-    grid-template-columns: 50px minmax(0, 1fr);
+    grid-template-columns: 60px minmax(0, 1fr);
     margin-bottom: 5px;
   }
 
