@@ -26,6 +26,7 @@ import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import { CreateScreenshotUsingRenderTargetAsync } from "@babylonjs/core/Misc/screenshotTools";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { FxaaPostProcess } from "@babylonjs/core/PostProcesses/fxaaPostProcess";
+import { BloomEffect } from "@babylonjs/core/PostProcesses/bloomEffect";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
 import { LensRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/lensRenderingPipeline";
 import { SSAO2RenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssao2RenderingPipeline";
@@ -1349,6 +1350,8 @@ ${beforeFogAppendBlock}
     private motionBlurPreviousCameraPosition: Vector3 | null = null;
     private motionBlurScreenDirection = new Vector2(0, 0);
     private motionBlurScreenAmount = 0;
+    private standaloneBloomEffect: BloomEffect | null = null;
+    private standaloneLensBlurPostProcess: PostProcess | null = null;
     private volumetricLightPostProcess: VolumetricLightScatteringPostProcess | null = null;
     private postEffectLutTexture: ColorGradingTexture | null = null;
     private postEffectLutTextureKey: string | null = null;
@@ -5139,7 +5142,6 @@ ${beforeFogAppendBlock}
         setDofLensBlurStrengthImpl(this, v);
     }
 
-
     /** Lens edge blur strength (0.0..3.0). */
     get dofLensEdgeBlur(): number {
         return getDofLensEdgeBlurImpl(this);
@@ -5464,6 +5466,14 @@ ${beforeFogAppendBlock}
                 this.motionBlurPostProcess.dispose(this.camera);
                 this.motionBlurPostProcess = null;
             }
+            if (this.standaloneBloomEffect) {
+                this.standaloneBloomEffect.disposeEffects(this.camera);
+                this.standaloneBloomEffect = null;
+            }
+            if (this.standaloneLensBlurPostProcess) {
+                this.standaloneLensBlurPostProcess.dispose(this.camera);
+                this.standaloneLensBlurPostProcess = null;
+            }
             if (this.volumetricLightPostProcess) {
                 this.volumetricLightPostProcess.dispose(this.camera);
                 this.volumetricLightPostProcess = null;
@@ -5573,6 +5583,14 @@ ${beforeFogAppendBlock}
         if (this.motionBlurPostProcess) {
             this.motionBlurPostProcess.dispose(this.camera);
             this.motionBlurPostProcess = null;
+        }
+        if (this.standaloneBloomEffect) {
+            this.standaloneBloomEffect.disposeEffects(this.camera);
+            this.standaloneBloomEffect = null;
+        }
+        if (this.standaloneLensBlurPostProcess) {
+            this.standaloneLensBlurPostProcess.dispose(this.camera);
+            this.standaloneLensBlurPostProcess = null;
         }
         if (this.volumetricLightPostProcess) {
             this.volumetricLightPostProcess.dispose(this.camera);
@@ -6792,6 +6810,14 @@ ${beforeFogAppendBlock}
             this.motionBlurPostProcess.dispose(this.camera);
             this.motionBlurPostProcess = null;
         }
+        if (this.standaloneBloomEffect) {
+            this.standaloneBloomEffect.disposeEffects(this.camera);
+            this.standaloneBloomEffect = null;
+        }
+        if (this.standaloneLensBlurPostProcess) {
+            this.standaloneLensBlurPostProcess.dispose(this.camera);
+            this.standaloneLensBlurPostProcess = null;
+        }
         if (this.volumetricLightPostProcess) {
             this.volumetricLightPostProcess.dispose(this.camera);
             this.volumetricLightPostProcess = null;
@@ -6817,6 +6843,10 @@ ${beforeFogAppendBlock}
         if (this.colorCorrectionPostProcess) {
             this.colorCorrectionPostProcess.dispose(this.camera);
             this.colorCorrectionPostProcess = null;
+        }
+        if (this.standaloneLensBlurPostProcess) {
+            this.standaloneLensBlurPostProcess.dispose(this.camera);
+            this.standaloneLensBlurPostProcess = null;
         }
         if (this.finalLensDistortionPostProcess) {
             this.finalLensDistortionPostProcess.dispose(this.camera);

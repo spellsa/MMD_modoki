@@ -1,6 +1,6 @@
 # Camera Post Effects Current Spec
 
-Updated: 2026-03-12
+Updated: 2026-04-23
 
 ## Summary
 
@@ -41,7 +41,9 @@ Notes:
 - `前後補正` is a signed offset from the camera target.
 - Positive values move the focus nearer to the camera.
 - Negative values move the focus farther behind the target.
-- Lens blur remains a separate additive control and only has effect while DoF is enabled.
+- Main lens blur now uses a custom standalone round-bokeh path after fog/bloom.
+- Legacy `LensRenderingPipeline` based runtime remains disabled.
+- `Edge blur` remains a placeholder value in project files, and the current runtime still ignores it.
 
 ## Fog Notes
 
@@ -71,3 +73,20 @@ Current project save/load persists these camera-side effect values:
 - LUT settings
 - Fog enabled / density / opacity / color
 
+## Final Post Process Order
+
+Current tail ordering after the main rendering pipeline is:
+
+- Fog
+- Bloom
+- Lens Blur
+- VLight
+- Motion Blur
+- Lens Distortion
+- FXAA
+
+Notes:
+
+- This tail order is controlled by `enforceFinalPostProcessOrder()`.
+- Bloom is handled by a standalone `BloomEffect` pass so it can run after fog instead of inside `DefaultRenderingPipeline`.
+- Lens blur is also handled outside `DefaultRenderingPipeline` as a single standalone pass.
