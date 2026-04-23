@@ -6245,17 +6245,28 @@ ${beforeFogAppendBlock}
 
         this.mmdCamera.target.copyFrom(this.camera.target);
         this.mmdCamera.position = this.camera.position.clone();
+        this.mmdCamera.rotation.z = (this.cameraRotationEulerDeg.z * Math.PI) / 180;
         this.mmdCamera.fov = this.camera.fov;
         this.recordViewportCameraSyncState();
     }
     private syncViewportCameraFromMmdCamera(): void {
         // MmdCamera is not the active scene camera, so keep its position up to date explicitly.
         this.mmdCamera.updatePosition();
+        const rotationMatrix = Matrix.RotationYawPitchRoll(
+            -this.mmdCamera.rotation.y,
+            -this.mmdCamera.rotation.x,
+            -this.mmdCamera.rotation.z,
+        );
+        const rotatedUp = Vector3.TransformNormal(this.mmdCamera.upVector, rotationMatrix).normalize();
+        this.camera.upVector = rotatedUp;
         this.camera.setPosition(this.mmdCamera.position);
         this.camera.setTarget(this.mmdCamera.target);
         this.camera.fov = this.mmdCamera.fov;
-        this.camera.upVector.copyFrom(this.mmdCamera.upVector);
-        this.syncCameraRotationFromCurrentView();
+        this.cameraRotationEulerDeg.set(
+            (this.mmdCamera.rotation.x * 180) / Math.PI,
+            (this.mmdCamera.rotation.y * 180) / Math.PI,
+            (this.mmdCamera.rotation.z * 180) / Math.PI,
+        );
         this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
     }
@@ -6313,7 +6324,6 @@ ${beforeFogAppendBlock}
         toPosition.normalize();
         this.cameraRotationEulerDeg.x = (Math.asin(-toPosition.y) * 180) / Math.PI;
         this.cameraRotationEulerDeg.y = (Math.atan2(toPosition.x, -toPosition.z) * 180) / Math.PI;
-        this.cameraRotationEulerDeg.z = 0;
     }
 
     private getOrCreateModelTrackFrameMap(model: MmdModel): Map<string, Uint32Array> {
