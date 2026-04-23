@@ -255,6 +255,8 @@ export class DofPanelController {
         const nearSuppressionValue = elements.nearSuppressionValue;
         const focalInvertInput = elements.focalInvertInput;
         const focalInvertValue = elements.focalInvertValue;
+        const lensBlurSlider = elements.lensBlurSlider;
+        const lensBlurValue = elements.lensBlurValue;
         const lensSizeSlider = elements.lensSizeSlider;
         const lensSizeValue = elements.lensSizeValue;
         const focalLengthSlider = elements.focalLengthSlider;
@@ -313,6 +315,15 @@ export class DofPanelController {
                 this.refreshAutoFocusReadout();
             }
         };
+        const applyDofLensBlur = (): void => {
+            if (!lensBlurSlider || !lensBlurValue) {
+                return;
+            }
+            const strength = Number(lensBlurSlider.value) / 100;
+            this.mmdManager.dofLensBlurStrength = strength;
+            lensBlurValue.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
+            this.syncRangeNumberInput(lensBlurSlider);
+        };
         const applyDofLensSize = (): void => {
             const lensSize = Number(lensSizeSlider.value);
             this.mmdManager.dofLensSize = lensSize;
@@ -369,13 +380,15 @@ export class DofPanelController {
         fStopSlider.value = String(Math.round(this.mmdManager.dofFStop * 100));
         nearSuppressionSlider.value = String(Math.round(this.mmdManager.dofNearSuppressionScale * 100));
         focalInvertInput.checked = this.mmdManager.dofFocalLengthDistanceInverted;
+        if (lensBlurSlider && lensBlurValue) {
+            lensBlurSlider.value = String(Math.round(this.mmdManager.dofLensBlurStrength * 100));
+            lensBlurSlider.disabled = false;
+            lensBlurSlider.title = "";
+            lensBlurValue.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
+            lensBlurValue.title = "";
+        }
         lensSizeSlider.value = String(Math.round(this.mmdManager.dofLensSize));
         focalLengthSlider.value = String(Math.round(this.mmdManager.dofFocalLength));
-
-        if (elements.lensBlurSlider && elements.lensBlurValue) {
-            elements.lensBlurSlider.value = String(Math.round(this.mmdManager.dofLensBlurStrength * 100));
-            elements.lensBlurValue.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
-        }
         if (autoFocusEnabled) {
             focusSlider.disabled = true;
             focusSlider.title = "Auto focus";
@@ -392,6 +405,7 @@ export class DofPanelController {
         applyDofFStop();
         applyDofNearSuppression();
         applyDofFocalInvert();
+        applyDofLensBlur();
         applyDofLensSize();
         applyDofFocalLength();
         this.refreshFocusTargetControls();
@@ -408,20 +422,12 @@ export class DofPanelController {
         fStopSlider.addEventListener("input", applyDofFStop);
         nearSuppressionSlider.addEventListener("input", applyDofNearSuppression);
         focalInvertInput.addEventListener("change", applyDofFocalInvert);
+        if (lensBlurSlider) {
+            lensBlurSlider.addEventListener("input", applyDofLensBlur);
+        }
         lensSizeSlider.addEventListener("input", applyDofLensSize);
         if (!focalLengthLinkedToFov) {
             focalLengthSlider.addEventListener("input", applyDofFocalLength);
-        }
-        if (elements.lensBlurSlider && elements.lensBlurValue) {
-            const lensBlurSlider = elements.lensBlurSlider;
-            const lensBlurValue = elements.lensBlurValue;
-            const applyDofLensBlur = (): void => {
-                const strength = Number(lensBlurSlider.value) / 100;
-                this.mmdManager.dofLensBlurStrength = strength;
-                lensBlurValue.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
-            };
-            applyDofLensBlur();
-            lensBlurSlider.addEventListener("input", applyDofLensBlur);
         }
     }
 }

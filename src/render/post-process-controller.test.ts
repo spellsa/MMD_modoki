@@ -11,6 +11,7 @@ describe("enforceFinalPostProcessOrder", () => {
         const lensBlur = { name: "lensBlur" };
         const vls = { name: "vls" };
         const motionBlur = { name: "motionBlur" };
+        const edgeBlur = { name: "edgeBlur" };
         const lens = { name: "lens" };
         const aa = { name: "aa" };
         const camera = {
@@ -26,6 +27,7 @@ describe("enforceFinalPostProcessOrder", () => {
             standaloneLensBlurPostProcess: lensBlur,
             volumetricLightPostProcess: vls,
             motionBlurPostProcess: motionBlur,
+            standaloneEdgeBlurPostProcess: edgeBlur,
             finalLensDistortionPostProcess: lens,
             finalAntialiasPostProcess: aa,
         };
@@ -41,6 +43,7 @@ describe("enforceFinalPostProcessOrder", () => {
             lensBlur,
             vls,
             motionBlur,
+            edgeBlur,
             lens,
             aa,
         ]);
@@ -53,6 +56,7 @@ describe("enforceFinalPostProcessOrder", () => {
             lensBlur,
             vls,
             motionBlur,
+            edgeBlur,
             lens,
             aa,
         ]);

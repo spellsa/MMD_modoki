@@ -1352,6 +1352,7 @@ ${beforeFogAppendBlock}
     private motionBlurScreenAmount = 0;
     private standaloneBloomEffect: BloomEffect | null = null;
     private standaloneLensBlurPostProcess: PostProcess | null = null;
+    private standaloneEdgeBlurPostProcess: PostProcess | null = null;
     private volumetricLightPostProcess: VolumetricLightScatteringPostProcess | null = null;
     private postEffectLutTexture: ColorGradingTexture | null = null;
     private postEffectLutTextureKey: string | null = null;
@@ -5474,6 +5475,10 @@ ${beforeFogAppendBlock}
                 this.standaloneLensBlurPostProcess.dispose(this.camera);
                 this.standaloneLensBlurPostProcess = null;
             }
+            if (this.standaloneEdgeBlurPostProcess) {
+                this.standaloneEdgeBlurPostProcess.dispose(this.camera);
+                this.standaloneEdgeBlurPostProcess = null;
+            }
             if (this.volumetricLightPostProcess) {
                 this.volumetricLightPostProcess.dispose(this.camera);
                 this.volumetricLightPostProcess = null;
@@ -5591,6 +5596,10 @@ ${beforeFogAppendBlock}
         if (this.standaloneLensBlurPostProcess) {
             this.standaloneLensBlurPostProcess.dispose(this.camera);
             this.standaloneLensBlurPostProcess = null;
+        }
+        if (this.standaloneEdgeBlurPostProcess) {
+            this.standaloneEdgeBlurPostProcess.dispose(this.camera);
+            this.standaloneEdgeBlurPostProcess = null;
         }
         if (this.volumetricLightPostProcess) {
             this.volumetricLightPostProcess.dispose(this.camera);
@@ -6818,6 +6827,10 @@ ${beforeFogAppendBlock}
             this.standaloneLensBlurPostProcess.dispose(this.camera);
             this.standaloneLensBlurPostProcess = null;
         }
+        if (this.standaloneEdgeBlurPostProcess) {
+            this.standaloneEdgeBlurPostProcess.dispose(this.camera);
+            this.standaloneEdgeBlurPostProcess = null;
+        }
         if (this.volumetricLightPostProcess) {
             this.volumetricLightPostProcess.dispose(this.camera);
             this.volumetricLightPostProcess = null;
@@ -6847,6 +6860,10 @@ ${beforeFogAppendBlock}
         if (this.standaloneLensBlurPostProcess) {
             this.standaloneLensBlurPostProcess.dispose(this.camera);
             this.standaloneLensBlurPostProcess = null;
+        }
+        if (this.standaloneEdgeBlurPostProcess) {
+            this.standaloneEdgeBlurPostProcess.dispose(this.camera);
+            this.standaloneEdgeBlurPostProcess = null;
         }
         if (this.finalLensDistortionPostProcess) {
             this.finalLensDistortionPostProcess.dispose(this.camera);

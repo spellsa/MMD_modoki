@@ -9,7 +9,7 @@ import { SSRRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeli
 import { VolumetricLightScatteringPostProcess } from "@babylonjs/core/PostProcesses/volumetricLightScatteringPostProcess";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 
 const STANDALONE_BLOOM_SCALE = 0.5;
@@ -38,6 +38,141 @@ function disposeStandaloneLensBlurPostProcess(host: any): void {
 
 function getStandaloneLensBlurPostProcesses(host: any): PostProcess[] {
     return host.standaloneLensBlurPostProcess ? [host.standaloneLensBlurPostProcess] : [];
+}
+
+function disposeStandaloneEdgeBlurPostProcess(host: any): void {
+    if (!host.standaloneEdgeBlurPostProcess) {
+        return;
+    }
+
+    host.standaloneEdgeBlurPostProcess.dispose(host.camera);
+    host.standaloneEdgeBlurPostProcess = null;
+}
+
+function getStandaloneEdgeBlurPostProcesses(host: any): PostProcess[] {
+    return host.standaloneEdgeBlurPostProcess ? [host.standaloneEdgeBlurPostProcess] : [];
+}
+
+function ensureStandaloneEdgeBlurShader(): void {
+    const shaderKey = "mmdStandaloneEdgeBlurFragmentShader";
+    if (!Effect.ShadersStore[shaderKey]) {
+        Effect.ShadersStore[shaderKey] = `
+                precision highp float;
+                varying vec2 vUV;
+                uniform sampler2D textureSampler;
+                uniform vec2 texelSize;
+                uniform float edgeBlurStrength;
+                uniform float aspectRatio;
+
+                float computeEdgeMask(vec2 uv) {
+                    vec2 centered = (uv - vec2(0.5)) * vec2(aspectRatio, 1.0);
+                    float radius = length(centered);
+                    float mask = smoothstep(0.50, 0.96, radius);
+                    return mask * mask * (3.0 - 2.0 * mask);
+                }
+
+                float computeEdgeStrengthCurve(float strength) {
+                    float lifted = strength + 0.75 * strength * strength;
+                    return min(1.75, lifted);
+                }
+
+                vec4 sampleBlur(vec2 uv, vec2 stepRadius) {
+                    vec4 color = texture2D(textureSampler, uv) * 0.20;
+                    color += texture2D(textureSampler, clamp(uv + vec2(stepRadius.x, 0.0), vec2(0.001), vec2(0.999))) * 0.12;
+                    color += texture2D(textureSampler, clamp(uv - vec2(stepRadius.x, 0.0), vec2(0.001), vec2(0.999))) * 0.12;
+                    color += texture2D(textureSampler, clamp(uv + vec2(0.0, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.12;
+                    color += texture2D(textureSampler, clamp(uv - vec2(0.0, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.12;
+                    color += texture2D(textureSampler, clamp(uv + vec2(stepRadius.x, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                    color += texture2D(textureSampler, clamp(uv + vec2(-stepRadius.x, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                    color += texture2D(textureSampler, clamp(uv + vec2(stepRadius.x, -stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                    color += texture2D(textureSampler, clamp(uv - vec2(stepRadius.x, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                    return color;
+                }
+
+                void main(void) {
+                    vec4 baseColor = texture2D(textureSampler, vUV);
+                    if (edgeBlurStrength <= 0.0001) {
+                        gl_FragColor = baseColor;
+                        return;
+                    }
+
+                    float edgeMask = computeEdgeMask(vUV);
+                    if (edgeMask <= 0.0001) {
+                        gl_FragColor = baseColor;
+                        return;
+                    }
+
+                    float curvedStrength = computeEdgeStrengthCurve(edgeBlurStrength);
+                    float blurPixels = (0.7 + 9.8 * curvedStrength) * (0.24 + 0.76 * edgeMask);
+                    vec2 stepRadius = texelSize * blurPixels;
+                    vec4 blurColor = sampleBlur(vUV, stepRadius);
+                    float blurMix = edgeMask * (0.28 + 0.72 * min(1.0, curvedStrength));
+                    gl_FragColor = mix(baseColor, blurColor, clamp(blurMix, 0.0, 1.0));
+                }
+            `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+                varying vUV: vec2f;
+                var textureSamplerSampler: sampler;
+                var textureSampler: texture_2d<f32>;
+                uniform texelSize: vec2f;
+                uniform edgeBlurStrength: f32;
+                uniform aspectRatio: f32;
+
+                fn computeEdgeMask(uv: vec2f) -> f32 {
+                    let centered: vec2f = (uv - vec2f(0.5, 0.5)) * vec2f(uniforms.aspectRatio, 1.0);
+                    let radius: f32 = length(centered);
+                    let mask: f32 = smoothstep(0.50, 0.96, radius);
+                    return mask * mask * (3.0 - 2.0 * mask);
+                }
+
+                fn computeEdgeStrengthCurve(strength: f32) -> f32 {
+                    let lifted: f32 = strength + 0.75 * strength * strength;
+                    return min(1.75, lifted);
+                }
+
+                fn sampleColor(uv: vec2f) -> vec4f {
+                    return textureSampleLevel(textureSampler, textureSamplerSampler, clamp(uv, vec2f(0.001, 0.001), vec2f(0.999, 0.999)), 0.0);
+                }
+
+                fn sampleBlur(uv: vec2f, stepRadius: vec2f) -> vec4f {
+                    var color: vec4f = sampleColor(uv) * 0.20;
+                    color += sampleColor(uv + vec2f(stepRadius.x, 0.0)) * 0.12;
+                    color += sampleColor(uv - vec2f(stepRadius.x, 0.0)) * 0.12;
+                    color += sampleColor(uv + vec2f(0.0, stepRadius.y)) * 0.12;
+                    color += sampleColor(uv - vec2f(0.0, stepRadius.y)) * 0.12;
+                    color += sampleColor(uv + vec2f(stepRadius.x, stepRadius.y)) * 0.08;
+                    color += sampleColor(uv + vec2f(-stepRadius.x, stepRadius.y)) * 0.08;
+                    color += sampleColor(uv + vec2f(stepRadius.x, -stepRadius.y)) * 0.08;
+                    color += sampleColor(uv - vec2f(stepRadius.x, stepRadius.y)) * 0.08;
+                    return color;
+                }
+
+                #define CUSTOM_FRAGMENT_DEFINITIONS
+                @fragment
+                fn main(input: FragmentInputs)->FragmentOutputs {
+                    let baseColor: vec4f = sampleColor(input.vUV);
+                    var finalColor: vec4f = baseColor;
+
+                    if (uniforms.edgeBlurStrength > 0.0001) {
+                        let edgeMask: f32 = computeEdgeMask(input.vUV);
+                        if (edgeMask > 0.0001) {
+                            let curvedStrength: f32 = computeEdgeStrengthCurve(uniforms.edgeBlurStrength);
+                            let blurPixels: f32 = (0.7 + 9.8 * curvedStrength) * (0.24 + 0.76 * edgeMask);
+                            let stepRadius: vec2f = uniforms.texelSize * blurPixels;
+                            let blurColor: vec4f = sampleBlur(input.vUV, stepRadius);
+                            let blurMix: f32 = clamp(edgeMask * (0.28 + 0.72 * min(1.0, curvedStrength)), 0.0, 1.0);
+                            finalColor = mix(baseColor, blurColor, blurMix);
+                        }
+                    }
+
+                    var fragmentOutputs: FragmentOutputs;
+                    fragmentOutputs.color = finalColor;
+                    return fragmentOutputs;
+                }
+            `;
+    }
 }
 
 function ensureStandaloneLensBlurShader(): void {
@@ -940,6 +1075,7 @@ export function enforceFinalPostProcessOrder(host: any): void {
     tail.push(...getStandaloneLensBlurPostProcesses(host));
     if (host.volumetricLightPostProcess) tail.push(host.volumetricLightPostProcess);
     if (host.motionBlurPostProcess) tail.push(host.motionBlurPostProcess);
+    tail.push(...getStandaloneEdgeBlurPostProcesses(host));
     if (host.finalLensDistortionPostProcess) tail.push(host.finalLensDistortionPostProcess);
     if (host.finalAntialiasPostProcess) tail.push(host.finalAntialiasPostProcess);
 
@@ -978,6 +1114,7 @@ export function setupEditorDofPipeline(host: any): void {
     }
     disposeStandaloneBloomEffect(host);
     disposeStandaloneLensBlurPostProcess(host);
+    disposeStandaloneEdgeBlurPostProcess(host);
     if (host.volumetricLightPostProcess) {
         host.volumetricLightPostProcess.dispose(host.camera);
         host.volumetricLightPostProcess = null;
@@ -1168,6 +1305,11 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
     pipeline.chromaticAberrationEnabled = host.postEffectChromaticAberrationValue > 1e-4;
     if (pipeline.chromaticAberration) {
         pipeline.chromaticAberration.aberrationAmount = host.postEffectChromaticAberrationValue;
+        pipeline.chromaticAberration.radialIntensity = 2.2;
+        pipeline.chromaticAberration.direction = new Vector2(0, 0);
+        pipeline.chromaticAberration.centerPosition = new Vector2(0.5, 0.5);
+        pipeline.chromaticAberration.screenWidth = host.engine.getRenderWidth();
+        pipeline.chromaticAberration.screenHeight = host.engine.getRenderHeight();
     }
 
     pipeline.grainEnabled = host.postEffectGrainIntensityValue > 1e-4;
@@ -1699,9 +1841,51 @@ export function setupFarDofPostProcess(host: any): void {
 }
 
 export function applyDofLensOpticsSettings(host: any): void {
-    if (!host.lensRenderingPipeline) return;
-    host.lensRenderingPipeline.dispose(false);
-    host.lensRenderingPipeline = null;
+    const normalizedStrength = Math.max(0, Math.min(1, host.dofLensEdgeBlurValue / 3));
+    if (normalizedStrength <= 0.0001) {
+        disposeStandaloneEdgeBlurPostProcess(host);
+        if (host.lensRenderingPipeline) {
+            host.lensRenderingPipeline.dispose(false);
+            host.lensRenderingPipeline = null;
+        }
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
+    ensureStandaloneEdgeBlurShader();
+
+    if (!host.standaloneEdgeBlurPostProcess) {
+        host.standaloneEdgeBlurPostProcess = new PostProcess(
+            "standaloneEdgeBlur",
+            "mmdStandaloneEdgeBlur",
+            {
+                uniforms: [
+                    "texelSize",
+                    "edgeBlurStrength",
+                    "aspectRatio",
+                ],
+                size: 1.0,
+                camera: host.camera,
+                samplingMode: Texture.BILINEAR_SAMPLINGMODE,
+                engine: host.engine,
+                reusable: false,
+                shaderLanguage: host.getPostProcessShaderLanguage(),
+            },
+        );
+        host.standaloneEdgeBlurPostProcess.onApplyObservable.add((effect: any) => {
+            const width = Math.max(1, host.standaloneEdgeBlurPostProcess?.width ?? host.engine.getRenderWidth());
+            const height = Math.max(1, host.standaloneEdgeBlurPostProcess?.height ?? host.engine.getRenderHeight());
+            effect.setFloat2("texelSize", 1 / width, 1 / height);
+            effect.setFloat("edgeBlurStrength", Math.max(0, Math.min(1, host.dofLensEdgeBlurValue / 3)));
+            effect.setFloat("aspectRatio", width / height);
+        });
+    }
+
+    if (host.lensRenderingPipeline) {
+        host.lensRenderingPipeline.dispose(false);
+        host.lensRenderingPipeline = null;
+    }
+    host.enforceFinalPostProcessOrder();
 }
 
 export function setupLensHighlightsPipeline(host: any): void {

@@ -6,8 +6,6 @@ type LensEffectElements = {
     distortionValue: HTMLElement | null;
     influenceInput: HTMLInputElement | null;
     influenceValue: HTMLElement | null;
-    edgeBlurInput: HTMLInputElement | null;
-    edgeBlurValue: HTMLElement | null;
 };
 
 type LensEffectPanelElements = {
@@ -15,8 +13,8 @@ type LensEffectPanelElements = {
     chromaticValue: HTMLElement;
     influenceInput: HTMLInputElement;
     influenceValue: HTMLElement;
-    edgeBlurInput: HTMLInputElement;
-    edgeBlurValue: HTMLElement;
+    edgeBlurInput: HTMLInputElement | null;
+    edgeBlurValue: HTMLElement | null;
 };
 
 export type LensEffectControllerDeps = {
@@ -31,8 +29,6 @@ function resolveLensEffectElements(): LensEffectElements {
         distortionValue: document.getElementById("effect-lens-distortion-val"),
         influenceInput: document.getElementById("effect-lens-distortion-influence") as HTMLInputElement | null,
         influenceValue: document.getElementById("effect-lens-distortion-influence-val"),
-        edgeBlurInput: document.getElementById("effect-lens-edge-blur") as HTMLInputElement | null,
-        edgeBlurValue: document.getElementById("effect-lens-edge-blur-val"),
     };
 }
 
@@ -48,9 +44,7 @@ function queryPanelElements(root: ParentNode): LensEffectPanelElements | null {
         !chromaticInput ||
         !chromaticValue ||
         !influenceInput ||
-        !influenceValue ||
-        !edgeBlurInput ||
-        !edgeBlurValue
+        !influenceValue
     ) {
         return null;
     }
@@ -99,10 +93,12 @@ export class LensEffectController {
             this.refreshStaticDistortionControls();
         };
 
-        const applyLensEdgeBlur = (): void => {
-            this.applyEdgeBlurInput(elements.edgeBlurInput);
+        const applyEdgeBlur = (): void => {
+            if (!elements.edgeBlurInput || !elements.edgeBlurValue) {
+                return;
+            }
+            this.mmdManager.dofLensEdgeBlur = Number(elements.edgeBlurInput.value) / 100;
             this.refreshEdgeBlurValue(elements.edgeBlurInput, elements.edgeBlurValue);
-            this.refreshStaticEdgeBlurControls();
         };
 
         elements.chromaticInput.value = String(
@@ -113,11 +109,11 @@ export class LensEffectController {
 
         applyChromaticAberration();
         applyDistortionInfluence();
-        applyLensEdgeBlur();
+        applyEdgeBlur();
 
         elements.chromaticInput.addEventListener("input", applyChromaticAberration);
         elements.influenceInput.addEventListener("input", applyDistortionInfluence);
-        elements.edgeBlurInput.addEventListener("input", applyLensEdgeBlur);
+        elements.edgeBlurInput?.addEventListener("input", applyEdgeBlur);
         return true;
     }
 
@@ -154,7 +150,6 @@ export class LensEffectController {
     private setupStaticControls(): void {
         this.setupStaticDistortionControl();
         this.setupStaticInfluenceControl();
-        this.setupStaticEdgeBlurControl();
     }
 
     private setupStaticDistortionControl(): void {
@@ -207,42 +202,14 @@ export class LensEffectController {
         input.addEventListener("input", applyLensDistortionInfluence);
     }
 
-    private setupStaticEdgeBlurControl(): void {
-        const input = this.elements.edgeBlurInput;
-        const value = this.elements.edgeBlurValue;
-        if (!input || !value) {
-            return;
-        }
-
-        const applyLensEdgeBlur = (): void => {
-            this.applyEdgeBlurInput(input);
-            this.refreshEdgeBlurValue(input, value);
-
-            const panelElements = queryPanelElements(document);
-            if (panelElements) {
-                this.refreshEdgeBlurValue(panelElements.edgeBlurInput, panelElements.edgeBlurValue);
-            }
-        };
-
-        this.refreshEdgeBlurValue(input, value);
-        applyLensEdgeBlur();
-        input.addEventListener("input", applyLensEdgeBlur);
-    }
-
     private applyDistortionInfluenceInput(input: HTMLInputElement): void {
         const scale = Number(input.value) / 100;
         this.mmdManager.dofLensDistortionInfluence = scale;
     }
 
-    private applyEdgeBlurInput(input: HTMLInputElement): void {
-        const scale = Number(input.value) / 100;
-        this.mmdManager.dofLensEdgeBlur = scale;
-    }
-
     private refreshStaticControls(): void {
         this.refreshStaticDistortionControls();
         this.refreshStaticInfluenceControls();
-        this.refreshStaticEdgeBlurControls();
     }
 
     private refreshStaticDistortionControls(): void {
@@ -265,13 +232,6 @@ export class LensEffectController {
         this.refreshDistortionInfluenceValue(this.elements.influenceInput, this.elements.influenceValue);
     }
 
-    private refreshStaticEdgeBlurControls(): void {
-        if (!this.elements.edgeBlurInput || !this.elements.edgeBlurValue) {
-            return;
-        }
-        this.refreshEdgeBlurValue(this.elements.edgeBlurInput, this.elements.edgeBlurValue);
-    }
-
     private refreshDistortionInfluenceValue(input: HTMLInputElement, value: HTMLElement): void {
         const percent = Math.round(this.mmdManager.dofLensDistortionInfluence * 100);
         input.value = String(percent);
@@ -279,10 +239,19 @@ export class LensEffectController {
         this.syncRangeNumberInput(input);
     }
 
-    private refreshEdgeBlurValue(input: HTMLInputElement, value: HTMLElement): void {
+    private refreshEdgeBlurValue(
+        input: HTMLInputElement | null,
+        value: HTMLElement | null,
+    ): void {
+        if (!input || !value) {
+            return;
+        }
+
         const percent = Math.round(this.mmdManager.dofLensEdgeBlur * 100);
         input.value = String(percent);
+        input.title = "独自ポストエフェクト実装待ち";
         value.textContent = `${percent}%`;
+        value.title = "独自ポストエフェクト実装待ち";
         this.syncRangeNumberInput(input);
     }
 }

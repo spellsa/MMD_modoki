@@ -43,7 +43,7 @@ Notes:
 - Negative values move the focus farther behind the target.
 - Main lens blur now uses a custom standalone round-bokeh path after fog/bloom.
 - Legacy `LensRenderingPipeline` based runtime remains disabled.
-- `Edge blur` remains a placeholder value in project files, and the current runtime still ignores it.
+- `Edge blur` now uses a standalone screen-edge blur pass.
 
 ## Fog Notes
 
@@ -82,6 +82,7 @@ Current tail ordering after the main rendering pipeline is:
 - Lens Blur
 - VLight
 - Motion Blur
+- Edge Blur
 - Lens Distortion
 - FXAA
 
@@ -90,3 +91,4 @@ Notes:
 - This tail order is controlled by `enforceFinalPostProcessOrder()`.
 - Bloom is handled by a standalone `BloomEffect` pass so it can run after fog instead of inside `DefaultRenderingPipeline`.
 - Lens blur is also handled outside `DefaultRenderingPipeline` as a single standalone pass.
+- Edge blur is handled as a standalone radial screen-edge blur pass before final lens distortion.
