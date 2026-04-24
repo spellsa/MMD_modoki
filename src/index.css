@@ -48,7 +48,7 @@
   --timeline-resizer-width: 6px;
   --shader-resizer-width: 6px;
   --bottom-panel-resizer-height: 6px;
-  --shader-panel-width: 280px;
+  --shader-panel-width: 304px;
   --bottom-panel-height: 220px;
   --bottom-panel-content-pad-y: 6px;
   --bottom-panel-content-pad-x: 8px;
@@ -1066,7 +1066,7 @@ body.file-drag-active #viewport-container {
 }
 
 #shader-panel .shader-postfx-controls .effect-row {
-  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  grid-template-columns: 86px minmax(0, 1fr) 44px;
   gap: 6px;
 }
 
@@ -1077,12 +1077,12 @@ body.file-drag-active #viewport-container {
 
 #shader-panel .shader-postfx-controls .effect-row.range-has-number,
 #shader-panel .shader-postfx-dof-controls .effect-row.range-has-number {
-  grid-template-columns: 52px minmax(0, 1fr) 64px;
+  grid-template-columns: 86px minmax(0, 1fr) 60px;
 }
 
 #shader-panel .shader-postfx-controls .effect-row.effect-row-check,
 #shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check {
-  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  grid-template-columns: 86px minmax(0, 1fr) 44px;
   grid-template-areas:
     "label check check"
     ". control value";
@@ -1090,14 +1090,14 @@ body.file-drag-active #viewport-container {
 
 #shader-panel .shader-postfx-controls .effect-row.effect-row-toggle,
 #shader-panel .shader-postfx-dof-controls .effect-row.effect-row-toggle {
-  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  grid-template-columns: 86px minmax(0, 1fr) 44px;
   grid-template-areas: "label check value";
   align-items: center;
 }
 
 #shader-panel .shader-postfx-controls .effect-row.effect-row-check.range-has-number,
 #shader-panel .shader-postfx-dof-controls .effect-row.effect-row-check.range-has-number {
-  grid-template-columns: 52px minmax(0, 1fr) 64px;
+  grid-template-columns: 86px minmax(0, 1fr) 60px;
   grid-template-areas:
     "label check check"
     ". control number";
@@ -1135,16 +1135,24 @@ body.file-drag-active #viewport-container {
 }
 
 #shader-panel .shader-postfx-controls .effect-label {
-  text-align: right;
+  text-align: left;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.15;
 }
 
 #shader-panel .shader-postfx-dof-controls .effect-row {
-  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  grid-template-columns: 86px minmax(0, 1fr) 44px;
   gap: 6px;
 }
 
 #shader-panel .shader-postfx-dof-controls .effect-label {
-  text-align: right;
+  text-align: left;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.15;
 }
 
 .shader-material-list::-webkit-scrollbar {
@@ -3622,7 +3630,7 @@ body.bottom-panel-resizing {
   :root {
     --toolbar-height: 52px;
     --timeline-width: 304px;
-    --shader-panel-width: 316px;
+    --shader-panel-width: 332px;
     --bottom-panel-height: 272px;
   }
 
