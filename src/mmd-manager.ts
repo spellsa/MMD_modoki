@@ -2750,8 +2750,6 @@ ${beforeFogAppendBlock}
 
         // Create scene
         this.scene = new Scene(this.engine);
-        // Avoid submesh-level frustum clipping tearing large, low-poly stage floors.
-        this.scene.dispatchAllSubMeshesOfActiveMeshes = true;
         this.scene.clearColor = this.defaultClearColor.clone();
         this.scene.ambientColor = new Color3(0.5, 0.5, 0.5);
         this.scene.imageProcessingConfiguration.isEnabled = true;
@@ -2772,10 +2770,7 @@ ${beforeFogAppendBlock}
             this.scene
         );
         this.camera.fov = (30 * Math.PI) / 180;
-        // Keep shallow-angle stage floors from being clipped too aggressively
-        // near the camera. Logarithmic depth is enabled on scene materials, so
-        // a smaller near plane is acceptable here.
-        this.camera.minZ = 0.03;
+        this.camera.minZ = 0.15;
         this.camera.maxZ = 100000;
         this.camera.lowerRadiusLimit = 3;
         this.camera.upperRadiusLimit = null;
@@ -2901,9 +2896,6 @@ ${beforeFogAppendBlock}
         groundMat.diffuseTexture = groundGridTexture;
         this.ground.material = groundMat;
         this.ground.receiveShadows = true;
-        // Keep the helper ground slightly below imported stage floors to avoid
-        // coplanar z-fighting when a stage also ships its own floor mesh.
-        this.ground.position.y = -0.05;
 
         this.skydome = CreateSphere("skydome", {
             diameter: 1200,

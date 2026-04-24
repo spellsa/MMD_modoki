@@ -588,8 +588,6 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
 
         mmdMesh.setEnabled(true);
         mmdMesh.isVisible = true;
-        mmdMesh.alwaysSelectAsActiveMesh = true;
-        mmdMesh.refreshBoundingInfo(true, true);
         const mmdMetadata = mmdMesh.metadata as typeof mmdMesh.metadata & {
             containsSerializationData?: boolean;
             materialsMetadata?: readonly { flag: number }[];
@@ -628,8 +626,6 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         for (const mesh of result.meshes) {
             mesh.setEnabled(true);
             mesh.isVisible = true;
-            mesh.alwaysSelectAsActiveMesh = true;
-            mesh.refreshBoundingInfo(true, true);
             const shadowFlags = host.resolvePmxShadowFlagsForMaterial(mesh.material, materialFlagMap);
             mesh.receiveShadows = shadowFlags.receivesShadow;
             if ((mesh.getTotalVertices?.() ?? 0) > 0 && shadowFlags.castsShadow) {

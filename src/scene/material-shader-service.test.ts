@@ -127,8 +127,8 @@ describe("material shader preset restore", () => {
         syncLuminousGlowLayer(host);
 
         expect(host.defaultRenderingPipeline.glowLayerEnabled).toBe(false);
-        expect(host.luminousGlowLayer.intensity).toBeCloseTo(1.4 * 0.82);
-        expect(host.luminousGlowCoreLayer.intensity).toBeCloseTo(1.4 * 0.56);
+        expect(host.luminousGlowLayer.intensity).toBeCloseTo(1.4 * 1.08);
+        expect(host.luminousGlowCoreLayer.intensity).toBeCloseTo(1.4 * 0.72);
         expect(host.luminousGlowLayer.blurKernelSize).toBe(20);
         expect(host.luminousGlowCoreLayer.blurKernelSize).toBe(5);
 
@@ -285,8 +285,8 @@ describe("material shader preset restore", () => {
         expect(applied).toBe(true);
 
         expect(host.defaultRenderingPipeline.bloomEnabled).toBe(false);
-        expect(host.luminousGlowLayer.intensity).toBeCloseTo(0.5 * 0.82);
-        expect(host.luminousGlowCoreLayer.intensity).toBeCloseTo(0.5 * 0.56);
+        expect(host.luminousGlowLayer.intensity).toBeCloseTo(0.5 * 1.08);
+        expect(host.luminousGlowCoreLayer.intensity).toBeCloseTo(0.5 * 0.72);
 
         const haloResult = {
             values: [0, 0, 0, 0],
@@ -303,7 +303,7 @@ describe("material shader preset restore", () => {
         expect(haloResult.values[3]).toBeGreaterThan(0);
     });
 
-    it("stops glowing after clearing the Luminous preset even when manual glow is enabled", () => {
+    it("keeps heuristic glow after clearing the Luminous preset back to the standard shader", () => {
         const host = createHost();
         host.material.diffuseColor = new Color3(0.2, 0.8, 1);
         host.material.ambientColor = new Color3(0.05, 0.1, 0.15);
@@ -333,9 +333,34 @@ describe("material shader preset restore", () => {
         };
         host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, clearedResult);
 
-        expect(clearedResult.values[0]).toBe(0);
-        expect(clearedResult.values[1]).toBe(0);
-        expect(clearedResult.values[2]).toBe(0);
-        expect(clearedResult.values[3]).toBe(1);
+        expect(clearedResult.values[0]).toBeGreaterThan(0.1);
+        expect(clearedResult.values[1]).toBeGreaterThan(clearedResult.values[0]);
+        expect(clearedResult.values[2]).toBeGreaterThan(clearedResult.values[1]);
+        expect(clearedResult.values[3]).toBeGreaterThan(0);
+    });
+
+    it("applies heuristic glow even for nonstandard explicit shader presets when AL conditions are met", () => {
+        const host = createHost();
+        host.material.diffuseColor = new Color3(0.2, 0.8, 1);
+        host.material.ambientColor = new Color3(0.05, 0.1, 0.15);
+        host.material.specularPower = 160;
+        host.material.specularColor = new Color3(0, 0, 0);
+        host.postEffectGlowEnabledValue = true;
+        host.postEffectGlowIntensityValue = 1;
+
+        expect(setWgslMaterialShaderPreset(host, 0, "0:face", "wgsl-full-shadow")).toBe(true);
+
+        const result = {
+            values: [1, 1, 1, 1],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, result);
+
+        expect(result.values[0]).toBeGreaterThan(0.1);
+        expect(result.values[1]).toBeGreaterThan(result.values[0]);
+        expect(result.values[2]).toBeGreaterThan(result.values[1]);
+        expect(result.values[3]).toBeGreaterThan(0);
     });
 });

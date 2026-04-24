@@ -93,10 +93,10 @@ const LUMINOUS_GLOW_MAIN_TEXTURE_RATIO = 0.5;
 const LUMINOUS_GLOW_MAIN_TEXTURE_SAMPLES = 4;
 const LUMINOUS_GLOW_DEPTH_BLUR_SIGMA = 320;
 const LUMINOUS_GLOW_HALO_SATURATION = 1.35;
-const LUMINOUS_GLOW_HALO_BRIGHTNESS = 0.92;
+const LUMINOUS_GLOW_HALO_BRIGHTNESS = 1.02;
 const LUMINOUS_GLOW_CORE_WHITE_MIX = 0.82;
-const LUMINOUS_GLOW_CORE_INTENSITY_RATIO = 0.56;
-const LUMINOUS_GLOW_HALO_INTENSITY_RATIO = 0.82;
+const LUMINOUS_GLOW_CORE_INTENSITY_RATIO = 0.72;
+const LUMINOUS_GLOW_HALO_INTENSITY_RATIO = 1.08;
 const LUMINOUS_GLOW_CORE_KERNEL_RATIO = 0.25;
 const LUMINOUS_GLOW_AL_MORPH_BLINK_FRAMES = 30;
 const LUMINOUS_GLOW_AL_MORPH_MAX_MULTIPLIER = 32;
@@ -711,14 +711,6 @@ function isLuminousGlowPresetMaterial(host: any, material: any): boolean {
     return getWgslMaterialShaderPresetForMaterial(host, material) === "wgsl-autoluminous";
 }
 
-function hasExplicitWgslMaterialShaderPresetAssignment(host: any, material: any): boolean {
-    const key = getMaterialKey(material);
-    if (!key) {
-        return false;
-    }
-    return host.materialShaderPresetByMaterial.has(key);
-}
-
 function getLuminousGlowMaterialState(host: any, material: any): {
     coreColor: Color3;
     haloColor: Color3;
@@ -731,15 +723,19 @@ function getLuminousGlowMaterialState(host: any, material: any): {
         return null;
     }
 
-    const shininess = Number(material.specularPower);
+    const defaults = ensureMaterialShaderDefaults(host, material);
+    const currentShininess = Number(material.specularPower);
+    const defaultShininess = Number(defaults.specularPower);
+    const shininess = Number.isFinite(currentShininess) && Number.isFinite(defaultShininess)
+        ? Math.max(currentShininess, defaultShininess)
+        : (Number.isFinite(currentShininess) ? currentShininess : defaultShininess);
     const texture = readMaterialTexture(material, ["diffuseTexture", "albedoTexture"]);
     const baseAlpha = Number.isFinite(Number(material.alpha))
         ? Math.max(0, Math.min(1, Number(material.alpha)))
         : 1;
     const manualGlow = Boolean(host.postEffectGlowEnabledValue) && Number(host.postEffectGlowIntensityValue) > 1e-6;
     const presetLuminous = isLuminousGlowPresetMaterial(host, material);
-    const hasExplicitPreset = hasExplicitWgslMaterialShaderPresetAssignment(host, material);
-    const allowHeuristicGlow = manualGlow && !hasExplicitPreset;
+    const allowHeuristicGlow = manualGlow;
     const specularColor = readMaterialColor(material, ["specularColor", "reflectivityColor"]);
     const specularLuma = computeColorLuminance(specularColor);
     if (!presetLuminous && !allowHeuristicGlow) {

@@ -132,6 +132,22 @@ const flipRgbaRowsInPlace = (bytes: Uint8Array, width: number, height: number): 
     }
 };
 
+const copyBgraToRgba = (
+    source: Uint8Array,
+    target: Uint8Array,
+    width: number,
+    height: number,
+): void => {
+    const pixelCount = width * height;
+    for (let i = 0; i < pixelCount; i += 1) {
+        const offset = i * 4;
+        target[offset + 0] = source[offset + 2];
+        target[offset + 1] = source[offset + 1];
+        target[offset + 2] = source[offset + 0];
+        target[offset + 3] = source[offset + 3];
+    }
+};
+
 const createCaptureRenderTarget = (
     exportInternals: ExportRuntimeInternals,
     width: number,
@@ -238,86 +254,50 @@ const createWebGpuCopyFrameCapture = (
         throw new Error("WebGPU copy capture requires a WebGPU engine");
     }
 
-    const renderTarget = createCaptureRenderTarget(exportInternals, width, height);
     const engine = exportInternals.engine as WebGPUEngine & {
         _device?: GPUDevice;
+        readPixels: (
+            x: number,
+            y: number,
+            width: number,
+            height: number,
+            hasAlpha?: boolean,
+            flushRenderer?: boolean,
+            data?: Uint8Array | null,
+        ) => Promise<ArrayBufferView>;
     };
     const device = engine._device;
     if (!device) {
         throw new Error("WebGPU device is unavailable for capture");
     }
 
-    const bytesPerPixel = 4;
-    const rowBytes = width * bytesPerPixel;
-    const paddedBytesPerRow = Math.ceil(rowBytes / 256) * 256;
-    const readBufferSize = paddedBytesPerRow * height;
-    const readMapMode = typeof GPUMapMode !== "undefined" ? GPUMapMode.READ : 1;
-    const readBuffer = device.createBuffer({
-        size: readBufferSize,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    });
+    const bufferByteLength = width * height * 4;
     const freeRgbaBuffers: Uint8Array[] = [];
 
     const acquireRgbaBuffer = (): Uint8Array => {
         const existing = freeRgbaBuffers.pop();
-        if (existing && existing.byteLength === rowBytes * height) {
+        if (existing && existing.byteLength === bufferByteLength) {
             return existing;
         }
-        return new Uint8Array(rowBytes * height);
+        return new Uint8Array(bufferByteLength);
     };
 
     return {
         modeLabel: "webgpu-copy",
         captureFrameAsync: async (frame: number, timestamp: number, duration: number): Promise<ExportQueueItem | null> => {
-            renderTarget.resetRefreshCounter();
-            renderTarget.render(true);
             engine.flushFramebuffer();
-
-            const internalTexture = renderTarget.getInternalTexture() as {
-                _hardwareTexture?: {
-                    underlyingResource?: GPUTexture | null;
-                } | null;
-            } | null;
-            const gpuTexture = internalTexture?._hardwareTexture?.underlyingResource ?? null;
-            if (!gpuTexture) {
-                return null;
-            }
-
-            const commandEncoder = device.createCommandEncoder({});
-            commandEncoder.copyTextureToBuffer(
-                {
-                    texture: gpuTexture,
-                    mipLevel: 0,
-                    origin: { x: 0, y: 0, z: 0 },
-                },
-                {
-                    buffer: readBuffer,
-                    bytesPerRow: paddedBytesPerRow,
-                    rowsPerImage: height,
-                },
-                {
-                    width,
-                    height,
-                    depthOrArrayLayers: 1,
-                },
-            );
-            device.queue.submit([commandEncoder.finish()]);
             try {
-                await withTimeout(readBuffer.mapAsync(readMapMode), CAPTURE_TIMEOUT_MS, "WebGPU copy capture");
-            } catch (error: unknown) {
-                const detail = error instanceof Error ? error.message : String(error);
-                throw new Error(`WebGPU copy capture stalled or failed: ${detail}. Try readPixels (stable) or canvas / VideoFrame.`);
-            }
-
-            try {
-                const mappedRange = readBuffer.getMappedRange();
-                const mappedBytes = new Uint8Array(mappedRange);
+                const sourcePixels = await withTimeout(
+                    engine.readPixels(0, 0, width, height, true, true, null).then((data) => {
+                        return data instanceof Uint8Array
+                            ? data
+                            : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                    }),
+                    CAPTURE_TIMEOUT_MS,
+                    "WebGPU copy capture",
+                );
                 const rgbaData = acquireRgbaBuffer();
-                for (let y = 0; y < height; y += 1) {
-                    const sourceOffset = y * paddedBytesPerRow;
-                    const targetOffset = (height - 1 - y) * rowBytes;
-                    rgbaData.set(mappedBytes.subarray(sourceOffset, sourceOffset + rowBytes), targetOffset);
-                }
+                copyBgraToRgba(sourcePixels, rgbaData, width, height);
                 return {
                     frame,
                     videoSample: createRawRgbaVideoSample(rgbaData, width, height, timestamp, duration),
@@ -325,16 +305,15 @@ const createWebGpuCopyFrameCapture = (
                         freeRgbaBuffers.push(rgbaData);
                     },
                 };
-            } finally {
-                readBuffer.unmap();
+            } catch (error: unknown) {
+                const detail = error instanceof Error ? error.message : String(error);
+                throw new Error(`WebGPU copy capture stalled or failed: ${detail}. Try readPixels (stable) or canvas / VideoFrame.`);
             }
         },
         flushPendingAsync: async (): Promise<ExportQueueItem[]> => {
             return [];
         },
         dispose: () => {
-            renderTarget.dispose();
-            readBuffer.destroy();
             freeRgbaBuffers.length = 0;
         },
     };
@@ -576,6 +555,14 @@ export async function runWebmExportJob(
     const mmdManager = await MmdManager.create(canvas);
 
     try {
+        const exportRuntimeInternals = mmdManager as unknown as ExportRuntimeInternals & {
+            engine: AbstractEngine & {
+                setHardwareScalingLevel?: (level: number) => void;
+            };
+        };
+        exportRuntimeInternals.engine.setHardwareScalingLevel?.(1);
+        mmdManager.resize();
+
         updateStatus(callbacks, "Loading project into export renderer...", "loading-project");
         const importResult = await mmdManager.importProjectState(request.project, { forExport: true });
         const expectedModelCount = request.project.scene.models.length;
@@ -641,7 +628,6 @@ export async function runWebmExportJob(
             });
         }
 
-        const exportRuntimeInternals = mmdManager as unknown as ExportRuntimeInternals;
         const frameCapture = createFrameCapture(
             callbacks,
             captureMode,
