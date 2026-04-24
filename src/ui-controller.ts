@@ -2379,7 +2379,7 @@ export class UIController {
                     <input data-postfx="color-curves-saturation" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="color-curves-saturation" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
-                <div class="effect-row" style="display:none;">
+                <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.glow">Glow</span>
                     <input data-postfx="glow-intensity" type="range" class="effect-slider" min="0" max="400" value="50" step="1">
                     <span data-postfx-val="glow-intensity" class="effect-value" data-i18n="status.off">OFF</span>

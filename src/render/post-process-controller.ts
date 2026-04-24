@@ -1296,11 +1296,7 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
 
     applyStandaloneBloomSettings(host);
 
-    pipeline.glowLayerEnabled = host.postEffectGlowEnabledValue;
-    if (pipeline.glowLayer) {
-        pipeline.glowLayer.intensity = host.postEffectGlowIntensityValue;
-        pipeline.glowLayer.blurKernelSize = host.postEffectGlowKernelValue;
-    }
+    pipeline.glowLayerEnabled = false;
 
     pipeline.chromaticAberrationEnabled = host.postEffectChromaticAberrationValue > 1e-4;
     if (pipeline.chromaticAberration) {

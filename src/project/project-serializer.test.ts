@@ -98,7 +98,7 @@ function createHost() {
         postEffectColorCurvesExposure: 0,
         postEffectGlowEnabled: false,
         postEffectGlowIntensity: 0.5,
-        postEffectGlowKernel: 32,
+        postEffectGlowKernel: 20,
         postEffectLutEnabled: false,
         postEffectLutIntensity: 1,
         postEffectLutPreset: "anime-soft",

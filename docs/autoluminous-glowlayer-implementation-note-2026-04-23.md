@@ -384,3 +384,41 @@ Babylon 側の確認開始点:
   - https://mmderproblems.tumblr.com/post/30117157081/mmd-tips-note-make-sure-you-loaded
 
 上記は厳密な公式仕様書ではないため、実装時は `推定仕様` として扱う。
+
+## 11. 2026-04-24 実装メモ
+
+今回の試作では、`LuminousGlow` を `Babylon.js GlowLayer` ベースで実装した。
+
+- 右パネルのエフェクト欄に `LuminousGlow` 強度スライダーを追加
+- Babylon の `DefaultRenderingPipeline.glowLayerEnabled` ではなく、手動生成した `GlowLayer` を使う構成に変更
+- 発光判定は `Shininess >= 100` を基準にしつつ、`diffuse + ambient` から発光色を作る
+- `specularColor` が強い普通の shiny 材質は、できるだけ発光源にしない方向へ寄せた
+- `mainTextureRatio = 0.5` と `mainTextureSamples = 4` にして、固定 `256` よりちらつきとモアレを減らした
+- glow の広がりは初期値を少し薄めに調整した
+
+今回の到達点:
+
+- stage / アクセサリ系の `AutoLuminous-lite` としては十分に成立する
+- 画面全体の見た目改善としては効果が大きい
+- 実装コストは独自ポストエフェクト全面再実装よりかなり軽い
+
+今回の既知課題:
+
+- モデル内の前後関係、とくに `ネクタイと襟` や `パンツ発光とスカート` のようなケースで、発光が非発光材質を貫通して見えることがある
+- これは `GlowLayer` の blur が本質的に depth 非考慮なため、完全には止めきれない
+- alpha blend / alpha cutout / 材質ごとの描画順の影響も強く、モデル依存の破綻が出やすい
+
+今回試したが決定打にならなかったもの:
+
+- 非発光材質を glow pass の occluder として描く
+- alpha silhouette を使って occluder を残す
+- `alpha blend` 材質も glow pass に参加させる
+- depth-aware blur を `GlowLayer` の後段に差し込む試み
+
+上記の対策で一部改善は見られたが、`GlowLayer` ベースのままでは完全解決に至らなかった。現時点では `LuminousGlow` を `実験機能 / AutoLuminous-lite` として維持し、`モデル内遮蔽の完全再現` は別課題として切り分けるのが妥当。
+
+再開する場合の候補:
+
+- `GlowLayer` 後段に専用の depth-aware マスク合成を足す
+- 既存 glow を使わず、発光抽出 + blur + depth-aware composite を独自ポストエフェクトとして組み直す
+- まずは `ステージ / アクセサリ優先` に適用対象を絞り、モデル本体には既存 Bloom 系を残す

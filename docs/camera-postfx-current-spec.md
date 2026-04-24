@@ -7,6 +7,7 @@ Updated: 2026-04-23
 Current camera-side post effects are edited from the right `エフェクト` panel when `対象 = Camera`.
 
 - Base image controls: `Gamma`, `Vignette`, `Chroma`, `Grain`, `Sharpen`, `Distortion`, `EdgeBlur`, `Edge`
+- `LuminousGlow`: intensity slider for `GlowLayer` based pseudo `AutoLuminous`
 - LUT: preset + intensity
 - Bloom: `On/Off`, `Bloom強度`, `BloomTh`, `BloomK`
 - DoF: `On/Off`, quality, focus, signed focus offset, F-stop, near suppression, focal invert, lens size, lens blur
@@ -21,7 +22,6 @@ The following items are intentionally hidden from the current UI:
 - `Exposure`
 - `Dither`
 - `Curves`
-- `Glow`
 - `Motion Blur`
 - `SSR`
 - `VLight`

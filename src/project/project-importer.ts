@@ -555,7 +555,7 @@ export async function importProjectState(
         : 0.5;
     host.postEffectGlowKernel = typeof data.effects.glowKernel === "number" && Number.isFinite(data.effects.glowKernel)
         ? data.effects.glowKernel
-        : 32;
+        : 20;
     host.postEffectLutPreset = typeof data.effects.lutPreset === "string"
         ? data.effects.lutPreset
         : host.postEffectLutPreset;

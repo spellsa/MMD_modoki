@@ -314,7 +314,7 @@
     "shader.postfx.grain":  "Grain",
     "shader.postfx.sharpen":  "Sharpen",
     "shader.postfx.curves":  "Curves",
-    "shader.postfx.glow":  "Glow",
+    "shader.postfx.glow":  "LuminousGlow",
     "shader.postfx.lutSource":  "LUTSrc",
     "shader.postfx.lutFile":  "LUTFile",
     "shader.postfx.motionBlur":  "MBlur",

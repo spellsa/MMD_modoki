@@ -16,6 +16,7 @@ import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Layer } from "@babylonjs/core/Layers/layer";
+import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -1295,7 +1296,7 @@ ${beforeFogAppendBlock}
     private postEffectColorCurvesExposureValue = 0;
     private postEffectGlowEnabledValue = false;
     private postEffectGlowIntensityValue = 0.5;
-    private postEffectGlowKernelValue = 32;
+    private postEffectGlowKernelValue = 20;
     private postEffectLutEnabledValue = false;
     private postEffectLutIntensityValue = 1;
     private postEffectLutPresetValue = "anime-soft";
@@ -1351,6 +1352,7 @@ ${beforeFogAppendBlock}
     private motionBlurScreenDirection = new Vector2(0, 0);
     private motionBlurScreenAmount = 0;
     private standaloneBloomEffect: BloomEffect | null = null;
+    private luminousGlowLayer: GlowLayer | null = null;
     private standaloneLensBlurPostProcess: PostProcess | null = null;
     private standaloneEdgeBlurPostProcess: PostProcess | null = null;
     private volumetricLightPostProcess: VolumetricLightScatteringPostProcess | null = null;
@@ -4837,7 +4839,7 @@ ${beforeFogAppendBlock}
         this.applyImageProcessingSettings();
     }
 
-    /** Glow enabled state. */
+    /** LuminousGlow enabled state. */
     get postEffectGlowEnabled(): boolean {
         return this.postEffectGlowEnabledValue;
     }
@@ -4846,7 +4848,7 @@ ${beforeFogAppendBlock}
         this.applyDefaultPipelinePostProcessSettings();
     }
 
-    /** Glow intensity (0..4). */
+    /** LuminousGlow intensity (0..4). */
     get postEffectGlowIntensity(): number {
         return this.postEffectGlowIntensityValue;
     }
@@ -4855,7 +4857,7 @@ ${beforeFogAppendBlock}
         this.applyDefaultPipelinePostProcessSettings();
     }
 
-    /** Glow kernel size (1..256). */
+    /** LuminousGlow kernel size (1..256). */
     get postEffectGlowKernel(): number {
         return this.postEffectGlowKernelValue;
     }
@@ -5471,6 +5473,10 @@ ${beforeFogAppendBlock}
                 this.standaloneBloomEffect.disposeEffects(this.camera);
                 this.standaloneBloomEffect = null;
             }
+            if (this.luminousGlowLayer) {
+                this.luminousGlowLayer.dispose();
+                this.luminousGlowLayer = null;
+            }
             if (this.standaloneLensBlurPostProcess) {
                 this.standaloneLensBlurPostProcess.dispose(this.camera);
                 this.standaloneLensBlurPostProcess = null;
@@ -5592,6 +5598,10 @@ ${beforeFogAppendBlock}
         if (this.standaloneBloomEffect) {
             this.standaloneBloomEffect.disposeEffects(this.camera);
             this.standaloneBloomEffect = null;
+        }
+        if (this.luminousGlowLayer) {
+            this.luminousGlowLayer.dispose();
+            this.luminousGlowLayer = null;
         }
         if (this.standaloneLensBlurPostProcess) {
             this.standaloneLensBlurPostProcess.dispose(this.camera);
@@ -6822,6 +6832,10 @@ ${beforeFogAppendBlock}
         if (this.standaloneBloomEffect) {
             this.standaloneBloomEffect.disposeEffects(this.camera);
             this.standaloneBloomEffect = null;
+        }
+        if (this.luminousGlowLayer) {
+            this.luminousGlowLayer.dispose();
+            this.luminousGlowLayer = null;
         }
         if (this.standaloneLensBlurPostProcess) {
             this.standaloneLensBlurPostProcess.dispose(this.camera);
