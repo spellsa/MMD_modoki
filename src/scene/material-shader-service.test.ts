@@ -7,6 +7,7 @@ import {
 } from "./material-shader-service";
 
 function createHost() {
+    const morphWeights = new Map<string, number>();
     const material = {
         name: "face",
         disableLighting: false,
@@ -18,19 +19,31 @@ function createHost() {
         ignoreDiffuseWhenToonTextureIsNull: false,
         markAsDirty: vi.fn(),
     };
+    const mesh = { name: "modelRoot", parent: null };
+    const model = {
+        morph: {
+            getMorphWeight: (name: string) => morphWeights.get(name) ?? 0,
+        },
+    };
 
     return {
         constructor: {
             DEFAULT_WGSL_MATERIAL_SHADER_PRESET: "wgsl-mmd-standard",
             WGSL_MATERIAL_SHADER_PRESETS: [
                 { id: "wgsl-mmd-standard", label: "standard" },
+                { id: "wgsl-autoluminous", label: "Luminous" },
                 { id: "wgsl-full-shadow", label: "full_shadow" },
             ],
             externalWgslToonFragmentByMaterial: new WeakMap<object, string>(),
             presetWgslToonFragmentByMaterial: new WeakMap<object, string>(),
         },
         material,
+        mesh,
+        model,
+        morphWeights,
         sceneModels: [{
+            mesh,
+            model,
             materials: [{
                 key: "0:face",
                 material,
@@ -57,6 +70,14 @@ function createHost() {
             customEmissiveTextureSelector: null,
             dispose: vi.fn(),
         },
+        luminousGlowCoreLayer: {
+            mmdLuminousGlowLayer: true,
+            intensity: 0,
+            blurKernelSize: 0,
+            customEmissiveColorSelector: null,
+            customEmissiveTextureSelector: null,
+            dispose: vi.fn(),
+        },
         postEffectGlowEnabledValue: false,
         postEffectGlowIntensityValue: 0,
         postEffectGlowKernelValue: 20,
@@ -64,6 +85,10 @@ function createHost() {
         postEffectBloomWeightValue: 1,
         postEffectBloomThresholdValue: 1,
         postEffectBloomKernelValue: 64,
+        mmdRuntime: {
+            currentFrameTime: 0,
+        },
+        luminousGlowMorphRevision: 0,
         onMaterialShaderStateChanged: vi.fn(),
         isWebGpuEngine: () => true,
         isMaterialVisible: () => true,
@@ -102,21 +127,81 @@ describe("material shader preset restore", () => {
         syncLuminousGlowLayer(host);
 
         expect(host.defaultRenderingPipeline.glowLayerEnabled).toBe(false);
-        expect(host.luminousGlowLayer.intensity).toBe(1.4);
+        expect(host.luminousGlowLayer.intensity).toBeCloseTo(1.4 * 0.82);
+        expect(host.luminousGlowCoreLayer.intensity).toBeCloseTo(1.4 * 0.56);
+        expect(host.luminousGlowLayer.blurKernelSize).toBe(20);
+        expect(host.luminousGlowCoreLayer.blurKernelSize).toBe(5);
 
-        const result = {
+        const haloResult = {
             values: [0, 0, 0, 0],
             set(r: number, g: number, b: number, a: number) {
                 this.values = [r, g, b, a];
             },
         };
-        host.luminousGlowLayer.customEmissiveColorSelector(null, null, host.material, result);
+        const coreResult = {
+            values: [0, 0, 0, 0],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(null, null, host.material, haloResult);
+        host.luminousGlowCoreLayer.customEmissiveColorSelector(null, null, host.material, coreResult);
 
-        expect(result.values[0]).toBeGreaterThan(0.8);
-        expect(result.values[1]).toBeGreaterThan(0.2);
-        expect(result.values[2]).toBeGreaterThan(0.2);
-        expect(result.values[3]).toBeGreaterThan(0);
+        expect(haloResult.values[0]).toBeGreaterThan(0.8);
+        expect(haloResult.values[1]).toBeGreaterThan(0.15);
+        expect(haloResult.values[2]).toBeGreaterThan(0.05);
+        expect(haloResult.values[3]).toBeGreaterThan(0);
+        expect(coreResult.values[0]).toBeGreaterThan(haloResult.values[1]);
+        expect(coreResult.values[1]).toBeGreaterThan(haloResult.values[1]);
+        expect(coreResult.values[2]).toBeGreaterThan(haloResult.values[2]);
+        expect(coreResult.values[0] - coreResult.values[2]).toBeLessThan(haloResult.values[0] - haloResult.values[2]);
         expect(host.luminousGlowLayer.customEmissiveTextureSelector(null, null, host.material)).toBe(fakeTexture);
+        expect(host.luminousGlowCoreLayer.customEmissiveTextureSelector(null, null, host.material)).toBe(fakeTexture);
+    });
+
+    it("applies AL morph brightness controls on top of the material-driven glow", () => {
+        const host = createHost();
+        host.material.specularPower = 120;
+        host.material.specularColor = new Color3(0, 0, 0);
+        host.material.diffuseColor = new Color3(0.6, 0.2, 0.1);
+        host.material.ambientColor = new Color3(0.1, 0.05, 0.1);
+        host.postEffectGlowEnabledValue = true;
+        host.postEffectGlowIntensityValue = 1;
+
+        syncLuminousGlowLayer(host);
+
+        const baseResult = {
+            values: [0, 0, 0, 0],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, baseResult);
+
+        host.morphWeights.set("LightUp", 1);
+        host.luminousGlowMorphRevision += 1;
+        const boostedResult = {
+            values: [0, 0, 0, 0],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, boostedResult);
+
+        expect(boostedResult.values[0]).toBeGreaterThan(baseResult.values[0]);
+        expect(boostedResult.values[1]).toBeGreaterThan(baseResult.values[1]);
+
+        host.morphWeights.set("LightOff", 1);
+        host.luminousGlowMorphRevision += 1;
+        const offResult = {
+            values: [1, 1, 1, 0],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, offResult);
+
+        expect(offResult.values).toEqual([0, 0, 0, 1]);
     });
 
     it("keeps an opaque black occluder pass when shininess is below the AutoLuminous threshold", () => {
@@ -140,9 +225,18 @@ describe("material shader preset restore", () => {
             },
         };
         host.luminousGlowLayer.customEmissiveColorSelector(null, null, host.material, result);
+        const coreResult = {
+            values: [1, 1, 1, 1],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowCoreLayer.customEmissiveColorSelector(null, null, host.material, coreResult);
 
         expect(result.values).toEqual([0, 0, 0, 1]);
+        expect(coreResult.values).toEqual([0, 0, 0, 1]);
         expect(host.luminousGlowLayer.customEmissiveTextureSelector(null, null, host.material)).toBe(fakeTexture);
+        expect(host.luminousGlowCoreLayer.customEmissiveTextureSelector(null, null, host.material)).toBe(fakeTexture);
     });
 
     it("keeps ordinary shiny materials as occluders when specular color is not dark", () => {
@@ -163,10 +257,85 @@ describe("material shader preset restore", () => {
             },
         };
         host.luminousGlowLayer.customEmissiveColorSelector(null, null, host.material, result);
+        const coreResult = {
+            values: [1, 1, 1, 1],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowCoreLayer.customEmissiveColorSelector(null, null, host.material, coreResult);
 
         expect(result.values[0]).toBe(0);
         expect(result.values[1]).toBe(0);
         expect(result.values[2]).toBe(0);
         expect(result.values[3]).toBe(1);
+        expect(coreResult.values[0]).toBe(0);
+        expect(coreResult.values[1]).toBe(0);
+        expect(coreResult.values[2]).toBe(0);
+        expect(coreResult.values[3]).toBe(1);
+    });
+
+    it("routes the Luminous preset through LuminousGlow instead of auto bloom", () => {
+        const host = createHost();
+        host.material.diffuseColor = new Color3(0.2, 0.8, 1);
+        host.material.ambientColor = new Color3(0.05, 0.1, 0.15);
+        host.material.specularPower = 16;
+
+        const applied = setWgslMaterialShaderPreset(host, 0, "0:face", "wgsl-autoluminous");
+        expect(applied).toBe(true);
+
+        expect(host.defaultRenderingPipeline.bloomEnabled).toBe(false);
+        expect(host.luminousGlowLayer.intensity).toBeCloseTo(0.5 * 0.82);
+        expect(host.luminousGlowCoreLayer.intensity).toBeCloseTo(0.5 * 0.56);
+
+        const haloResult = {
+            values: [0, 0, 0, 0],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, haloResult);
+
+        expect(haloResult.values[0]).toBeGreaterThan(0.05);
+        expect(haloResult.values[1]).toBeGreaterThan(0.3);
+        expect(haloResult.values[2]).toBeGreaterThan(0.4);
+        expect(haloResult.values[2]).toBeGreaterThan(haloResult.values[0]);
+        expect(haloResult.values[3]).toBeGreaterThan(0);
+    });
+
+    it("stops glowing after clearing the Luminous preset even when manual glow is enabled", () => {
+        const host = createHost();
+        host.material.diffuseColor = new Color3(0.2, 0.8, 1);
+        host.material.ambientColor = new Color3(0.05, 0.1, 0.15);
+        host.material.specularPower = 160;
+        host.material.specularColor = new Color3(0, 0, 0);
+        host.postEffectGlowEnabledValue = true;
+        host.postEffectGlowIntensityValue = 1;
+
+        expect(setWgslMaterialShaderPreset(host, 0, "0:face", "wgsl-autoluminous")).toBe(true);
+
+        const luminousResult = {
+            values: [0, 0, 0, 0],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, luminousResult);
+        expect(luminousResult.values[2]).toBeGreaterThan(0.4);
+
+        expect(setWgslMaterialShaderPreset(host, 0, "0:face", "wgsl-mmd-standard")).toBe(true);
+
+        const clearedResult = {
+            values: [1, 1, 1, 1],
+            set(r: number, g: number, b: number, a: number) {
+                this.values = [r, g, b, a];
+            },
+        };
+        host.luminousGlowLayer.customEmissiveColorSelector(host.mesh, null, host.material, clearedResult);
+
+        expect(clearedResult.values[0]).toBe(0);
+        expect(clearedResult.values[1]).toBe(0);
+        expect(clearedResult.values[2]).toBe(0);
+        expect(clearedResult.values[3]).toBe(1);
     });
 });

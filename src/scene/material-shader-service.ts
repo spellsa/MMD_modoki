@@ -18,6 +18,7 @@ import toonHardShadowWgslText from "../../wgsl/toon_hard_shadow.wgsl?raw";
 import fallbackAccessoryToonTextureUrl from "../assets/textures/toon/fallback_accessory_toon.bmp?url";
 // eslint-disable-next-line import/no-unresolved
 import fallbackShadowToonTextureUrl from "../assets/textures/toon/fallback_shadow_toon.bmp?url";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { Effect } from "@babylonjs/core/Materials/effect";
 import { Material } from "@babylonjs/core/Materials/material";
@@ -68,10 +69,18 @@ type MaterialShaderDefaults = {
     ignoreDiffuseWhenToonTextureIsNull: boolean | null;
 };
 
+type LuminousGlowLayerAlphaCutOverrideState = {
+    hasTransparencyMode: boolean;
+    transparencyMode: number | null | undefined;
+    hasAlphaCutOff: boolean;
+    alphaCutOff: number | null | undefined;
+    hasUseAlphaFromDiffuseTexture: boolean;
+    useAlphaFromDiffuseTexture: boolean | null | undefined;
+    hasUseAlphaFromAlbedoTexture: boolean;
+    useAlphaFromAlbedoTexture: boolean | null | undefined;
+};
+
 const DEFAULT_WGSL_MATERIAL_SHADER_PRESET = "wgsl-mmd-standard";
-const AUTO_LUMINOUS_BLOOM_WEIGHT = 0.42;
-const AUTO_LUMINOUS_BLOOM_THRESHOLD = 1.05;
-const AUTO_LUMINOUS_BLOOM_KERNEL = 64;
 const AUTO_LUMINOUS_BASE_LEVEL = 1.28;
 const AUTO_LUMINOUS_BRIGHTNESS_BIAS = 0.14;
 const AUTO_LUMINOUS_TINT_STRENGTH = 0.72;
@@ -83,6 +92,19 @@ const LUMINOUS_GLOW_OCCLUDER_ALPHA = 1;
 const LUMINOUS_GLOW_MAIN_TEXTURE_RATIO = 0.5;
 const LUMINOUS_GLOW_MAIN_TEXTURE_SAMPLES = 4;
 const LUMINOUS_GLOW_DEPTH_BLUR_SIGMA = 320;
+const LUMINOUS_GLOW_HALO_SATURATION = 1.35;
+const LUMINOUS_GLOW_HALO_BRIGHTNESS = 0.92;
+const LUMINOUS_GLOW_CORE_WHITE_MIX = 0.82;
+const LUMINOUS_GLOW_CORE_INTENSITY_RATIO = 0.56;
+const LUMINOUS_GLOW_HALO_INTENSITY_RATIO = 0.82;
+const LUMINOUS_GLOW_CORE_KERNEL_RATIO = 0.25;
+const LUMINOUS_GLOW_AL_MORPH_BLINK_FRAMES = 30;
+const LUMINOUS_GLOW_AL_MORPH_MAX_MULTIPLIER = 32;
+const LUMINOUS_GLOW_HALO_DEPTH_EDGE_STRENGTH = 0.72;
+const LUMINOUS_GLOW_CORE_DEPTH_EDGE_STRENGTH = 0.38;
+const LUMINOUS_GLOW_DEPTH_EDGE_THRESHOLD_LOW = 0.0008;
+const LUMINOUS_GLOW_DEPTH_EDGE_THRESHOLD_HIGH = 0.02;
+const LUMINOUS_GLOW_LAYER_ALPHA_CUTOFF = 0.5;
 const presetFallbackAccessoryToonTextureByScene = new WeakMap<object, Texture>();
 const presetFallbackShadowToonTextureByScene = new WeakMap<object, Texture>();
 
@@ -182,16 +204,152 @@ function ensureLuminousGlowDepthBlurShader(): void {
     }
 }
 
+function ensureLuminousGlowDepthMergeShader(): void {
+    const vertexShaderKey = "mmdLuminousGlowMergeVertexShader";
+    const fragmentShaderKey = "mmdLuminousGlowMergePixelShader";
+    if (!Effect.ShadersStore[vertexShaderKey]) {
+        Effect.ShadersStore[vertexShaderKey] = `
+                attribute vec2 position;
+                varying vec2 vUV;
+                const vec2 madd = vec2(0.5, 0.5);
+                void main(void) {
+                    vUV = position * madd + madd;
+                    gl_Position = vec4(position, 0.0, 1.0);
+                }
+            `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[vertexShaderKey]) {
+        ShaderStore.ShadersStoreWGSL[vertexShaderKey] = `
+                attribute position: vec2f;
+                varying vUV: vec2f;
+                @vertex
+                fn main(input: VertexInputs)->FragmentInputs {
+                    let madd: vec2f = vec2f(0.5, 0.5);
+                    vertexOutputs.vUV = input.position * madd + madd;
+                    vertexOutputs.position = vec4f(input.position, 0.0, 1.0);
+                }
+            `;
+    }
+    if (!Effect.ShadersStore[fragmentShaderKey]) {
+        Effect.ShadersStore[fragmentShaderKey] = `
+                varying vec2 vUV;
+                uniform sampler2D textureSampler;
+                uniform sampler2D textureSampler2;
+                uniform sampler2D depthSampler;
+                uniform vec2 screenSize;
+                uniform float offset;
+                uniform float edgeStrength;
+                uniform float edgeThresholdLow;
+                uniform float edgeThresholdHigh;
+
+                float readDepth(vec2 uv) {
+                    return clamp(abs(texture2D(depthSampler, clamp(uv, vec2(0.001), vec2(0.999))).r), 0.0, 1.0);
+                }
+
+                void main(void) {
+                    vec4 baseColor = (texture2D(textureSampler, vUV) + texture2D(textureSampler2, vUV)) * offset;
+                    vec2 texel = 1.0 / max(screenSize, vec2(1.0));
+
+                    float centerDepth = readDepth(vUV);
+                    float edge = 0.0;
+                    edge = max(edge, abs(readDepth(vUV + vec2(texel.x, 0.0)) - centerDepth));
+                    edge = max(edge, abs(readDepth(vUV - vec2(texel.x, 0.0)) - centerDepth));
+                    edge = max(edge, abs(readDepth(vUV + vec2(0.0, texel.y)) - centerDepth));
+                    edge = max(edge, abs(readDepth(vUV - vec2(0.0, texel.y)) - centerDepth));
+
+                    float edgeMask = smoothstep(edgeThresholdLow, edgeThresholdHigh, edge);
+                    float nearMask = 1.0 - smoothstep(0.92, 1.0, centerDepth);
+                    float attenuation = 1.0 - (edgeMask * nearMask * edgeStrength);
+                    baseColor.rgb *= clamp(attenuation, 0.0, 1.0);
+                    baseColor.a *= clamp(1.0 - edgeMask * edgeStrength * 0.35, 0.0, 1.0);
+
+                    gl_FragColor = baseColor;
+                }
+            `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[fragmentShaderKey]) {
+        ShaderStore.ShadersStoreWGSL[fragmentShaderKey] = `
+                varying vUV: vec2f;
+                var textureSamplerSampler: sampler;
+                var textureSampler: texture_2d<f32>;
+                var textureSampler2Sampler: sampler;
+                var textureSampler2: texture_2d<f32>;
+                var depthSamplerSampler: sampler;
+                var depthSampler: texture_2d<f32>;
+                uniform screenSize: vec2f;
+                uniform offset: f32;
+                uniform edgeStrength: f32;
+                uniform edgeThresholdLow: f32;
+                uniform edgeThresholdHigh: f32;
+
+                fn readDepth(uv: vec2f) -> f32 {
+                    return clamp(abs(textureSampleLevel(depthSampler, depthSamplerSampler, clamp(uv, vec2f(0.001), vec2f(0.999)), 0.0).r), 0.0, 1.0);
+                }
+
+                @fragment
+                fn main(input: FragmentInputs)->FragmentOutputs {
+                    var baseColor = (textureSample(textureSampler, textureSamplerSampler, input.vUV)
+                        + textureSample(textureSampler2, textureSampler2Sampler, input.vUV)) * uniforms.offset;
+                    let texel = 1.0 / max(uniforms.screenSize, vec2f(1.0));
+
+                    let centerDepth = readDepth(input.vUV);
+                    var edge = 0.0;
+                    edge = max(edge, abs(readDepth(input.vUV + vec2f(texel.x, 0.0)) - centerDepth));
+                    edge = max(edge, abs(readDepth(input.vUV - vec2f(texel.x, 0.0)) - centerDepth));
+                    edge = max(edge, abs(readDepth(input.vUV + vec2f(0.0, texel.y)) - centerDepth));
+                    edge = max(edge, abs(readDepth(input.vUV - vec2f(0.0, texel.y)) - centerDepth));
+
+                    let edgeMask = smoothstep(uniforms.edgeThresholdLow, uniforms.edgeThresholdHigh, edge);
+                    let nearMask = 1.0 - smoothstep(0.92, 1.0, centerDepth);
+                    let attenuation = clamp(1.0 - (edgeMask * nearMask * uniforms.edgeStrength), 0.0, 1.0);
+                    baseColor = vec4f(
+                        baseColor.rgb * attenuation,
+                        baseColor.a * clamp(1.0 - edgeMask * uniforms.edgeStrength * 0.35, 0.0, 1.0),
+                    );
+
+                    fragmentOutputs.color = baseColor;
+                    return fragmentOutputs;
+                }
+            `;
+    }
+}
+
 class LuminousGlowLayer extends GlowLayer {
     public readonly mmdLuminousGlowLayer = true;
     private readonly mmdGlowHost: any;
+    private readonly mmdDepthEdgeStrength: number;
     private static constructingHost: any = null;
+    private static constructingDepthEdgeStrength = 0;
 
     public constructor(host: any, name: string, scene: any, options?: any) {
         LuminousGlowLayer.constructingHost = host;
+        LuminousGlowLayer.constructingDepthEdgeStrength = Number(options?.mmdDepthEdgeStrength ?? 0);
         super(name, scene, options);
         this.mmdGlowHost = host;
+        this.mmdDepthEdgeStrength = LuminousGlowLayer.constructingDepthEdgeStrength;
         LuminousGlowLayer.constructingHost = null;
+        LuminousGlowLayer.constructingDepthEdgeStrength = 0;
+    }
+
+    protected override _createMergeEffect(): any {
+        ensureLuminousGlowDepthMergeShader();
+        const self = this as any;
+        let defines = "#define EMISSIVE\n";
+        if (self._options?.ldrMerge) {
+            defines += "#define LDR\n";
+        }
+        return self._engine.createEffect(
+            "mmdLuminousGlowMerge",
+            [VertexBuffer.PositionKind],
+            ["offset", "screenSize", "edgeStrength", "edgeThresholdLow", "edgeThresholdHigh"],
+            ["textureSampler", "textureSampler2", "depthSampler"],
+            defines,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            this.shaderLanguage,
+        );
     }
 
     protected override _canRenderMesh(_mesh: any, _material: any): boolean {
@@ -199,8 +357,19 @@ class LuminousGlowLayer extends GlowLayer {
         return true;
     }
 
+    protected override _renderSubMesh(subMesh: any, enableAlphaMode = false): void {
+        const material = subMesh?.getMaterial?.();
+        const restoreAlphaCutOverride = beginLuminousGlowLayerAlphaCutOverride(this.mmdGlowHost, material);
+        try {
+            super._renderSubMesh(subMesh, enableAlphaMode);
+        } finally {
+            restoreAlphaCutOverride?.();
+        }
+    }
+
     protected override _createTextureAndPostProcesses(): void {
         ensureLuminousGlowDepthBlurShader();
+        ensureLuminousGlowDepthMergeShader();
 
         const self = this as any;
         const host = this.mmdGlowHost ?? LuminousGlowLayer.constructingHost;
@@ -236,9 +405,15 @@ class LuminousGlowLayer extends GlowLayer {
 
         self._textures = [self._blurTexture1, self._blurTexture2];
         self._thinEffectLayer.bindTexturesForCompose = (effect: any) => {
+            const depthMap = host?.depthRenderer?.getDepthMap?.();
             effect.setTexture("textureSampler", self._blurTexture1);
             effect.setTexture("textureSampler2", self._blurTexture2);
+            effect.setTexture("depthSampler", depthMap ?? self._mainTexture);
             effect.setFloat("offset", this.intensity);
+            effect.setFloat2("screenSize", self._engine.getRenderWidth(), self._engine.getRenderHeight());
+            effect.setFloat("edgeStrength", depthMap ? this.mmdDepthEdgeStrength : 0);
+            effect.setFloat("edgeThresholdLow", LUMINOUS_GLOW_DEPTH_EDGE_THRESHOLD_LOW);
+            effect.setFloat("edgeThresholdHigh", LUMINOUS_GLOW_DEPTH_EDGE_THRESHOLD_HIGH);
         };
 
         const createDepthAwareBlur = (name: string, width: number, height: number, directionX: number, directionY: number): PostProcess => {
@@ -357,8 +532,196 @@ function computeColorLuminance(color: Color3 | null): number {
     return Math.max(0, color.r * 0.299 + color.g * 0.587 + color.b * 0.114);
 }
 
+function scaleColor(color: Color3, factor: number): Color3 {
+    return new Color3(
+        Math.max(0, color.r * factor),
+        Math.max(0, color.g * factor),
+        Math.max(0, color.b * factor),
+    );
+}
+
+function saturateColor(color: Color3, amount: number): Color3 {
+    const luma = computeColorLuminance(color);
+    return new Color3(
+        Math.max(0, luma + (color.r - luma) * amount),
+        Math.max(0, luma + (color.g - luma) * amount),
+        Math.max(0, luma + (color.b - luma) * amount),
+    );
+}
+
+function mixColorTowardValue(color: Color3, target: number, amount: number): Color3 {
+    return new Color3(
+        Math.max(0, color.r + (target - color.r) * amount),
+        Math.max(0, color.g + (target - color.g) * amount),
+        Math.max(0, color.b + (target - color.b) * amount),
+    );
+}
+
+function clampUnit(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+}
+
+function lerpNumber(from: number, to: number, amount: number): number {
+    return from + (to - from) * clampUnit(amount);
+}
+
+function createLuminousGlowOccluderState(texture: Texture | null): {
+    coreColor: Color3;
+    haloColor: Color3;
+    alpha: number;
+    texture: Texture | null;
+    luminous: boolean;
+} {
+    return {
+        coreColor: Color3.Black(),
+        haloColor: Color3.Black(),
+        alpha: LUMINOUS_GLOW_OCCLUDER_ALPHA,
+        texture,
+        luminous: false,
+    };
+}
+
+function getLuminousGlowMorphWeight(model: any, morphName: string): number {
+    const modelMorph = model?.morph;
+    if (!modelMorph || typeof morphName !== "string" || morphName.length === 0) {
+        return 0;
+    }
+    try {
+        return clampUnit(Number(modelMorph.getMorphWeight(morphName)));
+    } catch {
+        return 0;
+    }
+}
+
+function getLuminousGlowMorphTimelineKey(host: any): number {
+    const runtimeFrame = Number(host?.mmdRuntime?.currentFrameTime);
+    if (Number.isFinite(runtimeFrame)) {
+        return runtimeFrame;
+    }
+    const currentFrame = Number(host?.currentFrame);
+    if (Number.isFinite(currentFrame)) {
+        return currentFrame;
+    }
+    return 0;
+}
+
+function getLuminousGlowMorphRevision(host: any): number {
+    const revision = Number(host?.luminousGlowMorphRevision);
+    if (!Number.isFinite(revision)) {
+        return 0;
+    }
+    return revision;
+}
+
+function getLuminousGlowMorphScaleForModel(host: any, model: any): number {
+    if (!model || typeof model !== "object") {
+        return 1;
+    }
+
+    const cache = host.luminousGlowMorphScaleByModel as WeakMap<object, {
+        timelineKey: number;
+        revision: number;
+        scale: number;
+    }> | undefined;
+    const resolvedCache = cache ?? new WeakMap<object, { timelineKey: number; revision: number; scale: number }>();
+    if (!cache) {
+        host.luminousGlowMorphScaleByModel = resolvedCache;
+    }
+
+    const timelineKey = getLuminousGlowMorphTimelineKey(host);
+    const revision = getLuminousGlowMorphRevision(host);
+    const modelKey = model as object;
+    const cached = resolvedCache.get(modelKey);
+    if (cached && cached.timelineKey === timelineKey && cached.revision === revision) {
+        return cached.scale;
+    }
+
+    const lightOff = getLuminousGlowMorphWeight(model, "LightOff");
+    const lightUp = getLuminousGlowMorphWeight(model, "LightUp");
+    const lightUpE = getLuminousGlowMorphWeight(model, "LightUpE");
+    const lightBlink = getLuminousGlowMorphWeight(model, "LightBlink");
+    const lightBS = getLuminousGlowMorphWeight(model, "LightBS");
+    const lightDuty = getLuminousGlowMorphWeight(model, "LightDuty");
+    const lightMin = getLuminousGlowMorphWeight(model, "LightMin");
+    const clockUp = getLuminousGlowMorphWeight(model, "LClockUp");
+    const clockDown = getLuminousGlowMorphWeight(model, "LClockDown");
+
+    let scale = 1;
+    scale *= lerpNumber(1, 2.2, lightUp);
+    scale *= lerpNumber(1, 12, lightUpE);
+    scale *= lerpNumber(1, 0, lightOff);
+
+    const blinkSpeedScale = lerpNumber(1, 6, clockUp) / Math.max(1e-4, lerpNumber(1, 6, clockDown));
+    const normalizedFrame = (timelineKey * blinkSpeedScale) / LUMINOUS_GLOW_AL_MORPH_BLINK_FRAMES;
+    const blinkPhase = normalizedFrame - Math.floor(normalizedFrame);
+    const blinkFloor = clampUnit(lightMin);
+    const sineWave = blinkFloor + (1 - blinkFloor) * (0.5 + 0.5 * Math.sin(normalizedFrame * Math.PI * 2));
+    const squareThreshold = Math.max(0.05, Math.min(0.95, 0.5 + lightDuty * 0.4));
+    const squareWave = blinkFloor + (1 - blinkFloor) * (blinkPhase < squareThreshold ? 1 : 0);
+
+    if (lightBlink > 1e-6) {
+        scale *= lerpNumber(1, sineWave, lightBlink);
+    }
+    if (lightBS > 1e-6) {
+        scale *= lerpNumber(1, squareWave, lightBS);
+    }
+
+    scale = Math.max(0, Math.min(LUMINOUS_GLOW_AL_MORPH_MAX_MULTIPLIER, scale));
+    resolvedCache.set(modelKey, { timelineKey, revision, scale });
+    return scale;
+}
+
+function getLuminousGlowMorphScaleForMesh(host: any, mesh: any): number {
+    if (!mesh || typeof mesh !== "object") {
+        return 1;
+    }
+
+    const cachedModelByMesh = host.luminousGlowModelByMesh as WeakMap<object, object> | undefined;
+    const resolvedModelByMesh = cachedModelByMesh ?? new WeakMap<object, object>();
+    if (!cachedModelByMesh) {
+        host.luminousGlowModelByMesh = resolvedModelByMesh;
+    }
+
+    const meshKey = mesh as object;
+    const cachedModel = resolvedModelByMesh.get(meshKey);
+    if (cachedModel) {
+        return getLuminousGlowMorphScaleForModel(host, cachedModel);
+    }
+
+    let rootMesh = mesh;
+    while (rootMesh?.parent) {
+        rootMesh = rootMesh.parent;
+    }
+
+    for (const sceneModel of host.sceneModels ?? []) {
+        if (sceneModel?.mesh === mesh || sceneModel?.mesh === rootMesh) {
+            resolvedModelByMesh.set(meshKey, sceneModel.model as object);
+            return getLuminousGlowMorphScaleForModel(host, sceneModel.model);
+        }
+    }
+
+    return 1;
+}
+
+function isLuminousGlowPresetMaterial(host: any, material: any): boolean {
+    if (!material || typeof material !== "object") {
+        return false;
+    }
+    return getWgslMaterialShaderPresetForMaterial(host, material) === "wgsl-autoluminous";
+}
+
+function hasExplicitWgslMaterialShaderPresetAssignment(host: any, material: any): boolean {
+    const key = getMaterialKey(material);
+    if (!key) {
+        return false;
+    }
+    return host.materialShaderPresetByMaterial.has(key);
+}
+
 function getLuminousGlowMaterialState(host: any, material: any): {
-    color: Color3;
+    coreColor: Color3;
+    haloColor: Color3;
     alpha: number;
     texture: Texture | null;
     luminous: boolean;
@@ -373,23 +736,20 @@ function getLuminousGlowMaterialState(host: any, material: any): {
     const baseAlpha = Number.isFinite(Number(material.alpha))
         ? Math.max(0, Math.min(1, Number(material.alpha)))
         : 1;
+    const manualGlow = Boolean(host.postEffectGlowEnabledValue) && Number(host.postEffectGlowIntensityValue) > 1e-6;
+    const presetLuminous = isLuminousGlowPresetMaterial(host, material);
+    const hasExplicitPreset = hasExplicitWgslMaterialShaderPresetAssignment(host, material);
+    const allowHeuristicGlow = manualGlow && !hasExplicitPreset;
     const specularColor = readMaterialColor(material, ["specularColor", "reflectivityColor"]);
     const specularLuma = computeColorLuminance(specularColor);
-    if (!Number.isFinite(shininess) || shininess < LUMINOUS_GLOW_MIN_SHININESS) {
-        return {
-            color: Color3.Black(),
-            alpha: LUMINOUS_GLOW_OCCLUDER_ALPHA,
-            texture,
-            luminous: false,
-        };
+    if (!presetLuminous && !allowHeuristicGlow) {
+        return createLuminousGlowOccluderState(texture);
     }
-    if (specularLuma > LUMINOUS_GLOW_MAX_SPECULAR_LUMA) {
-        return {
-            color: Color3.Black(),
-            alpha: LUMINOUS_GLOW_OCCLUDER_ALPHA,
-            texture,
-            luminous: false,
-        };
+    if (!presetLuminous && (!Number.isFinite(shininess) || shininess < LUMINOUS_GLOW_MIN_SHININESS)) {
+        return createLuminousGlowOccluderState(texture);
+    }
+    if (!presetLuminous && specularLuma > LUMINOUS_GLOW_MAX_SPECULAR_LUMA) {
+        return createLuminousGlowOccluderState(texture);
     }
 
     const diffuseColor = readMaterialColor(material, ["diffuseColor", "albedoColor", "baseColor"]) ?? Color3.Black();
@@ -401,22 +761,31 @@ function getLuminousGlowMaterialState(host: any, material: any): {
     );
     const maxChannel = Math.max(combined.r, combined.g, combined.b);
     if (maxChannel <= 1e-4) {
-        return {
-            color: Color3.Black(),
-            alpha: LUMINOUS_GLOW_OCCLUDER_ALPHA,
-            texture,
-            luminous: false,
-        };
+        return createLuminousGlowOccluderState(texture);
     }
 
-    const strength = Math.min(2.5, 0.75 + Math.max(0, shininess - LUMINOUS_GLOW_MIN_SHININESS) / 60);
+    const strength = presetLuminous
+        ? 1.25
+        : Math.min(2.5, 0.75 + Math.max(0, shininess - LUMINOUS_GLOW_MIN_SHININESS) / 60);
+    const luminousColor = new Color3(
+        combined.r * strength,
+        combined.g * strength,
+        combined.b * strength,
+    );
+    const luminousPeak = Math.max(luminousColor.r, luminousColor.g, luminousColor.b);
+    const haloColor = saturateColor(
+        scaleColor(luminousColor, LUMINOUS_GLOW_HALO_BRIGHTNESS),
+        LUMINOUS_GLOW_HALO_SATURATION,
+    );
+    const coreColor = mixColorTowardValue(
+        scaleColor(luminousColor, 1.08),
+        luminousPeak * 1.1,
+        LUMINOUS_GLOW_CORE_WHITE_MIX,
+    );
 
     return {
-        color: new Color3(
-            combined.r * strength,
-            combined.g * strength,
-            combined.b * strength,
-        ),
+        coreColor,
+        haloColor,
         alpha: Math.max(0.05, baseAlpha),
         texture,
         luminous: true,
@@ -428,15 +797,43 @@ function disposeManagedLuminousGlowLayer(host: any): void {
         host.luminousGlowLayer.dispose();
         host.luminousGlowLayer = null;
     }
+    if (host.luminousGlowCoreLayer) {
+        host.luminousGlowCoreLayer.dispose();
+        host.luminousGlowCoreLayer = null;
+    }
 }
 
-function ensureManagedLuminousGlowLayer(host: any): GlowLayer | null {
-    if (host.luminousGlowLayer) {
-        if ((host.luminousGlowLayer as any).mmdLuminousGlowLayer === true) {
-            return host.luminousGlowLayer as GlowLayer;
+function getManagedLuminousGlowKernel(baseKernel: number, kind: "core" | "halo"): number {
+    if (kind === "core") {
+        return Math.max(4, Math.round(baseKernel * LUMINOUS_GLOW_CORE_KERNEL_RATIO));
+    }
+    return baseKernel;
+}
+
+function getManagedLuminousGlowIntensity(baseIntensity: number, kind: "core" | "halo"): number {
+    if (kind === "core") {
+        return baseIntensity * LUMINOUS_GLOW_CORE_INTENSITY_RATIO;
+    }
+    return baseIntensity * LUMINOUS_GLOW_HALO_INTENSITY_RATIO;
+}
+
+function getManagedLuminousGlowDepthEdgeStrength(kind: "core" | "halo"): number {
+    if (kind === "core") {
+        return LUMINOUS_GLOW_CORE_DEPTH_EDGE_STRENGTH;
+    }
+    return LUMINOUS_GLOW_HALO_DEPTH_EDGE_STRENGTH;
+}
+
+function ensureManagedLuminousGlowLayer(host: any, kind: "core" | "halo"): GlowLayer | null {
+    const propertyName = kind === "core" ? "luminousGlowCoreLayer" : "luminousGlowLayer";
+    const layerName = kind === "core" ? "luminousGlowCore" : "luminousGlow";
+    const existingLayer = host[propertyName];
+    if (existingLayer) {
+        if ((existingLayer as any).mmdLuminousGlowLayer === true) {
+            return existingLayer as GlowLayer;
         }
-        host.luminousGlowLayer.dispose();
-        host.luminousGlowLayer = null;
+        existingLayer.dispose();
+        host[propertyName] = null;
     }
     if (!host.scene) {
         return null;
@@ -445,12 +842,16 @@ function ensureManagedLuminousGlowLayer(host: any): GlowLayer | null {
         host.configureDofDepthRenderer?.();
     }
 
-    const glowLayer = new LuminousGlowLayer(host, "luminousGlow", host.scene, {
+    const glowLayer = new LuminousGlowLayer(host, layerName, host.scene, {
         mainTextureRatio: LUMINOUS_GLOW_MAIN_TEXTURE_RATIO,
         mainTextureSamples: LUMINOUS_GLOW_MAIN_TEXTURE_SAMPLES,
-        blurKernelSize: host.postEffectGlowKernelValue ?? GlowLayer.DefaultBlurKernelSize,
+        blurKernelSize: getManagedLuminousGlowKernel(
+            host.postEffectGlowKernelValue ?? GlowLayer.DefaultBlurKernelSize,
+            kind,
+        ),
+        mmdDepthEdgeStrength: getManagedLuminousGlowDepthEdgeStrength(kind),
     });
-    host.luminousGlowLayer = glowLayer;
+    host[propertyName] = glowLayer;
     return glowLayer;
 }
 
@@ -520,6 +921,73 @@ function hasActualAlphaTextureSource(material: any): boolean {
     return Boolean(material?.diffuseTexture?.hasAlpha)
         || Boolean(material?.albedoTexture?.hasAlpha)
         || Boolean(material?.opacityTexture);
+}
+
+function beginLuminousGlowLayerAlphaCutOverride(host: any, material: any): (() => void) | null {
+    if (!material || typeof material !== "object") {
+        return null;
+    }
+    if (!hasActualAlphaTextureSource(material)) {
+        return null;
+    }
+
+    const glowState = getLuminousGlowMaterialState(host, material);
+    if (!glowState || glowState.luminous) {
+        return null;
+    }
+
+    const state: LuminousGlowLayerAlphaCutOverrideState = {
+        hasTransparencyMode: "transparencyMode" in material,
+        transparencyMode: "transparencyMode" in material && typeof material.transparencyMode === "number"
+            ? material.transparencyMode
+            : undefined,
+        hasAlphaCutOff: "alphaCutOff" in material,
+        alphaCutOff: "alphaCutOff" in material && Number.isFinite(Number(material.alphaCutOff))
+            ? Number(material.alphaCutOff)
+            : undefined,
+        hasUseAlphaFromDiffuseTexture: "useAlphaFromDiffuseTexture" in material,
+        useAlphaFromDiffuseTexture: "useAlphaFromDiffuseTexture" in material
+            ? Boolean(material.useAlphaFromDiffuseTexture)
+            : undefined,
+        hasUseAlphaFromAlbedoTexture: "useAlphaFromAlbedoTexture" in material,
+        useAlphaFromAlbedoTexture: "useAlphaFromAlbedoTexture" in material
+            ? Boolean(material.useAlphaFromAlbedoTexture)
+            : undefined,
+    };
+
+    if ("useAlphaFromDiffuseTexture" in material) {
+        material.useAlphaFromDiffuseTexture = false;
+    }
+    if ("useAlphaFromAlbedoTexture" in material) {
+        material.useAlphaFromAlbedoTexture = false;
+    }
+    if ("alphaCutOff" in material) {
+        const currentAlphaCutOff = Number.isFinite(Number(material.alphaCutOff))
+            ? Number(material.alphaCutOff)
+            : 0;
+        material.alphaCutOff = Math.max(currentAlphaCutOff, LUMINOUS_GLOW_LAYER_ALPHA_CUTOFF);
+    }
+    if ("transparencyMode" in material) {
+        material.transparencyMode = Material.MATERIAL_ALPHATEST;
+    }
+
+    return () => {
+        if (!material || typeof material !== "object") {
+            return;
+        }
+        if (state.hasTransparencyMode && "transparencyMode" in material) {
+            material.transparencyMode = state.transparencyMode;
+        }
+        if (state.hasAlphaCutOff && "alphaCutOff" in material) {
+            material.alphaCutOff = state.alphaCutOff;
+        }
+        if (state.hasUseAlphaFromDiffuseTexture && "useAlphaFromDiffuseTexture" in material) {
+            material.useAlphaFromDiffuseTexture = state.useAlphaFromDiffuseTexture;
+        }
+        if (state.hasUseAlphaFromAlbedoTexture && "useAlphaFromAlbedoTexture" in material) {
+            material.useAlphaFromAlbedoTexture = state.useAlphaFromAlbedoTexture;
+        }
+    };
 }
 
 function markMaterialShaderDirty(material: any): void {
@@ -666,37 +1134,54 @@ export function syncLuminousGlowLayer(host: any): void {
     }
 
     const manualGlow = Boolean(host.postEffectGlowEnabledValue) && Number(host.postEffectGlowIntensityValue) > 1e-6;
+    const autoGlow = hasLuminousMaterials;
     const manualBloom = Boolean(host.postEffectBloomEnabledValue);
-    const shouldEnableBloom = manualBloom || hasLuminousMaterials;
+    const glowBaseIntensity = manualGlow
+        ? Number(host.postEffectGlowIntensityValue)
+        : Math.max(0.000001, Number(host.postEffectGlowIntensityValue) || 0.5);
+    const glowBaseKernel = Math.max(1, Math.round(Number(host.postEffectGlowKernelValue) || GlowLayer.DefaultBlurKernelSize));
 
     pipeline.glowLayerEnabled = false;
-    const glowLayer = manualGlow ? ensureManagedLuminousGlowLayer(host) : null;
-    if (glowLayer) {
-        glowLayer.customEmissiveColorSelector = null;
-        glowLayer.customEmissiveTextureSelector = null;
-        glowLayer.intensity = host.postEffectGlowIntensityValue;
-        glowLayer.blurKernelSize = host.postEffectGlowKernelValue;
-        glowLayer.customEmissiveColorSelector = (_mesh: any, _subMesh: any, material: any, result: any) => {
-            const glowState = getLuminousGlowMaterialState(host, material);
-            if (!glowState) {
-                result.set(0, 0, 0, 0);
-                return;
-            }
-            result.set(
-                glowState.color.r,
-                glowState.color.g,
-                glowState.color.b,
-                glowState.alpha,
-            );
+    const haloGlowLayer = (manualGlow || autoGlow) ? ensureManagedLuminousGlowLayer(host, "halo") : null;
+    const coreGlowLayer = (manualGlow || autoGlow) ? ensureManagedLuminousGlowLayer(host, "core") : null;
+    if (haloGlowLayer || coreGlowLayer) {
+        const configureGlowLayer = (glowLayer: GlowLayer | null, kind: "core" | "halo"): void => {
+            if (!glowLayer) return;
+            glowLayer.customEmissiveColorSelector = null;
+            glowLayer.customEmissiveTextureSelector = null;
+            glowLayer.intensity = getManagedLuminousGlowIntensity(glowBaseIntensity, kind);
+            glowLayer.blurKernelSize = getManagedLuminousGlowKernel(glowBaseKernel, kind);
+            glowLayer.customEmissiveColorSelector = (mesh: any, _subMesh: any, material: any, result: any) => {
+                const glowState = getLuminousGlowMaterialState(host, material);
+                if (!glowState) {
+                    result.set(0, 0, 0, 0);
+                    return;
+                }
+                const morphScale = glowState.luminous ? getLuminousGlowMorphScaleForMesh(host, mesh) : 1;
+                if (glowState.luminous && morphScale <= 1e-4) {
+                    result.set(0, 0, 0, LUMINOUS_GLOW_OCCLUDER_ALPHA);
+                    return;
+                }
+                const glowColor = kind === "core" ? glowState.coreColor : glowState.haloColor;
+                const scaledGlowColor = glowState.luminous ? scaleColor(glowColor, morphScale) : glowColor;
+                result.set(
+                    scaledGlowColor.r,
+                    scaledGlowColor.g,
+                    scaledGlowColor.b,
+                    glowState.alpha,
+                );
+            };
+            glowLayer.customEmissiveTextureSelector = (_mesh: any, _subMesh: any, material: any) => {
+                return getLuminousGlowMaterialState(host, material)?.texture ?? null;
+            };
         };
-        glowLayer.customEmissiveTextureSelector = (_mesh: any, _subMesh: any, material: any) => {
-            return getLuminousGlowMaterialState(host, material)?.texture ?? null;
-        };
+        configureGlowLayer(haloGlowLayer, "halo");
+        configureGlowLayer(coreGlowLayer, "core");
     } else {
         disposeManagedLuminousGlowLayer(host);
     }
 
-    pipeline.bloomEnabled = shouldEnableBloom;
+    pipeline.bloomEnabled = manualBloom;
     const requestedBloomWeight = host.postEffectBloomWeightValue ?? 0;
     const requestedBloomThreshold = host.postEffectBloomThresholdValue ?? 2;
     const requestedBloomKernel = host.postEffectBloomKernelValue ?? 0;
@@ -705,11 +1190,6 @@ export function syncLuminousGlowLayer(host: any): void {
         pipeline.bloomWeight = requestedBloomWeight;
         pipeline.bloomThreshold = requestedBloomThreshold;
         pipeline.bloomKernel = requestedBloomKernel;
-    } else if (hasLuminousMaterials) {
-        // Keep the auto Luminous bloom selective so unrelated bright materials do not start glowing.
-        pipeline.bloomWeight = AUTO_LUMINOUS_BLOOM_WEIGHT;
-        pipeline.bloomThreshold = AUTO_LUMINOUS_BLOOM_THRESHOLD;
-        pipeline.bloomKernel = AUTO_LUMINOUS_BLOOM_KERNEL;
     } else {
         pipeline.bloomWeight = requestedBloomWeight;
         pipeline.bloomThreshold = requestedBloomThreshold;

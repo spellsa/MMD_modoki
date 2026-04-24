@@ -8,6 +8,7 @@ Current camera-side post effects are edited from the right `エフェクト` pan
 
 - Base image controls: `Gamma`, `Vignette`, `Chroma`, `Grain`, `Sharpen`, `Distortion`, `EdgeBlur`, `Edge`
 - `LuminousGlow`: intensity slider for `GlowLayer` based pseudo `AutoLuminous`
+- Material preset `Luminous` now routes into `LuminousGlow` instead of the old selective auto-bloom path
 - LUT: preset + intensity
 - Bloom: `On/Off`, `Bloom強度`, `BloomTh`, `BloomK`
 - DoF: `On/Off`, quality, focus, signed focus offset, F-stop, near suppression, focal invert, lens size, lens blur

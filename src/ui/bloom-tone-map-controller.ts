@@ -2,6 +2,7 @@ import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
 
 const LUMINOUS_GLOW_DEFAULT_KERNEL = 20;
+const LUMINOUS_GLOW_SLIDER_MAX = 100;
 
 type BloomToneMapElements = {
     toneMappingTypeSelect: HTMLSelectElement;
@@ -120,7 +121,10 @@ export class BloomToneMapController {
         };
 
         const applyGlow = (): void => {
-            this.mmdManager.postEffectGlowIntensity = Number(elements.glowIntensityInput.value) / 100;
+            this.mmdManager.postEffectGlowIntensity = Math.max(
+                0,
+                Math.min(1, Number(elements.glowIntensityInput.value) / 100),
+            );
             this.mmdManager.postEffectGlowKernel = LUMINOUS_GLOW_DEFAULT_KERNEL;
             this.mmdManager.postEffectGlowEnabled = this.mmdManager.postEffectGlowIntensity > 0.000001;
 
@@ -145,7 +149,10 @@ export class BloomToneMapController {
         elements.glowIntensityInput.value = String(
             Math.max(
                 0,
-                Math.min(400, Math.round((this.mmdManager.postEffectGlowEnabled ? this.mmdManager.postEffectGlowIntensity : 0) * 100)),
+                Math.min(
+                    LUMINOUS_GLOW_SLIDER_MAX,
+                    Math.round((this.mmdManager.postEffectGlowEnabled ? this.mmdManager.postEffectGlowIntensity : 0) * 100),
+                ),
             ),
         );
 

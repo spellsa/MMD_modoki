@@ -593,7 +593,7 @@ export class MmdManager {
         {
             id: "wgsl-autoluminous",
             label: "Luminous",
-            description: "Bloom-based emissive halo that respects final scene occlusion better",
+            description: "GlowLayer-based luminous preset that routes into LuminousGlow",
         },
         {
             id: "wgsl-full-light",
@@ -1353,6 +1353,8 @@ ${beforeFogAppendBlock}
     private motionBlurScreenAmount = 0;
     private standaloneBloomEffect: BloomEffect | null = null;
     private luminousGlowLayer: GlowLayer | null = null;
+    private luminousGlowCoreLayer: GlowLayer | null = null;
+    private luminousGlowMorphRevision = 0;
     private standaloneLensBlurPostProcess: PostProcess | null = null;
     private standaloneEdgeBlurPostProcess: PostProcess | null = null;
     private volumetricLightPostProcess: VolumetricLightScatteringPostProcess | null = null;
@@ -5477,6 +5479,10 @@ ${beforeFogAppendBlock}
                 this.luminousGlowLayer.dispose();
                 this.luminousGlowLayer = null;
             }
+            if (this.luminousGlowCoreLayer) {
+                this.luminousGlowCoreLayer.dispose();
+                this.luminousGlowCoreLayer = null;
+            }
             if (this.standaloneLensBlurPostProcess) {
                 this.standaloneLensBlurPostProcess.dispose(this.camera);
                 this.standaloneLensBlurPostProcess = null;
@@ -5602,6 +5608,10 @@ ${beforeFogAppendBlock}
         if (this.luminousGlowLayer) {
             this.luminousGlowLayer.dispose();
             this.luminousGlowLayer = null;
+        }
+        if (this.luminousGlowCoreLayer) {
+            this.luminousGlowCoreLayer.dispose();
+            this.luminousGlowCoreLayer = null;
         }
         if (this.standaloneLensBlurPostProcess) {
             this.standaloneLensBlurPostProcess.dispose(this.camera);
@@ -5982,6 +5992,7 @@ ${beforeFogAppendBlock}
     }
 
     private refreshCurrentModelAfterMorphEdit(): void {
+        this.luminousGlowMorphRevision += 1;
         this.recomputeCurrentModelPoseAfterManualEdit();
         this.currentMesh?.computeWorldMatrix(true);
         this.currentMesh?.metadata?.skeleton?.computeAbsoluteMatrices(true);
@@ -6836,6 +6847,10 @@ ${beforeFogAppendBlock}
         if (this.luminousGlowLayer) {
             this.luminousGlowLayer.dispose();
             this.luminousGlowLayer = null;
+        }
+        if (this.luminousGlowCoreLayer) {
+            this.luminousGlowCoreLayer.dispose();
+            this.luminousGlowCoreLayer = null;
         }
         if (this.standaloneLensBlurPostProcess) {
             this.standaloneLensBlurPostProcess.dispose(this.camera);

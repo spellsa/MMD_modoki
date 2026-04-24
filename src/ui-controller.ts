@@ -2381,7 +2381,7 @@ export class UIController {
                 </div>
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.glow">Glow</span>
-                    <input data-postfx="glow-intensity" type="range" class="effect-slider" min="0" max="400" value="50" step="1">
+                    <input data-postfx="glow-intensity" type="range" class="effect-slider" min="0" max="100" value="50" step="1">
                     <span data-postfx-val="glow-intensity" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
                 <div class="effect-row" style="display:none;">

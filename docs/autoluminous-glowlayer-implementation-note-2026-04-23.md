@@ -422,3 +422,39 @@ Babylon 側の確認開始点:
 - `GlowLayer` 後段に専用の depth-aware マスク合成を足す
 - 既存 glow を使わず、発光抽出 + blur + depth-aware composite を独自ポストエフェクトとして組み直す
 - まずは `ステージ / アクセサリ優先` に適用対象を絞り、モデル本体には既存 Bloom 系を残す
+
+### 11.1 AutoLuminous モーフ操作メモ
+
+`AutoLuminous` 系でよく使われる `ALMorphMaker` モーフについても試作を入れた。
+
+- `LightUp / LightOff / LightUpE` は `LuminousGlow` の強度側へ反映できた
+- 材質モーフで変化する `diffuse / ambient / alpha / specularPower` は、既存の glow selector が毎回材質値を見ているため、そのまま追従しやすい
+- そのため、`発光量の増減` については比較的軽い実装で対応できた
+
+一方で、点滅系は未完成。
+
+- `LightBlink / LightBS / LightDuty / LightMin / LClockUp / LClockDown` も glow 強度へ掛ける試みは入れた
+- ただし本家 `AutoLuminous` の見え方とはまだズレがあり、実運用レベルでは「うまくいった」とは言いにくい
+- 原因は `GlowLayer` 側の見え方、runtime 更新タイミング、blur を含む後段合成の性質が絡んでいる可能性が高い
+
+現時点の整理:
+
+- `モーフで発光量を上げ下げする` 方向は有望
+- `モーフで本家っぽく点滅させる` 方向は追加検討が必要
+
+したがって、当面の `LuminousGlow` は
+
+- `材質発光の近似`
+- `強度モーフ追従あり`
+- `点滅モーフ互換は未完成`
+
+という扱いにしておくのが妥当。
+### 2026-04-24 glow pass 遮蔽試行メモ
+
+- `LuminousGlow` の同モデル内貫通対策として、`glow pass` 中だけ非発光材質を `alpha cut` 寄りにする試行を入れた
+- `GlowLayer` 描画中のみ `transparencyMode = MATERIAL_ALPHATEST`、`alphaCutOff >= 0.5` を一時適用し、描画後に元の材質設定へ戻す方式を試した
+- `useAlphaFromDiffuseTexture / useAlphaFromAlbedoTexture` を切って、`alpha blend` のまま半透明 occluder になるのを避ける方向も試した
+- この一時 override だけでは、`スカート越しの下側発光` のようなケースを十分には止め切れなかった
+- `glowMapGeneration` shader 側で `ALPHATEST` 通過後は alpha=1 に丸める試行も行ったが、WebGPU で `EffectLayerMainRTT` の pipeline が invalid になり、画面が真っ黒化したため撤回した
+- 現時点の安全な状態は `glow pass 中の材質一時 override は残す / shader 直差しは使わない`
+- 現状は `黒化は解消済み / 遮蔽改善は限定的`
