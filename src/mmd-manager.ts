@@ -3690,21 +3690,25 @@ ${beforeFogAppendBlock}
         return { castsShadow, receivesShadow };
     }
 
-    private getSkeletonBoneTextureWidth(skeleton: Skeleton): number {
-        return Math.max(1, (skeleton.bones.length + 1) * 4);
+    private getSkeletonBoneTextureSize(skeleton: Skeleton): { width: number; height: number; elementCount: number } {
+        const requiredElementCount = 4 * (skeleton.bones.length + 1);
+        let width = requiredElementCount;
+        let height = 1;
+        if (skeleton.isUsingTextureForMatrices) {
+            const maxTextureSize = this.engine.getCaps().maxTextureSize & ~3;
+            if (maxTextureSize > 0 && maxTextureSize < width) {
+                width = maxTextureSize;
+                height = Math.ceil(requiredElementCount / maxTextureSize);
+            }
+        }
+        return {
+            width,
+            height,
+            elementCount: width * height * 4,
+        };
     }
 
-    private getGpuBoneTextureBoneLimit(maxTextureSize: number): number {
-        return Math.max(0, Math.floor(maxTextureSize / 4) - 1);
-    }
-
-    private getSafeCpuSkinningFallbackBoneThreshold(maxTextureSize: number): number {
-        const hardLimit = this.getGpuBoneTextureBoneLimit(maxTextureSize);
-        const safetyMargin = Math.max(32, Math.floor(hardLimit * 0.03));
-        return Math.max(0, hardLimit - safetyMargin);
-    }
-
-    private applyCpuSkinningFallbackForOversizedSkeletons(
+    private applyGpuBoneTextureStorageForLargeSkeletons(
         modelLabel: string,
         meshes: readonly Mesh[],
         skeletons: readonly Skeleton[],
@@ -3714,56 +3718,52 @@ ${beforeFogAppendBlock}
             return;
         }
 
-        const hardBoneLimit = this.getGpuBoneTextureBoneLimit(maxTextureSize);
-        const safeBoneThreshold = this.getSafeCpuSkinningFallbackBoneThreshold(maxTextureSize);
-
-        const oversizedSkeletons = skeletons.filter((skeleton) => {
-            if (!skeleton.useTextureToStoreBoneMatrices) {
-                return false;
-            }
-            return skeleton.bones.length >= safeBoneThreshold || this.getSkeletonBoneTextureWidth(skeleton) > maxTextureSize;
+        const largeSkeletons = skeletons.filter((skeleton) => {
+            const requiredOneRowWidth = Math.max(1, (skeleton.bones.length + 1) * 4);
+            return requiredOneRowWidth > maxTextureSize;
         });
-        if (oversizedSkeletons.length === 0) {
+        if (largeSkeletons.length === 0) {
             return;
         }
 
-        const oversizedSkeletonSet = new Set(oversizedSkeletons);
         let affectedMeshCount = 0;
         let maxBones = 0;
-        let maxBoneTextureWidth = 0;
+        let maxBoneTextureWidth = 1;
+        let maxBoneTextureHeight = 1;
 
-        for (const skeleton of oversizedSkeletons) {
-            skeleton.useTextureToStoreBoneMatrices = false;
+        const largeSkeletonSet = new Set(largeSkeletons);
+        for (const skeleton of largeSkeletons) {
+            skeleton.useTextureToStoreBoneMatrices = true;
             maxBones = Math.max(maxBones, skeleton.bones.length);
-            maxBoneTextureWidth = Math.max(maxBoneTextureWidth, this.getSkeletonBoneTextureWidth(skeleton));
+            const textureSize = this.getSkeletonBoneTextureSize(skeleton);
+            maxBoneTextureWidth = Math.max(maxBoneTextureWidth, textureSize.width);
+            maxBoneTextureHeight = Math.max(maxBoneTextureHeight, textureSize.height);
         }
 
         for (const mesh of meshes) {
             const skeleton = mesh.skeleton;
-            if (!skeleton || !oversizedSkeletonSet.has(skeleton)) {
+            if (!skeleton || !largeSkeletonSet.has(skeleton)) {
                 continue;
             }
             if (!mesh.useBones || mesh.numBoneInfluencers <= 0) {
                 continue;
             }
 
-            mesh.computeBonesUsingShaders = false;
+            mesh.computeBonesUsingShaders = true;
             affectedMeshCount += 1;
         }
 
-        const detail = `${modelLabel}: ${maxBones} bones requires bone texture width ${maxBoneTextureWidth}, exceeding max texture size ${maxTextureSize}`;
-        console.warn(`[PMX] CPU skinning fallback enabled for oversized or near-limit skeleton. ${detail}.`, {
+        console.info(`[PMX] GPU bone texture storage enabled for large skeleton. ${modelLabel}: ${maxBones} bones uses ${maxBoneTextureWidth}x${maxBoneTextureHeight} bone texture.`, {
             model: modelLabel,
-            skeletonCount: oversizedSkeletons.length,
+            skeletonCount: largeSkeletons.length,
             affectedMeshCount,
             maxBones,
             maxBoneTextureWidth,
+            maxBoneTextureHeight,
             maxTextureSize,
-            hardBoneLimit,
-            safeBoneThreshold,
             engine: this.getEngineType(),
         });
-        this.addRuntimeDiagnostic(`CPU skinning fallback: ${modelLabel} (${maxBones} bones, safe threshold ${safeBoneThreshold}, hard limit ${hardBoneLimit})`);
+        this.addRuntimeDiagnostic(`GPU bone texture: ${modelLabel} (${maxBones} bones, ${maxBoneTextureWidth}x${maxBoneTextureHeight})`);
     }
 
     private applyCpuSkinningFallbackForWebGpuSdefMeshes(

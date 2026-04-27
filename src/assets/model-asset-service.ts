@@ -4,8 +4,6 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import type { BoneControlInfo, ModelInfo } from "../types";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
-import { PmdReader } from "babylon-mmd/esm/Loader/Parser/pmdReader";
-import { PmxReader } from "babylon-mmd/esm/Loader/Parser/pmxReader";
 import { MmdStandardMaterialProxy } from "babylon-mmd/esm/Runtime/mmdStandardMaterialProxy";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import { ensureMaterialShaderDefaults } from "../scene/material-shader-service";
@@ -33,14 +31,6 @@ type SceneModelMaterialEntry = {
     name: string;
     material: any;
     meshNames: string[];
-};
-
-type ImportCpuSkinningPreflight = {
-    boneCount: number;
-    maxTextureSize: number;
-    hardBoneLimit: number;
-    safeBoneThreshold: number;
-    boneTextureWidth: number;
 };
 
 function getTextureDebugSource(texture: any): string | null {
@@ -88,74 +78,6 @@ function getTransparencyModeLabel(mode: unknown): string {
         default:
             return "unset";
     }
-}
-
-function toDetachedArrayBuffer(buffer: ArrayBuffer | ArrayBufferView): ArrayBuffer {
-    if (buffer instanceof ArrayBuffer) {
-        return buffer.slice(0);
-    }
-
-    const byteOffset = buffer.byteOffset ?? 0;
-    const byteLength = buffer.byteLength ?? buffer.buffer.byteLength;
-    return buffer.buffer.slice(byteOffset, byteOffset + byteLength);
-}
-
-async function buildImportCpuSkinningPreflight(host: any, filePath: string): Promise<ImportCpuSkinningPreflight | null> {
-    if (!host.isWebGpuEngine?.()) {
-        return null;
-    }
-
-    const maxTextureSize = host.engine?.getCaps?.().maxTextureSize;
-    if (!Number.isFinite(maxTextureSize) || maxTextureSize <= 0) {
-        return null;
-    }
-
-    const fileNameLower = filePath.toLowerCase();
-    if (!fileNameLower.endsWith(".pmx") && !fileNameLower.endsWith(".pmd")) {
-        return null;
-    }
-
-    const fileBuffer = await window.electronAPI.readBinaryFile(filePath);
-    if (!fileBuffer) {
-        return null;
-    }
-
-    const arrayBuffer = toDetachedArrayBuffer(fileBuffer);
-    const parsed = fileNameLower.endsWith(".pmx")
-        ? await PmxReader.ParseAsync(arrayBuffer)
-        : await PmdReader.ParseAsync(arrayBuffer);
-
-    const boneCount = Array.isArray(parsed.bones) ? parsed.bones.length : 0;
-    const boneTextureWidth = Math.max(1, (boneCount + 1) * 4);
-    const hardBoneLimit = host.getGpuBoneTextureBoneLimit(maxTextureSize);
-    const safeBoneThreshold = host.getSafeCpuSkinningFallbackBoneThreshold(maxTextureSize);
-
-    if (boneCount < safeBoneThreshold && boneTextureWidth <= maxTextureSize) {
-        return null;
-    }
-
-    return {
-        boneCount,
-        maxTextureSize,
-        hardBoneLimit,
-        safeBoneThreshold,
-        boneTextureWidth,
-    };
-}
-
-function installEarlyCpuSkinningFallbackForImport(host: any, modelLabel: string): () => void {
-    const meshObserver = host.scene.onNewMeshAddedObservable.add((mesh: Mesh) => {
-        mesh.computeBonesUsingShaders = false;
-    });
-    const skeletonObserver = host.scene.onNewSkeletonAddedObservable.add((skeleton: Skeleton) => {
-        skeleton.useTextureToStoreBoneMatrices = false;
-    });
-
-    return () => {
-        host.scene.onNewMeshAddedObservable.remove(meshObserver);
-        host.scene.onNewSkeletonAddedObservable.remove(skeletonObserver);
-        console.log(`[PMX] Early CPU skinning fallback observers removed for ${modelLabel}.`);
-    };
 }
 
 const PROBLEMATIC_BONE_DEBUG_PATTERN = /肩|腕|ひじ|手首|捩|IK|リボン|^[FSR][0-9]+$|^SR[0-9]+$/;
@@ -533,38 +455,23 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
 
         const { dir, fileName } = splitFilePath(filePath);
         const fileUrl = `file:///${dir}`;
-        const importCpuSkinningPreflight = await buildImportCpuSkinningPreflight(host, filePath);
 
         console.log("[PMX] Loading:", fileName, "from:", fileUrl);
         host.suspendSceneRendering();
 
-        let disposeEarlyCpuSkinningFallback: (() => void) | null = null;
-        if (importCpuSkinningPreflight) {
-            console.warn(
-                `[PMX] Early CPU skinning fallback armed before import. ${fileName}: ${importCpuSkinningPreflight.boneCount} bones requires bone texture width ${importCpuSkinningPreflight.boneTextureWidth}, exceeding safe threshold ${importCpuSkinningPreflight.safeBoneThreshold} / max texture size ${importCpuSkinningPreflight.maxTextureSize}.`,
-                {
-                    model: fileName,
-                    ...importCpuSkinningPreflight,
-                    engine: host.getEngineType?.(),
+        const result = await ImportMeshAsync(fileName, host.scene, {
+            rootUrl: fileUrl,
+            pluginOptions: {
+                mmdmodel: {
+                    materialBuilder: MmdModelLoader.SharedMaterialBuilder,
+                    useSdef: true,
+                    alwaysSetSubMeshesBoundingInfo: true,
+                    optimizeSubmeshes: true,
+                    optimizeSingleMaterialModel: true,
+                    preserveSerializationData: true,
                 },
-            );
-            disposeEarlyCpuSkinningFallback = installEarlyCpuSkinningFallbackForImport(host, fileName);
-        }
-
-        let result;
-        try {
-            result = await ImportMeshAsync(fileName, host.scene, {
-                rootUrl: fileUrl,
-                pluginOptions: {
-                    mmdmodel: {
-                        materialBuilder: MmdModelLoader.SharedMaterialBuilder,
-                        preserveSerializationData: true,
-                    },
-                },
-            });
-        } finally {
-            disposeEarlyCpuSkinningFallback?.();
-        }
+            },
+        });
 
         console.log("[PMX] ImportMeshAsync result:", {
             meshCount: result.meshes.length,
@@ -583,7 +490,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             if (skeleton) skeletonPool.push(skeleton);
         }
         const uniqueSkeletons = Array.from(new Set(skeletonPool));
-        host.applyCpuSkinningFallbackForOversizedSkeletons(fileName, result.meshes as Mesh[], uniqueSkeletons);
+        host.applyGpuBoneTextureStorageForLargeSkeletons?.(fileName, result.meshes as Mesh[], uniqueSkeletons);
         host.applyCpuSkinningFallbackForWebGpuSdefMeshes?.(fileName, result.meshes as Mesh[]);
 
         mmdMesh.setEnabled(true);
