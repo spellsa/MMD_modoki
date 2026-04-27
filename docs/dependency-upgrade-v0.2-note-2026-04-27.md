@@ -37,6 +37,17 @@ dev 依存を含む `npm.cmd audit` は 47 vulnerabilities。主な対象は Ele
 
 Babylon 系は従来どおり exact pin とし、`babylon-mmd` は既存指定に合わせて caret range のままにした。最初は `babylon-mmd@1.2.0` の検証済みベースに寄せるため、最新の `9.4.1` ではなく `9.2.0` を使う。
 
+`babylon-mmd@1.2.0` の changelog で v0.2 向けに関係が大きい点:
+
+- Babylon.js 9.2.0 の skinning shader 変更に合わせた outline renderer 対応
+- 最低要求 Babylon.js が 9.2.0 に変更
+- `ArrayBufferView` からのモデル読み込み修正
+- `MmdWasmModel` の bone flag sanity check 修正
+- Disposable pattern の見直し
+- Rust 2024 / LLVM 22 への更新
+
+v0.2 では、これに加えて既存計画の `MmdWasmInstanceTypeMPR` / Worker 物理対応を主対象にする。
+
 ## 確認結果
 
 実行済み:

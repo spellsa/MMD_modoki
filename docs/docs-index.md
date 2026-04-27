@@ -51,6 +51,7 @@
 - [MMD基本タスクチェックリスト](./mmd-basic-task-checklist.md)
 - [babylon-mmd 物理調査](./babylon-mmd-physics-research.md)
 - [babylon-mmd MultiPhysicsRuntime Worker対応 実装計画書](./physics-worker-implementation-plan.md)
+- [v0.2 物理演算調査メモ](./v0.2-physics-investigation-note.md)
 
 ## 出力 / エンコード
 
@@ -67,6 +68,8 @@
 
 - [手動テストチェックリスト](./manual-test-checklist.md)
 - [既知の問題](./known-issues.md)
+- [v0.2 作業メモ](./v0.2-task-memo.md)
+- [v0.2 依存更新メモ 2026-04-27](./dependency-upgrade-v0.2-note-2026-04-27.md)
 - [v0.1.1 フィードバック台帳](./v0.1.1-feedback.md)
 - [v0.1.0 フィードバック台帳](./v0.1.0-feedback.md)
 - [リリース手順メモ](./release-process.md)
