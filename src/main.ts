@@ -462,8 +462,33 @@ const isAllowedAppUrl = (targetUrl: string): boolean => {
   }
 };
 
+const appendResponseHeaderValue = (
+  headers: Record<string, string[]>,
+  name: string,
+  value: string,
+): void => {
+  const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase());
+  if (existingKey) {
+    headers[existingKey] = [value];
+    return;
+  }
+  headers[name] = [value];
+};
+
+const configureCrossOriginIsolationHeaders = (): void => {
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['*://*/*', 'file://*/*'] }, (details, callback) => {
+    const responseHeaders = { ...(details.responseHeaders ?? {}) };
+    appendResponseHeaderValue(responseHeaders, 'Cross-Origin-Opener-Policy', 'same-origin');
+    appendResponseHeaderValue(responseHeaders, 'Cross-Origin-Embedder-Policy', 'require-corp');
+    appendResponseHeaderValue(responseHeaders, 'Cross-Origin-Resource-Policy', 'cross-origin');
+    callback({ responseHeaders });
+  });
+};
+
 const configureSessionSecurity = (): void => {
-  if (isDev) return;
+  if (isDev) {
+    return;
+  }
 
   const requestFilter = {
     urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'],
@@ -592,19 +617,25 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
     if (event.sender.id !== mainWindow.webContents.id) return;
     const engine = typeof payload?.engine === 'string' ? payload.engine : 'unknown';
     const physicsBackend = typeof payload?.physicsBackend === 'string' ? payload.physicsBackend : 'unknown';
+    const crossOriginIsolated = payload?.crossOriginIsolated === true;
+    const sharedArrayBufferAvailable = payload?.sharedArrayBufferAvailable === true;
     if (SMOKE_TEST_REQUIRE_WEBGPU && engine !== 'WebGPU') {
       complete(false, 'renderer initialized without WebGPU', {
         engine,
         physicsBackend,
+        crossOriginIsolated,
+        sharedArrayBufferAvailable,
         requireWebGpu: SMOKE_TEST_REQUIRE_WEBGPU,
         webContentsId: mainWindow.webContents.id,
       });
       return;
     }
-    console.log(`[smoke] renderer ready: engine=${engine} physics=${physicsBackend}`);
+    console.log(`[smoke] renderer ready: engine=${engine} physics=${physicsBackend} isolated=${crossOriginIsolated}`);
     complete(true, 'renderer runtime initialized', {
       engine,
       physicsBackend,
+      crossOriginIsolated,
+      sharedArrayBufferAvailable,
       webContentsId: mainWindow.webContents.id,
     });
   };
@@ -693,6 +724,9 @@ app.on('ready', () => {
   writeAppLog('info', 'main', 'app ready', {
     logFilePath: log.transports.file.getFile().path,
   });
+  if (isDev) {
+    configureCrossOriginIsolationHeaders();
+  }
   configureSessionSecurity();
   createWindow();
 });

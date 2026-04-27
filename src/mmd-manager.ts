@@ -290,8 +290,11 @@ type EditorRuntimeBone = IMmdRuntimeBone & {
 };
 
 type PhysicsSimulationRateHz = 30 | 60 | 120;
+type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "ammo";
+type BulletPhysicsBackend = Extract<PhysicsBackend, "bullet-mpr" | "bullet-spr">;
 
-let sprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
+let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
+let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const DOF_FOCUS_BONE_CANDIDATES = [
     "頭",
@@ -345,10 +348,10 @@ function mergeFrameNumbers(a: Uint32Array, b: Uint32Array): Uint32Array {
     return merged.subarray(0, k);
 }
 
-async function loadSprWasmInstance(): Promise<IMmdWasmInstance> {
-    if (sprWasmInstancePromise) return sprWasmInstancePromise;
+async function loadBundledSprWasmInstance(): Promise<IMmdWasmInstance> {
+    if (bundledSprWasmInstancePromise) return bundledSprWasmInstancePromise;
 
-    sprWasmInstancePromise = (async () => {
+    bundledSprWasmInstancePromise = (async () => {
         const initOutput = await sprWasmBindgen.default({ module_or_path: sprWasmBinaryUrl });
         sprWasmBindgen.init();
 
@@ -370,7 +373,37 @@ async function loadSprWasmInstance(): Promise<IMmdWasmInstance> {
         return mmdWasmInstance;
     })();
 
-    return sprWasmInstancePromise;
+    return bundledSprWasmInstancePromise;
+}
+
+async function loadBundledMprWasmInstance(): Promise<IMmdWasmInstance> {
+    if (bundledMprWasmInstancePromise) return bundledMprWasmInstancePromise;
+
+    bundledMprWasmInstancePromise = (async () => {
+        const importModule = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<typeof import("babylon-mmd/esm/Runtime/Optimized/wasm/mpr")>;
+        const mprWasmBindgen = await importModule("/node_modules/babylon-mmd/esm/Runtime/Optimized/wasm/mpr/index.js");
+        const initOutput = await mprWasmBindgen.default({ module_or_path: mprWasmBinaryUrl });
+        mprWasmBindgen.init();
+
+        const memory = initOutput.memory;
+        const mmdWasmInstance = { ...mprWasmBindgen } as unknown as IMmdWasmInstance;
+        mmdWasmInstance.memory = memory;
+        mmdWasmInstance.createTypedArray = <T extends ArrayBufferView>(
+            typedArrayConstructor: new (buffer: ArrayBufferLike, byteOffset: number, length: number) => T,
+            byteOffset: number,
+            length: number,
+        ) => {
+            if (memory.buffer instanceof ArrayBuffer) {
+                return new WasmTypedArray(typedArrayConstructor, memory, byteOffset, length);
+            }
+            return new WasmSharedTypedArray(typedArrayConstructor, memory, byteOffset, length);
+        };
+
+        await mmdWasmInstance.initThreadPool?.(navigator.hardwareConcurrency);
+        return mmdWasmInstance;
+    })();
+
+    return bundledMprWasmInstancePromise;
 }
 
 // Side effects - register loaders
@@ -421,6 +454,7 @@ import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin
 import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime";
+import { PhysicsRuntimeEvaluationType } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/physicsRuntimeEvaluationType";
 import * as sprWasmBindgen from "babylon-mmd/esm/Runtime/Optimized/wasm/spr";
 import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
 import { WasmTypedArray } from "babylon-mmd/esm/Runtime/Optimized/Misc/wasmTypedArray";
@@ -428,6 +462,8 @@ import { WasmSharedTypedArray } from "babylon-mmd/esm/Runtime/Optimized/Misc/was
 import Ammo from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm";
 // eslint-disable-next-line import/no-unresolved
 import ammoWasmBinaryUrl from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm.wasm?url";
+// eslint-disable-next-line import/no-unresolved
+import mprWasmBinaryUrl from "babylon-mmd/esm/Runtime/Optimized/wasm/mpr/index_bg.wasm?url";
 // eslint-disable-next-line import/no-unresolved
 import sprWasmBinaryUrl from "babylon-mmd/esm/Runtime/Optimized/wasm/spr/index_bg.wasm?url";
 // eslint-disable-next-line import/no-unresolved
@@ -548,6 +584,7 @@ export class MmdManager {
     };
     private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.75;
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
+    private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
         {
@@ -1157,6 +1194,7 @@ ${beforeFogAppendBlock}
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
     private renderFpsLimit = 0;
+    private nextPhysicsPerformanceLogMs = performance.now() + 10_000;
     private ground: Mesh | null = null;
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
@@ -1248,11 +1286,16 @@ ${beforeFogAppendBlock}
     private physicsRuntime: MmdAmmoPhysics | MmdBulletPhysics | null = null;
     private physicsInitializationPromise: Promise<boolean>;
     private physicsAvailable = false;
-    private physicsBackend: "none" | "bullet" | "ammo" = "none";
+    private physicsBackend: PhysicsBackend = "none";
     private physicsEnabled = true;
     private physicsSimulationRateHz: PhysicsSimulationRateHz = 60;
     private physicsGravityAcceleration = 98;
     private physicsGravityDirection = new Vector3(0, -100, 0);
+    private bulletPhysicsEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
+    private webGpuSdefCpuFallbackEnabled = MmdManager.readBooleanLocalStorage(
+        MmdManager.WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY,
+        false,
+    );
     private shadowEnabled = true;
     private shadowDarknessValue = 0.0;
     private shadowFrustumSizeValue = 220;
@@ -2606,6 +2649,23 @@ ${beforeFogAppendBlock}
         return this.physicsAvailable && this.physicsEnabled;
     }
 
+    public async waitForPhysicsInitialization(): Promise<boolean> {
+        return this.physicsInitializationPromise;
+    }
+
+    public isWebGpuSdefCpuFallbackEnabled(): boolean {
+        return this.webGpuSdefCpuFallbackEnabled;
+    }
+
+    public setWebGpuSdefCpuFallbackEnabled(enabled: boolean): boolean {
+        this.webGpuSdefCpuFallbackEnabled = Boolean(enabled);
+        MmdManager.writeBooleanLocalStorage(
+            MmdManager.WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY,
+            this.webGpuSdefCpuFallbackEnabled,
+        );
+        return this.webGpuSdefCpuFallbackEnabled;
+    }
+
     private isPhysicsSimulationActive(): boolean {
         return this._isPlaying || this.externalPlaybackSimulationEnabled;
     }
@@ -2616,6 +2676,7 @@ ${beforeFogAppendBlock}
 
     public setExternalPlaybackSimulationEnabled(enabled: boolean): boolean {
         this.externalPlaybackSimulationEnabled = Boolean(enabled);
+        this.syncBulletPhysicsEvaluationTypeForPlayback();
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
         return this.externalPlaybackSimulationEnabled;
@@ -2630,6 +2691,7 @@ ${beforeFogAppendBlock}
         }
 
         this.physicsEnabled = enabled;
+        this.syncBulletPhysicsEvaluationTypeForPlayback();
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
         this.onPhysicsStateChanged?.(this.physicsEnabled, true);
@@ -2718,6 +2780,25 @@ ${beforeFogAppendBlock}
             logWarn("shader", "WebGPU initialization failed; falling back to WebGL2", toLogErrorData(err));
             startupDiagnostics.push("WebGPU initialization failed. Using WebGL2.");
             return { engine: MmdManager.createWebGlEngine(canvas), startupDiagnostics };
+        }
+    }
+
+    private static readBooleanLocalStorage(key: string, fallback: boolean): boolean {
+        try {
+            const value = globalThis.localStorage?.getItem(key);
+            if (value === "1" || value === "true") return true;
+            if (value === "0" || value === "false") return false;
+        } catch {
+            // Optional experiment flags must never block startup.
+        }
+        return fallback;
+    }
+
+    private static writeBooleanLocalStorage(key: string, value: boolean): void {
+        try {
+            globalThis.localStorage?.setItem(key, value ? "1" : "0");
+        } catch {
+            // Ignore persistence failures for optional experiment flags.
         }
     }
 
@@ -2975,6 +3056,7 @@ ${beforeFogAppendBlock}
             this.updateSimpleMotionBlurState(deltaMs);
             this.syncBackgroundVideoFrame();
             this.scene.render();
+            this.logPhysicsPerformanceSample(nowMs);
             if (!this._isPlaying) return;
 
             if (advancedManualPlayback) {
@@ -3000,7 +3082,7 @@ ${beforeFogAppendBlock}
         try {
             await this.initializeBulletPhysicsBackend();
             logInfo("physics", "physics backend initialized", {
-                backend: "Bullet",
+                backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
                 fallback: false,
                 simulationRateHz: this.physicsSimulationRateHz,
             });
@@ -3042,7 +3124,29 @@ ${beforeFogAppendBlock}
     }
 
     private async initializeBulletPhysicsBackend(): Promise<void> {
-        const wasmInstance = await loadSprWasmInstance();
+        const mprUnavailableReason = this.getMprUnavailableReason();
+        if (mprUnavailableReason === null) {
+            try {
+                await this.initializeBulletMprPhysicsBackend();
+                return;
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                console.warn("Bullet MPR physics initialization failed. Falling back to SPR:", message);
+                logWarn("physics", "Bullet MPR physics initialization failed; falling back to SPR", toLogErrorData(err));
+            }
+        } else {
+            logWarn("physics", "Bullet MPR physics skipped; falling back to SPR", {
+                reason: mprUnavailableReason,
+            });
+        }
+
+        await this.initializeBulletSprPhysicsBackend();
+    }
+
+    private initializeBulletPhysicsBackendWithWasmInstance(
+        backend: BulletPhysicsBackend,
+        wasmInstance: IMmdWasmInstance,
+    ): void {
         const runtime = new MultiPhysicsRuntime(wasmInstance);
         runtime.register(this.scene);
 
@@ -3050,8 +3154,34 @@ ${beforeFogAppendBlock}
         this.physicsPlugin = null;
         this.physicsRuntime = new MmdBulletPhysics(runtime);
         (this.mmdRuntime as unknown as { _physics: MmdBulletPhysics | null })._physics = this.physicsRuntime;
-        this.physicsBackend = "bullet";
+        this.physicsBackend = backend;
+        this.bulletPhysicsEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
+        runtime.evaluationType = this.bulletPhysicsEvaluationType;
         this.applyPhysicsSimulationRate();
+    }
+
+    private async initializeBulletMprPhysicsBackend(): Promise<void> {
+        this.initializeBulletPhysicsBackendWithWasmInstance("bullet-mpr", await loadBundledMprWasmInstance());
+    }
+
+    private async initializeBulletSprPhysicsBackend(): Promise<void> {
+        this.initializeBulletPhysicsBackendWithWasmInstance("bullet-spr", await loadBundledSprWasmInstance());
+    }
+
+    private getMprUnavailableReason(): string | null {
+        if (!import.meta.env.DEV) {
+            return "MPR packaged build integration is pending";
+        }
+        if (typeof WebAssembly === "undefined") {
+            return "WebAssembly is unavailable";
+        }
+        if (typeof SharedArrayBuffer === "undefined") {
+            return "SharedArrayBuffer is unavailable";
+        }
+        if (!globalThis.crossOriginIsolated) {
+            return "crossOriginIsolated is false";
+        }
+        return null;
     }
 
     private async initializeAmmoPhysicsBackend(): Promise<void> {
@@ -3102,6 +3232,56 @@ ${beforeFogAppendBlock}
             this.physicsPlugin.setMaxSteps(maxSubSteps);
             this.physicsPlugin.setFixedTimeStep(fixedTimeStep);
         }
+    }
+
+    private logPhysicsPerformanceSample(nowMs: number): void {
+        if (nowMs < this.nextPhysicsPerformanceLogMs) {
+            return;
+        }
+        this.nextPhysicsPerformanceLogMs = nowMs + 10_000;
+        logInfo("physics", "physics performance sample", {
+            backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
+            engine: this.getEngineType(),
+            fps: this.getFps(),
+            modelCount: this.sceneModels.length,
+            physicsAvailable: this.physicsAvailable,
+            physicsEnabled: this.getPhysicsEnabled(),
+            simulationActive: this.isPhysicsSimulationActive(),
+            simulationRateHz: this.physicsSimulationRateHz,
+            evaluationType: this.getBulletPhysicsEvaluationTypeLabel(),
+            crossOriginIsolated: globalThis.crossOriginIsolated,
+            sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
+        });
+    }
+
+    private syncBulletPhysicsEvaluationTypeForPlayback(): void {
+        this.setBulletPhysicsEvaluationType(PhysicsRuntimeEvaluationType.Immediate, "playback state");
+    }
+
+    private setBulletPhysicsEvaluationType(evaluationType: PhysicsRuntimeEvaluationType, reason: string): void {
+        if (!this.bulletPhysicsRuntime) return;
+        if (this.bulletPhysicsEvaluationType === evaluationType && this.bulletPhysicsRuntime.evaluationType === evaluationType) {
+            return;
+        }
+
+        try {
+            this.bulletPhysicsRuntime.evaluationType = evaluationType;
+            this.bulletPhysicsEvaluationType = evaluationType;
+            logInfo("physics", "Bullet physics evaluation type changed", {
+                evaluationType: this.getBulletPhysicsEvaluationTypeLabel(),
+                reason,
+            });
+        } catch (err: unknown) {
+            logWarn("physics", "Failed to change Bullet physics evaluation type", {
+                evaluationType: evaluationType === PhysicsRuntimeEvaluationType.Buffered ? "Buffered" : "Immediate",
+                reason,
+                ...toLogErrorData(err),
+            });
+        }
+    }
+
+    private getBulletPhysicsEvaluationTypeLabel(): "Immediate" | "Buffered" {
+        return this.bulletPhysicsEvaluationType === PhysicsRuntimeEvaluationType.Buffered ? "Buffered" : "Immediate";
     }
 
     private applyPhysicsStateToModel(model: MmdModel): void {
@@ -3593,6 +3773,9 @@ ${beforeFogAppendBlock}
         if (!this.isWebGpuEngine()) {
             return;
         }
+        if (!this.webGpuSdefCpuFallbackEnabled) {
+            return;
+        }
 
         let affectedMeshCount = 0;
         let positionMorphMeshCount = 0;
@@ -3901,6 +4084,7 @@ ${beforeFogAppendBlock}
         this.syncBackgroundVideoFrame(true);
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
+        this.syncBulletPhysicsEvaluationTypeForPlayback();
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
             this.mmdRuntime.pauseAnimation();
@@ -3914,6 +4098,7 @@ ${beforeFogAppendBlock}
     pause(): void {
         this._isPlaying = false;
         this.manualPlaybackWithoutAudio = false;
+        this.syncBulletPhysicsEvaluationTypeForPlayback();
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
@@ -3925,6 +4110,7 @@ ${beforeFogAppendBlock}
         this._isPlaying = false;
         this.manualPlaybackWithoutAudio = false;
         this.manualPlaybackFrameCursor = 0;
+        this.syncBulletPhysicsEvaluationTypeForPlayback();
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
@@ -3940,6 +4126,7 @@ ${beforeFogAppendBlock}
 
     seekTo(frame: number): void {
         const targetFrame = Math.max(0, Math.floor(frame));
+        this.setBulletPhysicsEvaluationType(PhysicsRuntimeEvaluationType.Immediate, "seek");
         if (targetFrame > this._totalFrames) {
             this._totalFrames = targetFrame;
         }
@@ -4528,14 +4715,21 @@ ${beforeFogAppendBlock}
         return "WGSL-first";
     }
 
-    getPhysicsBackendLabel(): "Bullet" | "Ammo" | "Off" {
+    getPhysicsBackendLabel(): "Bullet MPR" | "Bullet SPR" | "Ammo" | "Off" {
         if (!this.physicsAvailable) {
             return "Off";
         }
-        if (this.physicsBackend === "bullet") {
-            return "Bullet";
+        return this.getPhysicsBackendLabelForBackend(this.physicsBackend);
+    }
+
+    private getPhysicsBackendLabelForBackend(backend: PhysicsBackend): "Bullet MPR" | "Bullet SPR" | "Ammo" | "Off" {
+        if (backend === "bullet-mpr") {
+            return "Bullet MPR";
         }
-        if (this.physicsBackend === "ammo") {
+        if (backend === "bullet-spr") {
+            return "Bullet SPR";
+        }
+        if (backend === "ammo") {
             return "Ammo";
         }
         return "Off";

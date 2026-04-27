@@ -1515,10 +1515,14 @@ export class UIController {
                 shaderEl.style.borderColor = "rgba(56,189,248,0.24)";
             }
 
-            if (physicsType === "Bullet") {
+            if (physicsType === "Bullet MPR") {
                 physicsEl.style.background = "rgba(34,197,94,0.15)";
                 physicsEl.style.color = "#86efac";
                 physicsEl.style.borderColor = "rgba(34,197,94,0.3)";
+            } else if (physicsType === "Bullet SPR") {
+                physicsEl.style.background = "rgba(20,184,166,0.15)";
+                physicsEl.style.color = "#5eead4";
+                physicsEl.style.borderColor = "rgba(20,184,166,0.3)";
             } else if (physicsType === "Ammo") {
                 physicsEl.style.background = "rgba(245,158,11,0.15)";
                 physicsEl.style.color = "#fbbf24";

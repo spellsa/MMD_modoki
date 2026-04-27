@@ -141,6 +141,7 @@ async function initializeApp(): Promise<void> {
 
   try {
     const mmdManager = await MmdManager.create(canvas);
+    await mmdManager.waitForPhysicsInitialization();
     const engine = mmdManager.getEngineType();
     const physicsBackend = mmdManager.getPhysicsBackendLabel();
     logInfo("renderer", "MmdManager initialized", {
@@ -160,6 +161,8 @@ async function initializeApp(): Promise<void> {
     reportSmokeRendererReady({
       engine,
       physicsBackend,
+      crossOriginIsolated: globalThis.crossOriginIsolated,
+      sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

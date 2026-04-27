@@ -76,6 +76,8 @@ export type AppLogData = Record<string, unknown>;
 export interface SmokeRendererReadyPayload {
     engine: string;
     physicsBackend: string;
+    crossOriginIsolated?: boolean;
+    sharedArrayBufferAvailable?: boolean;
 }
 
 export interface SmokeRendererFailurePayload {
