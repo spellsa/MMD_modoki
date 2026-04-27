@@ -44,10 +44,10 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
-    "@babylonjs/core": "8.45.3",
-    "@babylonjs/gui": "8.45.3",
-    "@babylonjs/loaders": "8.45.3",
-    "babylon-mmd": "^1.1.0",
+    "@babylonjs/core": "9.2.0",
+    "@babylonjs/gui": "9.2.0",
+    "@babylonjs/loaders": "9.2.0",
+    "babylon-mmd": "^1.2.0",
     "electron-log": "^5.4.3",
     "electron-squirrel-startup": "^1.0.1",
     "i18next": "^25.8.18",

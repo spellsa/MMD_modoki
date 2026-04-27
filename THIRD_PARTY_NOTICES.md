@@ -9,10 +9,10 @@ Last updated: 2026-03-15
 
 | Package | Version | License | Upstream |
 | --- | --- | --- | --- |
-| `@babylonjs/core` | `8.45.3` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
-| `@babylonjs/gui` | `8.51.2` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
-| `@babylonjs/loaders` | `8.51.2` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
-| `babylon-mmd` | `1.1.0` | MIT | https://github.com/noname0310/babylon-mmd |
+| `@babylonjs/core` | `9.2.0` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
+| `@babylonjs/gui` | `9.2.0` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
+| `@babylonjs/loaders` | `9.2.0` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
+| `babylon-mmd` | `1.2.0` | MIT | https://github.com/noname0310/babylon-mmd |
 | `electron-squirrel-startup` | `1.0.1` | Apache-2.0 | https://github.com/mongodb-js/electron-squirrel-startup |
 | `i18next` | `25.8.18` | MIT | https://github.com/i18next/i18next |
 | `mediabunny` | `1.39.1` | MPL-2.0 | https://github.com/Vanilagy/mediabunny |
