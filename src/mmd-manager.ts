@@ -196,6 +196,12 @@ import {
 } from "./render/ssao-controller";
 import { ensureSimpleSsaoShader as ensureSimpleSsaoShaderImpl } from "./render/ssao-shader";
 import {
+    POST_EFFECT_BACKEND_STORAGE_KEY,
+    readPostEffectBackendLocalStorage,
+    type PostEffectBackend,
+} from "./render/post-effect-backend";
+import { FrameGraphPostEffectsController } from "./render/frame-graph-post-effects-controller";
+import {
     applyLightColorTemperature as applyLightColorTemperatureImpl,
     applyShadowEdgeSoftness as applyShadowEdgeSoftnessImpl,
     applyShadowFrustumSize as applyShadowFrustumSizeImpl,
@@ -1222,6 +1228,9 @@ ${beforeFogAppendBlock}
         MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
         false,
     );
+    private readonly requestedPostEffectBackend = readPostEffectBackendLocalStorage();
+    private postEffectBackend: PostEffectBackend = this.requestedPostEffectBackend;
+    private frameGraphPostEffectsController: FrameGraphPostEffectsController | null = null;
     private sceneInstrumentation: SceneInstrumentation | null = null;
     private camera: ArcRotateCamera;
     private mmdCamera: MmdCamera;
@@ -2949,6 +2958,7 @@ ${beforeFogAppendBlock}
         this.scene.imageProcessingConfiguration.isEnabled = true;
         this.scene.imageProcessingConfiguration.applyByPostProcess = false;
         this.scene.imageProcessingConfiguration.contrast = 1;
+        this.initializePostEffectBackend();
         this.initializeBoneGizmoSystem();
 
         // SDEF support
@@ -3223,6 +3233,7 @@ ${beforeFogAppendBlock}
             }
             sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.scene.render();
+            this.executePostEffectBackend();
             const afterRenderMs = performance.now();
             if (this.framePerformanceLogEnabled) {
                 this.recordFramePerformanceSection("sceneRender", afterRenderMs - sectionStartMs);
@@ -4567,6 +4578,62 @@ ${beforeFogAppendBlock}
         if (typeof sceneWithPrePass.disablePrePassRenderer === "function") {
             sceneWithPrePass.disablePrePassRenderer();
         }
+    }
+
+    private initializePostEffectBackend(): void {
+        if (this.requestedPostEffectBackend !== "frameGraph") {
+            this.postEffectBackend = "classic";
+            return;
+        }
+
+        this.frameGraphPostEffectsController = new FrameGraphPostEffectsController((warning) => {
+            console.warn(warning.message);
+            logWarn("render", "frame graph post effect backend requested but not active", {
+                storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
+                fallback: "classic",
+                reason: warning.reason,
+            });
+            this.addRuntimeDiagnostic(warning.message);
+        }, (info) => {
+            console.info(info.message);
+            logInfo("render", "frame graph post effect backend", {
+                event: info.event,
+                storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
+            });
+        });
+
+        // Keep classic post processes attached while the Frame Graph path is a
+        // no-op PoC. Visual effect migration starts after texture handoff works.
+        const activated = this.frameGraphPostEffectsController.activate(this.scene);
+        this.postEffectBackend = activated ? "frameGraph" : "classic";
+    }
+
+    private executePostEffectBackend(): void {
+        if (this.postEffectBackend !== "frameGraph") {
+            return;
+        }
+        this.frameGraphPostEffectsController?.execute();
+    }
+
+    private disposeFrameGraphPostEffectsController(): void {
+        if (!this.frameGraphPostEffectsController) {
+            return;
+        }
+        this.frameGraphPostEffectsController.dispose();
+        this.frameGraphPostEffectsController = null;
+    }
+
+    private shutdownPostEffectBackend(): void {
+        if (this.postEffectBackend === "frameGraph") {
+            // Future Frame Graph backends should detach before classic post
+            // effects are disposed.
+        }
+        this.postEffectBackend = "classic";
+        this.disposeFrameGraphPostEffectsController();
+    }
+
+    getPostEffectBackend(): PostEffectBackend {
+        return this.postEffectBackend;
     }
 
     private getPostProcessShaderLanguage(): ShaderLanguage {
@@ -6885,6 +6952,7 @@ ${beforeFogAppendBlock}
         this.physicsController.dispose();
         this.sceneInstrumentation?.dispose();
         this.sceneInstrumentation = null;
+        this.shutdownPostEffectBackend();
         if (this.defaultRenderingPipeline) {
             this.defaultRenderingPipeline.dispose();
             this.defaultRenderingPipeline = null;

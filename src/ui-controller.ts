@@ -33,6 +33,11 @@ import { ModelEdgeController } from "./ui/model-edge-controller";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
+import {
+    POST_EFFECT_BACKEND_STORAGE_KEY,
+    normalizePostEffectBackend,
+    type PostEffectBackend,
+} from "./render/post-effect-backend";
 
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
@@ -2366,6 +2371,15 @@ export class UIController {
 
         this.shaderMaterialList.innerHTML = `
             <div class="shader-postfx-controls">
+                <div class="effect-row">
+                    <span class="effect-label">Backend</span>
+                    <select data-postfx-select="backend" class="effect-select" title="Post effect backend を切り替える。変更後に自動で再読み込みします">
+                        <option value="classic">Classic</option>
+                        <option value="frameGraph">Frame Graph PoC</option>
+                    </select>
+                    <span data-postfx-val="backend" class="effect-value">Classic</span>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row" style="display:none;">
                     <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
                     <input data-postfx="contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
@@ -2509,6 +2523,18 @@ export class UIController {
                     </select>
                     <span data-postfx-val="tone-mapping" class="effect-value" data-i18n="option.none">None</span>
                 </div>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
+                    <div class="postfx-backend-note">
+                        <strong>Frame Graph PoC</strong><br>
+                        No migrated post effect is available on this backend yet. It currently runs only a no-op pass.
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">Pass</span>
+                        <span class="effect-value">No-op</span>
+                        <span class="effect-value">Ready</span>
+                    </div>
+                </div>
             </div>
         `;
         applyI18nToDom(this.shaderMaterialList);
@@ -2526,6 +2552,7 @@ export class UIController {
             return;
         }
         this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
+        this.installPostEffectBackendControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
     }
 
@@ -2538,6 +2565,7 @@ export class UIController {
         this.fogPanelController?.refresh();
         this.syncToolbarLocaleSelect();
         this.syncRuntimeModeSelect();
+        this.syncPostEffectBackendSelect();
     }
 
     private getSelectedToolbarLocale(): UiLocale | null {
@@ -2579,6 +2607,87 @@ export class UIController {
         const mode = this.getConfiguredRuntimeMode();
         if (this.toolbarRuntimeModeSelect.value !== mode) {
             this.toolbarRuntimeModeSelect.value = mode;
+        }
+    }
+
+    private getSelectedPostEffectBackend(select: HTMLSelectElement | null = null): PostEffectBackend | null {
+        const targetSelect = select ?? this.getPostEffectBackendSelectElement();
+        if (!targetSelect) return null;
+        const value = targetSelect.value;
+        if (value === "classic" || value === "frameGraph") {
+            return value;
+        }
+        return null;
+    }
+
+    private getConfiguredPostEffectBackend(): PostEffectBackend {
+        try {
+            return normalizePostEffectBackend(localStorage.getItem(POST_EFFECT_BACKEND_STORAGE_KEY));
+        } catch {
+            return "classic";
+        }
+    }
+
+    private syncPostEffectBackendSelect(): void {
+        const select = this.getPostEffectBackendSelectElement();
+        if (!select) return;
+        const backend = this.getConfiguredPostEffectBackend();
+        if (select.value !== backend) {
+            select.value = backend;
+        }
+        this.applyPostEffectBackendPanelState(select.closest(".shader-postfx-controls") as HTMLElement | null, backend);
+    }
+
+    private getPostEffectBackendSelectElement(): HTMLSelectElement | null {
+        return this.shaderMaterialList?.querySelector<HTMLSelectElement>('select[data-postfx-select="backend"]') ?? null;
+    }
+
+    private installPostEffectBackendControls(root: HTMLElement): void {
+        const select = root.querySelector<HTMLSelectElement>('select[data-postfx-select="backend"]');
+        if (!select) return;
+
+        this.syncPostEffectBackendSelect();
+        select.addEventListener("change", () => {
+            const nextBackend = this.getSelectedPostEffectBackend(select);
+            if (!nextBackend) {
+                this.syncPostEffectBackendSelect();
+                return;
+            }
+            const currentBackend = this.getConfiguredPostEffectBackend();
+            this.applyPostEffectBackendPanelState(root, nextBackend);
+            if (nextBackend === currentBackend) return;
+
+            try {
+                localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, nextBackend);
+            } catch {
+                this.syncPostEffectBackendSelect();
+                this.showToast("PostFX backend setting could not be saved", "error");
+                return;
+            }
+
+            this.setStatus(`PostFX: ${nextBackend === "frameGraph" ? "Frame Graph PoC" : "Classic"} / reloading...`, true);
+            window.setTimeout(() => {
+                window.location.reload();
+            }, 120);
+        });
+    }
+
+    private applyPostEffectBackendPanelState(root: HTMLElement | null, backend: PostEffectBackend): void {
+        if (!root) return;
+        const classicPanel = root.querySelector<HTMLElement>('[data-postfx-backend-panel="classic"]');
+        const frameGraphPanel = root.querySelector<HTMLElement>('[data-postfx-backend-panel="frameGraph"]');
+        const backendValue = root.querySelector<HTMLElement>('span[data-postfx-val="backend"]');
+        const dofControls = root.querySelector<HTMLElement>(".shader-postfx-dof-controls");
+
+        if (classicPanel) classicPanel.hidden = backend !== "classic";
+        if (frameGraphPanel) frameGraphPanel.hidden = backend !== "frameGraph";
+        if (dofControls) {
+            const visible = backend === "classic";
+            dofControls.hidden = !visible;
+            dofControls.style.display = visible ? "" : "none";
+        }
+        if (backendValue) {
+            backendValue.textContent = backend === "frameGraph" ? "PoC" : "Classic";
         }
     }
 
