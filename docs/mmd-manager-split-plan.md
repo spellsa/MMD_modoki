@@ -533,6 +533,86 @@ export class MmdManager {
 - `src/editor/bone-visualizer-controller.ts` と `src/editor/bone-gizmo-controller.ts` へ骨表示系の実装を寄せた。
 - `MmdManager` 側は `initializeBoneGizmoSystem()` / `handleBoneGizmoBeforeRender()` / `disposeBoneGizmoSystem()` / `updateBoneGizmoTarget()` の薄い wrapper と、bone visualizer の entry wrapper だけを残した。
 - `bone gizmo` の古い helper ブロックを削って、`mmd-manager.ts` は現在 5,088 行まで減っている。
+
+### 2026-04-28 physics runtime split 方針
+
+v0.2 物理調査で `mmd-manager.ts` に物理 backend / WASM runtime 実験の責務が増えた。
+
+現時点で `mmd-manager.ts` に残っている主な物理関連責務:
+
+- Bullet MPR / SPR / Ammo fallback の初期化
+- `MmdRuntime` への `MmdBulletPhysics` / `MmdAmmoPhysics` 接続
+- `MmdWasmRuntime` / `MmdWasmAnimation` / `MmdWasmPhysics` の実験的切り替え
+- physics enabled / available / backend label の状態管理
+- simulation rate / gravity の適用
+- Bullet evaluation type の切り替え
+- physics step time 計測
+- seek / playback / pause 後の physics 再初期化と paused physics patch
+- runtime bone API 差分への互換 guard
+
+次の分割候補は `src/physics/physics-runtime-controller.ts`。
+
+まず切り出す範囲:
+
+- `PhysicsBackend`
+- `PhysicsSimulationRateHz`
+- physics enabled / available / backend state
+- Bullet MPR / SPR / Ammo fallback 初期化
+- Bullet `MultiPhysicsRuntime` / Ammo plugin の保持と dispose
+- simulation rate / gravity の適用
+- Bullet evaluation type の管理
+- physics step time 計測と performance sample 用 snapshot
+- backend label 生成
+
+`MmdManager` 側に残す範囲:
+
+- `MmdRuntime` / `MmdWasmRuntime` の生成と差し替え
+- `MmdCamera` / runtime animation / model runtime の管理
+- `MmdWasmAnimation` 作成
+- `initializeMmdModelPhysics()` を呼ぶタイミング
+- seek / playback と physics 再初期化の orchestration
+- UI / project / timeline から見える既存 public API
+
+理由:
+
+- `MmdWasmRuntime` は物理 backend ではなく MMD runtime 全体の差し替えなので、最初から physics controller に押し込むと境界が濁る
+- 物理 backend 初期化と計測はまとまった責務なので、`MmdManager` から外しても public API を保ちやすい
+- v0.2 では WASM 化による FPS 改善は限定的だったため、分割の主目的は性能改善ではなく保守性と比較検証のしやすさに置く
+
+想定 API:
+
+```ts
+type PhysicsRuntimeControllerOptions = {
+  scene: Scene;
+  runtime: MmdRuntime;
+  getMprUnavailableReason: () => string | null;
+  loadMprWasmInstance: () => Promise<IMmdWasmInstance>;
+  loadSprWasmInstance: () => Promise<IMmdWasmInstance>;
+  onStateChanged?: (enabled: boolean, available: boolean) => void;
+};
+
+class PhysicsRuntimeController {
+  initialize(): Promise<boolean>;
+  dispose(): void;
+  setRuntime(runtime: MmdRuntime): void;
+  setEnabled(enabled: boolean): void;
+  getEnabled(): boolean;
+  getAvailable(): boolean;
+  getBackendLabel(): "Bullet MPR" | "Bullet SPR" | "Ammo" | "Off";
+  setSimulationRateHz(rate: PhysicsSimulationRateHz): void;
+  setGravity(direction: Vector3, acceleration: number): void;
+  initializeModelPhysics(model: MmdModel): void;
+  logPerformanceSample(nowMs: number, context: PhysicsPerformanceContext): void;
+}
+```
+
+注意点:
+
+- `MmdWasmRuntime` 用の `WASM MPR` label は、当面 `MmdManager` 側の runtime mode 判定で扱う
+- `MmdRuntime` の private `_physics` へ接続している箇所は controller 内に閉じ込める
+- `scene.enablePhysics()` を使う Ammo 経路と、`MultiPhysicsRuntime.register(scene)` を使う Bullet 経路の dispose 順序を明確にする
+- `physicsInitializationPromise` は `MmdManager` の asset loading gate として残し、中身だけ controller 初期化へ委譲する
+- `npm.cmd run lint` と、起動経路変更のため `npm.cmd run smoke:launch` を必ず確認する
 - `npm run lint` は通過。
 - `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみが残っている。
 - 次は残っている render orchestration と、必要なら bone visualizer の残りの dead code を詰める。
