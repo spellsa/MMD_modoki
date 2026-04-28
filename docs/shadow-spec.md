@@ -75,7 +75,7 @@ PMX の材質フラグには、影に関するビットがあります。
 - `cascadeBlendPercentage = 0.05`
 - `autoCalcDepthBounds = true`
 - `shadowFrustumSize = 960`（固定）
-- `shadowMaxZ = 4800`（既定値、UI で調整可能）
+- `shadowMaxZ = 1000`（既定値、UI で調整可能）
 - 光源位置距離: `220`
 - フィルタは `PCF + QUALITY_MEDIUM`
 
@@ -88,7 +88,7 @@ PMX の材質フラグには、影に関するビットがあります。
 - `CascadedShadowGenerator`:
   - `dirLight.shadowFrustumSize = 960`
   - `dirLight.shadowMinZ = 1`
-  - `dirLight.shadowMaxZ = 4800`
+  - `dirLight.shadowMaxZ = 1000`
 - `dirLight.shadowMinZ = 1`
 
 補足:
@@ -151,7 +151,7 @@ PMX の材質フラグには、影に関するビットがあります。
 - その代わり、近景の自己影や床影に割ける精度は落ちる
 - そのため、描画限界よりも「演出上必要な距離」を基準に調整するのが自然
 
-既定値は `4800` とし、影欄の `影描画距離` で調整できるようにしています。
+既定値は `1000` とし、影欄の `影描画距離` で調整できるようにしています。
 
 ## UI との関係
 
@@ -168,6 +168,11 @@ PMX の材質フラグには、影に関するビットがあります。
   - `shadowFrustumSize` の更新
   - `shadowMaxZ` の更新
   - `shadowBias` / `shadowNormalBias` は内部値として保持
+- 情報欄
+  - 選択中モデルごとに `影` チェックを持つ
+  - チェック OFF のモデルは shadow caster から外す
+  - 既定値は ON
+  - プロジェクト保存 / 読み込みで `castsShadow` として復元する
 
 現在は UI 上では常時 ON で運用し、主に影範囲と境界幅を調整します。
 `shadowDarkness` は内部値としては保持しますが、既定値 `0.0` で UI からは隠しています。
@@ -180,7 +185,7 @@ PMX の材質フラグには、影に関するビットがあります。
 - 光の強さ: `0.8`
 - 影の濃さ: `0.0`（UI非表示）
 - 影範囲: `220`
-- 影描画距離: `4800`
+- 影描画距離: `1000`
 - Shadow Bias: `0.0005`（UI非表示）
 - Normal Bias: `0.01`（UI非表示）
 

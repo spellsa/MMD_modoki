@@ -2701,9 +2701,37 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 
 .info-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(42px, 0.7fr) repeat(2, minmax(0, 1fr));
   gap: 6px;
   padding: 3px 0 4px;
+}
+
+.info-toggle-label {
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.info-toggle-label input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent-primary);
+}
+
+.info-toggle-label:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .info-action-btn {

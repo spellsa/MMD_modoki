@@ -227,6 +227,7 @@ export interface ProjectModelMaterialShaderState {
 export interface ProjectModelState {
     path: string;
     visible: boolean;
+    castsShadow?: boolean;
     motionImports: ProjectMotionImport[];
     materialShaders?: ProjectModelMaterialShaderState[];
     animation?: ProjectSerializedModelAnimation | null;

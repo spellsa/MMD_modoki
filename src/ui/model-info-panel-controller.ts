@@ -13,6 +13,7 @@ export type ModelInfoSelectState = {
 
 type ModelInfoPanelElements = {
     select: HTMLSelectElement | null;
+    chkShadow: HTMLInputElement | null;
     btnVisibility: HTMLButtonElement | null;
     btnDelete: HTMLButtonElement | null;
 };
@@ -28,6 +29,7 @@ export type ModelInfoPanelControllerDeps = {
 function resolveModelInfoPanelElements(): ModelInfoPanelElements {
     return {
         select: document.getElementById("info-model-select") as HTMLSelectElement | null,
+        chkShadow: document.getElementById("chk-model-shadow") as HTMLInputElement | null,
         btnVisibility: document.getElementById("btn-model-visibility") as HTMLButtonElement | null,
         btnDelete: document.getElementById("btn-model-delete") as HTMLButtonElement | null,
     };
@@ -103,6 +105,11 @@ export class ModelInfoPanelController {
                 : t("button.hide");
         }
 
+        if (this.elements.chkShadow) {
+            this.elements.chkShadow.disabled = !enabled;
+            this.elements.chkShadow.checked = enabled ? this.mmdManager.getActiveModelCastsShadow() : false;
+        }
+
         if (this.elements.btnDelete) {
             this.elements.btnDelete.disabled = !enabled;
         }
@@ -135,6 +142,18 @@ export class ModelInfoPanelController {
             this.updateActionButtons();
             this.onModelVisibilityChanged(visible);
             this.showToast(visible ? "Model visible" : "Model hidden", "info");
+        });
+
+        this.elements.chkShadow?.addEventListener("change", () => {
+            if (this.mmdManager.getTimelineTarget() !== "model") return;
+            const castShadow = this.elements.chkShadow?.checked ?? true;
+            const ok = this.mmdManager.setActiveModelCastsShadow(castShadow);
+            this.updateActionButtons();
+            if (!ok) {
+                this.showToast("Failed to update model shadow", "error");
+                return;
+            }
+            this.showToast(castShadow ? t("toast.modelShadow.on") : t("toast.modelShadow.off"), "info");
         });
 
         this.elements.btnDelete?.addEventListener("click", () => {

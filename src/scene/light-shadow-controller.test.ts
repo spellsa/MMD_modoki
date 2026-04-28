@@ -17,7 +17,7 @@ function createHost() {
         },
         shadowGenerator: null,
         shadowFrustumSizeValue: 220,
-        shadowMaxZValue: 4800,
+        shadowMaxZValue: 1000,
         constructor: {},
         applyVolumetricLightSettings: vi.fn(),
         refreshGlobalIlluminationLightParameters: vi.fn(),

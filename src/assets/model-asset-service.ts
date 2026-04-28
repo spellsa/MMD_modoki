@@ -530,6 +530,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
         };
         const materialFlagMap = host.buildPmxMaterialFlagMap(mmdMetadata);
         let materialOrder = 0;
+        const shadowCasterMeshes: Mesh[] = [];
         for (const mesh of result.meshes) {
             mesh.setEnabled(true);
             mesh.isVisible = true;
@@ -537,6 +538,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             mesh.receiveShadows = shadowFlags.receivesShadow;
             if ((mesh.getTotalVertices?.() ?? 0) > 0 && shadowFlags.castsShadow) {
                 host.shadowGenerator.addShadowCaster(mesh, true);
+                shadowCasterMeshes.push(mesh as Mesh);
             }
 
             if (mesh.material) {
@@ -721,6 +723,8 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             info: modelInfo,
             materials: sceneMaterials,
             rigidBodies: sceneRigidBodies,
+            shadowCasterMeshes,
+            castShadow: true,
         });
         host.refreshRigidBodyVisualizerTarget();
         host.syncLuminousGlowLayer?.();

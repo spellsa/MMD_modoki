@@ -36,6 +36,8 @@ import { VolumetricLightScatteringPostProcess } from "@babylonjs/core/PostProces
 import { DepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/depthOfFieldEffect";
 import { GizmoManager } from "@babylonjs/core/Gizmos/gizmoManager";
 import { DepthRenderer } from "@babylonjs/core/Rendering/depthRenderer";
+import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
+import type { PerfCounter } from "@babylonjs/core/Misc/perfCounter";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type {
     BoneControlInfo,
@@ -301,6 +303,39 @@ type EditorRuntimeBone = IMmdRuntimeBone & {
 type RuntimeMode = "classic" | "wasm";
 type RuntimeModel = PhysicsRuntimeModel;
 type RuntimeMmdRuntime = MmdRuntime | MmdWasmRuntime;
+type FramePerformanceSection =
+    | "frameTotal"
+    | "manualPlayback"
+    | "motionBlur"
+    | "backgroundVideo"
+    | "sceneRender"
+    | "cameraMotionToViewport"
+    | "viewportCameraInput"
+    | "boneGizmo"
+    | "boneVisualizer"
+    | "rigidBodyVisualizer"
+    | "editorDof"
+    | "frameStateUpdate";
+type FramePerformanceStats = {
+    samples: number;
+    totalMs: number;
+    maxMs: number;
+};
+
+const FRAME_PERFORMANCE_SECTIONS: readonly FramePerformanceSection[] = [
+    "frameTotal",
+    "manualPlayback",
+    "motionBlur",
+    "backgroundVideo",
+    "sceneRender",
+    "cameraMotionToViewport",
+    "viewportCameraInput",
+    "boneGizmo",
+    "boneVisualizer",
+    "rigidBodyVisualizer",
+    "editorDof",
+    "frameStateUpdate",
+];
 
 let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
@@ -561,6 +596,8 @@ type SceneModelEntry = {
     info: ModelInfo;
     materials: SceneModelMaterialEntry[];
     rigidBodies: SceneModelRigidBodyEntry[];
+    shadowCasterMeshes: Mesh[];
+    castShadow: boolean;
 };
 
 type MaterialShaderDefaults = {
@@ -590,6 +627,7 @@ export class MmdManager {
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
+    private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
         {
@@ -1180,6 +1218,11 @@ ${beforeFogAppendBlock}
     private readonly runtimeDiagnostics = new Set<string>();
     private readonly webGpuTextureMipmapDecisionCache = new Map<string, Promise<boolean>>();
     private scene: Scene;
+    private readonly framePerformanceLogEnabled = MmdManager.readBooleanLocalStorage(
+        MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
+        false,
+    );
+    private sceneInstrumentation: SceneInstrumentation | null = null;
     private camera: ArcRotateCamera;
     private mmdCamera: MmdCamera;
     private mmdRuntime: RuntimeMmdRuntime;
@@ -1201,6 +1244,8 @@ ${beforeFogAppendBlock}
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
     private renderFpsLimit = 0;
+    private nextFramePerformanceLogMs = performance.now() + 10_000;
+    private framePerformanceStats = MmdManager.createFramePerformanceStats();
     private ground: Mesh | null = null;
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
@@ -1296,7 +1341,7 @@ ${beforeFogAppendBlock}
     private shadowEnabled = true;
     private shadowDarknessValue = 0.0;
     private shadowFrustumSizeValue = 220;
-    private shadowMaxZValue = 4800;
+    private shadowMaxZValue = 1000;
     private shadowBiasValue = 0.0005;
     private shadowNormalBiasValue = 0.01;
     private selfShadowEdgeSoftnessValue = 0.05;
@@ -1654,12 +1699,13 @@ ${beforeFogAppendBlock}
     public onGlobalIlluminationStateChanged: ((enabled: boolean) => void) | null = null;
     public onDofFocusTargetChanged: (() => void) | null = null;
 
-    public getLoadedModels(): { index: number; name: string; path: string; active: boolean }[] {
+    public getLoadedModels(): { index: number; name: string; path: string; active: boolean; castsShadow: boolean }[] {
         return this.sceneModels.map((entry, index) => ({
             index,
             name: entry.info.name,
             path: entry.info.path,
             active: entry.model === this.currentModel,
+            castsShadow: entry.castShadow,
         }));
     }
 
@@ -1875,6 +1921,44 @@ ${beforeFogAppendBlock}
         return false;
     }
 
+    public getActiveModelCastsShadow(): boolean {
+        const entry = this.currentModel
+            ? this.sceneModels.find((sceneModel) => sceneModel.model === this.currentModel)
+            : null;
+        return entry?.castShadow ?? false;
+    }
+
+    public getModelCastsShadow(entry: { castShadow?: boolean }): boolean {
+        return entry.castShadow !== false;
+    }
+
+    public setModelCastsShadowByIndex(index: number, castShadow: boolean): boolean {
+        const entry = this.sceneModels[index];
+        if (!entry) return false;
+        if (entry.castShadow === castShadow) return true;
+
+        entry.castShadow = castShadow;
+        this.applyModelShadowCasterState(entry);
+        return true;
+    }
+
+    public setActiveModelCastsShadow(castShadow: boolean): boolean {
+        if (!this.currentModel) return false;
+        const index = this.sceneModels.findIndex((entry) => entry.model === this.currentModel);
+        if (index < 0) return false;
+        return this.setModelCastsShadowByIndex(index, castShadow);
+    }
+
+    private applyModelShadowCasterState(entry: SceneModelEntry): void {
+        for (const mesh of entry.shadowCasterMeshes) {
+            if (entry.castShadow) {
+                this.shadowGenerator.addShadowCaster(mesh, true);
+            } else {
+                this.shadowGenerator.removeShadowCaster(mesh, true);
+            }
+        }
+    }
+
     public getActiveModelVisibility(): boolean {
         if (!this.currentMesh) return false;
         if (this.currentMesh.isEnabled() && this.currentMesh.isVisible) return true;
@@ -1922,6 +2006,8 @@ ${beforeFogAppendBlock}
         if (removeIndex < 0) return false;
 
         const removed = this.sceneModels[removeIndex];
+        removed.castShadow = false;
+        this.applyModelShadowCasterState(removed);
 
         try {
             this.mmdRuntime.destroyMmdModel(removed.model as never);
@@ -2778,6 +2864,32 @@ ${beforeFogAppendBlock}
         }
     }
 
+    private static createFramePerformanceStats(): Record<FramePerformanceSection, FramePerformanceStats> {
+        const stats = {} as Record<FramePerformanceSection, FramePerformanceStats>;
+        for (const section of FRAME_PERFORMANCE_SECTIONS) {
+            stats[section] = {
+                samples: 0,
+                totalMs: 0,
+                maxMs: 0,
+            };
+        }
+        return stats;
+    }
+
+    private static summarizePerfCounter(counter: PerfCounter): {
+        current: number;
+        lastSecAverage: number;
+        average: number;
+        max: number;
+    } {
+        return {
+            current: Math.round(counter.current * 1000) / 1000,
+            lastSecAverage: Math.round(counter.lastSecAverage * 1000) / 1000,
+            average: Math.round(counter.average * 1000) / 1000,
+            max: Math.round(counter.max * 1000) / 1000,
+        };
+    }
+
     private static readRuntimeModeLocalStorage(): RuntimeMode {
         try {
             const value = globalThis.localStorage?.getItem(MmdManager.RUNTIME_MODE_STORAGE_KEY);
@@ -2817,6 +2929,21 @@ ${beforeFogAppendBlock}
 
         // Create scene
         this.scene = new Scene(this.engine);
+        if (this.framePerformanceLogEnabled) {
+            this.sceneInstrumentation = new SceneInstrumentation(this.scene);
+            this.sceneInstrumentation.captureActiveMeshesEvaluationTime = true;
+            this.sceneInstrumentation.captureRenderTargetsRenderTime = true;
+            this.sceneInstrumentation.captureFrameTime = true;
+            this.sceneInstrumentation.captureRenderTime = true;
+            this.sceneInstrumentation.captureParticlesRenderTime = true;
+            this.sceneInstrumentation.captureSpritesRenderTime = true;
+            this.sceneInstrumentation.capturePhysicsTime = true;
+            this.sceneInstrumentation.captureAnimationsTime = true;
+            this.sceneInstrumentation.captureCameraRenderTime = true;
+            logInfo("performance", "frame performance log enabled", {
+                storageKey: MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
+            });
+        }
         this.scene.clearColor = this.defaultClearColor.clone();
         this.scene.ambientColor = new Color3(0.5, 0.5, 0.5);
         this.scene.imageProcessingConfiguration.isEnabled = true;
@@ -3019,18 +3146,43 @@ ${beforeFogAppendBlock}
         );
 
         this.scene.onBeforeRenderObservable.add(() => {
+            if (!this.framePerformanceLogEnabled) {
+                if (this.shouldApplyCameraMotionToViewport()) {
+                    this.syncViewportCameraFromMmdCamera();
+                }
+                this.syncViewportCameraDrivenStateFromNativeInputs();
+                this.handleBoneGizmoBeforeRender();
+                this.updateBoneVisualizer();
+                this.updateRigidBodyVisualizer();
+                this.updateEditorDofFocusAndFStop();
+                return;
+            }
+
+            let sectionStartMs = performance.now();
             if (this.shouldApplyCameraMotionToViewport()) {
                 this.syncViewportCameraFromMmdCamera();
             }
+            this.recordFramePerformanceSection("cameraMotionToViewport", performance.now() - sectionStartMs);
+            sectionStartMs = performance.now();
             this.syncViewportCameraDrivenStateFromNativeInputs();
+            this.recordFramePerformanceSection("viewportCameraInput", performance.now() - sectionStartMs);
+            sectionStartMs = performance.now();
             this.handleBoneGizmoBeforeRender();
+            this.recordFramePerformanceSection("boneGizmo", performance.now() - sectionStartMs);
+            sectionStartMs = performance.now();
             this.updateBoneVisualizer();
+            this.recordFramePerformanceSection("boneVisualizer", performance.now() - sectionStartMs);
+            sectionStartMs = performance.now();
             this.updateRigidBodyVisualizer();
+            this.recordFramePerformanceSection("rigidBodyVisualizer", performance.now() - sectionStartMs);
+            sectionStartMs = performance.now();
             this.updateEditorDofFocusAndFStop();
+            this.recordFramePerformanceSection("editorDof", performance.now() - sectionStartMs);
         });
 
         // Start render loop
         this.engine.runRenderLoop(() => {
+            const frameStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             const nowMs = performance.now();
             if (this.suspendSceneRenderCount > 0) {
                 this.lastRenderTimestampMs = nowMs;
@@ -3053,22 +3205,58 @@ ${beforeFogAppendBlock}
             const deltaMs = Math.max(0, Math.min(100, nowMs - this.lastRenderTimestampMs));
             this.lastRenderTimestampMs = nowMs;
 
+            let sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             const advancedManualPlayback = this.advanceManualPlaybackWithoutAudio(deltaMs);
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("manualPlayback", performance.now() - sectionStartMs);
+            }
 
+            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.updateSimpleMotionBlurState(deltaMs);
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("motionBlur", performance.now() - sectionStartMs);
+            }
+            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.syncBackgroundVideoFrame();
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("backgroundVideo", performance.now() - sectionStartMs);
+            }
+            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.scene.render();
-            this.logPhysicsPerformanceSample(nowMs);
-            if (!this._isPlaying) return;
+            const afterRenderMs = performance.now();
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("sceneRender", afterRenderMs - sectionStartMs);
+            }
+            this.logPhysicsPerformanceSample(afterRenderMs);
+            if (!this._isPlaying) {
+                if (this.framePerformanceLogEnabled) {
+                    this.recordFramePerformanceSection("frameTotal", afterRenderMs - frameStartMs);
+                    this.logFramePerformanceSample(afterRenderMs);
+                }
+                return;
+            }
 
+            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             if (advancedManualPlayback) {
                 this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+                if (this.framePerformanceLogEnabled) {
+                    const frameEndMs = performance.now();
+                    this.recordFramePerformanceSection("frameStateUpdate", frameEndMs - sectionStartMs);
+                    this.recordFramePerformanceSection("frameTotal", frameEndMs - frameStartMs);
+                    this.logFramePerformanceSample(frameEndMs);
+                }
                 return;
             }
 
             const runtimeFrame = Math.floor(this.mmdRuntime.currentFrameTime);
             this._currentFrame = Math.min(runtimeFrame, this._totalFrames);
             this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+            if (this.framePerformanceLogEnabled) {
+                const frameEndMs = performance.now();
+                this.recordFramePerformanceSection("frameStateUpdate", frameEndMs - sectionStartMs);
+                this.recordFramePerformanceSection("frameTotal", frameEndMs - frameStartMs);
+                this.logFramePerformanceSample(frameEndMs);
+            }
         });
 
         // Handle resize
@@ -3147,6 +3335,67 @@ ${beforeFogAppendBlock}
             modelCount: this.sceneModels.length,
             simulationActive: this.isPhysicsSimulationActive(),
         });
+    }
+
+    private recordFramePerformanceSection(section: FramePerformanceSection, durationMs: number): void {
+        if (!this.framePerformanceLogEnabled) return;
+        if (!Number.isFinite(durationMs) || durationMs < 0) return;
+        const stats = this.framePerformanceStats[section];
+        stats.samples += 1;
+        stats.totalMs += durationMs;
+        stats.maxMs = Math.max(stats.maxMs, durationMs);
+    }
+
+    private logFramePerformanceSample(nowMs: number): void {
+        if (!this.framePerformanceLogEnabled) return;
+        if (nowMs < this.nextFramePerformanceLogMs) {
+            return;
+        }
+        this.nextFramePerformanceLogMs = nowMs + 10_000;
+
+        const sections: Record<string, { samples: number; avgMs: number | null; maxMs: number | null }> = {};
+        for (const section of FRAME_PERFORMANCE_SECTIONS) {
+            const stats = this.framePerformanceStats[section];
+            sections[section] = {
+                samples: stats.samples,
+                avgMs: stats.samples > 0 ? Math.round((stats.totalMs / stats.samples) * 1000) / 1000 : null,
+                maxMs: stats.samples > 0 ? Math.round(stats.maxMs * 1000) / 1000 : null,
+            };
+        }
+
+        logInfo("performance", "frame performance sample", {
+            runtimeMode: this.runtimeMode,
+            engine: this.getEngineType(),
+            fps: this.getFps(),
+            modelCount: this.sceneModels.length,
+            isPlaying: this._isPlaying,
+            physicsBackend: this.getPhysicsBackendLabel(),
+            rigidBodyVisualizerEnabled: this.rigidBodyVisualizerEnabled,
+            boneVisualizerTarget: this.boneVisualizerTarget !== null,
+            sections,
+            sceneInstrumentation: this.getSceneInstrumentationSnapshot(),
+        });
+        this.framePerformanceStats = MmdManager.createFramePerformanceStats();
+    }
+
+    private getSceneInstrumentationSnapshot(): Record<string, unknown> | null {
+        const instrumentation = this.sceneInstrumentation;
+        if (!instrumentation) return null;
+
+        return {
+            activeMeshes: this.scene.getActiveMeshes().length,
+            totalVertices: this.scene.totalVerticesPerfCounter.current,
+            activeMeshesEvaluationTime: MmdManager.summarizePerfCounter(instrumentation.activeMeshesEvaluationTimeCounter),
+            animationsTime: MmdManager.summarizePerfCounter(instrumentation.animationsTimeCounter),
+            physicsTime: MmdManager.summarizePerfCounter(instrumentation.physicsTimeCounter),
+            renderTargetsRenderTime: MmdManager.summarizePerfCounter(instrumentation.renderTargetsRenderTimeCounter),
+            renderTime: MmdManager.summarizePerfCounter(instrumentation.renderTimeCounter),
+            cameraRenderTime: MmdManager.summarizePerfCounter(instrumentation.cameraRenderTimeCounter),
+            particlesRenderTime: MmdManager.summarizePerfCounter(instrumentation.particlesRenderTimeCounter),
+            spritesRenderTime: MmdManager.summarizePerfCounter(instrumentation.spritesRenderTimeCounter),
+            frameTime: MmdManager.summarizePerfCounter(instrumentation.frameTimeCounter),
+            drawCalls: MmdManager.summarizePerfCounter(instrumentation.drawCallsCounter),
+        };
     }
 
     private applyPhysicsStateToModel(model: RuntimeModel): void {
@@ -6634,6 +6883,8 @@ ${beforeFogAppendBlock}
         this.mmdCamera.dispose();
         this.mmdRuntime.dispose(this.scene);
         this.physicsController.dispose();
+        this.sceneInstrumentation?.dispose();
+        this.sceneInstrumentation = null;
         if (this.defaultRenderingPipeline) {
             this.defaultRenderingPipeline.dispose();
             this.defaultRenderingPipeline = null;

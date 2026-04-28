@@ -125,6 +125,10 @@ export async function importProjectState(
         } else {
             host.applySceneMeshVisibility(targetEntry.mesh, Boolean(modelState.visible));
         }
+        host.setModelCastsShadowByIndex?.(
+            modelIndex,
+            typeof modelState.castsShadow === "boolean" ? modelState.castsShadow : true,
+        );
 
         const targetModel = targetEntry.model;
 

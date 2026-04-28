@@ -22,6 +22,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
     const models = host.sceneModels.map((entry: any) => ({
         path: entry.info.path,
         visible: host.getModelVisibility(entry.mesh),
+        castsShadow: host.getModelCastsShadow(entry),
         motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item: any) => ({ ...item })),
         materialShaders: host.getSerializedMaterialShaderStates(entry),
     }));

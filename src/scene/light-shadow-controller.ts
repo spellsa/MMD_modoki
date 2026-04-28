@@ -40,7 +40,7 @@ function clampShadowNormalBias(v: number): number {
 }
 
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
-const DEFAULT_CSM_SHADOW_MAX_Z = 4800;
+const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const DEFAULT_CSM_LIGHT_DISTANCE = 220;
 
