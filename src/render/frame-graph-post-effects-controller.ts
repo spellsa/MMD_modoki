@@ -1,5 +1,12 @@
+import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
-import { FrameGraphTask } from "@babylonjs/core/FrameGraph/frameGraphTask";
+import { FrameGraphPostProcessTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/postProcessTask";
+import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
+import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/frameGraphRenderPass";
+import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGraphRenderContext";
+import { EffectWrapper } from "@babylonjs/core/Materials/effectRenderer";
+import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
+import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
 import type { Scene } from "@babylonjs/core/scene";
 
 export type FrameGraphPostEffectsWarning = {
@@ -12,29 +19,89 @@ export type FrameGraphPostEffectsInfo = {
     event: "activated" | "ready";
 };
 
-class FrameGraphPostEffectsNoopTask extends FrameGraphTask {
+export type FrameGraphPostEffectsSettings = {
+    contrast: number;
+    gammaPower: number;
+};
+
+function ensureColorCorrectionShaders(): void {
+    const shaderKey = "mmdFrameGraphColorCorrectionPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform float contrast;
+            uniform float gammaPower;
+
+            void main(void) {
+                vec4 color = texture2D(textureSampler, vUV);
+                vec3 contrasted = ((color.rgb - vec3(0.5)) * contrast) + vec3(0.5);
+                vec3 corrected = pow(max(contrasted, vec3(0.0)), vec3(max(gammaPower, 0.0001)));
+                gl_FragColor = vec4(corrected, color.a);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            uniform contrast: f32;
+            uniform gammaPower: f32;
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let color: vec4f = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+                let contrasted: vec3f = ((color.rgb - vec3f(0.5)) * uniforms.contrast) + vec3f(0.5);
+                let safeGamma: f32 = max(uniforms.gammaPower, 0.0001);
+                let corrected: vec3f = pow(max(contrasted, vec3f(0.0)), vec3f(safeGamma));
+                fragmentOutputs.color = vec4f(corrected, color.a);
+            }
+        `;
+    }
+}
+
+class FrameGraphPostEffectsColorCorrectionTask extends FrameGraphPostProcessTask {
     constructor(
         name: string,
         frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
         private readonly onExecute: () => void,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
     ) {
-        super(name, frameGraph);
+        super(name, frameGraph, postProcess);
     }
 
     override getClassName(): string {
-        return "FrameGraphPostEffectsNoopTask";
+        return "FrameGraphPostEffectsColorCorrectionTask";
     }
 
-    override record(): void {
-        const pass = this._frameGraph.addPass(`${this.name}:noop`);
-        pass.setExecuteFunc(() => {
-            this.onExecute();
-        });
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        return super.record(
+            skipCreationOfDisabledPasses,
+            (context) => {
+                this.onExecute();
+                additionalExecute?.(context);
+            },
+            (context) => {
+                const settings = this.getSettings();
+                this.postProcess.effect.setFloat("contrast", settings.contrast);
+                this.postProcess.effect.setFloat("gammaPower", settings.gammaPower);
+                additionalBindings?.(context);
+            },
+        );
     }
 }
 
 export class FrameGraphPostEffectsController {
     private activationWarningEmitted = false;
+    private colorCorrectionEffect: EffectWrapper | null = null;
     private frameGraph: FrameGraph | null = null;
     private ready = false;
     private active = false;
@@ -43,32 +110,65 @@ export class FrameGraphPostEffectsController {
     constructor(
         private readonly onWarning: (warning: FrameGraphPostEffectsWarning) => void,
         private readonly onInfo?: (info: FrameGraphPostEffectsInfo) => void,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings = () => ({
+            contrast: 1,
+            gammaPower: 1,
+        }),
     ) {}
 
-    activate(scene?: Scene): boolean {
+    activate(scene?: Scene, sourceTexture?: InternalTexture | null): boolean {
         if (this.active) {
             return true;
         }
-        if (!scene) {
+        if (!scene || !sourceTexture) {
             this.emitWarningOnce({
-                message: "Frame Graph post effects are not connected yet. Using classic post effects.",
+                message: "Frame Graph post effects are not connected to a source texture. Using classic post effects.",
                 reason: "not-connected",
             });
             return false;
         }
 
-        this.frameGraph = new FrameGraph(scene, false);
-        this.frameGraph.name = "MMD modoki post effects";
-        this.frameGraph.addTask(new FrameGraphPostEffectsNoopTask(
-            "frameGraphPostEffectsBootstrap",
-            this.frameGraph,
+        ensureColorCorrectionShaders();
+
+        const frameGraph = new FrameGraph(scene, false);
+        frameGraph.name = "MMD modoki post effects";
+        this.colorCorrectionEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphColorCorrection",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["contrast", "gammaPower"],
+            name: "mmdFrameGraphColorCorrection",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+
+        const sourceTextureHandle = frameGraph.textureManager.importTexture(
+            "frameGraphPostEffectsSceneColor",
+            sourceTexture,
+        );
+        const colorCorrectionTask = new FrameGraphPostEffectsColorCorrectionTask(
+            "frameGraphPostEffectsColorCorrection",
+            frameGraph,
+            this.colorCorrectionEffect,
             () => {
                 this.executedFrameCount += 1;
             },
-        ));
+            this.getSettings,
+        );
+        colorCorrectionTask.sourceTexture = sourceTextureHandle;
+        frameGraph.addTask(colorCorrectionTask);
+
+        const outputTask = new FrameGraphCopyToBackbufferColorTask(
+            "frameGraphPostEffectsOutput",
+            frameGraph,
+        );
+        outputTask.sourceTexture = colorCorrectionTask.outputTexture;
+        frameGraph.addTask(outputTask);
+
+        this.frameGraph = frameGraph;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (noop PoC).",
+            message: "Frame Graph post effects backend active (color correction only).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -108,6 +208,8 @@ export class FrameGraphPostEffectsController {
     }
 
     dispose(): void {
+        this.colorCorrectionEffect?.dispose();
+        this.colorCorrectionEffect = null;
         this.frameGraph?.dispose();
         this.frameGraph = null;
         this.ready = false;

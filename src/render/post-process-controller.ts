@@ -1188,6 +1188,13 @@ export function applyImageProcessingSettings(host: any): void {
 
     const shouldEnable = isImageProcessingEffectsEnabled(host);
     const pipeline = host.defaultRenderingPipeline;
+    if (host.postEffectBackend === "frameGraph") {
+        host.scene.imageProcessingConfiguration.isEnabled = shouldEnable;
+        if (pipeline) {
+            pipeline.imageProcessingEnabled = false;
+        }
+        return;
+    }
     if (pipeline) {
         pipeline.imageProcessingEnabled = shouldEnable;
     } else {

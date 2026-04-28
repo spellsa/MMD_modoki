@@ -19,6 +19,7 @@ import { Layer } from "@babylonjs/core/Layers/layer";
 import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
+import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { ColorGradingTexture } from "@babylonjs/core/Materials/Textures/colorGradingTexture";
 import { Effect } from "@babylonjs/core/Materials/effect";
@@ -1430,6 +1431,7 @@ ${beforeFogAppendBlock}
     private readonly materialHiddenByMaterial = new WeakMap<object, boolean>();
     private externalWgslToonShaderPathValue: string | null = null;
     private colorCorrectionPostProcess: PostProcess | null = null;
+    private frameGraphPostEffectsSceneColorTarget: RenderTargetTexture | null = null;
     private originFogPostProcess: PostProcess | null = null;
     private finalAntialiasPostProcess: FxaaPostProcess | null = null;
     private finalLensDistortionPostProcess: PostProcess | null = null;
@@ -2958,7 +2960,6 @@ ${beforeFogAppendBlock}
         this.scene.imageProcessingConfiguration.isEnabled = true;
         this.scene.imageProcessingConfiguration.applyByPostProcess = false;
         this.scene.imageProcessingConfiguration.contrast = 1;
-        this.initializePostEffectBackend();
         this.initializeBoneGizmoSystem();
 
         // SDEF support
@@ -2993,6 +2994,7 @@ ${beforeFogAppendBlock}
         this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
         this.dofFocusDistanceMmValue = this.getDofAutoFocusDistanceMm();
+        this.initializePostEffectBackend();
         this.initializeDofPipeline();
         this.setupColorCorrectionPostProcess();
 
@@ -4594,18 +4596,88 @@ ${beforeFogAppendBlock}
                 reason: warning.reason,
             });
             this.addRuntimeDiagnostic(warning.message);
+            this.disposeFrameGraphPostEffectsSceneColorTarget();
+            this.postEffectBackend = "classic";
         }, (info) => {
             console.info(info.message);
             logInfo("render", "frame graph post effect backend", {
                 event: info.event,
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
             });
-        });
+        }, () => ({
+            contrast: this.postEffectContrastValue,
+            gammaPower: this.postEffectGammaValue,
+        }));
 
-        // Keep classic post processes attached while the Frame Graph path is a
-        // no-op PoC. Visual effect migration starts after texture handoff works.
-        const activated = this.frameGraphPostEffectsController.activate(this.scene);
+        const sourceTexture = this.createFrameGraphPostEffectsSceneColorTarget();
+        const activated = this.frameGraphPostEffectsController.activate(
+            this.scene,
+            sourceTexture?.getInternalTexture() ?? null,
+        );
+        if (!activated) {
+            this.disposeFrameGraphPostEffectsSceneColorTarget();
+        }
         this.postEffectBackend = activated ? "frameGraph" : "classic";
+    }
+
+    private createFrameGraphPostEffectsSceneColorTarget(): RenderTargetTexture | null {
+        if (!this.camera) {
+            return null;
+        }
+        this.disposeFrameGraphPostEffectsSceneColorTarget();
+        const size = this.getFrameGraphPostEffectsRenderTargetSize();
+
+        const renderTarget = new RenderTargetTexture(
+            "frameGraphPostEffectsSceneColor",
+            size,
+            this.scene,
+            {
+                generateMipMaps: false,
+                doNotChangeAspectRatio: true,
+                generateDepthBuffer: true,
+                generateStencilBuffer: true,
+                samples: 1,
+            },
+        );
+        renderTarget.activeCamera = this.camera;
+        renderTarget.renderList = [];
+        // Use the camera custom RT path instead of scene.customRenderTargets:
+        // camera RTs are collected after active-mesh evaluation, which is
+        // closer to the normal camera render path used by the editor viewport.
+        renderTarget.getCustomRenderList = () => this.scene.meshes;
+        renderTarget.renderParticles = true;
+        renderTarget.renderSprites = true;
+        renderTarget.skipInitialClear = false;
+        this.camera.customRenderTargets.push(renderTarget);
+        this.frameGraphPostEffectsSceneColorTarget = renderTarget;
+        return renderTarget;
+    }
+
+    private getFrameGraphPostEffectsRenderTargetSize(): { width: number; height: number } {
+        return {
+            width: Math.max(1, this.engine.getRenderWidth()),
+            height: Math.max(1, this.engine.getRenderHeight()),
+        };
+    }
+
+    private refreshFrameGraphPostEffectsBackendAfterResize(): void {
+        if (this.postEffectBackend !== "frameGraph" || !this.frameGraphPostEffectsController) {
+            return;
+        }
+        this.disposeFrameGraphPostEffectsController();
+        this.initializePostEffectBackend();
+    }
+
+    private disposeFrameGraphPostEffectsSceneColorTarget(): void {
+        if (!this.frameGraphPostEffectsSceneColorTarget) {
+            return;
+        }
+        const index = this.camera?.customRenderTargets.indexOf(this.frameGraphPostEffectsSceneColorTarget) ?? -1;
+        if (index >= 0) {
+            this.camera?.customRenderTargets.splice(index, 1);
+        }
+        this.frameGraphPostEffectsSceneColorTarget.dispose();
+        this.frameGraphPostEffectsSceneColorTarget = null;
     }
 
     private executePostEffectBackend(): void {
@@ -4621,6 +4693,7 @@ ${beforeFogAppendBlock}
         }
         this.frameGraphPostEffectsController.dispose();
         this.frameGraphPostEffectsController = null;
+        this.disposeFrameGraphPostEffectsSceneColorTarget();
     }
 
     private shutdownPostEffectBackend(): void {
@@ -5662,6 +5735,9 @@ ${beforeFogAppendBlock}
     }
 
     private setupColorCorrectionPostProcess(): void {
+        if (this.postEffectBackend === "frameGraph") {
+            return;
+        }
         const shaderKey = "mmdColorCorrectionFragmentShader";
         if (!Effect.ShadersStore[shaderKey]) {
             Effect.ShadersStore[shaderKey] = `
@@ -7103,6 +7179,7 @@ ${beforeFogAppendBlock}
                 this.ensureSsaoFallbackPostProcess();
                 this.enforceFinalPostProcessOrder();
             }
+            this.refreshFrameGraphPostEffectsBackendAfterResize();
         }
     }
 

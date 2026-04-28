@@ -2526,13 +2526,13 @@ export class UIController {
                 </div>
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
-                        <strong>Frame Graph PoC</strong><br>
-                        No migrated post effect is available on this backend yet. It currently runs only a no-op pass.
+                        <strong>Frame Graph</strong><br>
+                        Experimental scene color RT handoff. Current pass tests Gamma/Contrast without ImageProcessingTask.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
-                        <span class="effect-value">No-op</span>
-                        <span class="effect-value">Ready</span>
+                        <span class="effect-value">Color</span>
+                        <span class="effect-value">Debug</span>
                     </div>
                 </div>
             </div>
@@ -2687,7 +2687,7 @@ export class UIController {
             dofControls.style.display = visible ? "" : "none";
         }
         if (backendValue) {
-            backendValue.textContent = backend === "frameGraph" ? "PoC" : "Classic";
+            backendValue.textContent = backend === "frameGraph" ? "Frame Graph" : "Classic";
         }
     }
 
