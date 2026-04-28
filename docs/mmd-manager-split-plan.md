@@ -616,3 +616,23 @@ class PhysicsRuntimeController {
 - `npm run lint` は通過。
 - `npx tsc --noEmit` は引き続き既存の `src/i18n.ts` と wasm typed array 周辺の型エラーのみが残っている。
 - 次は残っている render orchestration と、必要なら bone visualizer の残りの dead code を詰める。
+
+### 2026-04-28 physics runtime split 初回実装
+
+- `src/physics/physics-runtime-controller.ts` を追加し、Bullet MPR / SPR / Ammo fallback、physics enabled / available、backend label、simulation rate、gravity、Bullet evaluation type、physics step time 計測を `MmdManager` から移した。
+- `MmdManager` 側は runtime mode 切り替え、`MmdWasmRuntime` 生成、モデルへの `initializeMmdModelPhysics()` 適用タイミング、seek / playback / pause の orchestration を残す形にした。
+- WASM runtime 実験時は `PhysicsRuntimeController.useWasmRuntime()` で backend 表示と simulation rate / gravity の適用だけを同期する。`MmdWasmRuntime` 自体の生成と差し替えは引き続き `MmdManager` 側の責務。
+- 初期化ログの backend label は controller の available 設定後に出すようにして、起動時に `Off` と表示される一瞬の不整合を避けた。
+- 分割直後に `model-asset-service.ts` が旧 `host.physicsAvailable` field を直接読んでいたため、PMX 読み込み時の `buildPhysics` が false になり物理が効かない回帰が出た。`isPhysicsAvailable()` 経由に修正し、project import/export の物理設定も getter 経由に寄せた。
+- `npm.cmd run lint` はエラーなしで通過。既存 warning は残る。
+- `npm.cmd run smoke:launch` は WebGPU / Bullet MPR で renderer runtime 初期化まで通過。
+
+### 2026-04-28 physics model split
+
+- `src/physics/physics-model-controller.ts` を追加し、モデル単位の `rigidBodyStates` 更新、`initializeMmdModelPhysics()` 呼び出し、paused state 用 `afterPhysics` patch、after-physics bone stage / evaluation order 補正を `MmdManager` から移した。
+- `MmdManager` 側は playback / seek / external playback のタイミングで controller を呼ぶ facade に寄せた。`MmdRuntime` / `MmdWasmRuntime` の生成と差し替え、`MmdWasmAnimation` 作成はまだ `MmdManager` 側に残す。
+- PMX 読み込みと project import/export の物理状態参照は `isPhysicsAvailable()` / `getPhysicsEnabled()` / `getPhysicsSimulationRateHz()` / `getPhysicsGravity*()` 経由に統一し、旧 field 直参照をやめた。
+- `host: any` は project/model service 全体の古い facade 境界として残る。物理系の直接 field 依存は外したので、次にやるなら service host interface をファイル単位で切る。
+- `npm.cmd run lint` はエラーなしで通過。既存 warning は残る。
+- `npm.cmd run smoke:launch` は WebGPU / WASM MPR で renderer runtime 初期化まで通過。
+- `npx tsc --noEmit` は既存の shader preset / wasm typed array / test mock / import.meta 周辺に加えて複数の型エラーが残る。今回触った範囲では `destroyMmdModel()` の union runtime 呼び出しと Ammo private `_stepSimulation` cast を補正した。

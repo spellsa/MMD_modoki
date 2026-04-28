@@ -127,14 +127,10 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             backgroundVideoPath: host.getBackgroundVideoPath(),
         },
         physics: {
-            enabled: host.physicsEnabled,
-            simulationRateHz: host.physicsSimulationRateHz,
-            gravityAcceleration: host.physicsGravityAcceleration,
-            gravityDirection: {
-                x: host.physicsGravityDirection.x,
-                y: host.physicsGravityDirection.y,
-                z: host.physicsGravityDirection.z,
-            },
+            enabled: host.getPhysicsEnabled(),
+            simulationRateHz: host.getPhysicsSimulationRateHz(),
+            gravityAcceleration: host.getPhysicsGravityAcceleration(),
+            gravityDirection: host.getPhysicsGravityDirection(),
         },
         effects: {
             dofEnabled: host.dofEnabled,

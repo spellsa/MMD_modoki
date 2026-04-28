@@ -439,7 +439,7 @@ export async function importProjectState(
         data.physics.gravityDirection.y,
         data.physics.gravityDirection.z,
     );
-    if (host.physicsAvailable) {
+    if (host.isPhysicsAvailable()) {
         host.setPhysicsEnabled(Boolean(data.physics.enabled));
     } else if (data.physics.enabled) {
         warnings.push("Physics was enabled in project, but physics is unavailable in this environment");

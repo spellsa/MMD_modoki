@@ -58,7 +58,7 @@ import {
     loadVMD as loadVMDImpl,
     loadVPD as loadVPDImpl,
 } from "./assets/motion-asset-service";
-import { logError, logInfo, logWarn, toLogErrorData } from "./app-logger";
+import { logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
@@ -282,6 +282,15 @@ import {
     syncRigidBodyVisualizerVisibility as syncRigidBodyVisualizerVisibilityImpl,
     updateRigidBodyVisualizer as updateRigidBodyVisualizerImpl,
 } from "./editor/rigid-body-visualizer-controller";
+import {
+    PhysicsRuntimeController,
+    type PhysicsBackendLabel,
+    type PhysicsSimulationRateHz,
+} from "./physics/physics-runtime-controller";
+import {
+    PhysicsModelController,
+    type PhysicsRuntimeModel,
+} from "./physics/physics-model-controller";
 
 type EditorRuntimeBone = IMmdRuntimeBone & {
     getAnimationPositionOffsetToRef?: (target: Vector3) => Vector3;
@@ -289,18 +298,9 @@ type EditorRuntimeBone = IMmdRuntimeBone & {
     getWorldMatrixToRef(target: Matrix): Matrix;
 };
 
-type PhysicsSimulationRateHz = 30 | 60 | 120;
 type RuntimeMode = "classic" | "wasm";
-type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "ammo" | "wasm-mpr";
-type BulletPhysicsBackend = Extract<PhysicsBackend, "bullet-mpr" | "bullet-spr">;
-type RuntimeModel = MmdModel | MmdWasmModel;
+type RuntimeModel = PhysicsRuntimeModel;
 type RuntimeMmdRuntime = MmdRuntime | MmdWasmRuntime;
-type PhysicsStepTimingStats = {
-    samples: number;
-    totalMs: number;
-    maxMs: number;
-    lastMs: number | null;
-};
 
 let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
@@ -462,19 +462,11 @@ import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
 import { PathNormalize } from "babylon-mmd/esm/Loader/Util/pathNormalize";
 import { SdefInjector } from "babylon-mmd/esm/Loader/sdefInjector";
 import { StreamAudioPlayer } from "babylon-mmd/esm/Runtime/Audio/streamAudioPlayer";
-import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
-import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
-import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 import { MmdWasmPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdWasmPhysics";
-import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime";
-import { PhysicsRuntimeEvaluationType } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/physicsRuntimeEvaluationType";
 import * as sprWasmBindgen from "babylon-mmd/esm/Runtime/Optimized/wasm/spr";
 import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
 import { WasmTypedArray } from "babylon-mmd/esm/Runtime/Optimized/Misc/wasmTypedArray";
 import { WasmSharedTypedArray } from "babylon-mmd/esm/Runtime/Optimized/Misc/wasmSharedTypedArray";
-import Ammo from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm";
-// eslint-disable-next-line import/no-unresolved
-import ammoWasmBinaryUrl from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm.wasm?url";
 // eslint-disable-next-line import/no-unresolved
 import mprWasmBinaryUrl from "babylon-mmd/esm/Runtime/Optimized/wasm/mpr/index_bg.wasm?url";
 // eslint-disable-next-line import/no-unresolved
@@ -501,8 +493,6 @@ import sepiaLutText from "../lut/sepia.3dl?raw";
 // eslint-disable-next-line import/no-unresolved
 import tealOrangeLutText from "../lut/teal-orange.3dl?raw";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
-import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
-import type { MmdWasmModel } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmModel";
 import type { MmdRuntimeAnimationHandle } from "babylon-mmd/esm/Runtime/mmdRuntimeAnimationHandle";
 
 export type WgslMaterialShaderPresetId =
@@ -1211,13 +1201,6 @@ ${beforeFogAppendBlock}
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
     private renderFpsLimit = 0;
-    private nextPhysicsPerformanceLogMs = performance.now() + 10_000;
-    private physicsStepTimingStats: PhysicsStepTimingStats = {
-        samples: 0,
-        totalMs: 0,
-        maxMs: 0,
-        lastMs: null,
-    };
     private ground: Mesh | null = null;
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
@@ -1244,7 +1227,6 @@ ${beforeFogAppendBlock}
     private hasCameraMotion = false;
     private readonly modelKeyframeTracksByModel = new WeakMap<RuntimeModel, Map<string, Uint32Array>>();
     private readonly modelSourceAnimationsByModel = new WeakMap<RuntimeModel, MmdAnimation>();
-    private readonly physicsAfterPhysicsPatchedModels = new WeakSet<object>();
     private cameraSourceAnimation: MmdAnimation | null = null;
     private readonly modelMotionImportsByModel = new WeakMap<RuntimeModel, ProjectMotionImport[]>();
     private cameraMotionPath: string | null = null;
@@ -1304,17 +1286,9 @@ ${beforeFogAppendBlock}
     private readonly boneGizmoTempRotation2 = Quaternion.Identity();
     private physicsEnabledBeforeBoneGizmoDrag: boolean | null = null;
     private globalIlluminationController: GlobalIlluminationController | null = null;
-    private physicsPlugin: MmdAmmoJSPlugin | null = null;
-    private bulletPhysicsRuntime: MultiPhysicsRuntime | null = null;
-    private physicsRuntime: MmdAmmoPhysics | MmdBulletPhysics | null = null;
+    private physicsController!: PhysicsRuntimeController;
+    private physicsModelController!: PhysicsModelController;
     private physicsInitializationPromise: Promise<boolean>;
-    private physicsAvailable = false;
-    private physicsBackend: PhysicsBackend = "none";
-    private physicsEnabled = true;
-    private physicsSimulationRateHz: PhysicsSimulationRateHz = 60;
-    private physicsGravityAcceleration = 98;
-    private physicsGravityDirection = new Vector3(0, -100, 0);
-    private bulletPhysicsEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
     private webGpuSdefCpuFallbackEnabled = MmdManager.readBooleanLocalStorage(
         MmdManager.WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY,
         false,
@@ -1950,7 +1924,7 @@ ${beforeFogAppendBlock}
         const removed = this.sceneModels[removeIndex];
 
         try {
-            this.mmdRuntime.destroyMmdModel(removed.model);
+            this.mmdRuntime.destroyMmdModel(removed.model as never);
         } catch {
             // no-op
         }
@@ -2645,10 +2619,10 @@ ${beforeFogAppendBlock}
     }
 
     public isRigidBodyVisualizerAvailable(): boolean {
-        return this.sceneModels.some((sceneModel) => {
-            const model = sceneModel.model as { _physicsModel?: unknown } | null;
-            return Boolean(model?._physicsModel && sceneModel.rigidBodies.length > 0);
-        });
+        return this.sceneModels.some((sceneModel) => PhysicsModelController.hasPhysicsModel(
+            sceneModel.model,
+            sceneModel.rigidBodies.length,
+        ));
     }
 
     public setRigidBodyVisualizerEnabled(enabled: boolean): boolean {
@@ -2665,11 +2639,11 @@ ${beforeFogAppendBlock}
     }
 
     public isPhysicsAvailable(): boolean {
-        return this.physicsAvailable;
+        return this.physicsController.isAvailable();
     }
 
     public getPhysicsEnabled(): boolean {
-        return this.physicsAvailable && this.physicsEnabled;
+        return this.physicsController.getEnabled();
     }
 
     public async waitForPhysicsInitialization(): Promise<boolean> {
@@ -2694,31 +2668,21 @@ ${beforeFogAppendBlock}
     }
 
     private syncScenePhysicsSimulationState(): void {
-        this.scene.physicsEnabled = this.getPhysicsEnabled() && this.isPhysicsSimulationActive();
+        this.physicsController.syncScenePhysicsSimulationState(this.isPhysicsSimulationActive());
     }
 
     public setExternalPlaybackSimulationEnabled(enabled: boolean): boolean {
         this.externalPlaybackSimulationEnabled = Boolean(enabled);
-        this.syncBulletPhysicsEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback();
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
         return this.externalPlaybackSimulationEnabled;
     }
 
     public setPhysicsEnabled(enabled: boolean): boolean {
-        if (!this.physicsAvailable) {
-            this.physicsEnabled = false;
-            this.syncScenePhysicsSimulationState();
-            this.onPhysicsStateChanged?.(false, false);
-            return false;
-        }
-
-        this.physicsEnabled = enabled;
-        this.syncBulletPhysicsEvaluationTypeForPlayback();
+        const nextEnabled = this.physicsController.setEnabled(enabled, this.isPhysicsSimulationActive());
         this.applyPhysicsStateToAllModels();
-        this.syncScenePhysicsSimulationState();
-        this.onPhysicsStateChanged?.(this.physicsEnabled, true);
-        return this.physicsEnabled;
+        return nextEnabled;
     }
 
     public togglePhysicsEnabled(): boolean {
@@ -2726,38 +2690,27 @@ ${beforeFogAppendBlock}
     }
 
     public getPhysicsSimulationRateHz(): PhysicsSimulationRateHz {
-        return this.physicsSimulationRateHz;
+        return this.physicsController.getSimulationRateHz();
     }
 
     public setPhysicsSimulationRateHz(value: number): PhysicsSimulationRateHz {
-        const normalized = MmdManager.normalizePhysicsSimulationRate(value);
-        this.physicsSimulationRateHz = normalized;
-        this.applyPhysicsSimulationRate();
-        return normalized;
+        return this.physicsController.setSimulationRateHz(value);
     }
 
     public getPhysicsGravityAcceleration(): number {
-        return this.physicsGravityAcceleration;
+        return this.physicsController.getGravityAcceleration();
     }
 
     public setPhysicsGravityAcceleration(value: number): void {
-        this.physicsGravityAcceleration = Math.max(0, Math.min(200, value));
-        this.applyPhysicsGravity();
+        this.physicsController.setGravityAcceleration(value);
     }
 
     public getPhysicsGravityDirection(): { x: number; y: number; z: number } {
-        return {
-            x: this.physicsGravityDirection.x,
-            y: this.physicsGravityDirection.y,
-            z: this.physicsGravityDirection.z,
-        };
+        return this.physicsController.getGravityDirection();
     }
 
     public setPhysicsGravityDirection(x: number, y: number, z: number): void {
-        this.physicsGravityDirection.x = Math.max(-100, Math.min(100, x));
-        this.physicsGravityDirection.y = Math.max(-100, Math.min(100, y));
-        this.physicsGravityDirection.z = Math.max(-100, Math.min(100, z));
-        this.applyPhysicsGravity();
+        this.physicsController.setGravityDirection(x, y, z);
     }
 
     static async create(canvas: HTMLCanvasElement): Promise<MmdManager> {
@@ -3031,6 +2984,22 @@ ${beforeFogAppendBlock}
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
         this.mmdRuntime.register(this.scene);
+        this.physicsController = new PhysicsRuntimeController({
+            scene: this.scene,
+            runtime: this.mmdRuntime,
+            getMprUnavailableReason: () => this.getMprUnavailableReason(),
+            loadMprWasmInstance: () => loadBundledMprWasmInstance(),
+            loadSprWasmInstance: () => loadBundledSprWasmInstance(),
+            onStateChanged: (enabled, available) => this.onPhysicsStateChanged?.(enabled, available),
+            onError: (message) => this.onError?.(message),
+        });
+        this.physicsModelController = new PhysicsModelController({
+            getRuntime: () => this.mmdRuntime,
+            getPhysicsEnabled: () => this.getPhysicsEnabled(),
+            isSimulationActive: () => this.isPhysicsSimulationActive(),
+            syncCpuSkinnedMorphSourceBuffers: (model) => this.syncCpuSkinnedMorphSourceBuffers(model),
+            addRuntimeDiagnostic: (message) => this.addRuntimeDiagnostic(message),
+        });
 
         // MMD camera runtime object (used for camera VMD evaluation)
         this.mmdCamera = new MmdCamera("mmdRuntimeCamera", this.camera.target.clone(), this.scene, false);
@@ -3113,15 +3082,15 @@ ${beforeFogAppendBlock}
 
     private async initializeRuntimeModeAndPhysics(): Promise<boolean> {
         if (this.runtimeMode !== "wasm") {
-            return await this.initializePhysics();
+            return await this.physicsController.initializeClassic();
         }
 
         try {
             await this.initializeWasmRuntimeMode();
             logInfo("physics", "experimental MMD WASM runtime initialized", {
                 runtimeMode: this.runtimeMode,
-                backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
-                simulationRateHz: this.physicsSimulationRateHz,
+                backend: this.getPhysicsBackendLabel(),
+                simulationRateHz: this.getPhysicsSimulationRateHz(),
             });
             return true;
         } catch (err: unknown) {
@@ -3129,10 +3098,8 @@ ${beforeFogAppendBlock}
             console.warn("Experimental MMD WASM runtime failed. Falling back to classic runtime:", err);
             this.runtimeMode = "classic";
             this.mmdWasmInstance = null;
-            this.physicsBackend = "none";
-            this.physicsAvailable = false;
-            this.physicsEnabled = true;
-            return await this.initializePhysics();
+            this.physicsController.setRuntime(this.mmdRuntime);
+            return await this.physicsController.initializeClassic();
         }
     }
 
@@ -3151,108 +3118,9 @@ ${beforeFogAppendBlock}
         this.mmdRuntime = wasmRuntime;
         this.mmdWasmInstance = wasmInstance;
         this.mmdRuntime.addAnimatable(this.mmdCamera);
-
-        this.bulletPhysicsRuntime = null;
-        this.physicsPlugin = null;
-        this.physicsRuntime = null;
-        this.physicsBackend = "wasm-mpr";
-        this.physicsAvailable = true;
-        this.physicsEnabled = true;
-        this.applyPhysicsSimulationRate();
-        this.applyPhysicsGravity();
+        this.physicsController.useWasmRuntime(wasmRuntime);
         this.syncScenePhysicsSimulationState();
-        this.onPhysicsStateChanged?.(this.physicsEnabled, true);
-    }
-
-    private async initializePhysics(): Promise<boolean> {
-        try {
-            await this.initializeBulletPhysicsBackend();
-            logInfo("physics", "physics backend initialized", {
-                backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
-                fallback: false,
-                simulationRateHz: this.physicsSimulationRateHz,
-            });
-        } catch (bulletErr: unknown) {
-            const bulletMessage = bulletErr instanceof Error ? bulletErr.message : String(bulletErr);
-            console.warn("Bullet physics initialization failed. Falling back to Ammo.js:", bulletMessage);
-            logWarn("physics", "Bullet physics initialization failed; falling back to Ammo.js", toLogErrorData(bulletErr));
-
-            try {
-                await this.initializeAmmoPhysicsBackend();
-                logInfo("physics", "physics backend initialized", {
-                    backend: "Ammo",
-                    fallback: true,
-                    simulationRateHz: this.physicsSimulationRateHz,
-                });
-            } catch (ammoErr: unknown) {
-                const ammoMessage = ammoErr instanceof Error ? ammoErr.message : String(ammoErr);
-                console.warn("Physics initialization failed:", ammoMessage);
-                logError("physics", "physics initialization failed", {
-                    bullet: toLogErrorData(bulletErr).error,
-                    ammo: toLogErrorData(ammoErr).error,
-                });
-                this.physicsAvailable = false;
-                this.physicsEnabled = false;
-                this.physicsBackend = "none";
-                this.syncScenePhysicsSimulationState();
-                this.onPhysicsStateChanged?.(false, false);
-                this.onError?.(`Physics init warning: Bullet=${bulletMessage}; Ammo=${ammoMessage}`);
-                return false;
-            }
-        }
-
-        this.physicsAvailable = true;
-        this.applyPhysicsGravity();
         this.applyPhysicsStateToAllModels();
-        this.syncScenePhysicsSimulationState();
-        this.onPhysicsStateChanged?.(this.physicsEnabled, true);
-        return true;
-    }
-
-    private async initializeBulletPhysicsBackend(): Promise<void> {
-        const mprUnavailableReason = this.getMprUnavailableReason();
-        if (mprUnavailableReason === null) {
-            try {
-                await this.initializeBulletMprPhysicsBackend();
-                return;
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                console.warn("Bullet MPR physics initialization failed. Falling back to SPR:", message);
-                logWarn("physics", "Bullet MPR physics initialization failed; falling back to SPR", toLogErrorData(err));
-            }
-        } else {
-            logWarn("physics", "Bullet MPR physics skipped; falling back to SPR", {
-                reason: mprUnavailableReason,
-            });
-        }
-
-        await this.initializeBulletSprPhysicsBackend();
-    }
-
-    private initializeBulletPhysicsBackendWithWasmInstance(
-        backend: BulletPhysicsBackend,
-        wasmInstance: IMmdWasmInstance,
-    ): void {
-        const runtime = new MultiPhysicsRuntime(wasmInstance);
-        this.installBulletPhysicsStepTiming(runtime);
-        runtime.register(this.scene);
-
-        this.bulletPhysicsRuntime = runtime;
-        this.physicsPlugin = null;
-        this.physicsRuntime = new MmdBulletPhysics(runtime);
-        (this.mmdRuntime as unknown as { _physics: MmdBulletPhysics | null })._physics = this.physicsRuntime;
-        this.physicsBackend = backend;
-        this.bulletPhysicsEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
-        runtime.evaluationType = this.bulletPhysicsEvaluationType;
-        this.applyPhysicsSimulationRate();
-    }
-
-    private async initializeBulletMprPhysicsBackend(): Promise<void> {
-        this.initializeBulletPhysicsBackendWithWasmInstance("bullet-mpr", await loadBundledMprWasmInstance());
-    }
-
-    private async initializeBulletSprPhysicsBackend(): Promise<void> {
-        this.initializeBulletPhysicsBackendWithWasmInstance("bullet-spr", await loadBundledSprWasmInstance());
     }
 
     private getMprUnavailableReason(): string | null {
@@ -3271,234 +3139,26 @@ ${beforeFogAppendBlock}
         return null;
     }
 
-    private async initializeAmmoPhysicsBackend(): Promise<void> {
-        const wasmResponse = await fetch(ammoWasmBinaryUrl);
-        if (!wasmResponse.ok) {
-            throw new Error(`Failed to fetch ammo wasm binary: ${wasmResponse.status} ${wasmResponse.statusText}`);
-        }
-        const wasmBinary = new Uint8Array(await wasmResponse.arrayBuffer());
-        const ammoInstance = await Ammo({
-            wasmBinary,
-            printErr: (message: unknown) => {
-                const text = String(message);
-                if (
-                    text.includes("wasm streaming compile failed") ||
-                    text.includes("falling back to ArrayBuffer instantiation")
-                ) {
-                    return;
-                }
-                console.warn(text);
-            },
-        });
-        const plugin = new MmdAmmoJSPlugin(true, ammoInstance);
-        this.installAmmoPhysicsStepTiming(plugin);
-        this.physicsPlugin = plugin;
-        this.applyPhysicsSimulationRate();
-        this.scene.enablePhysics(new Vector3(0, -this.physicsGravityAcceleration, 0), plugin);
-
-        this.bulletPhysicsRuntime = null;
-        this.physicsRuntime = new MmdAmmoPhysics(this.scene);
-        (this.mmdRuntime as unknown as { _physics: MmdAmmoPhysics | null })._physics = this.physicsRuntime;
-        this.physicsBackend = "ammo";
-    }
-
-    private static normalizePhysicsSimulationRate(value: number): PhysicsSimulationRateHz {
-        if (value === 30 || value === 120) {
-            return value;
-        }
-        return 60;
-    }
-
-    private applyPhysicsSimulationRate(): void {
-        const fixedTimeStep = 1 / this.physicsSimulationRateHz;
-        const maxSubSteps = this.physicsSimulationRateHz;
-        if (this.bulletPhysicsRuntime) {
-            this.bulletPhysicsRuntime.fixedTimeStep = fixedTimeStep;
-            this.bulletPhysicsRuntime.maxSubSteps = maxSubSteps;
-        }
-        if (this.mmdRuntime instanceof MmdWasmRuntime) {
-            const wasmPhysics = this.mmdRuntime.physics;
-            if (wasmPhysics) {
-                wasmPhysics.fixedTimeStep = fixedTimeStep;
-                wasmPhysics.maxSubSteps = maxSubSteps;
-            }
-        }
-        if (this.physicsPlugin) {
-            this.physicsPlugin.setMaxSteps(maxSubSteps);
-            this.physicsPlugin.setFixedTimeStep(fixedTimeStep);
-        }
-    }
-
-    private installBulletPhysicsStepTiming(runtime: MultiPhysicsRuntime): void {
-        const originalAfterAnimations = runtime.afterAnimations.bind(runtime);
-        runtime.afterAnimations = (deltaTime: number): void => {
-            const startMs = performance.now();
-            try {
-                originalAfterAnimations(deltaTime);
-            } finally {
-                this.recordPhysicsStepDuration(performance.now() - startMs);
-            }
-        };
-    }
-
-    private installAmmoPhysicsStepTiming(plugin: MmdAmmoJSPlugin): void {
-        const pluginWithStep = plugin as MmdAmmoJSPlugin & {
-            _stepSimulation?: (timeStep?: number, maxSteps?: number, fixedTimeStep?: number) => void;
-        };
-        if (typeof pluginWithStep._stepSimulation !== "function") return;
-
-        const originalStepSimulation = pluginWithStep._stepSimulation.bind(plugin);
-        pluginWithStep._stepSimulation = (timeStep = 1 / 60, maxSteps = 10, fixedTimeStep = 1 / 60): void => {
-            const startMs = performance.now();
-            try {
-                originalStepSimulation(timeStep, maxSteps, fixedTimeStep);
-            } finally {
-                this.recordPhysicsStepDuration(performance.now() - startMs);
-            }
-        };
-    }
-
-    private recordPhysicsStepDuration(durationMs: number): void {
-        if (!Number.isFinite(durationMs) || durationMs < 0) return;
-
-        this.physicsStepTimingStats.samples += 1;
-        this.physicsStepTimingStats.totalMs += durationMs;
-        this.physicsStepTimingStats.maxMs = Math.max(this.physicsStepTimingStats.maxMs, durationMs);
-        this.physicsStepTimingStats.lastMs = durationMs;
-    }
-
-    private consumePhysicsStepTimingStats(): {
-        samples: number;
-        avgMs: number | null;
-        maxMs: number | null;
-        lastMs: number | null;
-    } {
-        const { samples, totalMs, maxMs, lastMs } = this.physicsStepTimingStats;
-        this.physicsStepTimingStats = {
-            samples: 0,
-            totalMs: 0,
-            maxMs: 0,
-            lastMs,
-        };
-        return {
-            samples,
-            avgMs: samples > 0 ? totalMs / samples : null,
-            maxMs: samples > 0 ? maxMs : null,
-            lastMs,
-        };
-    }
-
-    private formatPhysicsStepTimingValue(valueMs: number | null): number | null {
-        if (valueMs === null || !Number.isFinite(valueMs)) return null;
-        return Math.round(valueMs * 1000) / 1000;
-    }
-
     private logPhysicsPerformanceSample(nowMs: number): void {
-        if (nowMs < this.nextPhysicsPerformanceLogMs) {
-            return;
-        }
-        this.nextPhysicsPerformanceLogMs = nowMs + 10_000;
-        const physicsStepTiming = this.consumePhysicsStepTimingStats();
-        logInfo("physics", "physics performance sample", {
-            backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
+        this.physicsController.logPerformanceSample(nowMs, {
             runtimeMode: this.runtimeMode,
             engine: this.getEngineType(),
             fps: this.getFps(),
             modelCount: this.sceneModels.length,
-            physicsAvailable: this.physicsAvailable,
-            physicsEnabled: this.getPhysicsEnabled(),
             simulationActive: this.isPhysicsSimulationActive(),
-            simulationRateHz: this.physicsSimulationRateHz,
-            evaluationType: this.getBulletPhysicsEvaluationTypeLabel(),
-            physicsStepSamples: physicsStepTiming.samples,
-            physicsStepAvgMs: this.formatPhysicsStepTimingValue(physicsStepTiming.avgMs),
-            physicsStepMaxMs: this.formatPhysicsStepTimingValue(physicsStepTiming.maxMs),
-            physicsStepLastMs: this.formatPhysicsStepTimingValue(physicsStepTiming.lastMs),
-            crossOriginIsolated: globalThis.crossOriginIsolated,
-            sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
         });
     }
 
-    private syncBulletPhysicsEvaluationTypeForPlayback(): void {
-        this.setBulletPhysicsEvaluationType(PhysicsRuntimeEvaluationType.Immediate, "playback state");
-    }
-
-    private setBulletPhysicsEvaluationType(evaluationType: PhysicsRuntimeEvaluationType, reason: string): void {
-        if (!this.bulletPhysicsRuntime) return;
-        if (this.bulletPhysicsEvaluationType === evaluationType && this.bulletPhysicsRuntime.evaluationType === evaluationType) {
-            return;
-        }
-
-        try {
-            this.bulletPhysicsRuntime.evaluationType = evaluationType;
-            this.bulletPhysicsEvaluationType = evaluationType;
-            logInfo("physics", "Bullet physics evaluation type changed", {
-                evaluationType: this.getBulletPhysicsEvaluationTypeLabel(),
-                reason,
-            });
-        } catch (err: unknown) {
-            logWarn("physics", "Failed to change Bullet physics evaluation type", {
-                evaluationType: evaluationType === PhysicsRuntimeEvaluationType.Buffered ? "Buffered" : "Immediate",
-                reason,
-                ...toLogErrorData(err),
-            });
-        }
-    }
-
-    private getBulletPhysicsEvaluationTypeLabel(): "Immediate" | "Buffered" | "WasmImmediate" {
-        if (this.mmdRuntime instanceof MmdWasmRuntime) {
-            return "WasmImmediate";
-        }
-        return this.bulletPhysicsEvaluationType === PhysicsRuntimeEvaluationType.Buffered ? "Buffered" : "Immediate";
-    }
-
     private applyPhysicsStateToModel(model: RuntimeModel): void {
-        if (model.rigidBodyStates.length === 0) return;
-
-        const shouldSimulatePhysics = this.getPhysicsEnabled() && this.isPhysicsSimulationActive();
-        model.rigidBodyStates.fill(shouldSimulatePhysics ? 1 : 0);
-        if (shouldSimulatePhysics) {
-            this.mmdRuntime.initializeMmdModelPhysics(model as never);
-        }
+        this.physicsModelController.applyPhysicsStateToModel(model);
     }
 
     private patchModelAfterPhysicsForPausedState(model: RuntimeModel): void {
-        if (this.mmdRuntime instanceof MmdWasmRuntime) {
-            return;
-        }
-        const modelObject = model as unknown as object;
-        if (this.physicsAfterPhysicsPatchedModels.has(modelObject)) {
-            return;
-        }
-
-        const modelInternal = model as unknown as {
-            afterPhysics?: () => void;
-            _physicsModel?: { syncBones?: () => void } | null;
-            _update?: (afterPhysicsStage: boolean) => void;
-            mesh?: { metadata?: { skeleton?: { _markAsDirty?: () => void } } };
-        };
-
-        if (typeof modelInternal.afterPhysics !== "function" || typeof modelInternal._update !== "function") {
-            return;
-        }
-
-        modelInternal.afterPhysics = () => {
-            if (this.getPhysicsEnabled() && this.isPhysicsSimulationActive()) {
-                modelInternal._physicsModel?.syncBones?.();
-            }
-            modelInternal._update?.(true);
-            this.syncCpuSkinnedMorphSourceBuffers(model);
-            modelInternal.mesh?.metadata?.skeleton?._markAsDirty?.();
-        };
-
-        this.physicsAfterPhysicsPatchedModels.add(modelObject);
+        this.physicsModelController.patchModelAfterPhysicsForPausedState(model);
     }
 
     private syncCpuSkinnedMorphSourceBuffers(model: RuntimeModel): void {
-        const metadataMeshes = (model.mesh.metadata as { meshes?: readonly Mesh[] } | null)?.meshes;
-        const meshes = Array.isArray(metadataMeshes)
-            ? metadataMeshes
-            : ([model.mesh, ...model.mesh.getChildMeshes()] as Mesh[]);
+        const meshes = PhysicsModelController.collectMeshesForCpuMorphSync(model);
 
         for (const mesh of meshes) {
             const morphTargetManager = mesh.morphTargetManager;
@@ -3561,216 +3221,17 @@ ${beforeFogAppendBlock}
     }
 
     private normalizeRuntimeBoneTransformStages(model: RuntimeModel): void {
-        if (this.mmdRuntime instanceof MmdWasmRuntime) {
-            return;
-        }
-        const runtimeBones = (model as unknown as {
-            runtimeBones?: Array<{
-                name?: string;
-                parentBone?: object | null;
-                childBones?: unknown[];
-                transformAfterPhysics?: boolean;
-            }>;
-        }).runtimeBones;
-        if (!Array.isArray(runtimeBones) || runtimeBones.length === 0) {
-            return;
-        }
-
-        let adjustedBoneCount = 0;
-        const adjustedBoneNames: string[] = [];
-        const visited = new Set<object>();
-
-        const propagateAfterPhysicsStage = (bone: {
-            name?: string;
-            childBones?: unknown[];
-            transformAfterPhysics?: boolean;
-        }): void => {
-            const boneObject = bone as unknown as object;
-            if (visited.has(boneObject)) {
-                return;
-            }
-            visited.add(boneObject);
-
-            const childBones = Array.isArray(bone.childBones) ? bone.childBones : [];
-            for (const child of childBones) {
-                if (!child || typeof child !== "object") {
-                    continue;
-                }
-
-                const childBone = child as {
-                    name?: string;
-                    childBones?: unknown[];
-                    transformAfterPhysics?: boolean;
-                };
-                if (childBone.transformAfterPhysics !== true) {
-                    childBone.transformAfterPhysics = true;
-                    adjustedBoneCount += 1;
-                    if (typeof childBone.name === "string") {
-                        adjustedBoneNames.push(childBone.name);
-                    }
-                }
-                propagateAfterPhysicsStage(childBone);
-            }
-        };
-
-        for (const runtimeBone of runtimeBones) {
-            if (!runtimeBone || runtimeBone.transformAfterPhysics !== true) {
-                continue;
-            }
-            propagateAfterPhysicsStage(runtimeBone);
-        }
-
-        if (adjustedBoneCount === 0) {
-            return;
-        }
-
-        const modelName = typeof model.mesh?.name === "string" ? model.mesh.name : "model";
-        console.warn(`[PMX] Normalized runtime bone transform stages for after-physics parent chains. ${modelName}: ${adjustedBoneCount} bone(s).`, {
-            model: modelName,
-            adjustedBoneCount,
-            adjustedBoneNames,
-        });
-        this.addRuntimeDiagnostic(`Normalized after-physics bone stages: ${modelName} (${adjustedBoneCount} bone(s))`);
+        this.physicsModelController.normalizeRuntimeBoneTransformStages(model);
     }
 
     private normalizeRuntimeBoneEvaluationOrder(model: RuntimeModel): void {
-        if (this.mmdRuntime instanceof MmdWasmRuntime) {
-            return;
-        }
-        const modelInternal = model as unknown as {
-            _sortedRuntimeBones?: Array<{
-                name?: string;
-                parentBone?: object | null;
-                transformAfterPhysics?: boolean;
-            }>;
-        };
-
-        const sortedRuntimeBones = modelInternal._sortedRuntimeBones;
-        if (!Array.isArray(sortedRuntimeBones) || sortedRuntimeBones.length === 0) {
-            return;
-        }
-
-        const originalOrderIndex = new Map<object, number>();
-        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
-            originalOrderIndex.set(sortedRuntimeBones[index] as unknown as object, index);
-        }
-
-        const sortGroupParentFirst = (afterPhysicsStage: boolean): Array<{
-            name?: string;
-            parentBone?: object | null;
-            transformAfterPhysics?: boolean;
-        }> => {
-            const groupBones = sortedRuntimeBones.filter((bone) => bone.transformAfterPhysics === afterPhysicsStage);
-            if (groupBones.length <= 1) {
-                return groupBones;
-            }
-
-            const groupSet = new Set<object>(groupBones.map((bone) => bone as unknown as object));
-            const indegree = new Map<object, number>();
-            const childMap = new Map<object, Array<{
-                name?: string;
-                parentBone?: object | null;
-                transformAfterPhysics?: boolean;
-            }>>();
-            for (const bone of groupBones) {
-                const boneObject = bone as unknown as object;
-                indegree.set(boneObject, 0);
-                childMap.set(boneObject, []);
-            }
-
-            for (const bone of groupBones) {
-                const parentBone = bone.parentBone;
-                if (!parentBone || !groupSet.has(parentBone as object)) {
-                    continue;
-                }
-                const boneObject = bone as unknown as object;
-                indegree.set(boneObject, (indegree.get(boneObject) ?? 0) + 1);
-                childMap.get(parentBone as object)?.push(bone);
-            }
-
-            const available = groupBones
-                .filter((bone) => (indegree.get(bone as unknown as object) ?? 0) === 0)
-                .sort((a, b) => (originalOrderIndex.get(a as unknown as object) ?? 0) - (originalOrderIndex.get(b as unknown as object) ?? 0));
-            const reorderedGroup: typeof groupBones = [];
-            const enqueueAvailable = (bone: typeof groupBones[number]): void => {
-                available.push(bone);
-                available.sort((a, b) => (originalOrderIndex.get(a as unknown as object) ?? 0) - (originalOrderIndex.get(b as unknown as object) ?? 0));
-            };
-
-            while (available.length > 0) {
-                const bone = available.shift();
-                if (!bone) {
-                    break;
-                }
-                reorderedGroup.push(bone);
-
-                for (const childBone of childMap.get(bone as unknown as object) ?? []) {
-                    const childObject = childBone as unknown as object;
-                    const nextIndegree = (indegree.get(childObject) ?? 0) - 1;
-                    indegree.set(childObject, nextIndegree);
-                    if (nextIndegree === 0) {
-                        enqueueAvailable(childBone);
-                    }
-                }
-            }
-
-            if (reorderedGroup.length !== groupBones.length) {
-                return groupBones;
-            }
-            return reorderedGroup;
-        };
-
-        const reorderedBones = [
-            ...sortGroupParentFirst(false),
-            ...sortGroupParentFirst(true),
-        ];
-
-        let changed = false;
-        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
-            if (sortedRuntimeBones[index] !== reorderedBones[index]) {
-                changed = true;
-                break;
-            }
-        }
-        if (!changed) {
-            return;
-        }
-
-        sortedRuntimeBones.splice(0, sortedRuntimeBones.length, ...reorderedBones);
-        const modelName = typeof model.mesh?.name === "string" ? model.mesh.name : "model";
-        console.warn(`[PMX] Normalized runtime bone evaluation order for parent-first traversal. ${modelName}.`, {
-            model: modelName,
-            runtimeBoneCount: sortedRuntimeBones.length,
-        });
-        this.addRuntimeDiagnostic(`Normalized runtime bone evaluation order: ${modelName} (${sortedRuntimeBones.length} bone(s))`);
+        this.physicsModelController.normalizeRuntimeBoneEvaluationOrder(model);
     }
 
     private applyPhysicsStateToAllModels(): void {
         for (const sceneModel of this.sceneModels) {
             this.applyPhysicsStateToModel(sceneModel.model);
         }
-    }
-
-    private applyPhysicsGravity(): void {
-        const direction = this.physicsGravityDirection.clone();
-        if (direction.lengthSquared() < 1e-6) {
-            direction.set(0, -1, 0);
-        } else {
-            direction.normalize();
-        }
-        const gravity = direction.scale(this.physicsGravityAcceleration);
-        if (this.bulletPhysicsRuntime) {
-            this.bulletPhysicsRuntime.setGravity(gravity);
-            return;
-        }
-        if (this.mmdRuntime instanceof MmdWasmRuntime) {
-            this.mmdRuntime.physics?.setGravity(gravity);
-            return;
-        }
-
-        const physicsEngine = this.scene.getPhysicsEngine();
-        if (!physicsEngine) return;
-        physicsEngine.setGravity(gravity);
     }
 
     private applyMmdMaterialCompatibilityFixes(material: any): boolean {
@@ -4265,7 +3726,7 @@ ${beforeFogAppendBlock}
         this.syncBackgroundVideoFrame(true);
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
-        this.syncBulletPhysicsEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback();
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
             this.mmdRuntime.pauseAnimation();
@@ -4279,7 +3740,7 @@ ${beforeFogAppendBlock}
     pause(): void {
         this._isPlaying = false;
         this.manualPlaybackWithoutAudio = false;
-        this.syncBulletPhysicsEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback();
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
@@ -4291,7 +3752,7 @@ ${beforeFogAppendBlock}
         this._isPlaying = false;
         this.manualPlaybackWithoutAudio = false;
         this.manualPlaybackFrameCursor = 0;
-        this.syncBulletPhysicsEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback();
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
@@ -4307,7 +3768,7 @@ ${beforeFogAppendBlock}
 
     seekTo(frame: number): void {
         const targetFrame = Math.max(0, Math.floor(frame));
-        this.setBulletPhysicsEvaluationType(PhysicsRuntimeEvaluationType.Immediate, "seek");
+        this.physicsController.syncBulletEvaluationTypeForSeek();
         if (targetFrame > this._totalFrames) {
             this._totalFrames = targetFrame;
         }
@@ -4602,7 +4063,7 @@ ${beforeFogAppendBlock}
         for (const entry of this.sceneModels) {
             this.removeGlobalIlluminationSceneModel(entry);
             try {
-                this.mmdRuntime.destroyMmdModel(entry.model);
+                this.mmdRuntime.destroyMmdModel(entry.model as never);
             } catch {
                 // no-op
             }
@@ -4903,27 +4364,8 @@ ${beforeFogAppendBlock}
         return "WGSL-first";
     }
 
-    getPhysicsBackendLabel(): "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Ammo" | "Off" {
-        if (!this.physicsAvailable) {
-            return "Off";
-        }
-        return this.getPhysicsBackendLabelForBackend(this.physicsBackend);
-    }
-
-    private getPhysicsBackendLabelForBackend(backend: PhysicsBackend): "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Ammo" | "Off" {
-        if (backend === "bullet-mpr") {
-            return "Bullet MPR";
-        }
-        if (backend === "bullet-spr") {
-            return "Bullet SPR";
-        }
-        if (backend === "wasm-mpr") {
-            return "WASM MPR";
-        }
-        if (backend === "ammo") {
-            return "Ammo";
-        }
-        return "Off";
+    getPhysicsBackendLabel(): PhysicsBackendLabel {
+        return this.physicsController.getBackendLabel();
     }
 
     private addRuntimeDiagnostic(message: string): void {
@@ -6530,16 +5972,9 @@ ${beforeFogAppendBlock}
     }
 
     private recomputeCurrentModelPoseAfterManualEdit(): void {
-        const currentModel = this.currentModel as
-            | ({
-                beforePhysics?: (frameTime: number | null) => void;
-                afterPhysics?: () => void;
-            } & object)
-            | null;
+        const currentModel = this.currentModel;
         if (!currentModel) return;
-
-        currentModel.beforePhysics?.(null);
-        currentModel.afterPhysics?.();
+        PhysicsModelController.beforeAndAfterPhysics(currentModel);
     }
 
     private invalidateBoneVisualizerPose(runtimeBone: EditorRuntimeBone, notifyEdited = true): void {
@@ -7177,7 +6612,7 @@ ${beforeFogAppendBlock}
         }
         for (const sceneModel of this.sceneModels) {
             try {
-                this.mmdRuntime.destroyMmdModel(sceneModel.model);
+                this.mmdRuntime.destroyMmdModel(sceneModel.model as never);
             } catch {
                 // no-op
             }
@@ -7198,17 +6633,7 @@ ${beforeFogAppendBlock}
         this.mmdRuntime.removeAnimatable(this.mmdCamera);
         this.mmdCamera.dispose();
         this.mmdRuntime.dispose(this.scene);
-        if (this.bulletPhysicsRuntime) {
-            this.bulletPhysicsRuntime.unregister();
-            this.bulletPhysicsRuntime.dispose();
-            this.bulletPhysicsRuntime = null;
-        }
-        if (this.scene.getPhysicsEngine()) {
-            this.scene.disablePhysicsEngine();
-        }
-        this.physicsPlugin = null;
-        this.physicsRuntime = null;
-        this.physicsBackend = "none";
+        this.physicsController.dispose();
         if (this.defaultRenderingPipeline) {
             this.defaultRenderingPipeline.dispose();
             this.defaultRenderingPipeline = null;

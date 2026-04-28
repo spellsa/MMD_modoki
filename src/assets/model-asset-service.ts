@@ -554,7 +554,7 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
             materialProxyConstructor: MmdStandardMaterialProxy,
-            buildPhysics: host.physicsAvailable
+            buildPhysics: host.isPhysicsAvailable()
                 ? { disableOffsetForConstraintFrame: true }
                 : false,
         });
