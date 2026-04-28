@@ -156,6 +156,7 @@ export class UIController {
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 120;
     private static readonly TIMELINE_WAVEFORM_FPS = 30;
+    private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private mmdManager: MmdManager;
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
@@ -168,6 +169,7 @@ export class UIController {
     private btnExportPngSeq: HTMLElement | null = null;
     private btnExportWebm: HTMLElement | null = null;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
+    private toolbarRuntimeModeSelect: HTMLSelectElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
     private btnStop: HTMLElement | null;
@@ -274,6 +276,7 @@ export class UIController {
         this.btnExportPngSeq = document.getElementById("btn-export-png-seq");
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
+        this.toolbarRuntimeModeSelect = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
         this.btnPlay = document.getElementById("btn-play")!;
         this.btnPause = document.getElementById("btn-pause")!;
         this.btnStop = document.getElementById("btn-stop");
@@ -485,6 +488,28 @@ export class UIController {
                 return;
             }
             setLocale(nextLocale);
+        });
+        this.toolbarRuntimeModeSelect?.addEventListener("change", () => {
+            const nextMode = this.getSelectedRuntimeMode();
+            if (!nextMode) {
+                this.syncRuntimeModeSelect();
+                return;
+            }
+            const currentMode = this.getConfiguredRuntimeMode();
+            if (nextMode === currentMode) return;
+
+            try {
+                localStorage.setItem(UIController.RUNTIME_MODE_STORAGE_KEY, nextMode);
+            } catch {
+                this.syncRuntimeModeSelect();
+                this.showToast("Runtime mode setting could not be saved", "error");
+                return;
+            }
+
+            this.setStatus(`Runtime: ${nextMode.toUpperCase()} / reloading...`, true);
+            window.setTimeout(() => {
+                window.location.reload();
+            }, 120);
         });
         // Playback
         this.btnPlay.addEventListener("click", () => this.play());
@@ -1482,10 +1507,19 @@ export class UIController {
             const engineType = this.mmdManager.getEngineType();
             const shaderType = this.mmdManager.getShaderRuntimeLabel();
             const physicsType = this.mmdManager.getPhysicsBackendLabel();
-            const shaderBadgeLabel = shaderType === "WGSL-first" ? "WGSL" : shaderType;
+            const shaderBadgeLabel = shaderType === "WGSL-first"
+                ? "WGSL"
+                : shaderType === "WGSL-custom"
+                    ? "WGSL+"
+                    : shaderType;
             engineEl.textContent = engineType;
             shaderEl.textContent = shaderBadgeLabel;
             physicsEl.textContent = physicsType;
+            shaderEl.title = shaderType === "WGSL-custom"
+                ? "WGSL renderer with custom material presets or external WGSL toon shaders"
+                : shaderType === "WGSL-first"
+                    ? "WGSL renderer with standard MMD material presets"
+                    : "GLSL renderer";
 
             if (engineType === "WebGPU") {
                 engineEl.style.background = "rgba(139,92,246,0.15)";
@@ -1505,7 +1539,7 @@ export class UIController {
                 shaderEl.style.background = "rgba(34,197,94,0.15)";
                 shaderEl.style.color = "#86efac";
                 shaderEl.style.borderColor = "rgba(34,197,94,0.3)";
-            } else if (shaderType === "Mixed") {
+            } else if (shaderType === "WGSL-custom") {
                 shaderEl.style.background = "rgba(245,158,11,0.15)";
                 shaderEl.style.color = "#fbbf24";
                 shaderEl.style.borderColor = "rgba(245,158,11,0.3)";
@@ -1515,7 +1549,11 @@ export class UIController {
                 shaderEl.style.borderColor = "rgba(56,189,248,0.24)";
             }
 
-            if (physicsType === "Bullet MPR") {
+            if (physicsType === "WASM MPR") {
+                physicsEl.style.background = "rgba(168,85,247,0.16)";
+                physicsEl.style.color = "#d8b4fe";
+                physicsEl.style.borderColor = "rgba(168,85,247,0.32)";
+            } else if (physicsType === "Bullet MPR") {
                 physicsEl.style.background = "rgba(34,197,94,0.15)";
                 physicsEl.style.color = "#86efac";
                 physicsEl.style.borderColor = "rgba(34,197,94,0.3)";
@@ -2499,6 +2537,7 @@ export class UIController {
         this.exportUiController?.refreshLocalizedState();
         this.fogPanelController?.refresh();
         this.syncToolbarLocaleSelect();
+        this.syncRuntimeModeSelect();
     }
 
     private getSelectedToolbarLocale(): UiLocale | null {
@@ -2518,6 +2557,28 @@ export class UIController {
         const locale = getLocale();
         if (this.toolbarLocaleSelect.value !== locale) {
             this.toolbarLocaleSelect.value = locale;
+        }
+    }
+
+    private getSelectedRuntimeMode(): "classic" | "wasm" | null {
+        if (!this.toolbarRuntimeModeSelect) return null;
+        const value = this.toolbarRuntimeModeSelect.value;
+        return value === "classic" || value === "wasm" ? value : null;
+    }
+
+    private getConfiguredRuntimeMode(): "classic" | "wasm" {
+        try {
+            return localStorage.getItem(UIController.RUNTIME_MODE_STORAGE_KEY) === "wasm" ? "wasm" : "classic";
+        } catch {
+            return "classic";
+        }
+    }
+
+    private syncRuntimeModeSelect(): void {
+        if (!this.toolbarRuntimeModeSelect) return;
+        const mode = this.getConfiguredRuntimeMode();
+        if (this.toolbarRuntimeModeSelect.value !== mode) {
+            this.toolbarRuntimeModeSelect.value = mode;
         }
     }
 

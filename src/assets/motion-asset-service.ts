@@ -58,7 +58,7 @@ export async function loadVMD(host: any, filePath: string): Promise<MotionInfo |
 
         host.modelSourceAnimationsByModel.set(targetModel, mergedAnimation);
         host.appendModelMotionImport(targetModel, { type: "vmd", path: filePath });
-        const animHandle = targetModel.createRuntimeAnimation(mergedAnimation);
+        const animHandle = host.createModelRuntimeAnimation(targetModel, mergedAnimation);
         targetModel.setRuntimeAnimation(animHandle);
 
         host._totalFrames = Math.max(
@@ -123,7 +123,7 @@ export async function loadVPD(host: any, filePath: string): Promise<MotionInfo |
         host.modelSourceAnimationsByModel.set(targetModel, mergedAnimation);
         host.appendModelMotionImport(targetModel, { type: "vpd", path: filePath, frame: loadFrame });
 
-        const animHandle = targetModel.createRuntimeAnimation(mergedAnimation);
+        const animHandle = host.createModelRuntimeAnimation(targetModel, mergedAnimation);
         targetModel.setRuntimeAnimation(animHandle);
 
         host._totalFrames = Math.max(

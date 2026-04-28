@@ -284,14 +284,23 @@ import {
 } from "./editor/rigid-body-visualizer-controller";
 
 type EditorRuntimeBone = IMmdRuntimeBone & {
-    getAnimationPositionOffsetToRef(target: Vector3): Vector3;
-    getAnimatedRotationToRef(target: Quaternion): Quaternion;
+    getAnimationPositionOffsetToRef?: (target: Vector3) => Vector3;
+    getAnimatedRotationToRef?: (target: Quaternion) => Quaternion;
     getWorldMatrixToRef(target: Matrix): Matrix;
 };
 
 type PhysicsSimulationRateHz = 30 | 60 | 120;
-type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "ammo";
+type RuntimeMode = "classic" | "wasm";
+type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "ammo" | "wasm-mpr";
 type BulletPhysicsBackend = Extract<PhysicsBackend, "bullet-mpr" | "bullet-spr">;
+type RuntimeModel = MmdModel | MmdWasmModel;
+type RuntimeMmdRuntime = MmdRuntime | MmdWasmRuntime;
+type PhysicsStepTimingStats = {
+    samples: number;
+    totalMs: number;
+    maxMs: number;
+    lastMs: number | null;
+};
 
 let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
@@ -412,6 +421,7 @@ import "babylon-mmd/esm/Loader/pmdLoader";
 import "babylon-mmd/esm/Loader/mmdOutlineRenderer";
 import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation";
 import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeCameraAnimation";
+import "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmRuntimeModelAnimation";
 import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader";
 import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
@@ -437,6 +447,8 @@ import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.fragment";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingBlendVolume.fragment";
 
 import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
+import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";
+import { MmdWasmAnimation } from "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmAnimation";
 import { MmdCamera } from "babylon-mmd/esm/Runtime/mmdCamera";
 import { VmdLoader } from "babylon-mmd/esm/Loader/vmdLoader";
 import { VpdLoader } from "babylon-mmd/esm/Loader/vpdLoader";
@@ -453,6 +465,7 @@ import { StreamAudioPlayer } from "babylon-mmd/esm/Runtime/Audio/streamAudioPlay
 import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
 import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
+import { MmdWasmPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdWasmPhysics";
 import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime";
 import { PhysicsRuntimeEvaluationType } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/physicsRuntimeEvaluationType";
 import * as sprWasmBindgen from "babylon-mmd/esm/Runtime/Optimized/wasm/spr";
@@ -489,6 +502,7 @@ import sepiaLutText from "../lut/sepia.3dl?raw";
 import tealOrangeLutText from "../lut/teal-orange.3dl?raw";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
+import type { MmdWasmModel } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmModel";
 import type { MmdRuntimeAnimationHandle } from "babylon-mmd/esm/Runtime/mmdRuntimeAnimationHandle";
 
 export type WgslMaterialShaderPresetId =
@@ -553,7 +567,7 @@ type SceneModelRigidBodyEntry = {
 
 type SceneModelEntry = {
     mesh: MmdMesh;
-    model: MmdModel;
+    model: RuntimeModel;
     info: ModelInfo;
     materials: SceneModelMaterialEntry[];
     rigidBodies: SceneModelRigidBodyEntry[];
@@ -585,6 +599,7 @@ export class MmdManager {
     private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.75;
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
+    private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
         {
@@ -1177,11 +1192,13 @@ ${beforeFogAppendBlock}
     private scene: Scene;
     private camera: ArcRotateCamera;
     private mmdCamera: MmdCamera;
-    private mmdRuntime: MmdRuntime;
+    private mmdRuntime: RuntimeMmdRuntime;
+    private runtimeMode: RuntimeMode = MmdManager.readRuntimeModeLocalStorage();
+    private mmdWasmInstance: IMmdWasmInstance | null = null;
     private vmdLoader: VmdLoader;
     private vpdLoader: VpdLoader;
     private currentMesh: MmdMesh | null = null;
-    private currentModel: MmdModel | null = null;
+    private currentModel: RuntimeModel | null = null;
     private activeModelInfo: ModelInfo | null = null;
     private sceneModels: SceneModelEntry[] = [];
     private _isPlaying = false;
@@ -1195,6 +1212,12 @@ ${beforeFogAppendBlock}
     private nextRenderDueTimestampMs = performance.now();
     private renderFpsLimit = 0;
     private nextPhysicsPerformanceLogMs = performance.now() + 10_000;
+    private physicsStepTimingStats: PhysicsStepTimingStats = {
+        samples: 0,
+        totalMs: 0,
+        maxMs: 0,
+        lastMs: null,
+    };
     private ground: Mesh | null = null;
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
@@ -1219,11 +1242,11 @@ ${beforeFogAppendBlock}
     private cameraRotationEulerDeg = new Vector3(0, 0, 0);
     private cameraAnimationHandle: MmdRuntimeAnimationHandle | null = null;
     private hasCameraMotion = false;
-    private readonly modelKeyframeTracksByModel = new WeakMap<MmdModel, Map<string, Uint32Array>>();
-    private readonly modelSourceAnimationsByModel = new WeakMap<MmdModel, MmdAnimation>();
+    private readonly modelKeyframeTracksByModel = new WeakMap<RuntimeModel, Map<string, Uint32Array>>();
+    private readonly modelSourceAnimationsByModel = new WeakMap<RuntimeModel, MmdAnimation>();
     private readonly physicsAfterPhysicsPatchedModels = new WeakSet<object>();
     private cameraSourceAnimation: MmdAnimation | null = null;
-    private readonly modelMotionImportsByModel = new WeakMap<MmdModel, ProjectMotionImport[]>();
+    private readonly modelMotionImportsByModel = new WeakMap<RuntimeModel, ProjectMotionImport[]>();
     private cameraMotionPath: string | null = null;
     private audioSourcePath: string | null = null;
     private cameraKeyframeFrames: Uint32Array = EMPTY_KEYFRAME_FRAMES;
@@ -1670,11 +1693,11 @@ ${beforeFogAppendBlock}
         return this.activeModelInfo;
     }
 
-    public setModelMotionImports(model: MmdModel, imports: ProjectMotionImport[]): void {
+    public setModelMotionImports(model: RuntimeModel, imports: ProjectMotionImport[]): void {
         this.modelMotionImportsByModel.set(model, imports.map((item) => ({ ...item })));
     }
 
-    public appendModelMotionImport(model: MmdModel, value: ProjectMotionImport): void {
+    public appendModelMotionImport(model: RuntimeModel, value: ProjectMotionImport): void {
         const current = this.modelMotionImportsByModel.get(model) ?? [];
         current.push({ ...value });
         this.modelMotionImportsByModel.set(model, current);
@@ -2802,6 +2825,16 @@ ${beforeFogAppendBlock}
         }
     }
 
+    private static readRuntimeModeLocalStorage(): RuntimeMode {
+        try {
+            const value = globalThis.localStorage?.getItem(MmdManager.RUNTIME_MODE_STORAGE_KEY);
+            return value === "wasm" ? "wasm" : "classic";
+        } catch {
+            // Optional experiment flags must never block startup.
+            return "classic";
+        }
+    }
+
     constructor(canvas: HTMLCanvasElement, engine?: Engine | WebGPUEngine, startupDiagnostics: readonly string[] = []) {
         this.renderingCanvas = canvas;
         for (const diagnostic of startupDiagnostics) {
@@ -2998,12 +3031,12 @@ ${beforeFogAppendBlock}
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
         this.mmdRuntime.register(this.scene);
-        this.physicsInitializationPromise = this.initializePhysics();
 
         // MMD camera runtime object (used for camera VMD evaluation)
         this.mmdCamera = new MmdCamera("mmdRuntimeCamera", this.camera.target.clone(), this.scene, false);
         this.syncMmdCameraFromViewportCamera();
         this.mmdRuntime.addAnimatable(this.mmdCamera);
+        this.physicsInitializationPromise = this.initializeRuntimeModeAndPhysics();
 
         // VMD Loader
         this.vmdLoader = new VmdLoader(this.scene);
@@ -3078,6 +3111,59 @@ ${beforeFogAppendBlock}
         this.resizeObserver.observe(canvas.parentElement ?? canvas);
     }
 
+    private async initializeRuntimeModeAndPhysics(): Promise<boolean> {
+        if (this.runtimeMode !== "wasm") {
+            return await this.initializePhysics();
+        }
+
+        try {
+            await this.initializeWasmRuntimeMode();
+            logInfo("physics", "experimental MMD WASM runtime initialized", {
+                runtimeMode: this.runtimeMode,
+                backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
+                simulationRateHz: this.physicsSimulationRateHz,
+            });
+            return true;
+        } catch (err: unknown) {
+            logWarn("physics", "experimental MMD WASM runtime failed; falling back to classic runtime", toLogErrorData(err));
+            console.warn("Experimental MMD WASM runtime failed. Falling back to classic runtime:", err);
+            this.runtimeMode = "classic";
+            this.mmdWasmInstance = null;
+            this.physicsBackend = "none";
+            this.physicsAvailable = false;
+            this.physicsEnabled = true;
+            return await this.initializePhysics();
+        }
+    }
+
+    private async initializeWasmRuntimeMode(): Promise<void> {
+        const mprUnavailableReason = this.getMprUnavailableReason();
+        if (mprUnavailableReason !== null) {
+            throw new Error(mprUnavailableReason);
+        }
+
+        const wasmInstance = await loadBundledMprWasmInstance();
+        const wasmRuntime = new MmdWasmRuntime(wasmInstance, this.scene, new MmdWasmPhysics(this.scene));
+        wasmRuntime.register(this.scene);
+
+        this.mmdRuntime.unregister(this.scene);
+        this.mmdRuntime.dispose(this.scene);
+        this.mmdRuntime = wasmRuntime;
+        this.mmdWasmInstance = wasmInstance;
+        this.mmdRuntime.addAnimatable(this.mmdCamera);
+
+        this.bulletPhysicsRuntime = null;
+        this.physicsPlugin = null;
+        this.physicsRuntime = null;
+        this.physicsBackend = "wasm-mpr";
+        this.physicsAvailable = true;
+        this.physicsEnabled = true;
+        this.applyPhysicsSimulationRate();
+        this.applyPhysicsGravity();
+        this.syncScenePhysicsSimulationState();
+        this.onPhysicsStateChanged?.(this.physicsEnabled, true);
+    }
+
     private async initializePhysics(): Promise<boolean> {
         try {
             await this.initializeBulletPhysicsBackend();
@@ -3148,6 +3234,7 @@ ${beforeFogAppendBlock}
         wasmInstance: IMmdWasmInstance,
     ): void {
         const runtime = new MultiPhysicsRuntime(wasmInstance);
+        this.installBulletPhysicsStepTiming(runtime);
         runtime.register(this.scene);
 
         this.bulletPhysicsRuntime = runtime;
@@ -3204,6 +3291,7 @@ ${beforeFogAppendBlock}
             },
         });
         const plugin = new MmdAmmoJSPlugin(true, ammoInstance);
+        this.installAmmoPhysicsStepTiming(plugin);
         this.physicsPlugin = plugin;
         this.applyPhysicsSimulationRate();
         this.scene.enablePhysics(new Vector3(0, -this.physicsGravityAcceleration, 0), plugin);
@@ -3228,10 +3316,81 @@ ${beforeFogAppendBlock}
             this.bulletPhysicsRuntime.fixedTimeStep = fixedTimeStep;
             this.bulletPhysicsRuntime.maxSubSteps = maxSubSteps;
         }
+        if (this.mmdRuntime instanceof MmdWasmRuntime) {
+            const wasmPhysics = this.mmdRuntime.physics;
+            if (wasmPhysics) {
+                wasmPhysics.fixedTimeStep = fixedTimeStep;
+                wasmPhysics.maxSubSteps = maxSubSteps;
+            }
+        }
         if (this.physicsPlugin) {
             this.physicsPlugin.setMaxSteps(maxSubSteps);
             this.physicsPlugin.setFixedTimeStep(fixedTimeStep);
         }
+    }
+
+    private installBulletPhysicsStepTiming(runtime: MultiPhysicsRuntime): void {
+        const originalAfterAnimations = runtime.afterAnimations.bind(runtime);
+        runtime.afterAnimations = (deltaTime: number): void => {
+            const startMs = performance.now();
+            try {
+                originalAfterAnimations(deltaTime);
+            } finally {
+                this.recordPhysicsStepDuration(performance.now() - startMs);
+            }
+        };
+    }
+
+    private installAmmoPhysicsStepTiming(plugin: MmdAmmoJSPlugin): void {
+        const pluginWithStep = plugin as MmdAmmoJSPlugin & {
+            _stepSimulation?: (timeStep?: number, maxSteps?: number, fixedTimeStep?: number) => void;
+        };
+        if (typeof pluginWithStep._stepSimulation !== "function") return;
+
+        const originalStepSimulation = pluginWithStep._stepSimulation.bind(plugin);
+        pluginWithStep._stepSimulation = (timeStep = 1 / 60, maxSteps = 10, fixedTimeStep = 1 / 60): void => {
+            const startMs = performance.now();
+            try {
+                originalStepSimulation(timeStep, maxSteps, fixedTimeStep);
+            } finally {
+                this.recordPhysicsStepDuration(performance.now() - startMs);
+            }
+        };
+    }
+
+    private recordPhysicsStepDuration(durationMs: number): void {
+        if (!Number.isFinite(durationMs) || durationMs < 0) return;
+
+        this.physicsStepTimingStats.samples += 1;
+        this.physicsStepTimingStats.totalMs += durationMs;
+        this.physicsStepTimingStats.maxMs = Math.max(this.physicsStepTimingStats.maxMs, durationMs);
+        this.physicsStepTimingStats.lastMs = durationMs;
+    }
+
+    private consumePhysicsStepTimingStats(): {
+        samples: number;
+        avgMs: number | null;
+        maxMs: number | null;
+        lastMs: number | null;
+    } {
+        const { samples, totalMs, maxMs, lastMs } = this.physicsStepTimingStats;
+        this.physicsStepTimingStats = {
+            samples: 0,
+            totalMs: 0,
+            maxMs: 0,
+            lastMs,
+        };
+        return {
+            samples,
+            avgMs: samples > 0 ? totalMs / samples : null,
+            maxMs: samples > 0 ? maxMs : null,
+            lastMs,
+        };
+    }
+
+    private formatPhysicsStepTimingValue(valueMs: number | null): number | null {
+        if (valueMs === null || !Number.isFinite(valueMs)) return null;
+        return Math.round(valueMs * 1000) / 1000;
     }
 
     private logPhysicsPerformanceSample(nowMs: number): void {
@@ -3239,8 +3398,10 @@ ${beforeFogAppendBlock}
             return;
         }
         this.nextPhysicsPerformanceLogMs = nowMs + 10_000;
+        const physicsStepTiming = this.consumePhysicsStepTimingStats();
         logInfo("physics", "physics performance sample", {
             backend: this.getPhysicsBackendLabelForBackend(this.physicsBackend),
+            runtimeMode: this.runtimeMode,
             engine: this.getEngineType(),
             fps: this.getFps(),
             modelCount: this.sceneModels.length,
@@ -3249,6 +3410,10 @@ ${beforeFogAppendBlock}
             simulationActive: this.isPhysicsSimulationActive(),
             simulationRateHz: this.physicsSimulationRateHz,
             evaluationType: this.getBulletPhysicsEvaluationTypeLabel(),
+            physicsStepSamples: physicsStepTiming.samples,
+            physicsStepAvgMs: this.formatPhysicsStepTimingValue(physicsStepTiming.avgMs),
+            physicsStepMaxMs: this.formatPhysicsStepTimingValue(physicsStepTiming.maxMs),
+            physicsStepLastMs: this.formatPhysicsStepTimingValue(physicsStepTiming.lastMs),
             crossOriginIsolated: globalThis.crossOriginIsolated,
             sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
         });
@@ -3280,21 +3445,27 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private getBulletPhysicsEvaluationTypeLabel(): "Immediate" | "Buffered" {
+    private getBulletPhysicsEvaluationTypeLabel(): "Immediate" | "Buffered" | "WasmImmediate" {
+        if (this.mmdRuntime instanceof MmdWasmRuntime) {
+            return "WasmImmediate";
+        }
         return this.bulletPhysicsEvaluationType === PhysicsRuntimeEvaluationType.Buffered ? "Buffered" : "Immediate";
     }
 
-    private applyPhysicsStateToModel(model: MmdModel): void {
+    private applyPhysicsStateToModel(model: RuntimeModel): void {
         if (model.rigidBodyStates.length === 0) return;
 
         const shouldSimulatePhysics = this.getPhysicsEnabled() && this.isPhysicsSimulationActive();
         model.rigidBodyStates.fill(shouldSimulatePhysics ? 1 : 0);
         if (shouldSimulatePhysics) {
-            this.mmdRuntime.initializeMmdModelPhysics(model);
+            this.mmdRuntime.initializeMmdModelPhysics(model as never);
         }
     }
 
-    private patchModelAfterPhysicsForPausedState(model: MmdModel): void {
+    private patchModelAfterPhysicsForPausedState(model: RuntimeModel): void {
+        if (this.mmdRuntime instanceof MmdWasmRuntime) {
+            return;
+        }
         const modelObject = model as unknown as object;
         if (this.physicsAfterPhysicsPatchedModels.has(modelObject)) {
             return;
@@ -3323,7 +3494,7 @@ ${beforeFogAppendBlock}
         this.physicsAfterPhysicsPatchedModels.add(modelObject);
     }
 
-    private syncCpuSkinnedMorphSourceBuffers(model: MmdModel): void {
+    private syncCpuSkinnedMorphSourceBuffers(model: RuntimeModel): void {
         const metadataMeshes = (model.mesh.metadata as { meshes?: readonly Mesh[] } | null)?.meshes;
         const meshes = Array.isArray(metadataMeshes)
             ? metadataMeshes
@@ -3389,7 +3560,10 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private normalizeRuntimeBoneTransformStages(model: MmdModel): void {
+    private normalizeRuntimeBoneTransformStages(model: RuntimeModel): void {
+        if (this.mmdRuntime instanceof MmdWasmRuntime) {
+            return;
+        }
         const runtimeBones = (model as unknown as {
             runtimeBones?: Array<{
                 name?: string;
@@ -3459,7 +3633,10 @@ ${beforeFogAppendBlock}
         this.addRuntimeDiagnostic(`Normalized after-physics bone stages: ${modelName} (${adjustedBoneCount} bone(s))`);
     }
 
-    private normalizeRuntimeBoneEvaluationOrder(model: MmdModel): void {
+    private normalizeRuntimeBoneEvaluationOrder(model: RuntimeModel): void {
+        if (this.mmdRuntime instanceof MmdWasmRuntime) {
+            return;
+        }
         const modelInternal = model as unknown as {
             _sortedRuntimeBones?: Array<{
                 name?: string;
@@ -3584,6 +3761,10 @@ ${beforeFogAppendBlock}
         const gravity = direction.scale(this.physicsGravityAcceleration);
         if (this.bulletPhysicsRuntime) {
             this.bulletPhysicsRuntime.setGravity(gravity);
+            return;
+        }
+        if (this.mmdRuntime instanceof MmdWasmRuntime) {
+            this.mmdRuntime.physics?.setGravity(gravity);
             return;
         }
 
@@ -4182,8 +4363,15 @@ ${beforeFogAppendBlock}
             this.currentModel.destroyRuntimeAnimation(handle);
         }
 
-        const handle = this.currentModel.createRuntimeAnimation(animation);
+        const handle = this.createModelRuntimeAnimation(this.currentModel, animation);
         this.currentModel.setRuntimeAnimation(handle);
+    }
+
+    private createModelRuntimeAnimation(model: RuntimeModel, animation: MmdAnimation): MmdRuntimeAnimationHandle {
+        if (this.runtimeMode === "wasm" && this.mmdWasmInstance) {
+            return model.createRuntimeAnimation(new MmdWasmAnimation(animation, this.mmdWasmInstance, this.scene));
+        }
+        return model.createRuntimeAnimation(animation);
     }
 
     private stabilizePhysicsAfterHardSeek(): void {
@@ -4696,7 +4884,7 @@ ${beforeFogAppendBlock}
     }
 
     /** High-level shader/runtime label shown beside the engine badge. */
-    getShaderRuntimeLabel(): "WGSL-first" | "GLSL" | "Mixed" {
+    getShaderRuntimeLabel(): "WGSL-first" | "WGSL-custom" | "GLSL" {
         if (!this.isWebGpuEngine()) {
             return "GLSL";
         }
@@ -4704,10 +4892,10 @@ ${beforeFogAppendBlock}
         for (const entry of this.sceneModels) {
             for (const materialEntry of entry.materials) {
                 if (getExternalWgslToonShaderPathForMaterialImpl(this, materialEntry.material)) {
-                    return "Mixed";
+                    return "WGSL-custom";
                 }
                 if (getWgslMaterialShaderPresetForMaterialImpl(this, materialEntry.material) !== MmdManager.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
-                    return "Mixed";
+                    return "WGSL-custom";
                 }
             }
         }
@@ -4715,19 +4903,22 @@ ${beforeFogAppendBlock}
         return "WGSL-first";
     }
 
-    getPhysicsBackendLabel(): "Bullet MPR" | "Bullet SPR" | "Ammo" | "Off" {
+    getPhysicsBackendLabel(): "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Ammo" | "Off" {
         if (!this.physicsAvailable) {
             return "Off";
         }
         return this.getPhysicsBackendLabelForBackend(this.physicsBackend);
     }
 
-    private getPhysicsBackendLabelForBackend(backend: PhysicsBackend): "Bullet MPR" | "Bullet SPR" | "Ammo" | "Off" {
+    private getPhysicsBackendLabelForBackend(backend: PhysicsBackend): "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Ammo" | "Off" {
         if (backend === "bullet-mpr") {
             return "Bullet MPR";
         }
         if (backend === "bullet-spr") {
             return "Bullet SPR";
+        }
+        if (backend === "wasm-mpr") {
+            return "WASM MPR";
         }
         if (backend === "ammo") {
             return "Ammo";
@@ -6099,7 +6290,7 @@ ${beforeFogAppendBlock}
         return boneNames.find((name): name is string => typeof name === "string" && name.length > 0) ?? null;
     }
 
-    private getRuntimeBoneByNameFromModel(model: MmdModel | null, boneName: string): EditorRuntimeBone | null {
+    private getRuntimeBoneByNameFromModel(model: RuntimeModel | null, boneName: string): EditorRuntimeBone | null {
         const runtimeBones = model?.runtimeBones;
         if (!runtimeBones) return null;
 
@@ -6259,8 +6450,10 @@ ${beforeFogAppendBlock}
         }
 
         const positionOffset = new Vector3();
-        runtimeBone.getAnimationPositionOffsetToRef(positionOffset);
-        const rotationQuaternion = runtimeBone.getAnimatedRotationToRef(Quaternion.Identity());
+        runtimeBone.getAnimationPositionOffsetToRef?.(positionOffset);
+        const rotationQuaternion = typeof runtimeBone.getAnimatedRotationToRef === "function"
+            ? runtimeBone.getAnimatedRotationToRef(Quaternion.Identity())
+            : Quaternion.Identity();
         const rotationEuler = rotationQuaternion.toEulerAngles();
         const radToDeg = 180 / Math.PI;
 
@@ -6282,6 +6475,13 @@ ${beforeFogAppendBlock}
     getAnimatedBoneTransform(boneName: string): { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } | null {
         const runtimeBone = this.getRuntimeBoneByName(boneName);
         if (!runtimeBone) return null;
+
+        if (
+            typeof runtimeBone.getAnimationPositionOffsetToRef !== "function" ||
+            typeof runtimeBone.getAnimatedRotationToRef !== "function"
+        ) {
+            return this.getBoneTransform(boneName);
+        }
 
         const positionOffset = new Vector3();
         runtimeBone.getAnimationPositionOffsetToRef(positionOffset);
@@ -6568,7 +6768,7 @@ ${beforeFogAppendBlock}
         this.cameraRotationEulerDeg.y = (Math.atan2(toPosition.x, -toPosition.z) * 180) / Math.PI;
     }
 
-    private getOrCreateModelTrackFrameMap(model: MmdModel): Map<string, Uint32Array> {
+    private getOrCreateModelTrackFrameMap(model: RuntimeModel): Map<string, Uint32Array> {
         return getOrCreateModelTrackFrameMapImpl(this, model);
     }
 

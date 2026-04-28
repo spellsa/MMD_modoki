@@ -235,7 +235,8 @@ body.exporter-mode #bone-overlay-canvas {
   display: none !important;
 }
 
-.toolbar-locale-select {
+.toolbar-locale-select,
+.toolbar-runtime-select {
   min-width: 112px;
   padding: 4px 8px;
   border: 1px solid var(--border-color);
@@ -249,25 +250,33 @@ body.exporter-mode #bone-overlay-canvas {
   transition: all var(--transition-fast);
 }
 
-.toolbar-locale-label {
+.toolbar-runtime-select {
+  min-width: 86px;
+}
+
+.toolbar-locale-label,
+.toolbar-runtime-label {
   color: rgba(255, 255, 255, 0.42);
   font-size: 11px;
   line-height: 1;
   white-space: nowrap;
 }
 
-.toolbar-locale-select:hover {
+.toolbar-locale-select:hover,
+.toolbar-runtime-select:hover {
   border-color: var(--border-accent);
   color: var(--text-primary);
 }
 
-.toolbar-locale-select:focus {
+.toolbar-locale-select:focus,
+.toolbar-runtime-select:focus {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
   color: var(--text-primary);
 }
 
-.toolbar-locale-select option {
+.toolbar-locale-select option,
+.toolbar-runtime-select option {
   color: var(--text-primary);
   background: var(--bg-primary);
 }
@@ -3586,13 +3595,19 @@ body.bottom-panel-resizing {
     min-height: 24px;
   }
 
-  .toolbar-locale-select {
+  .toolbar-locale-select,
+  .toolbar-runtime-select {
     min-width: 104px;
     padding: 4px 6px;
     font-size: 10px;
   }
 
-  .toolbar-locale-label {
+  .toolbar-runtime-select {
+    min-width: 76px;
+  }
+
+  .toolbar-locale-label,
+  .toolbar-runtime-label {
     font-size: 10px;
   }
 
@@ -3664,14 +3679,20 @@ body.bottom-panel-resizing {
     font-size: 12px;
   }
 
-  .toolbar-locale-select {
+  .toolbar-locale-select,
+  .toolbar-runtime-select {
     min-width: 124px;
     height: 36px;
     padding: 5px 10px;
     font-size: 12px;
   }
 
-  .toolbar-locale-label {
+  .toolbar-runtime-select {
+    min-width: 92px;
+  }
+
+  .toolbar-locale-label,
+  .toolbar-runtime-label {
     font-size: 12px;
   }
 
@@ -3925,11 +3946,16 @@ body.bottom-panel-resizing {
     min-height: 28px;
   }
 
-  .toolbar-locale-select {
+  .toolbar-locale-select,
+  .toolbar-runtime-select {
     min-width: 108px;
     height: 34px;
     padding: 4px 8px;
     font-size: 11px;
+  }
+
+  .toolbar-runtime-select {
+    min-width: 82px;
   }
 
   .perf-badge {

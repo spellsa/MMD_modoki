@@ -106,6 +106,16 @@
           </svg>
           <span id="fullscreen-ui-toggle-text" data-i18n="toolbar.ui.short">UI</span>
         </button>
+        <span class="toolbar-runtime-label">Runtime</span>
+        <select
+          id="toolbar-runtime-mode-select"
+          class="toolbar-runtime-select"
+          title="MMD runtime を切り替える。変更後に自動で再読み込みします"
+          aria-label="MMD runtime を切り替える"
+        >
+          <option value="classic">Classic</option>
+          <option value="wasm">WASM</option>
+        </select>
         <span class="toolbar-locale-label" data-i18n="toolbar.locale.label">Language</span>
         <select
           id="toolbar-locale-select"
