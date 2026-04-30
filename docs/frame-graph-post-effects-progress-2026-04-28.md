@@ -23,7 +23,7 @@ v0.2 で、既存の Classic post process 経路を残したまま、カメラ�
   - canvas resize 時は Frame Graph backend を作り直す。
 - `src/render/frame-graph-post-effects-controller.ts`
   - Frame Graph controller を分離。
-  - 現在は `scene color RT -> ImageProcessingTask -> Gamma/Contrast task -> backbuffer copy` の構成。
+  - 現在は `scene color RT -> ImageProcessingTask -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> backbuffer copy` の構成。
   - `FrameGraphImageProcessingTask` は常設し、LUT / exposure / tone mapping などの image processing 効果が無効なときは task を disabled にして copy pass として扱う。
 - `src/render/post-process-controller.ts`
   - Frame Graph backend 時は Classic 側の pipeline image processing を無効化する。
@@ -179,10 +179,58 @@ Gamma/Contrast task 復帰後、表示は出るがピクセル数が足りない
 - ただし、Frame Graph 移行の主目的は SSAO / DoF などの multi pass / depth 依存系であり、色調補正を全て Frame Graph に寄せる優先度は高くない。
 - v0.2 では LUT は Classic backend の安定経路を残し、Frame Graph backend では Gamma / Contrast までを実用範囲として扱う判断でよい。
 
+## 2026-04-30 追記 7: Frame Graph DoF 最小実装
+
+- 公式 `FrameGraphDepthOfFieldTask` を使い、Frame Graph backend に DoF task を追加した。
+- task chain は `scene color RT -> ImageProcessingTask -> DepthOfFieldTask -> Gamma/Contrast task -> backbuffer copy` に変更した。
+- 公式 Task List に合わせ、DoF task には `sourceTexture` / `depthTexture` / `camera` を渡す。
+- `depthTexture` は `DepthRenderer.getDepthMap()` を Frame Graph に import して使う。
+- Frame Graph backend では DoF 用 depth renderer を camera-space Z として作る。
+- Classic `DefaultRenderingPipeline.depthOfFieldEnabled` は Frame Graph backend では無効化し、DoF が二重にかからないようにした。
+- DoF UI は Frame Graph backend でも表示するようにした。
+- Frame Graph backend の DoF UI は、既存 DoF/Fog パネル全体ではなく、Frame Graph DoF に接続済みの項目だけを表示する。
+  - 表示する項目: DoF ON/OFF、focus、target model/bone、focus offset、f-stop、lens size、focal length。
+  - 前抑制と焦点距離反転は Classic 側の独自要素として扱い、Frame Graph backend では UI に出さない。
+  - Frame Graph DoF の f-stop 入力には、前抑制補正後の effective f-stop ではなく、UI の素の f-stop 値を渡す。
+  - 非表示にする項目: blur quality、lens blur、Fog 系。blur quality は task 作成時に pass 数が決まるため、現時点では UI 変更へ即時追従しない。
+- LUT UI は Frame Graph backend では非表示に戻し、Classic backend の安定機能として扱う。
+- focus distance / f-stop / lens size / focal length は Frame Graph task の `depthOfField` に毎 frame 反映する。
+- blur quality は `FrameGraphDepthOfFieldTask` 作成時に pass 数が決まるため、現時点では backend 初期化時の値で固定。UI 変更へ完全追従させるなら task 再生成または backend rebuild が必要。
+- lens blur / edge blur / lens distortion など、既存の独自レンズ系後段はまだ Frame Graph DoF には統合していない。
+- `npm.cmd run lint` 成功。既存 warning のみ。
+- `npm.cmd run smoke:launch` 成功。`engine=WebGPU` / `Frame Graph backend ready` まで到達。
+
+## 2026-04-30 追記 8: Frame Graph Bloom 最小実装
+
+- 公式 Task List にある `FrameGraphBloomTask` を使い、Frame Graph backend に Bloom task を追加した。
+  - 参照: https://doc.babylonjs.com/features/featuresDeepDive/frameGraph/frameGraphClassFramework/frameGraphTaskList/
+- task chain は `scene color RT -> ImageProcessingTask -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> backbuffer copy` に変更した。
+- Bloom task には `sourceTexture` を渡し、`outputTexture` を後続の Gamma / Contrast task に接続する。
+- 既存 UI の Bloom ON/OFF、weight、threshold、kernel をそのまま Frame Graph Bloom に反映する。
+- Bloom UI は Classic backend 用と Frame Graph backend 用で DOM を分ける。
+  - Classic 側は従来の `data-postfx="bloom-*"` を使う。
+  - Frame Graph 側は `data-postfx="frame-graph-bloom-*"` を使い、UI 上で新旧の切り分けをしやすくする。
+  - 現時点では内部設定値は同じ `postEffectBloom*` を使い、backend に応じて Classic / Frame Graph の実行経路だけを切り替える。
+- Gamma / Contrast UI も Classic backend 用と Frame Graph backend 用で DOM を分ける。
+  - Classic 側は従来の `data-postfx="contrast"` / `data-postfx="gamma"` を使う。
+  - Frame Graph 側は `data-postfx="frame-graph-contrast"` / `data-postfx="frame-graph-gamma"` を使う。
+- DoF UI も既存 `camera-dof-controls` の共有をやめ、Frame Graph backend panel 内に専用 `data-frame-graph-dof-*` UI を追加した。
+  - Classic 側の既存 DoF UI は Classic backend 時だけ表示する。
+  - Frame Graph 側は DoF ON/OFF、focus、target model/bone、focus offset、f-stop、lens size、focal length の専用 UI を表示する。
+  - 現時点では内部設定値は既存 DoF 値を共有し、DOM とイベント導線だけを分けている。
+- Frame Graph backend では Classic 側の standalone `BloomEffect` と `DefaultRenderingPipeline.bloomEnabled` を無効化し、二重 Bloom を避ける。
+- Bloom scale / HDR は現時点では `FrameGraphBloomTask` のデフォルト寄りにし、Classic UI にはまだ出さない。
+
 ## 未確認
 
 - exposure / scene image processing configuration が Classic と同等に扱えるか。
 - LUT を独自 Frame Graph LUT task として実装する場合の texture layout / sampler binding。
+- Frame Graph DoF の実機表示、白化有無、focus / f-stop / lens size / focal length の見た目反映。
+- Frame Graph DoF の blur quality 変更時に backend rebuild するかどうか。
+- Frame Graph DoF と MMD outline / 透過材質 / 髪 / スカートの順序・破綻確認。
+- Frame Graph Bloom の実機表示、Classic Bloom との見た目差、DoF との順序差。
+- Bloom scale / HDR を UI 化する価値があるか。
+- 既存 lens blur / edge blur / lens distortion を Frame Graph 側へ寄せるか、Classic 専用に残すか。
 - utility layer / bone visualizer / gizmo の上書き順が正しいか。
 - PNG / WebM 出力が Frame Graph backend の最終結果を拾えるか。
 - 二重描画による FPS 低下が許容範囲か。
@@ -195,24 +243,35 @@ Gamma/Contrast task 復帰後、表示は出るがピクセル数が足りない
    - 必要が薄ければ、Frame Graph backend では `ImageProcessingTask` を積極利用しない。
    - 色調補正は Gamma / Contrast の独自 task を主経路にする。
 
-2. LUT の扱いを整理する。
+2. Frame Graph DoF を実機確認する。
+   - DoF ON/OFF で白化しないか見る。
+   - focus distance / f-stop / lens size / focal length が見た目に反映されるか見る。
+   - blur quality は変更時 rebuild が必要か判断する。
+   - MMD outline / 透過材質 / 髪 / スカートの破綻を確認する。
+
+3. Frame Graph Bloom を実機確認する。
+   - Bloom ON/OFF / weight / threshold / kernel が見た目に反映されるか見る。
+   - Classic Bloom と同じ値で強度差が大きすぎないか見る。
+   - `DoF -> Bloom` の順序で問題がないか確認し、必要なら `Bloom -> DoF` との比較を追加する。
+
+4. LUT の扱いを整理する。
    - v0.2 では Classic backend の安定機能として残す。
    - Frame Graph backend では、無理に `FrameGraphImageProcessingTask` 経由で有効化しない。
    - 後で必要になったら、独自 Frame Graph LUT task として texture / intensity を明示 bind する。
 
-3. LUT / exposure を検証する。
+5. LUT / exposure を検証する。
    - exposure / tone mapping など、LUT 以外の image processing 項目を Frame Graph に載せる価値があるか判断する。
    - LUT は Classic backend の見た目を基準にし、Frame Graph backend では対象外でもよい。
 
-4. 出力系を確認する。
+6. 出力系を確認する。
    - PNG 出力。
    - WebM 出力。
    - Frame Graph backend の最終 backbuffer が拾えているかを見る。
 
-5. UI 表示を整理する。
-   - 現在の `Image / Color` 表示は検証用。
-   - Gamma/Contrast が確認できたら、Frame Graph backend で使える項目として表示を正式化する。
-   - 未移行の DoF / Fog は Frame Graph backend では出さない。
+7. UI 表示を整理する。
+   - 現在の `Image / DoF / Bloom / Color` 表示は検証用。
+   - Gamma/Contrast / DoF / Bloom が確認できたら、Frame Graph backend で使える項目として表示を正式化する。
+   - 未移行の Fog / lens blur / edge blur / lens distortion は Frame Graph backend では扱いを分ける。
 
 ## 再開時の注意
 

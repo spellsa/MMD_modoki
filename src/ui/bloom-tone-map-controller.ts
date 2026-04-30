@@ -8,12 +8,21 @@ type BloomToneMapElements = {
     toneMappingTypeSelect: HTMLSelectElement;
     toneMappingValue: HTMLElement;
     bloomEnabledInput: HTMLInputElement;
+    bloomEnabledValue: HTMLElement;
     bloomWeightInput: HTMLInputElement;
     bloomWeightValue: HTMLElement;
     bloomThresholdInput: HTMLInputElement;
     bloomThresholdValue: HTMLElement;
     bloomKernelInput: HTMLInputElement;
     bloomKernelValue: HTMLElement;
+    frameGraphBloomEnabledInput: HTMLInputElement | null;
+    frameGraphBloomEnabledValue: HTMLElement | null;
+    frameGraphBloomWeightInput: HTMLInputElement | null;
+    frameGraphBloomWeightValue: HTMLElement | null;
+    frameGraphBloomThresholdInput: HTMLInputElement | null;
+    frameGraphBloomThresholdValue: HTMLElement | null;
+    frameGraphBloomKernelInput: HTMLInputElement | null;
+    frameGraphBloomKernelValue: HTMLElement | null;
     glowIntensityInput: HTMLInputElement;
     glowIntensityValue: HTMLElement;
 };
@@ -26,12 +35,21 @@ function queryPanelElements(root: ParentNode): BloomToneMapElements | null {
     const toneMappingTypeSelect = root.querySelector<HTMLSelectElement>('select[data-postfx-select="tone-mapping-type"]');
     const toneMappingValue = root.querySelector<HTMLElement>('span[data-postfx-val="tone-mapping"]');
     const bloomEnabledInput = root.querySelector<HTMLInputElement>('input[data-postfx-check="bloom"]');
+    const bloomEnabledValue = root.querySelector<HTMLElement>('span[data-postfx-val="bloom-enabled"]');
     const bloomWeightInput = root.querySelector<HTMLInputElement>('input[data-postfx="bloom-weight"]');
     const bloomWeightValue = root.querySelector<HTMLElement>('span[data-postfx-val="bloom-weight"]');
     const bloomThresholdInput = root.querySelector<HTMLInputElement>('input[data-postfx="bloom-threshold"]');
     const bloomThresholdValue = root.querySelector<HTMLElement>('span[data-postfx-val="bloom-threshold"]');
     const bloomKernelInput = root.querySelector<HTMLInputElement>('input[data-postfx="bloom-kernel"]');
     const bloomKernelValue = root.querySelector<HTMLElement>('span[data-postfx-val="bloom-kernel"]');
+    const frameGraphBloomEnabledInput = root.querySelector<HTMLInputElement>('input[data-postfx-check="frame-graph-bloom"]');
+    const frameGraphBloomEnabledValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-bloom-enabled"]');
+    const frameGraphBloomWeightInput = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-bloom-weight"]');
+    const frameGraphBloomWeightValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-bloom-weight"]');
+    const frameGraphBloomThresholdInput = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-bloom-threshold"]');
+    const frameGraphBloomThresholdValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-bloom-threshold"]');
+    const frameGraphBloomKernelInput = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-bloom-kernel"]');
+    const frameGraphBloomKernelValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-bloom-kernel"]');
     const glowIntensityInput = root.querySelector<HTMLInputElement>('input[data-postfx="glow-intensity"]');
     const glowIntensityValue = root.querySelector<HTMLElement>('span[data-postfx-val="glow-intensity"]');
 
@@ -39,6 +57,7 @@ function queryPanelElements(root: ParentNode): BloomToneMapElements | null {
         !toneMappingTypeSelect ||
         !toneMappingValue ||
         !bloomEnabledInput ||
+        !bloomEnabledValue ||
         !bloomWeightInput ||
         !bloomWeightValue ||
         !bloomThresholdInput ||
@@ -55,12 +74,21 @@ function queryPanelElements(root: ParentNode): BloomToneMapElements | null {
         toneMappingTypeSelect,
         toneMappingValue,
         bloomEnabledInput,
+        bloomEnabledValue,
         bloomWeightInput,
         bloomWeightValue,
         bloomThresholdInput,
         bloomThresholdValue,
         bloomKernelInput,
         bloomKernelValue,
+        frameGraphBloomEnabledInput,
+        frameGraphBloomEnabledValue,
+        frameGraphBloomWeightInput,
+        frameGraphBloomWeightValue,
+        frameGraphBloomThresholdInput,
+        frameGraphBloomThresholdValue,
+        frameGraphBloomKernelInput,
+        frameGraphBloomKernelValue,
         glowIntensityInput,
         glowIntensityValue,
     };
@@ -102,22 +130,89 @@ export class BloomToneMapController {
                 : t("option.none");
         };
 
-        const applyBloom = (): void => {
-            this.mmdManager.postEffectBloomEnabled = elements.bloomEnabledInput.checked;
-            this.mmdManager.postEffectBloomWeight = Number(elements.bloomWeightInput.value) / 100;
-            // Invert threshold control: move right -> wider glow range (lower threshold).
-            this.mmdManager.postEffectBloomThreshold = 2 - (Number(elements.bloomThresholdInput.value) / 100);
-            this.mmdManager.postEffectBloomKernel = Number(elements.bloomKernelInput.value);
-
-            elements.bloomWeightInput.disabled = !this.mmdManager.postEffectBloomEnabled;
-            elements.bloomThresholdInput.disabled = !this.mmdManager.postEffectBloomEnabled;
-            elements.bloomKernelInput.disabled = !this.mmdManager.postEffectBloomEnabled;
-
-            elements.bloomWeightValue.textContent = this.mmdManager.postEffectBloomEnabled
+        const syncBloomUi = (): void => {
+            const enabled = this.mmdManager.postEffectBloomEnabled;
+            const weightText = enabled
                 ? `${Math.round(this.mmdManager.postEffectBloomWeight * 100)}%`
                 : t("status.off");
-            elements.bloomThresholdValue.textContent = this.mmdManager.postEffectBloomThreshold.toFixed(2);
-            elements.bloomKernelValue.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
+            const thresholdText = this.mmdManager.postEffectBloomThreshold.toFixed(2);
+            const kernelText = String(Math.round(this.mmdManager.postEffectBloomKernel));
+
+            const syncGroup = (
+                enabledInput: HTMLInputElement | null,
+                enabledValue: HTMLElement | null,
+                weightInput: HTMLInputElement | null,
+                weightValue: HTMLElement | null,
+                thresholdInput: HTMLInputElement | null,
+                thresholdValue: HTMLElement | null,
+                kernelInput: HTMLInputElement | null,
+                kernelValue: HTMLElement | null,
+            ): void => {
+                if (
+                    !enabledInput ||
+                    !enabledValue ||
+                    !weightInput ||
+                    !weightValue ||
+                    !thresholdInput ||
+                    !thresholdValue ||
+                    !kernelInput ||
+                    !kernelValue
+                ) {
+                    return;
+                }
+                enabledInput.checked = enabled;
+                enabledValue.textContent = enabled ? t("status.on") : t("status.off");
+                weightInput.value = String(
+                    Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectBloomWeight * 100))),
+                );
+                thresholdInput.value = String(
+                    Math.max(0, Math.min(200, Math.round((2 - this.mmdManager.postEffectBloomThreshold) * 100))),
+                );
+                kernelInput.value = String(
+                    Math.max(1, Math.min(256, Math.round(this.mmdManager.postEffectBloomKernel))),
+                );
+                weightInput.disabled = !enabled;
+                thresholdInput.disabled = !enabled;
+                kernelInput.disabled = !enabled;
+                weightValue.textContent = weightText;
+                thresholdValue.textContent = thresholdText;
+                kernelValue.textContent = kernelText;
+            };
+
+            syncGroup(
+                elements.bloomEnabledInput,
+                elements.bloomEnabledValue,
+                elements.bloomWeightInput,
+                elements.bloomWeightValue,
+                elements.bloomThresholdInput,
+                elements.bloomThresholdValue,
+                elements.bloomKernelInput,
+                elements.bloomKernelValue,
+            );
+            syncGroup(
+                elements.frameGraphBloomEnabledInput,
+                elements.frameGraphBloomEnabledValue,
+                elements.frameGraphBloomWeightInput,
+                elements.frameGraphBloomWeightValue,
+                elements.frameGraphBloomThresholdInput,
+                elements.frameGraphBloomThresholdValue,
+                elements.frameGraphBloomKernelInput,
+                elements.frameGraphBloomKernelValue,
+            );
+        };
+
+        const applyBloom = (
+            enabledInput: HTMLInputElement,
+            weightInput: HTMLInputElement,
+            thresholdInput: HTMLInputElement,
+            kernelInput: HTMLInputElement,
+        ): void => {
+            this.mmdManager.postEffectBloomEnabled = enabledInput.checked;
+            this.mmdManager.postEffectBloomWeight = Number(weightInput.value) / 100;
+            // Invert threshold control: move right -> wider glow range (lower threshold).
+            this.mmdManager.postEffectBloomThreshold = 2 - (Number(thresholdInput.value) / 100);
+            this.mmdManager.postEffectBloomKernel = Number(kernelInput.value);
+            syncBloomUi();
         };
 
         const applyGlow = (): void => {
@@ -136,16 +231,6 @@ export class BloomToneMapController {
         elements.toneMappingTypeSelect.value = this.mmdManager.postEffectToneMappingEnabled
             ? String(this.mmdManager.postEffectToneMappingType)
             : "-1";
-        elements.bloomEnabledInput.checked = this.mmdManager.postEffectBloomEnabled;
-        elements.bloomWeightInput.value = String(
-            Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectBloomWeight * 100))),
-        );
-        elements.bloomThresholdInput.value = String(
-            Math.max(0, Math.min(200, Math.round((2 - this.mmdManager.postEffectBloomThreshold) * 100))),
-        );
-        elements.bloomKernelInput.value = String(
-            Math.max(1, Math.min(256, Math.round(this.mmdManager.postEffectBloomKernel))),
-        );
         elements.glowIntensityInput.value = String(
             Math.max(
                 0,
@@ -157,14 +242,51 @@ export class BloomToneMapController {
         );
 
         applyToneMapping();
-        applyBloom();
+        syncBloomUi();
         applyGlow();
 
         elements.toneMappingTypeSelect.addEventListener("change", applyToneMapping);
-        elements.bloomEnabledInput.addEventListener("input", applyBloom);
-        elements.bloomWeightInput.addEventListener("input", applyBloom);
-        elements.bloomThresholdInput.addEventListener("input", applyBloom);
-        elements.bloomKernelInput.addEventListener("input", applyBloom);
+        elements.bloomEnabledInput.addEventListener("input", () => applyBloom(
+            elements.bloomEnabledInput,
+            elements.bloomWeightInput,
+            elements.bloomThresholdInput,
+            elements.bloomKernelInput,
+        ));
+        elements.bloomWeightInput.addEventListener("input", () => applyBloom(
+            elements.bloomEnabledInput,
+            elements.bloomWeightInput,
+            elements.bloomThresholdInput,
+            elements.bloomKernelInput,
+        ));
+        elements.bloomThresholdInput.addEventListener("input", () => applyBloom(
+            elements.bloomEnabledInput,
+            elements.bloomWeightInput,
+            elements.bloomThresholdInput,
+            elements.bloomKernelInput,
+        ));
+        elements.bloomKernelInput.addEventListener("input", () => applyBloom(
+            elements.bloomEnabledInput,
+            elements.bloomWeightInput,
+            elements.bloomThresholdInput,
+            elements.bloomKernelInput,
+        ));
+        if (
+            elements.frameGraphBloomEnabledInput &&
+            elements.frameGraphBloomWeightInput &&
+            elements.frameGraphBloomThresholdInput &&
+            elements.frameGraphBloomKernelInput
+        ) {
+            const applyFrameGraphBloom = (): void => applyBloom(
+                elements.frameGraphBloomEnabledInput as HTMLInputElement,
+                elements.frameGraphBloomWeightInput as HTMLInputElement,
+                elements.frameGraphBloomThresholdInput as HTMLInputElement,
+                elements.frameGraphBloomKernelInput as HTMLInputElement,
+            );
+            elements.frameGraphBloomEnabledInput.addEventListener("input", applyFrameGraphBloom);
+            elements.frameGraphBloomWeightInput.addEventListener("input", applyFrameGraphBloom);
+            elements.frameGraphBloomThresholdInput.addEventListener("input", applyFrameGraphBloom);
+            elements.frameGraphBloomKernelInput.addEventListener("input", applyFrameGraphBloom);
+        }
         elements.glowIntensityInput.addEventListener("input", applyGlow);
         return true;
     }

@@ -6,6 +6,10 @@ type ColorPostFxElements = {
     contrastValue: HTMLElement;
     gammaInput: HTMLInputElement;
     gammaValue: HTMLElement;
+    frameGraphContrastInput: HTMLInputElement | null;
+    frameGraphContrastValue: HTMLElement | null;
+    frameGraphGammaInput: HTMLInputElement | null;
+    frameGraphGammaValue: HTMLElement | null;
     exposureInput: HTMLInputElement;
     exposureValue: HTMLElement;
     ditheringInput: HTMLInputElement;
@@ -33,6 +37,10 @@ function resolveColorPostFxElements(root: ParentNode): ColorPostFxElements | nul
     const contrastValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="contrast"]');
     const gammaInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="gamma"]');
     const gammaValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="gamma"]');
+    const frameGraphContrastInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="frame-graph-contrast"]');
+    const frameGraphContrastValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="frame-graph-contrast"]');
+    const frameGraphGammaInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="frame-graph-gamma"]');
+    const frameGraphGammaValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="frame-graph-gamma"]');
     const exposureInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="exposure"]');
     const exposureValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="exposure"]');
     const ditheringInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="dithering-intensity"]');
@@ -72,6 +80,10 @@ function resolveColorPostFxElements(root: ParentNode): ColorPostFxElements | nul
         contrastValue,
         gammaInput,
         gammaValue,
+        frameGraphContrastInput,
+        frameGraphContrastValue,
+        frameGraphGammaInput,
+        frameGraphGammaValue,
         exposureInput,
         exposureValue,
         ditheringInput,
@@ -100,19 +112,37 @@ export class ColorPostFxController {
             return false;
         }
 
-        const applyContrast = (): void => {
-            const offsetPercent = Number(elements.contrastInput.value);
-            this.mmdManager.postEffectContrast = 1 + offsetPercent / 100;
+        const syncContrastUi = (): void => {
             const roundedOffset = Math.round((this.mmdManager.postEffectContrast - 1) * 100);
+            const value = String(roundedOffset);
+            elements.contrastInput.value = value;
             elements.contrastValue.textContent = `${roundedOffset}%`;
+            if (elements.frameGraphContrastInput && elements.frameGraphContrastValue) {
+                elements.frameGraphContrastInput.value = value;
+                elements.frameGraphContrastValue.textContent = `${roundedOffset}%`;
+            }
+        };
+        const syncGammaUi = (): void => {
+            const roundedOffset = Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100);
+            const value = String(roundedOffset);
+            elements.gammaInput.value = value;
+            elements.gammaValue.textContent = `${roundedOffset}%`;
+            if (elements.frameGraphGammaInput && elements.frameGraphGammaValue) {
+                elements.frameGraphGammaInput.value = value;
+                elements.frameGraphGammaValue.textContent = `${roundedOffset}%`;
+            }
+        };
+        const applyContrast = (input: HTMLInputElement): void => {
+            const offsetPercent = Number(input.value);
+            this.mmdManager.postEffectContrast = 1 + offsetPercent / 100;
+            syncContrastUi();
         };
 
-        const applyGamma = (): void => {
-            const offsetPercent = Number(elements.gammaInput.value);
+        const applyGamma = (input: HTMLInputElement): void => {
+            const offsetPercent = Number(input.value);
             const gammaPower = Math.pow(2, -offsetPercent / 100);
             this.mmdManager.postEffectGamma = gammaPower;
-            const roundedOffset = Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100);
-            elements.gammaValue.textContent = `${roundedOffset}%`;
+            syncGammaUi();
         };
 
         const applyExposure = (): void => {
@@ -163,8 +193,6 @@ export class ColorPostFxController {
                 : t("status.off");
         };
 
-        elements.contrastInput.value = String(Math.round((this.mmdManager.postEffectContrast - 1) * 100));
-        elements.gammaInput.value = String(Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100));
         elements.exposureInput.value = String(Math.max(0, Math.min(8, this.mmdManager.postEffectExposure)).toFixed(2));
         elements.ditheringInput.value = String(
             Math.max(0, Math.min(1, this.mmdManager.postEffectDitheringEnabled ? this.mmdManager.postEffectDitheringIntensity : 0)).toFixed(4),
@@ -185,8 +213,8 @@ export class ColorPostFxController {
             ),
         );
 
-        applyContrast();
-        applyGamma();
+        syncContrastUi();
+        syncGammaUi();
         applyExposure();
         applyDithering();
         applyVignette();
@@ -194,8 +222,14 @@ export class ColorPostFxController {
         applySharpenEdge();
         applyColorCurves();
 
-        elements.contrastInput.addEventListener("input", applyContrast);
-        elements.gammaInput.addEventListener("input", applyGamma);
+        elements.contrastInput.addEventListener("input", () => applyContrast(elements.contrastInput));
+        elements.gammaInput.addEventListener("input", () => applyGamma(elements.gammaInput));
+        elements.frameGraphContrastInput?.addEventListener("input", () => {
+            if (elements.frameGraphContrastInput) applyContrast(elements.frameGraphContrastInput);
+        });
+        elements.frameGraphGammaInput?.addEventListener("input", () => {
+            if (elements.frameGraphGammaInput) applyGamma(elements.frameGraphGammaInput);
+        });
         elements.exposureInput.addEventListener("input", applyExposure);
         elements.ditheringInput.addEventListener("input", applyDithering);
         elements.vignetteInput.addEventListener("input", applyVignette);

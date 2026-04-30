@@ -1,5 +1,7 @@
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
+import { FrameGraphBloomTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/bloomTask";
+import { FrameGraphDepthOfFieldTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/depthOfFieldTask";
 import { FrameGraphImageProcessingTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/imageProcessingTask";
 import { FrameGraphPostProcessTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/postProcessTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
@@ -8,7 +10,9 @@ import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGr
 import { EffectWrapper } from "@babylonjs/core/Materials/effectRenderer";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
+import { ThinDepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/thinDepthOfFieldEffect";
 import { ThinImageProcessingPostProcess } from "@babylonjs/core/PostProcesses/thinImageProcessingPostProcess";
+import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
 
 export type FrameGraphPostEffectsWarning = {
@@ -25,6 +29,16 @@ export type FrameGraphPostEffectsSettings = {
     contrast: number;
     gammaPower: number;
     imageProcessingEnabled: boolean;
+    dofEnabled: boolean;
+    dofBlurLevel: number;
+    dofFocusDistanceMm: number;
+    dofEffectiveFStop: number;
+    dofLensSize: number;
+    dofFocalLength: number;
+    bloomEnabled: boolean;
+    bloomWeight: number;
+    bloomThreshold: number;
+    bloomKernel: number;
 };
 
 function ensureColorCorrectionShaders(): void {
@@ -107,6 +121,8 @@ export class FrameGraphPostEffectsController {
     private colorCorrectionEffect: EffectWrapper | null = null;
     private imageProcessingEffect: ThinImageProcessingPostProcess | null = null;
     private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
+    private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
+    private bloomTask: FrameGraphBloomTask | null = null;
     private frameGraph: FrameGraph | null = null;
     private ready = false;
     private active = false;
@@ -120,10 +136,25 @@ export class FrameGraphPostEffectsController {
             contrast: 1,
             gammaPower: 1,
             imageProcessingEnabled: false,
+            dofEnabled: false,
+            dofBlurLevel: ThinDepthOfFieldEffectBlurLevel.Medium,
+            dofFocusDistanceMm: 55000,
+            dofEffectiveFStop: 2.8,
+            dofLensSize: 30,
+            dofFocalLength: 50,
+            bloomEnabled: false,
+            bloomWeight: 1,
+            bloomThreshold: 1,
+            bloomKernel: 100,
         }),
     ) {}
 
-    activate(scene?: Scene, sourceTexture?: InternalTexture | null): boolean {
+    activate(
+        scene?: Scene,
+        sourceTexture?: InternalTexture | null,
+        depthTexture?: InternalTexture | null,
+        camera?: Camera | null,
+    ): boolean {
         if (this.active) {
             return true;
         }
@@ -153,6 +184,9 @@ export class FrameGraphPostEffectsController {
             "frameGraphPostEffectsSceneColor",
             sourceTexture,
         );
+        const depthTextureHandle = depthTexture
+            ? frameGraph.textureManager.importTexture("frameGraphPostEffectsDepth", depthTexture)
+            : undefined;
 
         this.imageProcessingEffect = new ThinImageProcessingPostProcess(
             "frameGraphPostEffectsImageProcessing",
@@ -178,6 +212,42 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(imageProcessingTask);
         this.imageProcessingTask = imageProcessingTask;
 
+        let bloomSourceTexture = imageProcessingTask.outputTexture;
+        if (depthTextureHandle !== undefined && camera) {
+            const blurLevel = initialSettings.dofBlurLevel <= ThinDepthOfFieldEffectBlurLevel.Low
+                ? ThinDepthOfFieldEffectBlurLevel.Low
+                : initialSettings.dofBlurLevel === ThinDepthOfFieldEffectBlurLevel.Medium
+                    ? ThinDepthOfFieldEffectBlurLevel.Medium
+                    : ThinDepthOfFieldEffectBlurLevel.High;
+            const depthOfFieldTask = new FrameGraphDepthOfFieldTask(
+                "frameGraphPostEffectsDepthOfField",
+                frameGraph,
+                blurLevel,
+                false,
+            );
+            depthOfFieldTask.sourceTexture = imageProcessingTask.outputTexture;
+            depthOfFieldTask.depthTexture = depthTextureHandle;
+            depthOfFieldTask.camera = camera;
+            depthOfFieldTask.disabled = !initialSettings.dofEnabled;
+            this.applyDepthOfFieldSettings(depthOfFieldTask, initialSettings);
+            frameGraph.addTask(depthOfFieldTask);
+            this.depthOfFieldTask = depthOfFieldTask;
+            bloomSourceTexture = depthOfFieldTask.outputTexture;
+        }
+
+        const bloomTask = new FrameGraphBloomTask(
+            "frameGraphPostEffectsBloom",
+            frameGraph,
+            Math.max(0, initialSettings.bloomWeight),
+            Math.max(1, initialSettings.bloomKernel),
+            Math.max(0, initialSettings.bloomThreshold),
+            false,
+        );
+        bloomTask.sourceTexture = bloomSourceTexture;
+        bloomTask.disabled = !initialSettings.bloomEnabled;
+        frameGraph.addTask(bloomTask);
+        this.bloomTask = bloomTask;
+
         const colorCorrectionTask = new FrameGraphPostEffectsColorCorrectionTask(
             "frameGraphPostEffectsColorCorrection",
             frameGraph,
@@ -187,7 +257,7 @@ export class FrameGraphPostEffectsController {
             },
             this.getSettings,
         );
-        colorCorrectionTask.sourceTexture = imageProcessingTask.outputTexture;
+        colorCorrectionTask.sourceTexture = bloomTask.outputTexture;
         frameGraph.addTask(colorCorrectionTask);
 
         const outputTask = new FrameGraphCopyToBackbufferColorTask(
@@ -200,7 +270,7 @@ export class FrameGraphPostEffectsController {
         this.frameGraph = frameGraph;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + color correction).",
+            message: "Frame Graph post effects backend active (image processing + DoF + Bloom + color correction).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -233,6 +303,14 @@ export class FrameGraphPostEffectsController {
             this.imageProcessingEffect._updateParameters();
             this.lastImageProcessingEnabled = settings.imageProcessingEnabled;
         }
+        if (this.depthOfFieldTask) {
+            this.depthOfFieldTask.disabled = !settings.dofEnabled;
+            this.applyDepthOfFieldSettings(this.depthOfFieldTask, settings);
+        }
+        if (this.bloomTask) {
+            this.bloomTask.disabled = !settings.bloomEnabled;
+            this.applyBloomSettings(this.bloomTask, settings);
+        }
         this.frameGraph.execute();
     }
 
@@ -253,6 +331,8 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingEffect?.dispose();
         this.imageProcessingEffect = null;
         this.imageProcessingTask = null;
+        this.depthOfFieldTask = null;
+        this.bloomTask = null;
         this.frameGraph?.dispose();
         this.frameGraph = null;
         this.ready = false;
@@ -260,5 +340,24 @@ export class FrameGraphPostEffectsController {
         this.executedFrameCount = 0;
         this.lastImageProcessingEnabled = null;
         this.activationWarningEmitted = false;
+    }
+
+    private applyDepthOfFieldSettings(
+        depthOfFieldTask: FrameGraphDepthOfFieldTask,
+        settings: FrameGraphPostEffectsSettings,
+    ): void {
+        depthOfFieldTask.depthOfField.focusDistance = Math.max(1, settings.dofFocusDistanceMm);
+        depthOfFieldTask.depthOfField.fStop = Math.max(0.01, settings.dofEffectiveFStop);
+        depthOfFieldTask.depthOfField.lensSize = Math.max(0.001, settings.dofLensSize);
+        depthOfFieldTask.depthOfField.focalLength = Math.max(1, settings.dofFocalLength);
+    }
+
+    private applyBloomSettings(
+        bloomTask: FrameGraphBloomTask,
+        settings: FrameGraphPostEffectsSettings,
+    ): void {
+        bloomTask.bloom.weight = Math.max(0, settings.bloomWeight);
+        bloomTask.bloom.threshold = Math.max(0, settings.bloomThreshold);
+        bloomTask.bloom.kernel = Math.max(1, settings.bloomKernel);
     }
 }

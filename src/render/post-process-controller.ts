@@ -594,7 +594,7 @@ function applyStandaloneBloomSettings(host: any): void {
         pipeline.bloomEnabled = false;
     }
 
-    if (!host.postEffectBloomEnabledValue || !pipeline) {
+    if (host.postEffectBackend === "frameGraph" || !host.postEffectBloomEnabledValue || !pipeline) {
         disposeStandaloneBloomEffect(host);
         host.enforceFinalPostProcessOrder();
         return;
@@ -1409,7 +1409,7 @@ export function applyEditorDofSettings(host: any): void {
     dof.lensSize = host.dofLensSizeValue;
     dof.focalLength = host.dofFocalLengthValue;
     updateEditorDofFocusAndFStop(host);
-    host.defaultRenderingPipeline.depthOfFieldEnabled = host.dofEnabledValue;
+    host.defaultRenderingPipeline.depthOfFieldEnabled = host.postEffectBackend === "classic" && host.dofEnabledValue;
     applyDofLensBlurSettings(host);
 }
 
@@ -1417,6 +1417,7 @@ export function applyDofLensBlurSettings(host: any): void {
     const isEnabled = Boolean(
         host.defaultRenderingPipeline
         && host.depthRenderer
+        && host.postEffectBackend === "classic"
         && host.dofEnabledValue
         && host.dofLensBlurEnabledValue
         && host.dofLensBlurStrengthValue > 0.0001,
@@ -1599,11 +1600,15 @@ export function computeAutoFocusMinFStop(host: any, focusDistanceMm: number): nu
 }
 
 export function configureDofDepthRenderer(host: any): void {
+    if (host.depthRenderer && host.postEffectBackend !== "frameGraph") {
+        return;
+    }
     const depthRenderer = host.scene.enableDepthRenderer(
         host.camera,
         false,
         false,
         Texture.NEAREST_SAMPLINGMODE,
+        host.postEffectBackend === "frameGraph",
     );
     depthRenderer.useOnlyInActiveCamera = true;
     depthRenderer.forceDepthWriteTransparentMeshes = true;

@@ -1131,7 +1131,7 @@ export function syncLuminousGlowLayer(host: any): void {
 
     const manualGlow = Boolean(host.postEffectGlowEnabledValue) && Number(host.postEffectGlowIntensityValue) > 1e-6;
     const autoGlow = hasLuminousMaterials;
-    const manualBloom = Boolean(host.postEffectBloomEnabledValue);
+    const manualBloom = host.postEffectBackend !== "frameGraph" && Boolean(host.postEffectBloomEnabledValue);
     const glowBaseIntensity = manualGlow
         ? Number(host.postEffectGlowIntensityValue)
         : Math.max(0.000001, Number(host.postEffectGlowIntensityValue) || 0.5);

@@ -206,7 +206,7 @@ export function setDofEnabled(host: any, v: boolean): void {
         if (host.depthRenderer) {
             host.defaultRenderingPipeline.depthOfField.depthTexture = host.depthRenderer.getDepthMap();
         }
-        host.defaultRenderingPipeline.depthOfFieldEnabled = host.dofEnabledValue;
+        host.defaultRenderingPipeline.depthOfFieldEnabled = host.postEffectBackend === "classic" && host.dofEnabledValue;
     }
     host.applyDofLensBlurSettings();
     host.applyAntialiasSettings();

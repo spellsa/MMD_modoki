@@ -2379,17 +2379,17 @@ export class UIController {
                     </select>
                     <span data-postfx-val="backend" class="effect-value">Classic</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" data-postfx-classic-only="color">
                     <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
                     <input data-postfx="contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
                     <span data-postfx-val="contrast" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" data-postfx-classic-only="color">
                     <span class="effect-label" data-i18n="shader.postfx.gamma">Gamma</span>
                     <input data-postfx="gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row effect-row-check">
+                <div class="effect-row effect-row-check" data-postfx-classic-only="lut">
                     <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
                     <label class="effect-check-wrap">
                         <input data-postfx-check="lut" type="checkbox" class="effect-check">
@@ -2400,7 +2400,7 @@ export class UIController {
                     </select>
                     <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" data-postfx-classic-only="lut">
                     <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
                     <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
                     <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
@@ -2490,6 +2490,8 @@ export class UIController {
                     <input data-postfx="edge-width" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="edge-width" class="effect-value">0%</span>
                 </div>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row effect-row-toggle">
                     <span class="effect-label" data-i18n="shader.postfx.bloom">Bloom</span>
                     <label class="effect-check-wrap">
@@ -2513,6 +2515,8 @@ export class UIController {
                     <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="100" step="1">
                     <span data-postfx-val="bloom-kernel" class="effect-value">100</span>
                 </div>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.toneMap">ToneMap</span>
                     <select data-postfx-select="tone-mapping-type" class="effect-select">
@@ -2527,12 +2531,90 @@ export class UIController {
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
                         <strong>Frame Graph</strong><br>
-                        Experimental backend. Gamma / Contrast and built-in LUT presets are available above; other post effects are still being migrated.
+                        Experimental backend. Gamma / Contrast, DoF, and Bloom are available above; LUT remains on the Classic backend for now.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
                         <span class="effect-value">Image</span>
+                        <span class="effect-value">DoF</span>
+                        <span class="effect-value">Bloom</span>
                         <span class="effect-value">Color</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
+                        <input data-postfx="frame-graph-contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
+                        <span data-postfx-val="frame-graph-contrast" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.gamma">Gamma</span>
+                        <input data-postfx="frame-graph-gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-gamma" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label">DoF</span>
+                        <label class="effect-check-wrap">
+                            <input data-frame-graph-dof-check="enabled" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-frame-graph-dof-val="enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoFフォーカス</span>
+                        <input data-frame-graph-dof="focus" type="range" class="effect-slider" min="100" max="300000" value="55000" step="100">
+                        <span data-frame-graph-dof-val="focus" class="effect-value">55.0m</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF中心モデル</span>
+                        <select data-frame-graph-dof-select="target-model" class="effect-select"></select>
+                        <span class="effect-value"></span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF中心ボーン</span>
+                        <select data-frame-graph-dof-select="target-bone" class="effect-select"></select>
+                        <span class="effect-value"></span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">前後補正</span>
+                        <input data-frame-graph-dof="focus-offset" type="range" class="effect-slider" min="-20000" max="20000" value="0" step="100">
+                        <span data-frame-graph-dof-val="focus-offset" class="effect-value">0.0m</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF F-stop</span>
+                        <input data-frame-graph-dof="fstop" type="range" class="effect-slider" min="0" max="400" value="280" step="1">
+                        <span data-frame-graph-dof-val="fstop" class="effect-value">2.80</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF lens</span>
+                        <input data-frame-graph-dof="lens-size" type="range" class="effect-slider" min="1" max="4096" value="30" step="1">
+                        <span data-frame-graph-dof-val="lens-size" class="effect-value">30</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF focal</span>
+                        <input data-frame-graph-dof="focal-length" type="range" class="effect-slider" min="1" max="300" value="50" step="1">
+                        <span data-frame-graph-dof-val="focal-length" class="effect-value">50</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label" data-i18n="shader.postfx.bloom">Bloom</span>
+                        <label class="effect-check-wrap">
+                            <input data-postfx-check="frame-graph-bloom" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-postfx-val="frame-graph-bloom-enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="label.bloomStrength">Bloom・ｽ・ｽ・ｽx</span>
+                        <input data-postfx="frame-graph-bloom-weight" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                        <span data-postfx-val="frame-graph-bloom-weight" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.bloomThreshold">BloomTh</span>
+                        <input data-postfx="frame-graph-bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                        <span data-postfx-val="frame-graph-bloom-threshold" class="effect-value">1.00</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.bloomKernel">BloomK</span>
+                        <input data-postfx="frame-graph-bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="100" step="1">
+                        <span data-postfx-val="frame-graph-bloom-kernel" class="effect-value">100</span>
                     </div>
                 </div>
             </div>
@@ -2553,6 +2635,7 @@ export class UIController {
         }
         this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
         this.installPostEffectBackendControls(postFxControls);
+        this.installFrameGraphDofControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
     }
 
@@ -2672,19 +2755,237 @@ export class UIController {
         });
     }
 
+    private installFrameGraphDofControls(root: HTMLElement): void {
+        const enabledInput = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof-check="enabled"]');
+        const enabledValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="enabled"]');
+        const focusSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="focus"]');
+        const focusValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="focus"]');
+        const targetModelSelect = root.querySelector<HTMLSelectElement>('select[data-frame-graph-dof-select="target-model"]');
+        const targetBoneSelect = root.querySelector<HTMLSelectElement>('select[data-frame-graph-dof-select="target-bone"]');
+        const focusOffsetSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="focus-offset"]');
+        const focusOffsetValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="focus-offset"]');
+        const fStopSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="fstop"]');
+        const fStopValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="fstop"]');
+        const lensSizeSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="lens-size"]');
+        const lensSizeValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="lens-size"]');
+        const focalLengthSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="focal-length"]');
+        const focalLengthValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="focal-length"]');
+        if (
+            !enabledInput ||
+            !enabledValue ||
+            !focusSlider ||
+            !focusValue ||
+            !targetModelSelect ||
+            !targetBoneSelect ||
+            !focusOffsetSlider ||
+            !focusOffsetValue ||
+            !fStopSlider ||
+            !fStopValue ||
+            !lensSizeSlider ||
+            !lensSizeValue ||
+            !focalLengthSlider ||
+            !focalLengthValue
+        ) {
+            return;
+        }
+
+        const refreshTargetControls = (): void => {
+            const loadedModels = this.mmdManager.getLoadedModels();
+            const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
+            const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
+            const resolvedModel = targetModelPath
+                ? loadedModels.find((model) => model.path === targetModelPath) ?? null
+                : null;
+
+            targetModelSelect.innerHTML = "";
+            const cameraOption = document.createElement("option");
+            cameraOption.value = "";
+            cameraOption.textContent = t("option.cameraTarget");
+            targetModelSelect.appendChild(cameraOption);
+            for (const model of loadedModels) {
+                const option = document.createElement("option");
+                option.value = String(model.index);
+                option.textContent = model.name;
+                targetModelSelect.appendChild(option);
+            }
+            targetModelSelect.value = resolvedModel ? String(resolvedModel.index) : "";
+            targetModelSelect.disabled = loadedModels.length === 0;
+
+            targetBoneSelect.innerHTML = "";
+            if (!resolvedModel) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = t("option.none");
+                targetBoneSelect.appendChild(option);
+                targetBoneSelect.value = "";
+                targetBoneSelect.disabled = true;
+                return;
+            }
+            const boneNames = this.mmdManager.getModelBoneNames(resolvedModel.index);
+            for (const boneName of boneNames) {
+                const option = document.createElement("option");
+                option.value = boneName;
+                option.textContent = boneName;
+                targetBoneSelect.appendChild(option);
+            }
+            const fallbackBoneName =
+                targetBoneName && boneNames.includes(targetBoneName)
+                    ? targetBoneName
+                    : this.mmdManager.getPreferredDofFocusBoneName(resolvedModel.index);
+            targetBoneSelect.value = fallbackBoneName && boneNames.includes(fallbackBoneName)
+                ? fallbackBoneName
+                : (boneNames[0] ?? "");
+            targetBoneSelect.disabled = boneNames.length === 0;
+        };
+
+        const refreshValues = (): void => {
+            enabledInput.checked = this.mmdManager.dofEnabled;
+            enabledValue.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
+            focusSlider.value = String(Math.round(this.mmdManager.dofFocusDistanceMm));
+            focusValue.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
+            focusOffsetSlider.value = String(Math.round(this.mmdManager.dofAutoFocusNearOffsetMm));
+            focusOffsetValue.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
+            fStopSlider.value = String(Math.round(this.mmdManager.dofFStop * 100));
+            fStopValue.textContent = this.mmdManager.dofFStop.toFixed(2);
+            lensSizeSlider.value = String(Math.round(this.mmdManager.dofLensSize));
+            lensSizeValue.textContent = `${Math.round(this.mmdManager.dofLensSize)}`;
+            focalLengthSlider.value = String(Math.round(this.mmdManager.dofFocalLength));
+            focalLengthValue.textContent = `${Math.round(this.mmdManager.dofFocalLength)}`;
+            focusSlider.disabled = this.mmdManager.dofAutoFocusEnabled;
+            focalLengthSlider.disabled = this.mmdManager.dofFocalLengthLinkedToCameraFov;
+            refreshTargetControls();
+        };
+
+        enabledInput.addEventListener("change", () => {
+            this.mmdManager.dofEnabled = enabledInput.checked;
+            refreshValues();
+        });
+        focusSlider.addEventListener("input", () => {
+            if (!this.mmdManager.dofAutoFocusEnabled) {
+                this.mmdManager.dofFocusDistanceMm = Number(focusSlider.value);
+            }
+            refreshValues();
+        });
+        targetModelSelect.addEventListener("change", () => {
+            const modelIndex = Number.parseInt(targetModelSelect.value, 10);
+            if (Number.isNaN(modelIndex)) {
+                this.mmdManager.setDofFocusTargetByIndex(null, null);
+            } else {
+                this.mmdManager.setDofFocusTargetByIndex(
+                    modelIndex,
+                    this.mmdManager.getPreferredDofFocusBoneName(modelIndex),
+                );
+            }
+            refreshValues();
+        });
+        targetBoneSelect.addEventListener("change", () => {
+            const modelIndex = Number.parseInt(targetModelSelect.value, 10);
+            if (!Number.isNaN(modelIndex)) {
+                this.mmdManager.setDofFocusTargetByIndex(modelIndex, targetBoneSelect.value || null);
+            }
+            refreshValues();
+        });
+        focusOffsetSlider.addEventListener("input", () => {
+            this.mmdManager.dofAutoFocusNearOffsetMm = Number(focusOffsetSlider.value);
+            refreshValues();
+        });
+        fStopSlider.addEventListener("input", () => {
+            this.mmdManager.dofFStop = Number(fStopSlider.value) / 100;
+            refreshValues();
+        });
+        lensSizeSlider.addEventListener("input", () => {
+            this.mmdManager.dofLensSize = Number(lensSizeSlider.value);
+            refreshValues();
+        });
+        focalLengthSlider.addEventListener("input", () => {
+            if (!this.mmdManager.dofFocalLengthLinkedToCameraFov) {
+                this.mmdManager.dofFocalLength = Number(focalLengthSlider.value);
+            }
+            refreshValues();
+        });
+        refreshValues();
+    }
+
     private applyPostEffectBackendPanelState(root: HTMLElement | null, backend: PostEffectBackend): void {
         if (!root) return;
-        const classicPanel = root.querySelector<HTMLElement>('[data-postfx-backend-panel="classic"]');
+        const classicPanels = Array.from(root.querySelectorAll<HTMLElement>('[data-postfx-backend-panel="classic"]'));
         const frameGraphPanel = root.querySelector<HTMLElement>('[data-postfx-backend-panel="frameGraph"]');
         const backendValue = root.querySelector<HTMLElement>('span[data-postfx-val="backend"]');
         const dofControls = root.querySelector<HTMLElement>(".shader-postfx-dof-controls");
+        const classicOnlyRows = Array.from(root.querySelectorAll<HTMLElement>("[data-postfx-classic-only]"));
+        const dofRowByControlId = (id: string): HTMLElement | null => {
+            return root.querySelector<HTMLElement>(`#${id}`)?.closest<HTMLElement>(".effect-row") ?? null;
+        };
+        const setFrameGraphDofRowState = (row: HTMLElement | null, visibleInFrameGraph: boolean): void => {
+            if (!row) return;
+            if (backend === "frameGraph") {
+                if (row.dataset.frameGraphPrevHidden === undefined) {
+                    row.dataset.frameGraphPrevHidden = row.hidden ? "true" : "false";
+                    row.dataset.frameGraphPrevDisplay = row.style.display;
+                }
+                row.hidden = !visibleInFrameGraph;
+                row.style.display = visibleInFrameGraph ? "grid" : "none";
+                return;
+            }
+            if (row.dataset.frameGraphPrevHidden !== undefined) {
+                row.hidden = row.dataset.frameGraphPrevHidden === "true";
+                row.style.display = row.dataset.frameGraphPrevDisplay ?? "";
+                delete row.dataset.frameGraphPrevHidden;
+                delete row.dataset.frameGraphPrevDisplay;
+            }
+        };
 
-        if (classicPanel) classicPanel.hidden = backend !== "classic";
+        for (const classicPanel of classicPanels) {
+            classicPanel.hidden = backend !== "classic";
+        }
         if (frameGraphPanel) frameGraphPanel.hidden = backend !== "frameGraph";
         if (dofControls) {
             const visible = backend === "classic";
             dofControls.hidden = !visible;
             dofControls.style.display = visible ? "" : "none";
+        }
+        const frameGraphDofVisibleControls = new Set([
+            "effect-dof-enabled",
+            "effect-dof-focus",
+            "effect-dof-target-model",
+            "effect-dof-target-bone",
+            "effect-dof-focus-offset",
+            "effect-dof-fstop",
+            "effect-dof-lens-size",
+            "effect-dof-focal-length",
+        ]);
+        const frameGraphDofControlledRows = [
+            "effect-dof-enabled",
+            "effect-dof-quality",
+            "effect-dof-focus",
+            "effect-dof-target-model",
+            "effect-dof-target-bone",
+            "effect-dof-focus-offset",
+            "effect-dof-fstop",
+            "effect-dof-near-suppression",
+            "effect-dof-focal-invert",
+            "effect-dof-lens-size",
+            "effect-dof-lens-blur",
+            "effect-fog-enabled",
+            "effect-fog-mode",
+            "effect-fog-start",
+            "effect-fog-end",
+            "effect-fog-density",
+            "effect-fog-opacity",
+            "effect-fog-color-r",
+            "effect-fog-color-g",
+            "effect-fog-color-b",
+            "effect-dof-focal-length",
+        ];
+        for (const controlId of frameGraphDofControlledRows) {
+            setFrameGraphDofRowState(
+                dofRowByControlId(controlId),
+                frameGraphDofVisibleControls.has(controlId),
+            );
+        }
+        for (const row of classicOnlyRows) {
+            row.hidden = backend !== "classic";
+            row.style.display = backend === "classic" ? "" : "none";
         }
         if (backendValue) {
             backendValue.textContent = backend === "frameGraph" ? "Frame Graph" : "Classic";

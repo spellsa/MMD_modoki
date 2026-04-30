@@ -4608,12 +4608,26 @@ ${beforeFogAppendBlock}
             contrast: this.postEffectContrastValue,
             gammaPower: this.postEffectGammaValue,
             imageProcessingEnabled: this.isImageProcessingEffectsEnabled(),
+            dofEnabled: this.dofEnabledValue,
+            dofBlurLevel: this.dofBlurLevelValue,
+            dofFocusDistanceMm: this.dofFocusDistanceMmValue,
+            dofEffectiveFStop: this.dofFStopValue,
+            dofLensSize: this.dofLensSizeValue,
+            dofFocalLength: this.dofFocalLengthValue,
+            bloomEnabled: this.postEffectBloomEnabledValue,
+            bloomWeight: this.postEffectBloomWeightValue,
+            bloomThreshold: this.postEffectBloomThresholdValue,
+            bloomKernel: this.postEffectBloomKernelValue,
         }));
 
+        this.configureDofDepthRenderer();
         const sourceTexture = this.createFrameGraphPostEffectsSceneColorTarget();
+        const depthTexture = this.depthRenderer?.getDepthMap().getInternalTexture() ?? null;
         const activated = this.frameGraphPostEffectsController.activate(
             this.scene,
             sourceTexture?.getInternalTexture() ?? null,
+            depthTexture,
+            this.camera,
         );
         if (!activated) {
             this.disposeFrameGraphPostEffectsSceneColorTarget();
