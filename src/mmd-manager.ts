@@ -4607,6 +4607,7 @@ ${beforeFogAppendBlock}
         }, () => ({
             contrast: this.postEffectContrastValue,
             gammaPower: this.postEffectGammaValue,
+            imageProcessingEnabled: this.isImageProcessingEffectsEnabled(),
         }));
 
         const sourceTexture = this.createFrameGraphPostEffectsSceneColorTarget();

@@ -2379,8 +2379,7 @@ export class UIController {
                     </select>
                     <span data-postfx-val="backend" class="effect-value">Classic</span>
                 </div>
-                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
-                <div class="effect-row" style="display:none;">
+                <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
                     <input data-postfx="contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
                     <span data-postfx-val="contrast" class="effect-value">0%</span>
@@ -2390,6 +2389,23 @@ export class UIController {
                     <input data-postfx="gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
+                <div class="effect-row effect-row-check">
+                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
+                    <label class="effect-check-wrap">
+                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
+                        <span data-i18n="status.on">On</span>
+                    </label>
+                    <select data-postfx-select="lut-preset" class="effect-select">
+                        ${lutPresetOptionsHtml}
+                    </select>
+                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
+                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
+                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row" style="display:none;">
                     <span class="effect-label" data-i18n="shader.postfx.exposure">Exposure</span>
                     <input data-postfx="exposure" type="range" class="effect-slider" min="0" max="8" value="1" step="0.01">
@@ -2474,22 +2490,6 @@ export class UIController {
                     <input data-postfx="edge-width" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="edge-width" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row effect-row-check">
-                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
-                    <label class="effect-check-wrap">
-                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
-                        <span data-i18n="status.on">On</span>
-                    </label>
-                    <select data-postfx-select="lut-preset" class="effect-select">
-                        ${lutPresetOptionsHtml}
-                    </select>
-                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
-                </div>
-                <div class="effect-row">
-                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
-                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
-                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
-                </div>
                 <div class="effect-row effect-row-toggle">
                     <span class="effect-label" data-i18n="shader.postfx.bloom">Bloom</span>
                     <label class="effect-check-wrap">
@@ -2527,12 +2527,12 @@ export class UIController {
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
                         <strong>Frame Graph</strong><br>
-                        Experimental scene color RT handoff. Current pass tests Gamma/Contrast without ImageProcessingTask.
+                        Experimental backend. Gamma / Contrast and built-in LUT presets are available above; other post effects are still being migrated.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
+                        <span class="effect-value">Image</span>
                         <span class="effect-value">Color</span>
-                        <span class="effect-value">Debug</span>
                     </div>
                 </div>
             </div>

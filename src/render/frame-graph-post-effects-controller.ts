@@ -1,5 +1,6 @@
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
+import { FrameGraphImageProcessingTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/imageProcessingTask";
 import { FrameGraphPostProcessTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/postProcessTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/frameGraphRenderPass";
@@ -7,6 +8,7 @@ import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGr
 import { EffectWrapper } from "@babylonjs/core/Materials/effectRenderer";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
+import { ThinImageProcessingPostProcess } from "@babylonjs/core/PostProcesses/thinImageProcessingPostProcess";
 import type { Scene } from "@babylonjs/core/scene";
 
 export type FrameGraphPostEffectsWarning = {
@@ -22,6 +24,7 @@ export type FrameGraphPostEffectsInfo = {
 export type FrameGraphPostEffectsSettings = {
     contrast: number;
     gammaPower: number;
+    imageProcessingEnabled: boolean;
 };
 
 function ensureColorCorrectionShaders(): void {
@@ -102,10 +105,13 @@ class FrameGraphPostEffectsColorCorrectionTask extends FrameGraphPostProcessTask
 export class FrameGraphPostEffectsController {
     private activationWarningEmitted = false;
     private colorCorrectionEffect: EffectWrapper | null = null;
+    private imageProcessingEffect: ThinImageProcessingPostProcess | null = null;
+    private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
     private frameGraph: FrameGraph | null = null;
     private ready = false;
     private active = false;
     private executedFrameCount = 0;
+    private lastImageProcessingEnabled: boolean | null = null;
 
     constructor(
         private readonly onWarning: (warning: FrameGraphPostEffectsWarning) => void,
@@ -113,6 +119,7 @@ export class FrameGraphPostEffectsController {
         private readonly getSettings: () => FrameGraphPostEffectsSettings = () => ({
             contrast: 1,
             gammaPower: 1,
+            imageProcessingEnabled: false,
         }),
     ) {}
 
@@ -146,6 +153,31 @@ export class FrameGraphPostEffectsController {
             "frameGraphPostEffectsSceneColor",
             sourceTexture,
         );
+
+        this.imageProcessingEffect = new ThinImageProcessingPostProcess(
+            "frameGraphPostEffectsImageProcessing",
+            frameGraph.engine,
+            {
+                scene,
+                shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+            },
+        );
+        // The imported scene-color RT comes from the existing editor render path.
+        // Treat it as display/gamma-space input so ImageProcessingTask does not
+        // apply an extra final gamma lift when LUT is enabled.
+        this.imageProcessingEffect.fromLinearSpace = false;
+        const imageProcessingTask = new FrameGraphImageProcessingTask(
+            "frameGraphPostEffectsImageProcessing",
+            frameGraph,
+            this.imageProcessingEffect,
+        );
+        const initialSettings = this.getSettings();
+        imageProcessingTask.sourceTexture = sourceTextureHandle;
+        imageProcessingTask.disabled = !initialSettings.imageProcessingEnabled;
+        this.lastImageProcessingEnabled = initialSettings.imageProcessingEnabled;
+        frameGraph.addTask(imageProcessingTask);
+        this.imageProcessingTask = imageProcessingTask;
+
         const colorCorrectionTask = new FrameGraphPostEffectsColorCorrectionTask(
             "frameGraphPostEffectsColorCorrection",
             frameGraph,
@@ -155,7 +187,7 @@ export class FrameGraphPostEffectsController {
             },
             this.getSettings,
         );
-        colorCorrectionTask.sourceTexture = sourceTextureHandle;
+        colorCorrectionTask.sourceTexture = imageProcessingTask.outputTexture;
         frameGraph.addTask(colorCorrectionTask);
 
         const outputTask = new FrameGraphCopyToBackbufferColorTask(
@@ -168,7 +200,7 @@ export class FrameGraphPostEffectsController {
         this.frameGraph = frameGraph;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (color correction only).",
+            message: "Frame Graph post effects backend active (image processing + color correction).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -193,6 +225,14 @@ export class FrameGraphPostEffectsController {
         if (!this.active || !this.ready || !this.frameGraph?.isReady()) {
             return;
         }
+        const settings = this.getSettings();
+        if (this.imageProcessingTask) {
+            this.imageProcessingTask.disabled = !settings.imageProcessingEnabled;
+        }
+        if (this.imageProcessingEffect && this.lastImageProcessingEnabled !== settings.imageProcessingEnabled) {
+            this.imageProcessingEffect._updateParameters();
+            this.lastImageProcessingEnabled = settings.imageProcessingEnabled;
+        }
         this.frameGraph.execute();
     }
 
@@ -210,11 +250,15 @@ export class FrameGraphPostEffectsController {
     dispose(): void {
         this.colorCorrectionEffect?.dispose();
         this.colorCorrectionEffect = null;
+        this.imageProcessingEffect?.dispose();
+        this.imageProcessingEffect = null;
+        this.imageProcessingTask = null;
         this.frameGraph?.dispose();
         this.frameGraph = null;
         this.ready = false;
         this.active = false;
         this.executedFrameCount = 0;
+        this.lastImageProcessingEnabled = null;
         this.activationWarningEmitted = false;
     }
 }
