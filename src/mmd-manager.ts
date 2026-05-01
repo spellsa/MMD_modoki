@@ -4624,6 +4624,8 @@ ${beforeFogAppendBlock}
             ssaoEnabled: this.postEffectSsaoEnabledValue,
             ssaoStrength: this.postEffectSsaoStrengthValue,
             ssaoRadius: this.postEffectSsaoRadiusValue,
+            ssaoShadowColor: this.getShadowColor(),
+            ssaoToonInfluence: this.toonShadowInfluenceValue,
             antialiasEnabled: this.antialiasEnabledValue,
         }));
 

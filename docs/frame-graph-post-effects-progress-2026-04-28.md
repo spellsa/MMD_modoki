@@ -409,3 +409,64 @@ Frame Graph 移行の最初の難所だった「通常描画の scene color を 
 - SSAO ON 時の FPS 低下が許容範囲か。特に geometry pass 追加分のコストを見る。
 - PNG / WebM 出力に Frame Graph SSAO2 が正しく乗るか。
 - Classic WebGPU fallback SSAO にあった fade / debug / toon tint を Frame Graph 側にも移す価値があるか。
+
+## 2026-05-01 追記 7: Frame Graph SSAO2 の影色 / Toon 寄せ
+
+- Frame Graph SSAO2 の後段に独自 `SSAOToonComposite` post process を追加した。
+- Babylon 公式 `FrameGraphSSAO2RenderingPipelineTask` の combine は `sceneColor * ssaoColor` の黒乗算寄り合成なので、そのままだと MMD の影色や Toon 感とずれやすい。
+- 追加 post process では、SSAO2 後の色と SSAO2 前の色を比較して AO 量を推定し、暗くなる部分だけを MMD 向けの影色へ寄せる。
+- 影色は照明 UI の `shadowColor` / `toonShadowInfluence` を `FrameGraphPostEffectsSettings` 経由で渡す。
+- Toon については、現時点では fullscreen 後段から各材質の `toonTexture` を直接サンプリングできない。
+  - そのため、SSAO2 前の描画色に既に含まれている材質色 / Toon 階調の色相を近似として使う。
+  - 厳密に材質ごとの Toon texture 色を使うには、material id / toon band / shadow color などを別の geometry buffer として出す必要がある。
+- 今回の実装は、公式 SSAO2 を壊さずに「黒い AO」から「影色と描画済み Toon 色に寄せた AO」へ近づける最小変更。
+
+未確認:
+
+- 影色スライダーを青 / 赤 / 緑へ振った時に SSAO 暗部の色相が自然に追従するか。
+- Toon 影が強いモデルで、SSAO 暗部がモデル固有の Toon 色と馴染むか。
+- 白服 / 黒髪 / 低彩度材質で色転びや汚れが出ないか。
+- 直接 toonTexture を読む専用 buffer が必要になるか。
+
+## 2026-05-01 追記 8: SSAO 白目黒ずみ対策
+
+- Frame Graph SSAO2 の影色 / Toon 寄せ composite に、明るい低彩度ピクセル向けの AO 抑制を追加した。
+- 白目は高輝度・低彩度・小面積なので、通常の SSAO 黒乗算がかなり目立つ。
+- 材質 ID や toonTexture 直読なしでまず効かせるため、SSAO 前の描画色から以下を判定する。
+  - `baseMax` が高い。
+  - `baseChroma` が低い。
+- 条件に合うピクセルでは AO 量を約 24% まで抑え、SSAO2 後の黒い結果よりも元色寄りへ戻す。
+- この処理は白目だけを厳密に識別するものではないため、白服や淡い低彩度材質にも少し効く。
+
+未確認:
+
+- 白目の黒ずみが自然に減るか。
+- 白服の接地影 / 皺影まで弱くなりすぎないか。
+- 必要なら将来、材質名 / material id / toon-color buffer ベースの保護へ進める。
+
+## 2026-05-01 追記 9: SSAO 近傍色ベースの影色補正
+
+- Frame Graph SSAO2 の `SSAOToonComposite` に、SSAO 前の `originalColor` 近傍ピクセルを使う補正を追加した。
+- 目的は、SSAO の暗部を常に黒寄りで乗せるのではなく、周辺の明るさ / 色に寄せて乗せること。
+  - 明るい周辺では AO の乗算色を明るめにする。
+  - 暗い周辺では AO の乗算色を暗めにする。
+- 実装は追加 buffer なしの軽量版。
+  - composite shader 内で上下左右 4 点の `originalColor` を読む。
+  - 中心色との差が大きいサンプルは weight を下げ、輪郭をまたいだ色移りを抑える。
+  - 近傍平均色から hue / luminance を取り、既存の影色 / Toon 寄せ band に控えめに混ぜる。
+- WGSL ではピクセルごとの分岐後に `textureSample` を呼ぶと `must only be called from uniform control flow` で shader module 作成に失敗する。
+  - 近傍サンプルは `textureSampleLevel(..., 0.0)` を使い、非 uniform 分岐後でも derivative 不要の明示 LOD サンプルにする。
+- 白目のような明るい低彩度領域は、既存の bright-neutral 保護で AO 量を抑えつつ、近傍色補正の影響も少し抑える。
+
+注意:
+
+- fullscreen 後段の近傍色補正なので、厳密な材質単位の toonTexture 参照ではない。
+- 目や髪の細部では、色差 rejection の閾値次第で色移り / 効き不足のどちらも起こり得る。
+- より安定させる場合は、低解像度の neighborhood color buffer、または material id / toon-color buffer を別 pass で出す案を再検討する。
+
+## 2026-05-01 追記 10: Frame Graph SSAO UI レンジ調整
+
+- Frame Graph backend 専用の SSAO Strength / Radius slider 上限を `200` から `100` に下げた。
+- 実機確認では 1.0 を超える範囲より、0.0-1.0 の範囲を細かく触れるほうが調整しやすい。
+- Frame Graph backend 選択時は、既存値が 1.0 を超えている場合に UI 初期化時点で 1.0 へ丸める。
+- Classic backend の SSAO UI とは DOM を共有しない方針を維持する。

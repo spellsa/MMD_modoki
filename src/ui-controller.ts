@@ -2580,13 +2580,13 @@ export class UIController {
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">SSAO Strength</span>
-                        <input data-frame-graph-ssao="strength" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                        <input data-frame-graph-ssao="strength" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
                         <span data-frame-graph-ssao-val="strength" class="effect-value">1.00</span>
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">SSAO Radius</span>
-                        <input data-frame-graph-ssao="radius" type="range" class="effect-slider" min="1" max="200" value="200" step="1">
-                        <span data-frame-graph-ssao-val="radius" class="effect-value">2.00</span>
+                        <input data-frame-graph-ssao="radius" type="range" class="effect-slider" min="1" max="100" value="100" step="1">
+                        <span data-frame-graph-ssao-val="radius" class="effect-value">1.00</span>
                     </div>
                     <div class="effect-row effect-row-toggle">
                         <span class="effect-label">DoF</span>
@@ -2805,15 +2805,20 @@ export class UIController {
             return;
         }
 
+        if (this.getConfiguredPostEffectBackend() === "frameGraph") {
+            this.mmdManager.postEffectSsaoStrength = Math.min(this.mmdManager.postEffectSsaoStrength, 1);
+            this.mmdManager.postEffectSsaoRadius = Math.min(this.mmdManager.postEffectSsaoRadius, 1);
+        }
+
         const refreshValues = (): void => {
             const enabled = this.mmdManager.postEffectSsaoEnabled;
             enabledInput.checked = enabled;
             enabledValue.textContent = enabled ? t("status.on") : t("status.off");
-            strengthSlider.value = String(Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectSsaoStrength * 100))));
+            strengthSlider.value = String(Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectSsaoStrength * 100))));
             strengthValue.textContent = enabled
                 ? this.mmdManager.postEffectSsaoStrength.toFixed(2)
                 : t("status.off");
-            radiusSlider.value = String(Math.max(1, Math.min(200, Math.round(this.mmdManager.postEffectSsaoRadius * 100))));
+            radiusSlider.value = String(Math.max(1, Math.min(100, Math.round(this.mmdManager.postEffectSsaoRadius * 100))));
             radiusValue.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
             strengthSlider.disabled = !enabled;
             radiusSlider.disabled = !enabled;
