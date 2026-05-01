@@ -2531,7 +2531,7 @@ export class UIController {
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
                         <strong>Frame Graph</strong><br>
-                        Experimental backend. Gamma / Contrast, DoF, and Bloom are available above; LUT remains on the Classic backend for now.
+                        Experimental backend. Gamma / Contrast, DoF, Bloom, Sharpen, Grain, Chroma, and FXAA are available above; SSAO and LUT remain on the Classic backend for now.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
@@ -2539,6 +2539,10 @@ export class UIController {
                         <span class="effect-value">DoF</span>
                         <span class="effect-value">Bloom</span>
                         <span class="effect-value">Color</span>
+                        <span class="effect-value">Sharp</span>
+                        <span class="effect-value">Grain</span>
+                        <span class="effect-value">Chroma</span>
+                        <span class="effect-value">FXAA</span>
                     </div>
                     <div class="effect-row">
                         <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
@@ -2549,6 +2553,21 @@ export class UIController {
                         <span class="effect-label" data-i18n="shader.postfx.gamma">Gamma</span>
                         <input data-postfx="frame-graph-gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                         <span data-postfx-val="frame-graph-gamma" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.chroma">Chroma</span>
+                        <input data-postfx="frame-graph-chromatic-aberration" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
+                        <span data-postfx-val="frame-graph-chromatic-aberration" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.grain">Grain</span>
+                        <input data-postfx="frame-graph-grain-intensity" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-grain-intensity" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.sharpen">Sharpen</span>
+                        <input data-postfx="frame-graph-sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
+                        <span data-postfx-val="frame-graph-sharpen-edge" class="effect-value" data-i18n="status.off">OFF</span>
                     </div>
                     <div class="effect-row effect-row-toggle">
                         <span class="effect-label">DoF</span>

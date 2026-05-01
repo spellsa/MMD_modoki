@@ -20,6 +20,10 @@ type ColorPostFxElements = {
     grainValue: HTMLElement;
     sharpenInput: HTMLInputElement;
     sharpenValue: HTMLElement;
+    frameGraphGrainInput: HTMLInputElement | null;
+    frameGraphGrainValue: HTMLElement | null;
+    frameGraphSharpenInput: HTMLInputElement | null;
+    frameGraphSharpenValue: HTMLElement | null;
     colorCurvesInput: HTMLInputElement;
     colorCurvesValue: HTMLElement;
 };
@@ -51,6 +55,10 @@ function resolveColorPostFxElements(root: ParentNode): ColorPostFxElements | nul
     const grainValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="grain-intensity"]');
     const sharpenInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="sharpen-edge"]');
     const sharpenValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="sharpen-edge"]');
+    const frameGraphGrainInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="frame-graph-grain-intensity"]');
+    const frameGraphGrainValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="frame-graph-grain-intensity"]');
+    const frameGraphSharpenInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="frame-graph-sharpen-edge"]');
+    const frameGraphSharpenValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="frame-graph-sharpen-edge"]');
     const colorCurvesInput = queryRequired<HTMLInputElement>(root, 'input[data-postfx="color-curves-saturation"]');
     const colorCurvesValue = queryRequired<HTMLElement>(root, 'span[data-postfx-val="color-curves-saturation"]');
 
@@ -94,6 +102,10 @@ function resolveColorPostFxElements(root: ParentNode): ColorPostFxElements | nul
         grainValue,
         sharpenInput,
         sharpenValue,
+        frameGraphGrainInput,
+        frameGraphGrainValue,
+        frameGraphSharpenInput,
+        frameGraphSharpenValue,
         colorCurvesInput,
         colorCurvesValue,
     };
@@ -169,16 +181,54 @@ export class ColorPostFxController {
 
         const applyGrainIntensity = (): void => {
             this.mmdManager.postEffectGrainIntensity = Number(elements.grainInput.value);
-            elements.grainValue.textContent = this.mmdManager.postEffectGrainIntensity > 0.000001
+            syncGrainUi();
+        };
+
+        const applyFrameGraphGrainIntensity = (): void => {
+            if (!elements.frameGraphGrainInput) {
+                return;
+            }
+            this.mmdManager.postEffectGrainIntensity = Number(elements.frameGraphGrainInput.value);
+            syncGrainUi();
+        };
+
+        const syncGrainUi = (): void => {
+            const value = String(Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectGrainIntensity))));
+            const label = this.mmdManager.postEffectGrainIntensity > 0.000001
                 ? this.mmdManager.postEffectGrainIntensity.toFixed(1)
                 : t("status.off");
+            elements.grainInput.value = value;
+            elements.grainValue.textContent = label;
+            if (elements.frameGraphGrainInput && elements.frameGraphGrainValue) {
+                elements.frameGraphGrainInput.value = value;
+                elements.frameGraphGrainValue.textContent = label;
+            }
         };
 
         const applySharpenEdge = (): void => {
             this.mmdManager.postEffectSharpenEdge = Number(elements.sharpenInput.value) / 100;
-            elements.sharpenValue.textContent = this.mmdManager.postEffectSharpenEdge > 0.000001
+            syncSharpenUi();
+        };
+
+        const applyFrameGraphSharpenEdge = (): void => {
+            if (!elements.frameGraphSharpenInput) {
+                return;
+            }
+            this.mmdManager.postEffectSharpenEdge = Number(elements.frameGraphSharpenInput.value) / 100;
+            syncSharpenUi();
+        };
+
+        const syncSharpenUi = (): void => {
+            const value = String(Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))));
+            const label = this.mmdManager.postEffectSharpenEdge > 0.000001
                 ? this.mmdManager.postEffectSharpenEdge.toFixed(2)
                 : t("status.off");
+            elements.sharpenInput.value = value;
+            elements.sharpenValue.textContent = label;
+            if (elements.frameGraphSharpenInput && elements.frameGraphSharpenValue) {
+                elements.frameGraphSharpenInput.value = value;
+                elements.frameGraphSharpenValue.textContent = label;
+            }
         };
 
         const applyColorCurves = (): void => {
@@ -203,9 +253,15 @@ export class ColorPostFxController {
         elements.grainInput.value = String(
             Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectGrainIntensity))),
         );
+        if (elements.frameGraphGrainInput) {
+            elements.frameGraphGrainInput.value = elements.grainInput.value;
+        }
         elements.sharpenInput.value = String(
             Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))),
         );
+        if (elements.frameGraphSharpenInput) {
+            elements.frameGraphSharpenInput.value = elements.sharpenInput.value;
+        }
         elements.colorCurvesInput.value = String(
             Math.max(
                 -100,
@@ -218,8 +274,8 @@ export class ColorPostFxController {
         applyExposure();
         applyDithering();
         applyVignette();
-        applyGrainIntensity();
-        applySharpenEdge();
+        syncGrainUi();
+        syncSharpenUi();
         applyColorCurves();
 
         elements.contrastInput.addEventListener("input", () => applyContrast(elements.contrastInput));
@@ -235,6 +291,8 @@ export class ColorPostFxController {
         elements.vignetteInput.addEventListener("input", applyVignette);
         elements.grainInput.addEventListener("input", applyGrainIntensity);
         elements.sharpenInput.addEventListener("input", applySharpenEdge);
+        elements.frameGraphGrainInput?.addEventListener("input", applyFrameGraphGrainIntensity);
+        elements.frameGraphSharpenInput?.addEventListener("input", applyFrameGraphSharpenEdge);
         elements.colorCurvesInput.addEventListener("input", applyColorCurves);
 
         return true;

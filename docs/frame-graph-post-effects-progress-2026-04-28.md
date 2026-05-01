@@ -312,3 +312,63 @@ ImageProcessing / LUT 周りの注意:
 Frame Graph 移行の最初の難所だった「通常描画の scene color を Frame Graph に渡す」部分は、独立 RT 方式で一応越えられている。
 
 ただし、まだ本格移行完了ではない。次の山は SSAO / DoF のような depth や multi pass に価値がある post effects。LUT は Classic backend の安定経路を残し、Frame Graph backend では Gamma / Contrast までを実用範囲として扱ってよい。v0.2 では Classic を安定経路、Frame Graph を実験 backend として、小さな単位で移行する方針が妥当。
+
+## 2026-05-01 追記: Frame Graph SSAO2 PoC
+
+- Babylon.js 9.2.0 の公式 `FrameGraphSSAO2RenderingPipelineTask` を使う PoC を追加した。
+- task chain は `scene color RT -> ImageProcessingTask -> SSAO2 -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> backbuffer copy`。
+- `FrameGraphSSAO2RenderingPipelineTask` は `sourceTexture` だけでは動かず、camera view-space の `depthTexture` と `normalTexture` が必須。
+- そのため `FrameGraphGeometryRendererTask` を同じ FrameGraph 内に追加し、`PREPASS_DEPTH_TEXTURE_TYPE` と `PREPASS_NORMAL_TEXTURE_TYPE` を生成して SSAO2 に渡す。
+- geometry renderer の depth は当初 Babylon の Node Render Graph geometry renderer block 既定値に寄せて `TEXTUREFORMAT_RED` / `TEXTURETYPE_FLOAT` としたが、WebGPU で `RenderPipeline_r32float_nodepth_samples1_textureState1` が invalid になり警告が大量発生した。
+- 対策として depth も `TEXTUREFORMAT_RGBA` / `TEXTURETYPE_HALF_FLOAT` に変更した。SSAO2 shader は depth sampler の `.r` を読むため、RGBA化しても先頭チャンネルの値を使える想定。
+- SSAO2 の有効化時だけ geometry renderer と SSAO2 task を実行するようにし、無効時は disabled pass で入力色を後段へ流す。
+- Frame Graph backend 時は Classic 側の `SSAO2RenderingPipeline`、独自 fullscreen SSAO fallback、SSAO 用 `DepthRenderer` を止める。新旧 SSAO が重なると見た目と性能の切り分けができないため。
+- UI は Frame Graph backend panel 内に専用の `SSAO / Strength / Radius` を追加した。Classic 側の実験 SSAO UI とは共有しない。
+
+注意点:
+
+- `FrameGraphGeometryRendererTask` は MMD 材質、透過材質、outline、髪やスカートの描画順と相性確認が必要。公式 task を使えても、geometry texture の中身が MMD の見た目に十分合うとは限らない。
+- 現行の Classic WebGPU fallback SSAO は MMD 向けに toon 寄せ合成や fade/debug を持っているが、Frame Graph SSAO2 はまず公式 task 準拠に寄せたため、fade/debug/tint は未移行。
+- SSAO2 は geometry pass を追加するため重い。FPS 低下、PNG/WebM 出力、DoF/Bloom との順序差を実機で確認する。
+- 白化や白浮きが出た場合は、まず `scene color RT -> backbuffer copy`、次に `ImageProcessingTask disabled`、次に `SSAO2 disabled` の順で切り分ける。SSAO2 自体は color space 変換ではなく depth/normal 依存の暗部合成なので、白化が出る場合は前段/後段の color task か imported RT の扱いを疑う。
+
+## 2026-05-01 追記 2: Frame Graph SSAO2 は一旦無効化
+
+- 実機ログで、`FrameGraphGeometryRendererTask` の render pass が WebGPU 警告を大量に出し、画面が黒くなる問題を確認した。
+- 最初は depth texture description を `TEXTUREFORMAT_RED` / `TEXTURETYPE_FLOAT` にしていたため `RenderPipeline_r32float_nodepth_samples1_textureState1` が invalid になった。
+- depth / normal を `TEXTUREFORMAT_RGBA` / `TEXTURETYPE_HALF_FLOAT` に変えても、次は `RenderPipeline_rgba16float_nodepth_samples1_textureState1` が invalid になった。
+- そのため、主因は texture format ではなく、公式 `FrameGraphGeometryRendererTask` がこの経路で `nodepth` の geometry render pass を作っている点、または MMD 材質側の WebGPU pipeline state とその render pass の組み合わせにある可能性が高い。
+- 黒画面を避けるため、Frame Graph backend から `FrameGraphGeometryRendererTask` / `FrameGraphSSAO2RenderingPipelineTask` の実行と SSAO UI 露出を一旦外した。
+- 現在の Frame Graph backend は `scene color RT -> ImageProcessingTask -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> backbuffer copy` に戻す。
+- Classic backend の SSAO は退避経路として残す。ただし Frame Graph backend では Classic SSAO も止め、UI 上も移行済み項目だけを出す方針を維持する。
+
+今後 SSAO を再開する場合の候補:
+
+- 公式 `FrameGraphGeometryRendererTask` に明示的な depth attachment を渡せるか、Babylon.js の公式サンプル / Playground で確認する。
+- MMD 材質を geometry texture 生成用の簡易 material / override material に寄せ、通常材質 pipeline を geometry pass に通さない構成を検討する。
+- 公式 SSAO2 task にこだわらず、既存 `DepthRenderer` の depth texture を import し、独自 `FrameGraphPostProcessTask` で MMD 向け SSAO fallback を Frame Graph 化する。
+- いずれの場合も、再有効化前に `*_nodepth_*` pipeline 警告が出ないこと、Frame Graph backend 切替時に黒画面にならないことを先に確認する。
+
+## 2026-05-01 追記 3: Frame Graph FXAA 移行
+
+- 公式 `FrameGraphFXAATask` を使い、Frame Graph backend の最終段に FXAA を追加した。
+- task chain は `scene color RT -> ImageProcessingTask -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> FXAATask -> backbuffer copy`。
+- FXAA は depth / normal を要求しない単純な post process なので、SSAO2 のような geometry pass は追加しない。
+- 既存の `antialiasEnabled` 設定値をそのまま使い、Frame Graph backend では `FrameGraphFXAATask.disabled` に反映する。
+- Classic backend の `FxaaPostProcess` は Frame Graph backend では生成しない。二重 FXAA を避け、Frame Graph backend の pass 表示と実行経路を一致させるため。
+- UI の Frame Graph pass 表示は `Image / DoF / Bloom / Color / FXAA` に更新した。アンチエイリアスの ON/OFF 操作自体は既存の Runtime 側 AA toggle を引き続き使う。
+
+## 2026-05-01 追記 4: 公式 task で移せる軽量 post effects
+
+- 公式 task があり、depth / normal / velocity を要求しない軽量 post effects として以下を Frame Graph backend に追加した。
+  - `FrameGraphSharpenTask`
+  - `FrameGraphGrainTask`
+  - `FrameGraphChromaticAberrationTask`
+- task chain は `scene color RT -> ImageProcessingTask -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> SharpenTask -> GrainTask -> ChromaticAberrationTask -> FXAATask -> backbuffer copy`。
+- 既存設定値はそのまま共有する。
+  - `postEffectSharpenEdge`
+  - `postEffectGrainIntensity`
+  - `postEffectChromaticAberration`
+- UI は Frame Graph backend panel 内に専用 slider を追加し、Classic backend の UI DOM とは分けた。内部設定値は共有し、backend に応じて実行経路だけを切り替える。
+- Frame Graph backend では Classic `DefaultRenderingPipeline` 側の sharpen / grain / chromatic aberration を無効化する。二重適用を避け、Frame Graph pass 表示と実行内容を一致させるため。
+- lens distortion / edge blur / motion blur / SSR / SSAO は今回は対象外。独自 shader、depth/normal、velocity、geometry pass が絡むため、公式 task 寄せで安全に移せるものから外した。

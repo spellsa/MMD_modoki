@@ -41,6 +41,31 @@ export function syncShaderContactAoState(host: any): void {
 }
 
 export function applySsaoSettings(host: any): void {
+    if (host.postEffectBackend === "frameGraph") {
+        const previousEnabled = host.constructor.toonContactAoEnabled;
+        host.constructor.toonContactAoEnabled = false;
+        host.constructor.toonContactAoStrength = 0;
+        host.constructor.toonContactAoRadius = 0.8;
+        host.constructor.toonContactAoDebugView = false;
+        host.constructor.toonContactAoDepthRenderer = null;
+        if (previousEnabled) {
+            host.scene.markAllMaterialsAsDirty(127);
+        }
+        if (host.ssaoRenderingPipeline) {
+            host.ssaoRenderingPipeline.dispose(true);
+            host.ssaoRenderingPipeline = null;
+        }
+        if (host.ssaoPostProcess) {
+            host.ssaoPostProcess.dispose(host.camera);
+            host.ssaoPostProcess = null;
+        }
+        if (host.ssaoDepthRenderer) {
+            disposeSsaoDepthRenderer(host);
+        }
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
     if (host.isWebGpuEngine()) {
         if (host.ssaoRenderingPipeline) {
             host.ssaoRenderingPipeline.dispose(true);

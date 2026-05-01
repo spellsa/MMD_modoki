@@ -1051,6 +1051,10 @@ export function applyAntialiasSettings(host: any): void {
         host.finalAntialiasPostProcess.dispose(host.camera);
         host.finalAntialiasPostProcess = null;
     }
+    if (host.postEffectBackend === "frameGraph") {
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
     if (!host.antialiasEnabledValue) {
         host.enforceFinalPostProcessOrder();
         return;
@@ -1305,7 +1309,9 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
 
     pipeline.glowLayerEnabled = false;
 
-    pipeline.chromaticAberrationEnabled = host.postEffectChromaticAberrationValue > 1e-4;
+    const useClassicDefaultPipelineEffects = host.postEffectBackend === "classic";
+
+    pipeline.chromaticAberrationEnabled = useClassicDefaultPipelineEffects && host.postEffectChromaticAberrationValue > 1e-4;
     if (pipeline.chromaticAberration) {
         pipeline.chromaticAberration.aberrationAmount = host.postEffectChromaticAberrationValue;
         pipeline.chromaticAberration.radialIntensity = 2.2;
@@ -1315,13 +1321,13 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
         pipeline.chromaticAberration.screenHeight = host.engine.getRenderHeight();
     }
 
-    pipeline.grainEnabled = host.postEffectGrainIntensityValue > 1e-4;
+    pipeline.grainEnabled = useClassicDefaultPipelineEffects && host.postEffectGrainIntensityValue > 1e-4;
     if (pipeline.grain) {
         pipeline.grain.intensity = host.postEffectGrainIntensityValue;
         pipeline.grain.animated = false;
     }
 
-    pipeline.sharpenEnabled = host.postEffectSharpenEdgeValue > 1e-4;
+    pipeline.sharpenEnabled = useClassicDefaultPipelineEffects && host.postEffectSharpenEdgeValue > 1e-4;
     if (pipeline.sharpen) {
         pipeline.sharpen.edgeAmount = host.postEffectSharpenEdgeValue;
         pipeline.sharpen.colorAmount = 1;

@@ -4618,6 +4618,10 @@ ${beforeFogAppendBlock}
             bloomWeight: this.postEffectBloomWeightValue,
             bloomThreshold: this.postEffectBloomThresholdValue,
             bloomKernel: this.postEffectBloomKernelValue,
+            chromaticAberration: this.postEffectChromaticAberrationValue,
+            grainIntensity: this.postEffectGrainIntensityValue,
+            sharpenEdge: this.postEffectSharpenEdgeValue,
+            antialiasEnabled: this.antialiasEnabledValue,
         }));
 
         this.configureDofDepthRenderer();

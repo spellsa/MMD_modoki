@@ -1,17 +1,26 @@
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
 import { FrameGraphBloomTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/bloomTask";
+import { FrameGraphChromaticAberrationTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/chromaticAberrationTask";
 import { FrameGraphDepthOfFieldTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/depthOfFieldTask";
+import { FrameGraphFXAATask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/fxaaTask";
+import { FrameGraphGrainTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/grainTask";
 import { FrameGraphImageProcessingTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/imageProcessingTask";
 import { FrameGraphPostProcessTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/postProcessTask";
+import { FrameGraphSharpenTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/sharpenTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/frameGraphRenderPass";
 import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGraphRenderContext";
 import { EffectWrapper } from "@babylonjs/core/Materials/effectRenderer";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
+import { Vector2 } from "@babylonjs/core/Maths/math.vector";
+import { ThinChromaticAberrationPostProcess } from "@babylonjs/core/PostProcesses/thinChromaticAberrationPostProcess";
 import { ThinDepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/thinDepthOfFieldEffect";
+import { ThinFXAAPostProcess } from "@babylonjs/core/PostProcesses/thinFXAAPostProcess";
+import { ThinGrainPostProcess } from "@babylonjs/core/PostProcesses/thinGrainPostProcess";
 import { ThinImageProcessingPostProcess } from "@babylonjs/core/PostProcesses/thinImageProcessingPostProcess";
+import { ThinSharpenPostProcess } from "@babylonjs/core/PostProcesses/thinSharpenPostProcess";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
 
@@ -39,6 +48,10 @@ export type FrameGraphPostEffectsSettings = {
     bloomWeight: number;
     bloomThreshold: number;
     bloomKernel: number;
+    chromaticAberration: number;
+    grainIntensity: number;
+    sharpenEdge: number;
+    antialiasEnabled: boolean;
 };
 
 function ensureColorCorrectionShaders(): void {
@@ -123,6 +136,14 @@ export class FrameGraphPostEffectsController {
     private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
     private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
     private bloomTask: FrameGraphBloomTask | null = null;
+    private chromaticAberrationEffect: ThinChromaticAberrationPostProcess | null = null;
+    private chromaticAberrationTask: FrameGraphChromaticAberrationTask | null = null;
+    private grainEffect: ThinGrainPostProcess | null = null;
+    private grainTask: FrameGraphGrainTask | null = null;
+    private sharpenEffect: ThinSharpenPostProcess | null = null;
+    private sharpenTask: FrameGraphSharpenTask | null = null;
+    private fxaaEffect: ThinFXAAPostProcess | null = null;
+    private fxaaTask: FrameGraphFXAATask | null = null;
     private frameGraph: FrameGraph | null = null;
     private ready = false;
     private active = false;
@@ -146,6 +167,10 @@ export class FrameGraphPostEffectsController {
             bloomWeight: 1,
             bloomThreshold: 1,
             bloomKernel: 100,
+            chromaticAberration: 0,
+            grainIntensity: 0,
+            sharpenEdge: 0,
+            antialiasEnabled: true,
         }),
     ) {}
 
@@ -260,17 +285,88 @@ export class FrameGraphPostEffectsController {
         colorCorrectionTask.sourceTexture = bloomTask.outputTexture;
         frameGraph.addTask(colorCorrectionTask);
 
+        this.sharpenEffect = new ThinSharpenPostProcess(
+            "frameGraphPostEffectsSharpen",
+            frameGraph.engine,
+            {
+                shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+            },
+        );
+        const sharpenTask = new FrameGraphSharpenTask(
+            "frameGraphPostEffectsSharpen",
+            frameGraph,
+            this.sharpenEffect,
+        );
+        sharpenTask.sourceTexture = colorCorrectionTask.outputTexture;
+        sharpenTask.disabled = initialSettings.sharpenEdge <= 0.0001;
+        this.applySharpenSettings(sharpenTask, initialSettings);
+        frameGraph.addTask(sharpenTask);
+        this.sharpenTask = sharpenTask;
+
+        this.grainEffect = new ThinGrainPostProcess(
+            "frameGraphPostEffectsGrain",
+            frameGraph.engine,
+            {
+                shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+            },
+        );
+        const grainTask = new FrameGraphGrainTask(
+            "frameGraphPostEffectsGrain",
+            frameGraph,
+            this.grainEffect,
+        );
+        grainTask.sourceTexture = sharpenTask.outputTexture;
+        grainTask.disabled = initialSettings.grainIntensity <= 0.0001;
+        this.applyGrainSettings(grainTask, initialSettings);
+        frameGraph.addTask(grainTask);
+        this.grainTask = grainTask;
+
+        this.chromaticAberrationEffect = new ThinChromaticAberrationPostProcess(
+            "frameGraphPostEffectsChromaticAberration",
+            frameGraph.engine,
+            {
+                shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+            },
+        );
+        const chromaticAberrationTask = new FrameGraphChromaticAberrationTask(
+            "frameGraphPostEffectsChromaticAberration",
+            frameGraph,
+            this.chromaticAberrationEffect,
+        );
+        chromaticAberrationTask.sourceTexture = grainTask.outputTexture;
+        chromaticAberrationTask.disabled = initialSettings.chromaticAberration <= 0.0001;
+        this.applyChromaticAberrationSettings(chromaticAberrationTask, initialSettings);
+        frameGraph.addTask(chromaticAberrationTask);
+        this.chromaticAberrationTask = chromaticAberrationTask;
+
+        this.fxaaEffect = new ThinFXAAPostProcess(
+            "frameGraphPostEffectsFXAA",
+            frameGraph.engine,
+            {
+                shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+            },
+        );
+        const fxaaTask = new FrameGraphFXAATask(
+            "frameGraphPostEffectsFXAA",
+            frameGraph,
+            this.fxaaEffect,
+        );
+        fxaaTask.sourceTexture = chromaticAberrationTask.outputTexture;
+        fxaaTask.disabled = !initialSettings.antialiasEnabled;
+        frameGraph.addTask(fxaaTask);
+        this.fxaaTask = fxaaTask;
+
         const outputTask = new FrameGraphCopyToBackbufferColorTask(
             "frameGraphPostEffectsOutput",
             frameGraph,
         );
-        outputTask.sourceTexture = colorCorrectionTask.outputTexture;
+        outputTask.sourceTexture = fxaaTask.outputTexture;
         frameGraph.addTask(outputTask);
 
         this.frameGraph = frameGraph;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + DoF + Bloom + color correction).",
+            message: "Frame Graph post effects backend active (image processing + DoF + Bloom + color correction + Sharpen + Grain + Chromatic Aberration + FXAA).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -311,6 +407,21 @@ export class FrameGraphPostEffectsController {
             this.bloomTask.disabled = !settings.bloomEnabled;
             this.applyBloomSettings(this.bloomTask, settings);
         }
+        if (this.sharpenTask) {
+            this.sharpenTask.disabled = settings.sharpenEdge <= 0.0001;
+            this.applySharpenSettings(this.sharpenTask, settings);
+        }
+        if (this.grainTask) {
+            this.grainTask.disabled = settings.grainIntensity <= 0.0001;
+            this.applyGrainSettings(this.grainTask, settings);
+        }
+        if (this.chromaticAberrationTask) {
+            this.chromaticAberrationTask.disabled = settings.chromaticAberration <= 0.0001;
+            this.applyChromaticAberrationSettings(this.chromaticAberrationTask, settings);
+        }
+        if (this.fxaaTask) {
+            this.fxaaTask.disabled = !settings.antialiasEnabled;
+        }
         this.frameGraph.execute();
     }
 
@@ -333,6 +444,18 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingTask = null;
         this.depthOfFieldTask = null;
         this.bloomTask = null;
+        this.chromaticAberrationEffect?.dispose();
+        this.chromaticAberrationEffect = null;
+        this.chromaticAberrationTask = null;
+        this.grainEffect?.dispose();
+        this.grainEffect = null;
+        this.grainTask = null;
+        this.sharpenEffect?.dispose();
+        this.sharpenEffect = null;
+        this.sharpenTask = null;
+        this.fxaaEffect?.dispose();
+        this.fxaaEffect = null;
+        this.fxaaTask = null;
         this.frameGraph?.dispose();
         this.frameGraph = null;
         this.ready = false;
@@ -359,5 +482,31 @@ export class FrameGraphPostEffectsController {
         bloomTask.bloom.weight = Math.max(0, settings.bloomWeight);
         bloomTask.bloom.threshold = Math.max(0, settings.bloomThreshold);
         bloomTask.bloom.kernel = Math.max(1, settings.bloomKernel);
+    }
+
+    private applyChromaticAberrationSettings(
+        chromaticAberrationTask: FrameGraphChromaticAberrationTask,
+        settings: FrameGraphPostEffectsSettings,
+    ): void {
+        chromaticAberrationTask.postProcess.aberrationAmount = Math.max(0, settings.chromaticAberration);
+        chromaticAberrationTask.postProcess.radialIntensity = 2.2;
+        chromaticAberrationTask.postProcess.direction = Vector2.Zero();
+        chromaticAberrationTask.postProcess.centerPosition = new Vector2(0.5, 0.5);
+    }
+
+    private applyGrainSettings(
+        grainTask: FrameGraphGrainTask,
+        settings: FrameGraphPostEffectsSettings,
+    ): void {
+        grainTask.postProcess.intensity = Math.max(0, settings.grainIntensity);
+        grainTask.postProcess.animated = false;
+    }
+
+    private applySharpenSettings(
+        sharpenTask: FrameGraphSharpenTask,
+        settings: FrameGraphPostEffectsSettings,
+    ): void {
+        sharpenTask.postProcess.edgeAmount = Math.max(0, settings.sharpenEdge);
+        sharpenTask.postProcess.colorAmount = 1;
     }
 }
