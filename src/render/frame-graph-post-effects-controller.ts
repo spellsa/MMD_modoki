@@ -1,5 +1,7 @@
+import { Constants } from "@babylonjs/core/Engines/constants";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { FrameGraph } from "@babylonjs/core/FrameGraph/frameGraph";
+import { FrameGraphObjectList } from "@babylonjs/core/FrameGraph/frameGraphObjectList";
 import { FrameGraphBloomTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/bloomTask";
 import { FrameGraphChromaticAberrationTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/chromaticAberrationTask";
 import { FrameGraphDepthOfFieldTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/depthOfFieldTask";
@@ -8,6 +10,9 @@ import { FrameGraphGrainTask } from "@babylonjs/core/FrameGraph/Tasks/PostProces
 import { FrameGraphImageProcessingTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/imageProcessingTask";
 import { FrameGraphPostProcessTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/postProcessTask";
 import { FrameGraphSharpenTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/sharpenTask";
+import { FrameGraphSSAO2RenderingPipelineTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/ssao2RenderingPipelineTask";
+import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask";
+import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/frameGraphRenderPass";
 import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGraphRenderContext";
@@ -51,6 +56,9 @@ export type FrameGraphPostEffectsSettings = {
     chromaticAberration: number;
     grainIntensity: number;
     sharpenEdge: number;
+    ssaoEnabled: boolean;
+    ssaoStrength: number;
+    ssaoRadius: number;
     antialiasEnabled: boolean;
 };
 
@@ -134,6 +142,8 @@ export class FrameGraphPostEffectsController {
     private colorCorrectionEffect: EffectWrapper | null = null;
     private imageProcessingEffect: ThinImageProcessingPostProcess | null = null;
     private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
+    private geometryRendererTask: FrameGraphGeometryRendererTask | null = null;
+    private ssaoTask: FrameGraphSSAO2RenderingPipelineTask | null = null;
     private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
     private bloomTask: FrameGraphBloomTask | null = null;
     private chromaticAberrationEffect: ThinChromaticAberrationPostProcess | null = null;
@@ -170,6 +180,9 @@ export class FrameGraphPostEffectsController {
             chromaticAberration: 0,
             grainIntensity: 0,
             sharpenEdge: 0,
+            ssaoEnabled: false,
+            ssaoStrength: 1,
+            ssaoRadius: 2,
             antialiasEnabled: true,
         }),
     ) {}
@@ -237,7 +250,82 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(imageProcessingTask);
         this.imageProcessingTask = imageProcessingTask;
 
-        let bloomSourceTexture = imageProcessingTask.outputTexture;
+        let dofSourceTexture = imageProcessingTask.outputTexture;
+        if (camera) {
+            const sourceTextureSize = this.getSourceTextureSize(scene, sourceTexture);
+            const geometryDepthTexture = frameGraph.textureManager.createRenderTargetTexture(
+                "frameGraphPostEffectsGeometryDepth",
+                {
+                    size: sourceTextureSize,
+                    sizeIsPercentage: false,
+                    options: {
+                        createMipMaps: false,
+                        types: [Constants.TEXTURETYPE_UNSIGNED_BYTE],
+                        formats: [Constants.TEXTUREFORMAT_DEPTH32_FLOAT],
+                        samples: 1,
+                        useSRGBBuffers: [false],
+                        labels: ["geometryDepth"],
+                    },
+                },
+            );
+            const clearGeometryDepthTask = new FrameGraphClearTextureTask(
+                "frameGraphPostEffectsGeometryDepthClear",
+                frameGraph,
+            );
+            clearGeometryDepthTask.clearColor = false;
+            clearGeometryDepthTask.clearDepth = true;
+            clearGeometryDepthTask.depthTexture = geometryDepthTexture;
+            frameGraph.addTask(clearGeometryDepthTask);
+
+            const geometryRendererTask = new FrameGraphGeometryRendererTask(
+                "frameGraphPostEffectsGeometry",
+                frameGraph,
+                scene,
+                { doNotChangeAspectRatio: true },
+            );
+            const objectList = new FrameGraphObjectList();
+            objectList.meshes = null;
+            objectList.particleSystems = null;
+            geometryRendererTask.objectList = objectList;
+            geometryRendererTask.camera = camera;
+            geometryRendererTask.depthTexture = clearGeometryDepthTask.depthTexture;
+            geometryRendererTask.size = sourceTextureSize;
+            geometryRendererTask.sizeIsPercentage = false;
+            geometryRendererTask.samples = 1;
+            geometryRendererTask.textureDescriptions = [
+                {
+                    type: Constants.PREPASS_NORMAL_TEXTURE_TYPE,
+                    textureType: Constants.TEXTURETYPE_HALF_FLOAT,
+                    textureFormat: Constants.TEXTUREFORMAT_RGBA,
+                },
+                {
+                    type: Constants.PREPASS_DEPTH_TEXTURE_TYPE,
+                    textureType: Constants.TEXTURETYPE_HALF_FLOAT,
+                    textureFormat: Constants.TEXTUREFORMAT_RED,
+                },
+            ];
+            geometryRendererTask.disabled = !initialSettings.ssaoEnabled || initialSettings.ssaoStrength <= 0.00001;
+            frameGraph.addTask(geometryRendererTask);
+            this.geometryRendererTask = geometryRendererTask;
+
+            const ssaoTask = new FrameGraphSSAO2RenderingPipelineTask(
+                "frameGraphPostEffectsSSAO2",
+                frameGraph,
+                0.75,
+                0.75,
+            );
+            ssaoTask.sourceTexture = imageProcessingTask.outputTexture;
+            ssaoTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+            ssaoTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+            ssaoTask.camera = camera;
+            ssaoTask.disabled = !initialSettings.ssaoEnabled || initialSettings.ssaoStrength <= 0.00001;
+            this.applySsaoSettings(ssaoTask, initialSettings, camera);
+            frameGraph.addTask(ssaoTask);
+            this.ssaoTask = ssaoTask;
+            dofSourceTexture = ssaoTask.outputTexture;
+        }
+
+        let bloomSourceTexture = dofSourceTexture;
         if (depthTextureHandle !== undefined && camera) {
             const blurLevel = initialSettings.dofBlurLevel <= ThinDepthOfFieldEffectBlurLevel.Low
                 ? ThinDepthOfFieldEffectBlurLevel.Low
@@ -250,7 +338,7 @@ export class FrameGraphPostEffectsController {
                 blurLevel,
                 false,
             );
-            depthOfFieldTask.sourceTexture = imageProcessingTask.outputTexture;
+            depthOfFieldTask.sourceTexture = dofSourceTexture;
             depthOfFieldTask.depthTexture = depthTextureHandle;
             depthOfFieldTask.camera = camera;
             depthOfFieldTask.disabled = !initialSettings.dofEnabled;
@@ -366,7 +454,7 @@ export class FrameGraphPostEffectsController {
         this.frameGraph = frameGraph;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + DoF + Bloom + color correction + Sharpen + Grain + Chromatic Aberration + FXAA).",
+            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Bloom + color correction + Sharpen + Grain + Chromatic Aberration + FXAA).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -402,6 +490,13 @@ export class FrameGraphPostEffectsController {
         if (this.depthOfFieldTask) {
             this.depthOfFieldTask.disabled = !settings.dofEnabled;
             this.applyDepthOfFieldSettings(this.depthOfFieldTask, settings);
+        }
+        if (this.geometryRendererTask) {
+            this.geometryRendererTask.disabled = !settings.ssaoEnabled || settings.ssaoStrength <= 0.00001;
+        }
+        if (this.ssaoTask) {
+            this.ssaoTask.disabled = !settings.ssaoEnabled || settings.ssaoStrength <= 0.00001;
+            this.applySsaoSettings(this.ssaoTask, settings, this.ssaoTask.camera);
         }
         if (this.bloomTask) {
             this.bloomTask.disabled = !settings.bloomEnabled;
@@ -442,6 +537,9 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingEffect?.dispose();
         this.imageProcessingEffect = null;
         this.imageProcessingTask = null;
+        this.geometryRendererTask = null;
+        this.ssaoTask?.dispose();
+        this.ssaoTask = null;
         this.depthOfFieldTask = null;
         this.bloomTask = null;
         this.chromaticAberrationEffect?.dispose();
@@ -484,6 +582,24 @@ export class FrameGraphPostEffectsController {
         bloomTask.bloom.kernel = Math.max(1, settings.bloomKernel);
     }
 
+    private applySsaoSettings(
+        ssaoTask: FrameGraphSSAO2RenderingPipelineTask,
+        settings: FrameGraphPostEffectsSettings,
+        camera: Camera,
+    ): void {
+        ssaoTask.ssao.samples = 16;
+        ssaoTask.ssao.expensiveBlur = true;
+        ssaoTask.ssao.bilateralSamples = 16;
+        ssaoTask.ssao.bilateralSoften = 0.25;
+        ssaoTask.ssao.bilateralTolerance = 0.15;
+        ssaoTask.ssao.base = 0;
+        ssaoTask.ssao.totalStrength = Math.max(0, settings.ssaoStrength) * 2.2;
+        ssaoTask.ssao.radius = Math.max(0.01, settings.ssaoRadius);
+        ssaoTask.ssao.maxZ = Math.max(50, Math.min(2000, camera.maxZ));
+        ssaoTask.ssao.minZAspect = 0.2;
+        ssaoTask.ssao.epsilon = 0.02;
+    }
+
     private applyChromaticAberrationSettings(
         chromaticAberrationTask: FrameGraphChromaticAberrationTask,
         settings: FrameGraphPostEffectsSettings,
@@ -508,5 +624,16 @@ export class FrameGraphPostEffectsController {
     ): void {
         sharpenTask.postProcess.edgeAmount = Math.max(0, settings.sharpenEdge);
         sharpenTask.postProcess.colorAmount = 1;
+    }
+
+    private getSourceTextureSize(scene: Scene, sourceTexture: InternalTexture): { width: number; height: number } {
+        const textureWithSize = sourceTexture as InternalTexture & {
+            baseWidth?: number;
+            baseHeight?: number;
+        };
+        return {
+            width: Math.max(1, textureWithSize.width || textureWithSize.baseWidth || scene.getEngine().getRenderWidth()),
+            height: Math.max(1, textureWithSize.height || textureWithSize.baseHeight || scene.getEngine().getRenderHeight()),
+        };
     }
 }

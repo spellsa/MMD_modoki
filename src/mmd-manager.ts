@@ -4621,6 +4621,9 @@ ${beforeFogAppendBlock}
             chromaticAberration: this.postEffectChromaticAberrationValue,
             grainIntensity: this.postEffectGrainIntensityValue,
             sharpenEdge: this.postEffectSharpenEdgeValue,
+            ssaoEnabled: this.postEffectSsaoEnabledValue,
+            ssaoStrength: this.postEffectSsaoStrengthValue,
+            ssaoRadius: this.postEffectSsaoRadiusValue,
             antialiasEnabled: this.antialiasEnabledValue,
         }));
 

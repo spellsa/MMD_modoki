@@ -372,3 +372,40 @@ Frame Graph 移行の最初の難所だった「通常描画の scene color を 
 - UI は Frame Graph backend panel 内に専用 slider を追加し、Classic backend の UI DOM とは分けた。内部設定値は共有し、backend に応じて実行経路だけを切り替える。
 - Frame Graph backend では Classic `DefaultRenderingPipeline` 側の sharpen / grain / chromatic aberration を無効化する。二重適用を避け、Frame Graph pass 表示と実行内容を一致させるため。
 - lens distortion / edge blur / motion blur / SSR / SSAO は今回は対象外。独自 shader、depth/normal、velocity、geometry pass が絡むため、公式 task 寄せで安全に移せるものから外した。
+
+## 2026-05-01 追記 5: Frame Graph SSAO2 再試行
+
+- ユーザー提供の Babylon.js 公式サンプル `SSAO.js` を確認した。
+- 公式サンプルでは `FrameGraphGeometryRendererTask` に、事前に `FrameGraphClearTextureTask` で clear した depth attachment を明示的に渡している。
+  - `geomTask.depthTexture = clearTask.depthTexture`
+  - geometry texture は normal: `PREPASS_NORMAL_TEXTURE_TYPE` / `RGBA` / `HALF_FLOAT`、depth: `PREPASS_DEPTH_TEXTURE_TYPE` / `RED` / `HALF_FLOAT`。
+- 前回の失敗時に出ていた `*_nodepth_*` 系 WebGPU pipeline 警告は、geometry render pass が depth attachment なしで作られていたことが主因の可能性が高い。
+- 再試行では、FrameGraph 内に SSAO 用 depth RT を作り、clear task の `depthTexture` を geometry renderer へ接続するようにした。
+- task chain は `scene color RT -> ImageProcessingTask -> SSAO2 -> DepthOfFieldTask -> BloomTask -> Gamma/Contrast task -> SharpenTask -> GrainTask -> ChromaticAberrationTask -> FXAATask -> backbuffer copy`。
+- Frame Graph backend panel に専用 SSAO UI を再追加した。
+  - 表示項目: SSAO ON/OFF、Strength、Radius。
+  - Classic backend の SSAO UI とは DOM を共有しない。
+  - 内部設定値は既存 `postEffectSsao*` を共有し、backend ごとに実行経路だけを切り替える。
+- Frame Graph backend では引き続き Classic `SSAO2RenderingPipeline`、独自 fullscreen SSAO fallback、SSAO 用 `DepthRenderer` は止める。
+
+注意:
+
+- 今回は公式 task 準拠の再試行であり、MMD 向け fallback SSAO の fade/debug/toon tint はまだ移していない。
+- 実機で WebGPU 警告や黒画面が再発した場合は、まず SSAO OFF で FrameGraph 全体が生きているか確認し、次に geometry pass の depth attachment 接続と material compatibility を見る。
+- SSAO は geometry pass を追加するため重い。DoF/Bloom との併用時の FPS、PNG/WebM 出力、透過材質や outline との見た目差は別途確認が必要。
+
+## 2026-05-01 追記 6: Frame Graph SSAO2 実機動作確認
+
+- ユーザー実機確認で Frame Graph backend の SSAO2 が動作した。
+- 前回の `*_nodepth_*` 系 WebGPU pipeline 警告と黒画面は、`FrameGraphGeometryRendererTask` に depth attachment を明示接続していなかったことが主因だった可能性が高い。
+- 今回の接続は公式サンプル寄りに、FrameGraph 内で SSAO 用 depth RT を作り、`FrameGraphClearTextureTask.depthTexture` を geometry renderer の `depthTexture` へ渡す構成にした。
+- SSAO2 はひとまず「使える」段階まで到達。ただし、見た目と負荷の調整は未完了。
+
+次に確認すること:
+
+- SSAO Strength / Radius の初期値と UI レンジが MMD モデル向けに妥当か。
+- 透過材質、髪、スカート、toon outline 付近で AO が汚く出ないか。
+- DoF / Bloom / Sharpen / Grain / Chroma / FXAA との順序で破綻しないか。
+- SSAO ON 時の FPS 低下が許容範囲か。特に geometry pass 追加分のコストを見る。
+- PNG / WebM 出力に Frame Graph SSAO2 が正しく乗るか。
+- Classic WebGPU fallback SSAO にあった fade / debug / toon tint を Frame Graph 側にも移す価値があるか。

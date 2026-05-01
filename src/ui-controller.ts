@@ -2531,11 +2531,12 @@ export class UIController {
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
                         <strong>Frame Graph</strong><br>
-                        Experimental backend. Gamma / Contrast, DoF, Bloom, Sharpen, Grain, Chroma, and FXAA are available above; SSAO and LUT remain on the Classic backend for now.
+                        Experimental backend. Gamma / Contrast, SSAO2, DoF, Bloom, Sharpen, Grain, Chroma, and FXAA are available above; LUT remains on the Classic backend for now.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
                         <span class="effect-value">Image</span>
+                        <span class="effect-value">SSAO</span>
                         <span class="effect-value">DoF</span>
                         <span class="effect-value">Bloom</span>
                         <span class="effect-value">Color</span>
@@ -2568,6 +2569,24 @@ export class UIController {
                         <span class="effect-label" data-i18n="shader.postfx.sharpen">Sharpen</span>
                         <input data-postfx="frame-graph-sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
                         <span data-postfx-val="frame-graph-sharpen-edge" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label">SSAO</span>
+                        <label class="effect-check-wrap">
+                            <input data-frame-graph-ssao-check="enabled" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-frame-graph-ssao-val="enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">SSAO Strength</span>
+                        <input data-frame-graph-ssao="strength" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                        <span data-frame-graph-ssao-val="strength" class="effect-value">1.00</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">SSAO Radius</span>
+                        <input data-frame-graph-ssao="radius" type="range" class="effect-slider" min="1" max="200" value="200" step="1">
+                        <span data-frame-graph-ssao-val="radius" class="effect-value">2.00</span>
                     </div>
                     <div class="effect-row effect-row-toggle">
                         <span class="effect-label">DoF</span>
@@ -2654,6 +2673,7 @@ export class UIController {
         }
         this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
         this.installPostEffectBackendControls(postFxControls);
+        this.installFrameGraphSsaoControls(postFxControls);
         this.installFrameGraphDofControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
     }
@@ -2772,6 +2792,45 @@ export class UIController {
                 window.location.reload();
             }, 120);
         });
+    }
+
+    private installFrameGraphSsaoControls(root: HTMLElement): void {
+        const enabledInput = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssao-check="enabled"]');
+        const enabledValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssao-val="enabled"]');
+        const strengthSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssao="strength"]');
+        const strengthValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssao-val="strength"]');
+        const radiusSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssao="radius"]');
+        const radiusValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssao-val="radius"]');
+        if (!enabledInput || !enabledValue || !strengthSlider || !strengthValue || !radiusSlider || !radiusValue) {
+            return;
+        }
+
+        const refreshValues = (): void => {
+            const enabled = this.mmdManager.postEffectSsaoEnabled;
+            enabledInput.checked = enabled;
+            enabledValue.textContent = enabled ? t("status.on") : t("status.off");
+            strengthSlider.value = String(Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectSsaoStrength * 100))));
+            strengthValue.textContent = enabled
+                ? this.mmdManager.postEffectSsaoStrength.toFixed(2)
+                : t("status.off");
+            radiusSlider.value = String(Math.max(1, Math.min(200, Math.round(this.mmdManager.postEffectSsaoRadius * 100))));
+            radiusValue.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
+            strengthSlider.disabled = !enabled;
+            radiusSlider.disabled = !enabled;
+        };
+
+        const applyValues = (): void => {
+            this.mmdManager.postEffectSsaoEnabled = enabledInput.checked;
+            this.mmdManager.postEffectSsaoStrength = Number(strengthSlider.value) / 100;
+            this.mmdManager.postEffectSsaoRadius = Number(radiusSlider.value) / 100;
+            this.mmdManager.postEffectSsaoDebugView = false;
+            refreshValues();
+        };
+
+        enabledInput.addEventListener("change", applyValues);
+        strengthSlider.addEventListener("input", applyValues);
+        radiusSlider.addEventListener("input", applyValues);
+        refreshValues();
     }
 
     private installFrameGraphDofControls(root: HTMLElement): void {
