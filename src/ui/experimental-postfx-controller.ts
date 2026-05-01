@@ -114,6 +114,9 @@ export class ExperimentalPostFxController {
     }
 
     private disableSsao(): void {
+        if (this.mmdManager.getPostEffectBackend() === "frameGraph") {
+            return;
+        }
         this.mmdManager.postEffectSsaoStrength = 0;
         this.mmdManager.postEffectSsaoRadius = 2;
         this.mmdManager.postEffectSsaoFadeEnd = 200;

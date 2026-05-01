@@ -189,6 +189,19 @@ export function getDofEnabled(host: any): boolean {
     return host.dofEnabledValue;
 }
 export function setDofEnabled(host: any, v: boolean): void {
+    if (host.postEffectBackend === "frameGraph") {
+        host.dofEnabledValue = Boolean(v);
+        if (host.dofEnabledValue) {
+            host.updateEditorDofFocusAndFStop();
+        }
+        if (host.defaultRenderingPipeline) {
+            host.defaultRenderingPipeline.depthOfFieldEnabled = false;
+        }
+        host.applyDofLensBlurSettings();
+        host.applyAntialiasSettings();
+        return;
+    }
+
     if (v && !host.defaultRenderingPipeline) {
         host.initializeDofPipeline();
     }

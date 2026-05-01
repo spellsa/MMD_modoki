@@ -2158,11 +2158,37 @@ export class UIController {
     }
 
     private handleModelTargetSelection(value: string, showToast: boolean): void {
+        const frameGraphDofEnabledBeforeTargetSwitch = this.getConfiguredPostEffectBackend() === "frameGraph"
+            ? this.mmdManager.dofEnabled
+            : null;
+        const frameGraphSsaoEnabledBeforeTargetSwitch = this.getConfiguredPostEffectBackend() === "frameGraph"
+            ? this.mmdManager.postEffectSsaoEnabled
+            : null;
+        const restoreFrameGraphPostEffectEnabledStates = (): boolean => {
+            let changed = false;
+            if (frameGraphDofEnabledBeforeTargetSwitch === null) return false;
+            if (this.mmdManager.dofEnabled !== frameGraphDofEnabledBeforeTargetSwitch) {
+                this.mmdManager.dofEnabled = frameGraphDofEnabledBeforeTargetSwitch;
+                changed = true;
+            }
+            if (
+                frameGraphSsaoEnabledBeforeTargetSwitch !== null &&
+                this.mmdManager.postEffectSsaoEnabled !== frameGraphSsaoEnabledBeforeTargetSwitch
+            ) {
+                this.mmdManager.postEffectSsaoEnabled = frameGraphSsaoEnabledBeforeTargetSwitch;
+                changed = true;
+            }
+            return changed;
+        };
+
         if (value === MODEL_INFO_CAMERA_SELECT_VALUE) {
             this.mmdManager.setTimelineTarget("camera");
             this.applyCameraSelectionUI();
             this.refreshModelSelector();
             this.refreshShaderPanel();
+            if (restoreFrameGraphPostEffectEnabledStates()) {
+                this.refreshShaderPanel();
+            }
             if (showToast) {
                 this.showToast("Timeline target: Camera", "success");
             }
@@ -2183,6 +2209,7 @@ export class UIController {
         this.applyActiveModelSelectionUI();
         this.refreshModelSelector();
         this.refreshShaderPanel();
+        restoreFrameGraphPostEffectEnabledStates();
         if (showToast) {
             this.showToast("Active model switched", "success");
         }
