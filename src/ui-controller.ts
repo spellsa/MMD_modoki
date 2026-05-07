@@ -639,6 +639,8 @@ export class UIController {
         const elShadow = document.getElementById("light-shadow") as HTMLInputElement;
         const elShadowFrustumSize = document.getElementById("light-shadow-frustum-size") as HTMLInputElement;
         const elShadowMaxZ = document.getElementById("light-shadow-max-z") as HTMLInputElement;
+        const elShadowFilteringQuality = document.getElementById("light-shadow-filter-quality") as HTMLInputElement;
+        const elSoftTransparentShadow = document.getElementById("light-soft-transparent-shadow") as HTMLInputElement;
         const elShadowBias = document.getElementById("light-shadow-bias") as HTMLInputElement;
         const elShadowNormalBias = document.getElementById("light-shadow-normal-bias") as HTMLInputElement;
         const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
@@ -661,6 +663,8 @@ export class UIController {
         const valSh = document.getElementById("light-shadow-val")!;
         const valShadowFrustumSize = document.getElementById("light-shadow-frustum-size-val")!;
         const valShadowMaxZ = document.getElementById("light-shadow-max-z-val")!;
+        const valShadowFilteringQuality = document.getElementById("light-shadow-filter-quality-val")!;
+        const valSoftTransparentShadow = document.getElementById("light-soft-transparent-shadow-val")!;
         const valShadowBias = document.getElementById("light-shadow-bias-val")!;
         const valShadowNormalBias = document.getElementById("light-shadow-normal-bias-val")!;
         const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
@@ -779,6 +783,21 @@ export class UIController {
             valShadowMaxZ.textContent = String(Math.round(v));
             this.mmdManager.shadowMaxZ = v;
         });
+        const formatShadowFilteringQuality = (quality: number): string => {
+            if (quality <= 0) return "High";
+            if (quality >= 2) return "Low";
+            return "Med";
+        };
+        elShadowFilteringQuality.addEventListener("input", () => {
+            const v = Number(elShadowFilteringQuality.value);
+            this.mmdManager.shadowFilteringQuality = v;
+            valShadowFilteringQuality.textContent = formatShadowFilteringQuality(this.mmdManager.shadowFilteringQuality);
+        });
+        elSoftTransparentShadow.addEventListener("input", () => {
+            const enabled = Number(elSoftTransparentShadow.value) > 0;
+            this.mmdManager.softTransparentShadowEnabled = enabled;
+            valSoftTransparentShadow.textContent = enabled ? "Soft" : "Hard";
+        });
         elShadowBias.addEventListener("input", () => {
             const v = Number(elShadowBias.value) / 1_000_000;
             valShadowBias.textContent = v.toFixed(5);
@@ -824,6 +843,10 @@ export class UIController {
         valShadowFrustumSize.textContent = String(Math.round(this.mmdManager.shadowFrustumSize));
         elShadowMaxZ.value = String(Math.round(this.mmdManager.shadowMaxZ));
         valShadowMaxZ.textContent = String(Math.round(this.mmdManager.shadowMaxZ));
+        elShadowFilteringQuality.value = String(this.mmdManager.shadowFilteringQuality);
+        valShadowFilteringQuality.textContent = formatShadowFilteringQuality(this.mmdManager.shadowFilteringQuality);
+        elSoftTransparentShadow.value = this.mmdManager.softTransparentShadowEnabled ? "1" : "0";
+        valSoftTransparentShadow.textContent = this.mmdManager.softTransparentShadowEnabled ? "Soft" : "Hard";
         elShadowBias.value = String(Math.round(this.mmdManager.shadowBias * 1_000_000));
         valShadowBias.textContent = this.mmdManager.shadowBias.toFixed(5);
         elShadowNormalBias.value = String(Math.round(this.mmdManager.shadowNormalBias * 100_000));
@@ -3219,6 +3242,12 @@ export class UIController {
         setSliderValue("light-shadow", "light-shadow-val", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
         setSliderValue("light-shadow-frustum-size", "light-shadow-frustum-size-val", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
         setSliderValue("light-shadow-max-z", "light-shadow-max-z-val", this.mmdManager.shadowMaxZ, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-filter-quality", "light-shadow-filter-quality-val", this.mmdManager.shadowFilteringQuality, (value) => {
+            if (value <= 0) return "High";
+            if (value >= 2) return "Low";
+            return "Med";
+        });
+        setSliderValue("light-soft-transparent-shadow", "light-soft-transparent-shadow-val", this.mmdManager.softTransparentShadowEnabled ? 1 : 0, (value) => value > 0 ? "Soft" : "Hard");
         setSliderValue("light-shadow-bias", "light-shadow-bias-val", this.mmdManager.shadowBias * 1_000_000, (value) => (value / 1_000_000).toFixed(5));
         setSliderValue("light-shadow-normal-bias", "light-shadow-normal-bias-val", this.mmdManager.shadowNormalBias * 100_000, (value) => (value / 100_000).toFixed(5));
         setSliderValue("light-shadow-color-r", "light-shadow-color-r-val", shadowColor.r * 255, (value) => String(Math.round(value)));

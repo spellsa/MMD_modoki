@@ -201,6 +201,8 @@
     "label.flatColorInfluence":  "Flat color influence",
     "label.shadowDarkness":  "Shadow darkness",
     "label.shadowFrustumSize":  "그림자 범위",
+    "label.shadowQuality":  "그림자 품질",
+    "label.softTransparentShadow":  "반투명 그림자",
     "label.shadowColorR":  "그림자 색 R",
     "label.shadowColorG":  "그림자 색 G",
     "label.shadowColorB":  "그림자 색 B",

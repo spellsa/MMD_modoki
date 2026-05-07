@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     getSerializedLightDirection,
     setLightDirection,
+    setSoftTransparentShadowEnabled,
     setShadowFrustumSize,
     setShadowMaxZ,
 } from "./light-shadow-controller";
@@ -47,5 +48,35 @@ describe("light direction serialization", () => {
         expect(direction.x).toBeCloseTo(-0.35);
         expect(direction.y).toBeCloseTo(-1.15);
         expect(direction.z).toBeCloseTo(0.6);
+    });
+});
+
+describe("transparent shadow controls", () => {
+    it("keeps transparent casters while toggling soft transparent shadows", () => {
+        const host = {
+            ...createHost(),
+            shadowGenerator: {
+                transparencyShadow: true,
+                enableSoftTransparentShadow: true,
+                useOpacityTextureForTransparentShadow: true,
+            },
+            engine: {
+                releaseEffects: vi.fn(),
+            },
+        };
+
+        setSoftTransparentShadowEnabled(host, false);
+
+        expect(host.shadowGenerator.transparencyShadow).toBe(true);
+        expect(host.shadowGenerator.enableSoftTransparentShadow).toBe(false);
+        expect(host.shadowGenerator.useOpacityTextureForTransparentShadow).toBe(true);
+        expect(host.engine.releaseEffects).toHaveBeenCalledTimes(1);
+
+        setSoftTransparentShadowEnabled(host, true);
+
+        expect(host.shadowGenerator.transparencyShadow).toBe(true);
+        expect(host.shadowGenerator.enableSoftTransparentShadow).toBe(true);
+        expect(host.shadowGenerator.useOpacityTextureForTransparentShadow).toBe(true);
+        expect(host.engine.releaseEffects).toHaveBeenCalledTimes(2);
     });
 });

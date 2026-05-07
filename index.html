@@ -792,6 +792,16 @@
               <input type="range" id="light-shadow-max-z" class="light-slider" min="500" max="12000" value="4800" step="50">
               <span id="light-shadow-max-z-val" class="light-value">4800</span>
             </div>
+            <div class="light-row light-row--shadow">
+              <span class="light-label" data-i18n="label.shadowQuality">影品質</span>
+              <input type="range" id="light-shadow-filter-quality" class="light-slider" min="0" max="2" value="1" step="1">
+              <span id="light-shadow-filter-quality-val" class="light-value">Med</span>
+            </div>
+            <div class="light-row light-row--shadow">
+              <span class="light-label" data-i18n="label.softTransparentShadow">半透明影</span>
+              <input type="range" id="light-soft-transparent-shadow" class="light-slider" min="0" max="1" value="1" step="1">
+              <span id="light-soft-transparent-shadow-val" class="light-value">Soft</span>
+            </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.shadowBias">Shadow Bias</span>
               <input type="range" id="light-shadow-bias" class="light-slider" min="0" max="10000" value="500" step="1">

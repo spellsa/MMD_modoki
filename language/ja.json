@@ -201,6 +201,8 @@
     "label.flatColorInfluence":  "光色反映",
     "label.shadowDarkness":  "影の濃さ",
     "label.shadowFrustumSize":  "影範囲",
+    "label.shadowQuality":  "影品質",
+    "label.softTransparentShadow":  "半透明影",
     "label.shadowColorR":  "影色R",
     "label.shadowColorG":  "影色G",
     "label.shadowColorB":  "影色B",

@@ -201,6 +201,8 @@
     "label.flatColorInfluence":  "Flat color influence",
     "label.shadowDarkness":  "Shadow darkness",
     "label.shadowFrustumSize":  "Shadow frustum",
+    "label.shadowQuality":  "Shadow quality",
+    "label.softTransparentShadow":  "Transparent shadow",
     "label.shadowColorR":  "Shadow color R",
     "label.shadowColorG":  "Shadow color G",
     "label.shadowColorB":  "Shadow color B",

@@ -116,6 +116,8 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             shadowMaxZ: host.shadowMaxZ,
             shadowBias: host.shadowBias,
             shadowNormalBias: host.shadowNormalBias,
+            shadowFilteringQuality: host.shadowFilteringQuality,
+            softTransparentShadowEnabled: host.softTransparentShadowEnabled,
             shadowEdgeSoftness: host.shadowEdgeSoftness,
             selfShadowEdgeSoftness: host.selfShadowEdgeSoftness,
             occlusionShadowEdgeSoftness: host.occlusionShadowEdgeSoftness,

@@ -42,6 +42,8 @@ function createHost() {
         shadowMaxZ: 4800,
         shadowBias: 0.0005,
         shadowNormalBias: 0.01,
+        shadowFilteringQuality: 1,
+        softTransparentShadowEnabled: true,
         shadowEdgeSoftness: 0.03,
         selfShadowEdgeSoftness: 0.05,
         occlusionShadowEdgeSoftness: 0.01,

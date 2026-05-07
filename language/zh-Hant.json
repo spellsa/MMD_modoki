@@ -201,6 +201,8 @@
     "label.flatColorInfluence":  "Flat color influence",
     "label.shadowDarkness":  "Shadow darkness",
     "label.shadowFrustumSize":  "陰影範圍",
+    "label.shadowQuality":  "陰影品質",
+    "label.softTransparentShadow":  "半透明陰影",
     "label.shadowColorR":  "陰影色 R",
     "label.shadowColorG":  "陰影色 G",
     "label.shadowColorB":  "陰影色 B",

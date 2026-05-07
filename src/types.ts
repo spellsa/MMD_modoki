@@ -266,6 +266,8 @@ export interface ProjectLightingState {
     shadowMaxZ?: number;
     shadowBias?: number;
     shadowNormalBias?: number;
+    shadowFilteringQuality?: number;
+    softTransparentShadowEnabled?: boolean;
     shadowEdgeSoftness?: number;
     selfShadowEdgeSoftness?: number;
     occlusionShadowEdgeSoftness?: number;

@@ -39,6 +39,12 @@ function clampShadowNormalBias(v: number): number {
     return Math.max(0, Math.min(0.02, v));
 }
 
+function clampShadowFilteringQuality(v: number): number {
+    const fallback = ShadowGenerator.QUALITY_MEDIUM;
+    const rounded = Math.round(Number.isFinite(v) ? v : fallback);
+    return Math.max(ShadowGenerator.QUALITY_HIGH, Math.min(ShadowGenerator.QUALITY_LOW, rounded));
+}
+
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
 const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
@@ -66,11 +72,11 @@ function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGen
         shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
     }
     shadowGenerator.usePercentageCloserFiltering = true;
-    shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
+    shadowGenerator.filteringQuality = clampShadowFilteringQuality(host.shadowFilteringQualityValue);
     shadowGenerator.useContactHardeningShadow = false;
     shadowGenerator.frustumEdgeFalloff = 0.26;
     shadowGenerator.transparencyShadow = true;
-    shadowGenerator.enableSoftTransparentShadow = true;
+    shadowGenerator.enableSoftTransparentShadow = host.softTransparentShadowEnabledValue !== false;
     shadowGenerator.useOpacityTextureForTransparentShadow = true;
     shadowGenerator.darkness = host.shadowDarknessValue;
     host.shadowGenerator = shadowGenerator;
@@ -303,6 +309,32 @@ export function getShadowNormalBias(host: any): number {
 export function setShadowNormalBias(host: any, v: number): void {
     host.shadowNormalBiasValue = clampShadowNormalBias(v);
     applyShadowBiasSettings(host);
+}
+
+export function getShadowFilteringQuality(host: any): number {
+    return clampShadowFilteringQuality(host.shadowFilteringQualityValue);
+}
+
+export function setShadowFilteringQuality(host: any, v: number): void {
+    host.shadowFilteringQualityValue = clampShadowFilteringQuality(v);
+    if (host.shadowGenerator) {
+        host.shadowGenerator.filteringQuality = host.shadowFilteringQualityValue;
+        host.engine?.releaseEffects?.();
+    }
+}
+
+export function getSoftTransparentShadowEnabled(host: any): boolean {
+    return host.softTransparentShadowEnabledValue !== false;
+}
+
+export function setSoftTransparentShadowEnabled(host: any, enabled: boolean): void {
+    host.softTransparentShadowEnabledValue = Boolean(enabled);
+    if (host.shadowGenerator) {
+        host.shadowGenerator.transparencyShadow = true;
+        host.shadowGenerator.enableSoftTransparentShadow = host.softTransparentShadowEnabledValue;
+        host.shadowGenerator.useOpacityTextureForTransparentShadow = true;
+        host.engine?.releaseEffects?.();
+    }
 }
 
 export function getShadowEnabled(host: any): boolean {

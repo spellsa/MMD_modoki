@@ -67,6 +67,15 @@ PMX の材質フラグには、影に関するビットがあります。
   - `enableSoftTransparentShadow = true`
   - `useOpacityTextureForTransparentShadow = true`
 
+補足:
+
+- Babylon.js の soft transparent shadow は、fragment alpha を元に shadow map へ dithering pattern を生成する方式です。
+- 公式 Shadows ドキュメントでも、PCF などの filtering を使っていても拡大時や対象によって pattern が見える場合があり、filtering method の比較が必要とされています。
+- 現行の `CascadedShadowGenerator` は Babylon.js 実装上 `PCF / PCSS / None` 系の filter に制限されるため、Blur Exponential 系を使う場合は通常の `ShadowGenerator` へ切り替える必要があります。
+- 2026-05 時点では PCF、PCSS、Blur Exponential を実機で比較しましたが、標準 UI からは比較用の `影方式` / `影ブラー` を外し、`PCF + CascadedShadowGenerator` 固定に戻しています。
+- `PCSS` は CSM を維持したまま `useContactHardeningShadow = true` を使う比較を行いましたが、半透明影の pattern は改善しませんでした。
+- `Blur Exponential` は `useBlurExponentialShadowMap = true` を使う比較を行いましたが、CSM ではなくなるため、遠景や広いステージの影安定性が PCF より落ちました。
+
 `CascadedShadowGenerator` 使用時の設定:
 
 - `numCascades = 2`
@@ -99,6 +108,46 @@ PMX の材質フラグには、影に関するビットがあります。
 - `影範囲` フェーダーが有効なのは、非対応環境で `ShadowGenerator` にフォールバックした場合のみです。
 - `shadowMaxZ` を遠くしすぎると、近景の自己影や床影に使える精度が薄まります。
 - 描画限界まで影を出すより、「演出上ほしい距離まで」に絞る方が見た目は安定しやすいです。
+
+## 2026-05 半透明影の調整メモ
+
+### 問題
+
+Babylon.js の `enableSoftTransparentShadow` は、半透明 fragment の alpha を shadow map 上の dithering pattern に変換する方式です。
+
+そのため、透明な板・ガラス・フェンス状のアクセサリを床へ投影すると、影の面内に規則的な点/波模様が見えることがあります。今回の確認では、駅ステージ系アクセサリの透明面が床に落とす影で特に目立ちました。
+
+### 試した設定
+
+一時的に `影方式` UI を追加し、以下を比較しました。この UI は 2026-05 の確認後に撤去し、現在は `0 = PCF` 相当で固定しています。
+
+- `0 = PCF`
+  - `CascadedShadowGenerator` を維持
+  - `usePercentageCloserFiltering = true`
+  - 結果: 模様は残るが、影範囲・濃さ・ステージ全体の安定性は最もまし
+- `1 = PCSS`
+  - `CascadedShadowGenerator` を維持
+  - `useContactHardeningShadow = true`
+  - 結果: 半影風にはなるが、半透明 dithering pattern はむしろ荒れて見えるケースがあった
+- `2 = Blur`
+  - 通常 `ShadowGenerator` へ切り替え
+  - `useBlurExponentialShadowMap = true`
+  - `useKernelBlur` / `blurKernel` / `blurScale` / `blurBoxOffset` を調整
+  - 結果: 模様は薄くなる方向だが、CSM を捨てるため広いステージで影範囲・濃さ・安定性が悪化しやすい
+
+### 現時点の結論
+
+広い背景ステージを扱う MMD 用途では、標準の影方式は `PCF + CascadedShadowGenerator` を維持するのが現実的です。
+
+`PCSS` は比較用として残す価値はありますが、半透明影の dithering pattern を消す本命ではありません。`Blur Exponential` は Babylon 公式ドキュメント上も半透明 shadow の pattern を抑える候補ですが、このプロジェクトの主要用途では CSM を失う副作用が大きいです。
+
+根本的に見た目を改善するなら、以下のような別方針を検討します。
+
+- 半透明アクセサリを通常 shadow caster から外す
+- 必要なアクセサリだけ、床向けの簡易ぼかし影を別パスで合成する
+- 透明材質の影だけを弱める、または無効化する UI を追加する
+
+現時点では、Babylon 標準 shadow filter の切替だけで「CSM を維持しつつ半透明 dithering を完全に消す」ことは難しいと判断します。
 
 ## 2026-03 時点の実調整メモ
 
