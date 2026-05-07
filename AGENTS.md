@@ -56,6 +56,24 @@
 - 挙動変更や重要な知見が出たら、必要に応じて `docs/` にメモを残す
 - タスク管理は `docs/mmd-basic-task-checklist.md` に集約する
 - 方針メモや位置づけメモはチェックリストと分離して管理する
+- 文字化けしたコメント行を見つけた場合は、意味を復元できない限り削除してよい。ただしコードの挙動に影響しないことを確認し、可能な範囲で lint や関連する確認コマンドを実行する
+- UI に機能を追加するときは、表示だけでなく初期値、保存/読み込み、backend 切替時の同期まで確認対象にする
+- Classic / Frame Graph / Experimental など複数経路がある機能では、UI と実行経路を混在させず、二重適用や古い PostProcess の残存を確認する
+- 実機確認で OK / NG が分かった項目は、必要に応じて `docs/` の進捗メモに確認結果として残す
+
+## 外部公式ドキュメントの確認
+
+Babylon.js / babylon-mmd / Electron / WebGPU など、外部ライブラリや実行基盤に関わる作業では、記憶や推測だけで進めず、必要に応じて検索して公式ドキュメントや一次情報を確認してください。
+
+特に Babylon.js と babylon-mmd は公式ドキュメント・API リファレンス・サンプルが充実しているため、以下のような作業では積極的に参照してください。
+
+- Frame Graph、Rendering Pipeline、Post Process、Material、Shader、WebGPU まわりの実装や調査
+- babylon-mmd の runtime、loader、physics、MMD material、outline、animation に関わる変更
+- Babylon.js / babylon-mmd のバージョン差による API 変更や非推奨 API の確認
+- 公式 task / helper / recommended path が存在するかどうかの確認
+- 独自実装を入れる前に、既存の公式機能で置き換えられるか判断する場面
+
+調査で得た重要な知見や、公式ドキュメントと実装上の差分・制約が見つかった場合は、必要に応じて `docs/` に短い調査メモを残してください。
 
 ## 確認コマンド
 
