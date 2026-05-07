@@ -1,5 +1,37 @@
 # Frame Graph post effects 進捗メモ 2026-04-28
 
+## 2026-05-01 追記 11: Frame Graph Vignette / EdgeBlur 移行
+
+- Frame Graph backend に `Vignette + EdgeBlur` の独自 `FrameGraphPostProcessTask` を追加した。
+- 公式 task には該当する軽量単体 task が見当たらないため、既存の standalone edge blur shader をベースにし、ビネット処理も同じ fullscreen pass にまとめた。
+- task chain は `... -> ChromaticAberrationTask -> VignetteEdgeBlurTask -> FXAATask -> backbuffer copy`。
+- EdgeBlur は Classic standalone 実装と同じく周辺ピクセルだけを 9 tap blur する。WebGPU / WGSL では非 uniform 分岐内の texture sampling 警告を避けるため、`textureSampleLevel(..., 0.0)` を使う。
+- Vignette は Babylon の `ImageProcessingConfiguration.vignetteEnabled` には寄せず、Frame Graph 側の custom shader で黒ビネットを直接乗せる。
+  - `FrameGraphImageProcessingTask` に scene image processing configuration をそのまま渡すと、LUT / color space / shader define の問題と混ざりやすいため。
+  - Frame Graph 実行時は image processing task 側の vignette を無効化し、custom pass 側だけで扱う。
+- UI は Frame Graph backend panel 内に専用の `frame-graph-vignette-weight` / `frame-graph-edge-blur` slider を追加した。
+  - Classic backend の `vignette-weight` / `lens-edge-blur` DOM は共有しない。
+  - 内部設定値は既存 project 保存項目をそのまま使い、backend ごとに実行経路だけを切り替える。
+
+未確認:
+
+- Classic vignette と完全に同じカーブではない。見た目の近さを優先した黒ビネットとして扱う。
+- EdgeBlur は Classic 側と同じ正規化を使っているが、DoF / Chroma / FXAA との順序差で見え方は少し変わる可能性がある。
+
+## 2026-05-02 追記 12: Frame Graph Lens Distortion 移行
+
+- Frame Graph backend に lens distortion 用の独自 `FrameGraphPostProcessTask` を追加した。
+- 既存 Classic の `finalLensDistortion` shader は fullscreen の UV 変形だけで、depth / normal / velocity を必要としないため、Frame Graph 化しやすい。
+- task chain は `... -> ChromaticAberrationTask -> VignetteEdgeBlurTask -> LensDistortionTask -> FXAATask -> backbuffer copy`。
+- Frame Graph backend では Classic の `finalLensDistortionPostProcess` を作らないようにし、二重適用を避ける。
+- UI は Frame Graph backend panel 内に専用の `frame-graph-distortion-influence` slider を追加した。
+  - Classic backend の `distortion-influence` DOM は共有しない。
+  - 内部設定は既存の FoV 連動 `dofLensDistortionInfluence` / `dofLensDistortion` をそのまま使い、Frame Graph task は最終 distortion 値だけを読む。
+
+未確認:
+
+- Classic と同じ shader 式を使っているが、Frame Graph 側では `VignetteEdgeBlur -> Distortion -> FXAA` の順序になるため、最終的な見え方は Classic tail の順序差を確認する必要がある。
+
 ## 目的
 
 v0.2 で、既存の Classic post process 経路を残したまま、カメラ用ポストエフェクトを段階的に Frame Graph backend へ移す。

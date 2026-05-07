@@ -54,6 +54,10 @@ export type FrameGraphPostEffectsSettings = {
     bloomWeight: number;
     bloomThreshold: number;
     bloomKernel: number;
+    vignetteEnabled: boolean;
+    vignetteWeight: number;
+    edgeBlurStrength: number;
+    lensDistortion: number;
     chromaticAberration: number;
     grainIntensity: number;
     sharpenEdge: number;
@@ -302,6 +306,223 @@ function ensureSsaoToonCompositeShaders(): void {
     }
 }
 
+function ensureVignetteEdgeBlurShaders(): void {
+    const shaderKey = "mmdFrameGraphVignetteEdgeBlurPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform vec2 texelSize;
+            uniform float edgeBlurStrength;
+            uniform float vignetteWeight;
+            uniform float aspectRatio;
+
+            float computeEdgeMask(vec2 uv) {
+                vec2 centered = (uv - vec2(0.5)) * vec2(aspectRatio, 1.0);
+                float radius = length(centered);
+                float mask = smoothstep(0.50, 0.96, radius);
+                return mask * mask * (3.0 - 2.0 * mask);
+            }
+
+            float computeVignetteMask(vec2 uv) {
+                vec2 centered = (uv - vec2(0.5)) * vec2(aspectRatio, 1.0);
+                float radius = length(centered);
+                float mask = smoothstep(0.42, 0.92, radius);
+                return mask * mask * (3.0 - 2.0 * mask);
+            }
+
+            float computeEdgeStrengthCurve(float strength) {
+                float lifted = strength + 0.75 * strength * strength;
+                return min(1.75, lifted);
+            }
+
+            vec4 sampleBlur(vec2 uv, vec2 stepRadius) {
+                vec4 color = texture2D(textureSampler, uv) * 0.20;
+                color += texture2D(textureSampler, clamp(uv + vec2(stepRadius.x, 0.0), vec2(0.001), vec2(0.999))) * 0.12;
+                color += texture2D(textureSampler, clamp(uv - vec2(stepRadius.x, 0.0), vec2(0.001), vec2(0.999))) * 0.12;
+                color += texture2D(textureSampler, clamp(uv + vec2(0.0, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.12;
+                color += texture2D(textureSampler, clamp(uv - vec2(0.0, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.12;
+                color += texture2D(textureSampler, clamp(uv + vec2(stepRadius.x, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                color += texture2D(textureSampler, clamp(uv + vec2(-stepRadius.x, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                color += texture2D(textureSampler, clamp(uv + vec2(stepRadius.x, -stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                color += texture2D(textureSampler, clamp(uv - vec2(stepRadius.x, stepRadius.y), vec2(0.001), vec2(0.999))) * 0.08;
+                return color;
+            }
+
+            void main(void) {
+                vec4 baseColor = texture2D(textureSampler, vUV);
+                vec4 finalColor = baseColor;
+
+                if (edgeBlurStrength > 0.0001) {
+                    float edgeMask = computeEdgeMask(vUV);
+                    if (edgeMask > 0.0001) {
+                        float curvedStrength = computeEdgeStrengthCurve(edgeBlurStrength);
+                        float blurPixels = (0.7 + 9.8 * curvedStrength) * (0.24 + 0.76 * edgeMask);
+                        vec2 stepRadius = texelSize * blurPixels;
+                        vec4 blurColor = sampleBlur(vUV, stepRadius);
+                        float blurMix = edgeMask * (0.28 + 0.72 * min(1.0, curvedStrength));
+                        finalColor = mix(finalColor, blurColor, clamp(blurMix, 0.0, 1.0));
+                    }
+                }
+
+                if (vignetteWeight > 0.0001) {
+                    float vignetteMask = computeVignetteMask(vUV);
+                    float vignetteAmount = clamp(vignetteWeight * 0.35, 0.0, 1.0);
+                    finalColor.rgb *= 1.0 - vignetteMask * vignetteAmount;
+                }
+
+                gl_FragColor = finalColor;
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            uniform texelSize: vec2f;
+            uniform edgeBlurStrength: f32;
+            uniform vignetteWeight: f32;
+            uniform aspectRatio: f32;
+
+            fn computeEdgeMask(uv: vec2f) -> f32 {
+                let centered: vec2f = (uv - vec2f(0.5, 0.5)) * vec2f(uniforms.aspectRatio, 1.0);
+                let radius: f32 = length(centered);
+                let mask: f32 = smoothstep(0.50, 0.96, radius);
+                return mask * mask * (3.0 - 2.0 * mask);
+            }
+
+            fn computeVignetteMask(uv: vec2f) -> f32 {
+                let centered: vec2f = (uv - vec2f(0.5, 0.5)) * vec2f(uniforms.aspectRatio, 1.0);
+                let radius: f32 = length(centered);
+                let mask: f32 = smoothstep(0.42, 0.92, radius);
+                return mask * mask * (3.0 - 2.0 * mask);
+            }
+
+            fn computeEdgeStrengthCurve(strength: f32) -> f32 {
+                let lifted: f32 = strength + 0.75 * strength * strength;
+                return min(1.75, lifted);
+            }
+
+            fn sampleColor(uv: vec2f) -> vec4f {
+                return textureSampleLevel(textureSampler, textureSamplerSampler, clamp(uv, vec2f(0.001, 0.001), vec2f(0.999, 0.999)), 0.0);
+            }
+
+            fn sampleBlur(uv: vec2f, stepRadius: vec2f) -> vec4f {
+                var color: vec4f = sampleColor(uv) * 0.20;
+                color += sampleColor(uv + vec2f(stepRadius.x, 0.0)) * 0.12;
+                color += sampleColor(uv - vec2f(stepRadius.x, 0.0)) * 0.12;
+                color += sampleColor(uv + vec2f(0.0, stepRadius.y)) * 0.12;
+                color += sampleColor(uv - vec2f(0.0, stepRadius.y)) * 0.12;
+                color += sampleColor(uv + vec2f(stepRadius.x, stepRadius.y)) * 0.08;
+                color += sampleColor(uv + vec2f(-stepRadius.x, stepRadius.y)) * 0.08;
+                color += sampleColor(uv + vec2f(stepRadius.x, -stepRadius.y)) * 0.08;
+                color += sampleColor(uv - vec2f(stepRadius.x, stepRadius.y)) * 0.08;
+                return color;
+            }
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let baseColor: vec4f = sampleColor(input.vUV);
+                var finalColor: vec4f = baseColor;
+
+                if (uniforms.edgeBlurStrength > 0.0001) {
+                    let edgeMask: f32 = computeEdgeMask(input.vUV);
+                    if (edgeMask > 0.0001) {
+                        let curvedStrength: f32 = computeEdgeStrengthCurve(uniforms.edgeBlurStrength);
+                        let blurPixels: f32 = (0.7 + 9.8 * curvedStrength) * (0.24 + 0.76 * edgeMask);
+                        let stepRadius: vec2f = uniforms.texelSize * blurPixels;
+                        let blurColor: vec4f = sampleBlur(input.vUV, stepRadius);
+                        let blurMix: f32 = clamp(edgeMask * (0.28 + 0.72 * min(1.0, curvedStrength)), 0.0, 1.0);
+                        finalColor = mix(finalColor, blurColor, vec4f(blurMix));
+                    }
+                }
+
+                if (uniforms.vignetteWeight > 0.0001) {
+                    let vignetteMask: f32 = computeVignetteMask(input.vUV);
+                    let vignetteAmount: f32 = clamp(uniforms.vignetteWeight * 0.35, 0.0, 1.0);
+                    finalColor = vec4f(finalColor.rgb * (1.0 - vignetteMask * vignetteAmount), finalColor.a);
+                }
+
+                fragmentOutputs.color = finalColor;
+                return fragmentOutputs;
+            }
+        `;
+    }
+}
+
+function ensureLensDistortionShaders(): void {
+    const shaderKey = "mmdFrameGraphLensDistortionPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform float distortion;
+
+            void main(void) {
+                vec2 finalUv = vUV;
+                vec2 centered = vUV - vec2(0.5);
+                float radius2 = dot(centered, centered);
+
+                if (abs(distortion) >= 0.0001 && radius2 >= 1e-8) {
+                    vec2 direction = normalize(centered);
+                    float amount = clamp(abs(distortion) * 0.23, 0.0, 1.0);
+
+                    vec2 barrelUv = vec2(0.5) + direction * radius2;
+                    barrelUv = mix(vUV, barrelUv, amount);
+
+                    vec2 pincushionUv = vec2(0.5) - direction * radius2;
+                    pincushionUv = mix(vUV, pincushionUv, amount);
+
+                    finalUv = distortion >= 0.0 ? barrelUv : pincushionUv;
+                    finalUv = clamp(finalUv, vec2(0.0), vec2(1.0));
+                }
+
+                gl_FragColor = texture2D(textureSampler, finalUv);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            uniform distortion: f32;
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let centered: vec2f = input.vUV - vec2f(0.5);
+                let radius2: f32 = dot(centered, centered);
+
+                var finalUv: vec2f = input.vUV;
+                if (abs(uniforms.distortion) >= 0.0001 && radius2 >= 1e-8) {
+                    let direction: vec2f = normalize(centered);
+                    let amount: f32 = clamp(abs(uniforms.distortion) * 0.23, 0.0, 1.0);
+
+                    var barrelUv: vec2f = vec2f(0.5) + direction * radius2;
+                    barrelUv = mix(input.vUV, barrelUv, amount);
+
+                    var pincushionUv: vec2f = vec2f(0.5) - direction * radius2;
+                    pincushionUv = mix(input.vUV, pincushionUv, amount);
+
+                    finalUv = pincushionUv;
+                    if (uniforms.distortion >= 0.0) {
+                        finalUv = barrelUv;
+                    }
+                    finalUv = clamp(finalUv, vec2f(0.0), vec2f(1.0));
+                }
+
+                fragmentOutputs.color = textureSampleLevel(textureSampler, textureSamplerSampler, finalUv, 0.0);
+                return fragmentOutputs;
+            }
+        `;
+    }
+}
+
 class FrameGraphPostEffectsColorCorrectionTask extends FrameGraphPostProcessTask {
     constructor(
         name: string,
@@ -388,6 +609,74 @@ class FrameGraphPostEffectsSsaoToonCompositeTask extends FrameGraphPostProcessTa
     }
 }
 
+class FrameGraphPostEffectsVignetteEdgeBlurTask extends FrameGraphPostProcessTask {
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsVignetteEdgeBlurTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        return super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const effect = this.postProcess.effect;
+                const engine = this.postProcess.options.engine;
+                const width = Math.max(1, engine.getRenderWidth());
+                const height = Math.max(1, engine.getRenderHeight());
+                effect.setFloat2("texelSize", 1 / width, 1 / height);
+                effect.setFloat("aspectRatio", width / height);
+                effect.setFloat("vignetteWeight", settings.vignetteEnabled ? Math.max(0, settings.vignetteWeight) : 0);
+                effect.setFloat("edgeBlurStrength", Math.max(0, Math.min(1, settings.edgeBlurStrength / 3)));
+                additionalBindings?.(context);
+            },
+        );
+    }
+}
+
+class FrameGraphPostEffectsLensDistortionTask extends FrameGraphPostProcessTask {
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsLensDistortionTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        return super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                this.postProcess.effect.setFloat("distortion", this.getSettings().lensDistortion);
+                additionalBindings?.(context);
+            },
+        );
+    }
+}
+
 export class FrameGraphPostEffectsController {
     private activationWarningEmitted = false;
     private colorCorrectionEffect: EffectWrapper | null = null;
@@ -401,6 +690,10 @@ export class FrameGraphPostEffectsController {
     private bloomTask: FrameGraphBloomTask | null = null;
     private chromaticAberrationEffect: ThinChromaticAberrationPostProcess | null = null;
     private chromaticAberrationTask: FrameGraphChromaticAberrationTask | null = null;
+    private vignetteEdgeBlurEffect: EffectWrapper | null = null;
+    private vignetteEdgeBlurTask: FrameGraphPostEffectsVignetteEdgeBlurTask | null = null;
+    private lensDistortionEffect: EffectWrapper | null = null;
+    private lensDistortionTask: FrameGraphPostEffectsLensDistortionTask | null = null;
     private grainEffect: ThinGrainPostProcess | null = null;
     private grainTask: FrameGraphGrainTask | null = null;
     private sharpenEffect: ThinSharpenPostProcess | null = null;
@@ -430,6 +723,10 @@ export class FrameGraphPostEffectsController {
             bloomWeight: 1,
             bloomThreshold: 1,
             bloomKernel: 100,
+            vignetteEnabled: false,
+            vignetteWeight: 0.3,
+            edgeBlurStrength: 0,
+            lensDistortion: 0,
             chromaticAberration: 0,
             grainIntensity: 0,
             sharpenEdge: 0,
@@ -461,6 +758,8 @@ export class FrameGraphPostEffectsController {
 
         ensureColorCorrectionShaders();
         ensureSsaoToonCompositeShaders();
+        ensureVignetteEdgeBlurShaders();
+        ensureLensDistortionShaders();
 
         const frameGraph = new FrameGraph(scene, false);
         frameGraph.name = "MMD modoki post effects";
@@ -705,6 +1004,46 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(chromaticAberrationTask);
         this.chromaticAberrationTask = chromaticAberrationTask;
 
+        this.vignetteEdgeBlurEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphVignetteEdgeBlur",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["texelSize", "edgeBlurStrength", "vignetteWeight", "aspectRatio"],
+            name: "mmdFrameGraphVignetteEdgeBlur",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const vignetteEdgeBlurTask = new FrameGraphPostEffectsVignetteEdgeBlurTask(
+            "frameGraphPostEffectsVignetteEdgeBlur",
+            frameGraph,
+            this.vignetteEdgeBlurEffect,
+            this.getSettings,
+        );
+        vignetteEdgeBlurTask.sourceTexture = chromaticAberrationTask.outputTexture;
+        vignetteEdgeBlurTask.disabled = !this.isVignetteEdgeBlurEnabled(initialSettings);
+        frameGraph.addTask(vignetteEdgeBlurTask);
+        this.vignetteEdgeBlurTask = vignetteEdgeBlurTask;
+
+        this.lensDistortionEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphLensDistortion",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["distortion"],
+            name: "mmdFrameGraphLensDistortion",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const lensDistortionTask = new FrameGraphPostEffectsLensDistortionTask(
+            "frameGraphPostEffectsLensDistortion",
+            frameGraph,
+            this.lensDistortionEffect,
+            this.getSettings,
+        );
+        lensDistortionTask.sourceTexture = vignetteEdgeBlurTask.outputTexture;
+        lensDistortionTask.disabled = Math.abs(initialSettings.lensDistortion) <= 0.0001;
+        frameGraph.addTask(lensDistortionTask);
+        this.lensDistortionTask = lensDistortionTask;
+
         this.fxaaEffect = new ThinFXAAPostProcess(
             "frameGraphPostEffectsFXAA",
             frameGraph.engine,
@@ -717,7 +1056,7 @@ export class FrameGraphPostEffectsController {
             frameGraph,
             this.fxaaEffect,
         );
-        fxaaTask.sourceTexture = chromaticAberrationTask.outputTexture;
+        fxaaTask.sourceTexture = lensDistortionTask.outputTexture;
         fxaaTask.disabled = !initialSettings.antialiasEnabled;
         frameGraph.addTask(fxaaTask);
         this.fxaaTask = fxaaTask;
@@ -732,7 +1071,7 @@ export class FrameGraphPostEffectsController {
         this.frameGraph = frameGraph;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Bloom + color correction + Sharpen + Grain + Chromatic Aberration + FXAA).",
+            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Bloom + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -765,6 +1104,9 @@ export class FrameGraphPostEffectsController {
             this.imageProcessingEffect._updateParameters();
             this.lastImageProcessingEnabled = settings.imageProcessingEnabled;
         }
+        if (this.imageProcessingEffect?.vignetteEnabled) {
+            this.imageProcessingEffect.vignetteEnabled = false;
+        }
         if (this.depthOfFieldTask) {
             this.depthOfFieldTask.disabled = !settings.dofEnabled;
             this.applyDepthOfFieldSettings(this.depthOfFieldTask, settings);
@@ -794,6 +1136,12 @@ export class FrameGraphPostEffectsController {
         if (this.chromaticAberrationTask) {
             this.chromaticAberrationTask.disabled = settings.chromaticAberration <= 0.0001;
             this.applyChromaticAberrationSettings(this.chromaticAberrationTask, settings);
+        }
+        if (this.vignetteEdgeBlurTask) {
+            this.vignetteEdgeBlurTask.disabled = !this.isVignetteEdgeBlurEnabled(settings);
+        }
+        if (this.lensDistortionTask) {
+            this.lensDistortionTask.disabled = Math.abs(settings.lensDistortion) <= 0.0001;
         }
         if (this.fxaaTask) {
             this.fxaaTask.disabled = !settings.antialiasEnabled;
@@ -829,6 +1177,12 @@ export class FrameGraphPostEffectsController {
         this.chromaticAberrationEffect?.dispose();
         this.chromaticAberrationEffect = null;
         this.chromaticAberrationTask = null;
+        this.vignetteEdgeBlurEffect?.dispose();
+        this.vignetteEdgeBlurEffect = null;
+        this.vignetteEdgeBlurTask = null;
+        this.lensDistortionEffect?.dispose();
+        this.lensDistortionEffect = null;
+        this.lensDistortionTask = null;
         this.grainEffect?.dispose();
         this.grainEffect = null;
         this.grainTask = null;
@@ -908,6 +1262,11 @@ export class FrameGraphPostEffectsController {
     ): void {
         sharpenTask.postProcess.edgeAmount = Math.max(0, settings.sharpenEdge);
         sharpenTask.postProcess.colorAmount = 1;
+    }
+
+    private isVignetteEdgeBlurEnabled(settings: FrameGraphPostEffectsSettings): boolean {
+        return (settings.vignetteEnabled && settings.vignetteWeight > 0.0001)
+            || settings.edgeBlurStrength > 0.0001;
     }
 
     private getSourceTextureSize(scene: Scene, sourceTexture: InternalTexture): { width: number; height: number } {

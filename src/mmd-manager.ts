@@ -4607,7 +4607,7 @@ ${beforeFogAppendBlock}
         }, () => ({
             contrast: this.postEffectContrastValue,
             gammaPower: this.postEffectGammaValue,
-            imageProcessingEnabled: this.isImageProcessingEffectsEnabled(),
+            imageProcessingEnabled: this.isFrameGraphImageProcessingTaskNeeded(),
             dofEnabled: this.dofEnabledValue,
             dofBlurLevel: this.dofBlurLevelValue,
             dofFocusDistanceMm: this.dofFocusDistanceMmValue,
@@ -4618,6 +4618,10 @@ ${beforeFogAppendBlock}
             bloomWeight: this.postEffectBloomWeightValue,
             bloomThreshold: this.postEffectBloomThresholdValue,
             bloomKernel: this.postEffectBloomKernelValue,
+            vignetteEnabled: this.postEffectVignetteEnabledValue,
+            vignetteWeight: this.postEffectVignetteWeightValue,
+            edgeBlurStrength: this.dofLensEdgeBlurValue,
+            lensDistortion: this.dofLensDistortionValue,
             chromaticAberration: this.postEffectChromaticAberrationValue,
             grainIntensity: this.postEffectGrainIntensityValue,
             sharpenEdge: this.postEffectSharpenEdgeValue,
@@ -4642,6 +4646,15 @@ ${beforeFogAppendBlock}
             this.disposeFrameGraphPostEffectsSceneColorTarget();
         }
         this.postEffectBackend = activated ? "frameGraph" : "classic";
+    }
+
+    private isFrameGraphImageProcessingTaskNeeded(): boolean {
+        const epsilon = 1e-4;
+        return this.postEffectToneMappingEnabledValue
+            || this.postEffectDitheringEnabledValue
+            || this.postEffectColorCurvesEnabledValue
+            || (this.postEffectLutEnabledValue && isLutSourceReadyImpl(this))
+            || Math.abs(this.postEffectExposureValue - 1) > epsilon;
     }
 
     private createFrameGraphPostEffectsSceneColorTarget(): RenderTargetTexture | null {

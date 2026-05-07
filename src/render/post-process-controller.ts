@@ -950,6 +950,15 @@ export function setupOriginFogPostProcess(host: any): void {
 }
 
 export function setupFinalLensDistortionPostProcess(host: any): void {
+    if (host.postEffectBackend === "frameGraph") {
+        if (host.finalLensDistortionPostProcess) {
+            host.finalLensDistortionPostProcess.dispose(host.camera);
+            host.finalLensDistortionPostProcess = null;
+        }
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
     const shaderKey = "mmdFinalLensDistortionFragmentShader";
     if (!Effect.ShadersStore[shaderKey]) {
         Effect.ShadersStore[shaderKey] = `

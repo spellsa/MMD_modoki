@@ -2558,7 +2558,7 @@ export class UIController {
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
                         <strong>Frame Graph</strong><br>
-                        Experimental backend. Gamma / Contrast, SSAO2, DoF, Bloom, Sharpen, Grain, Chroma, and FXAA are available above; LUT remains on the Classic backend for now.
+                        Experimental backend. Gamma / Contrast, SSAO2, DoF, Bloom, Sharpen, Grain, Chroma, Vignette, EdgeBlur, Distortion, and FXAA are available above; LUT remains on the Classic backend for now.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
@@ -2570,6 +2570,9 @@ export class UIController {
                         <span class="effect-value">Sharp</span>
                         <span class="effect-value">Grain</span>
                         <span class="effect-value">Chroma</span>
+                        <span class="effect-value">Vignette</span>
+                        <span class="effect-value">EdgeBlur</span>
+                        <span class="effect-value">Distort</span>
                         <span class="effect-value">FXAA</span>
                     </div>
                     <div class="effect-row">
@@ -2586,6 +2589,21 @@ export class UIController {
                         <span class="effect-label" data-i18n="shader.postfx.chroma">Chroma</span>
                         <input data-postfx="frame-graph-chromatic-aberration" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                         <span data-postfx-val="frame-graph-chromatic-aberration" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.vignette">Vignette</span>
+                        <input data-postfx="frame-graph-vignette-weight" type="range" class="effect-slider" min="0" max="4" value="0" step="0.01">
+                        <span data-postfx-val="frame-graph-vignette-weight" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.edgeBlur">EdgeBlur</span>
+                        <input data-postfx="frame-graph-edge-blur" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-edge-blur" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.distortion">Distortion</span>
+                        <input data-postfx="frame-graph-distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-distortion-influence" class="effect-value">0%</span>
                     </div>
                     <div class="effect-row">
                         <span class="effect-label" data-i18n="shader.postfx.grain">Grain</span>
@@ -2700,6 +2718,7 @@ export class UIController {
         }
         this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
         this.installPostEffectBackendControls(postFxControls);
+        this.installFrameGraphLensEffectControls(postFxControls);
         this.installFrameGraphSsaoControls(postFxControls);
         this.installFrameGraphDofControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
@@ -2819,6 +2838,64 @@ export class UIController {
                 window.location.reload();
             }, 120);
         });
+    }
+
+    private installFrameGraphLensEffectControls(root: HTMLElement): void {
+        const vignetteSlider = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-vignette-weight"]');
+        const vignetteValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-vignette-weight"]');
+        const edgeBlurSlider = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-edge-blur"]');
+        const edgeBlurValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-edge-blur"]');
+        const distortionSlider = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-distortion-influence"]');
+        const distortionValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-distortion-influence"]');
+        if (
+            !vignetteSlider ||
+            !vignetteValue ||
+            !edgeBlurSlider ||
+            !edgeBlurValue ||
+            !distortionSlider ||
+            !distortionValue
+        ) {
+            return;
+        }
+
+        const refreshValues = (): void => {
+            const vignetteWeight = this.mmdManager.postEffectVignetteEnabled
+                ? this.mmdManager.postEffectVignetteWeight
+                : 0;
+            vignetteSlider.value = Math.max(0, Math.min(4, vignetteWeight)).toFixed(2);
+            vignetteValue.textContent = vignetteWeight > 0.0001
+                ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
+                : t("status.off");
+
+            const edgeBlurPercent = Math.max(0, Math.min(100, Math.round(this.mmdManager.dofLensEdgeBlur * 100)));
+            edgeBlurSlider.value = String(edgeBlurPercent);
+            edgeBlurValue.textContent = edgeBlurPercent > 0
+                ? `${edgeBlurPercent}%`
+                : t("status.off");
+
+            const distortionPercent = Math.max(0, Math.min(100, Math.round(this.mmdManager.dofLensDistortionInfluence * 100)));
+            distortionSlider.value = String(distortionPercent);
+            const currentDistortionPercent = Math.round(this.mmdManager.dofLensDistortion * 100);
+            distortionValue.textContent = distortionPercent > 0
+                ? `${distortionPercent}% (${currentDistortionPercent}%)`
+                : t("status.off");
+        };
+
+        vignetteSlider.addEventListener("input", () => {
+            const weight = Number(vignetteSlider.value);
+            this.mmdManager.postEffectVignetteWeight = weight;
+            this.mmdManager.postEffectVignetteEnabled = weight > 0.0001;
+            refreshValues();
+        });
+        edgeBlurSlider.addEventListener("input", () => {
+            this.mmdManager.dofLensEdgeBlur = Number(edgeBlurSlider.value) / 100;
+            refreshValues();
+        });
+        distortionSlider.addEventListener("input", () => {
+            this.mmdManager.dofLensDistortionInfluence = Number(distortionSlider.value) / 100;
+            refreshValues();
+        });
+        refreshValues();
     }
 
     private installFrameGraphSsaoControls(root: HTMLElement): void {
