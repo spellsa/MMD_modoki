@@ -74,6 +74,7 @@ type XLoadHost = {
     getLoadedModels?: () => ArrayLike<unknown>;
     setCameraTarget?: (x: number, y: number, z: number) => void;
     setCameraDistance?: (distance: number) => void;
+    syncIblShadowsScene?: () => void;
 };
 
 type AccessoryEntry = {
@@ -1141,6 +1142,7 @@ if (!mmdManagerProto.loadX) {
                 X_ACCESSORY_IMPORT_SCALE,
             );
             host.applyToonShadowInfluenceToMeshes?.(result.meshes as Mesh[]);
+            host.syncIblShadowsScene?.();
 
             console.log("[X] Loaded:", fileName, "meshes:", result.meshes.length, "accessory:", accessoryName);
             return true;
@@ -1191,6 +1193,7 @@ if (!mmdManagerProto.loadX) {
                 },
                 GLB_ACCESSORY_IMPORT_SCALE,
             );
+            host.syncIblShadowsScene?.();
 
             console.log("[GLB] Loaded:", fileName, "meshes:", container.meshes.length, "accessory:", accessoryName);
             return true;
@@ -1230,6 +1233,7 @@ if (!mmdManagerProto.clearAccessories) {
             const entry = entries.pop();
             entry?.root.dispose(false);
         }
+        (this as unknown as XLoadHost).syncIblShadowsScene?.();
     };
 }
 
@@ -1239,6 +1243,7 @@ if (!mmdManagerProto.setAccessoryVisibility) {
         const entry = entries[index];
         if (!entry) return false;
         setAccessoryVisible(entry, visible);
+        (this as unknown as XLoadHost).syncIblShadowsScene?.();
         return isAccessoryVisible(entry);
     };
 }
@@ -1250,6 +1255,7 @@ if (!mmdManagerProto.toggleAccessoryVisibility) {
         if (!entry) return false;
         const next = !isAccessoryVisible(entry);
         setAccessoryVisible(entry, next);
+        (this as unknown as XLoadHost).syncIblShadowsScene?.();
         return next;
     };
 }
@@ -1261,6 +1267,7 @@ if (!mmdManagerProto.removeAccessory) {
         const [entry] = entries.splice(index, 1);
         if (!entry) return false;
         entry.root.dispose(false);
+        (this as unknown as XLoadHost).syncIblShadowsScene?.();
         return true;
     };
 }
@@ -1324,6 +1331,7 @@ if (!mmdManagerProto.setAccessoryTransform) {
         }
 
         entry.offset.computeWorldMatrix(true);
+        (this as unknown as XLoadHost).syncIblShadowsScene?.();
         return true;
     };
 }

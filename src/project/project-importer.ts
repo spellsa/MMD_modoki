@@ -429,6 +429,24 @@ export async function importProjectState(
     host.softTransparentShadowEnabled = typeof data.lighting.softTransparentShadowEnabled === "boolean"
         ? data.lighting.softTransparentShadowEnabled
         : true;
+    host.iblShadowOpacity = typeof data.lighting.iblShadowOpacity === "number" && Number.isFinite(data.lighting.iblShadowOpacity)
+        ? data.lighting.iblShadowOpacity
+        : 0.25;
+    host.iblShadowDistanceScale = typeof data.lighting.iblShadowDistanceScale === "number" && Number.isFinite(data.lighting.iblShadowDistanceScale)
+        ? data.lighting.iblShadowDistanceScale
+        : 4;
+    host.iblShadowsEnabled = typeof data.lighting.iblShadowsEnabled === "boolean"
+        ? data.lighting.iblShadowsEnabled
+        : false;
+    host.characterContactShadowOpacity = typeof data.lighting.characterContactShadowOpacity === "number" && Number.isFinite(data.lighting.characterContactShadowOpacity)
+        ? data.lighting.characterContactShadowOpacity
+        : 0.35;
+    host.characterContactShadowScale = typeof data.lighting.characterContactShadowScale === "number" && Number.isFinite(data.lighting.characterContactShadowScale)
+        ? data.lighting.characterContactShadowScale
+        : 1;
+    host.characterContactShadowEnabled = typeof data.lighting.characterContactShadowEnabled === "boolean"
+        ? data.lighting.characterContactShadowEnabled
+        : false;
     const legacyShadowEdgeSoftness = typeof data.lighting.shadowEdgeSoftness === "number" && Number.isFinite(data.lighting.shadowEdgeSoftness)
         ? data.lighting.shadowEdgeSoftness
         : null;

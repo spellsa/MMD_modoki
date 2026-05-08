@@ -724,11 +724,13 @@ export async function loadPMX(host: any, filePath: string): Promise<ModelInfo | 
             materials: sceneMaterials,
             rigidBodies: sceneRigidBodies,
             shadowCasterMeshes,
+            contactShadowMesh: null,
             castShadow: true,
         });
         host.refreshRigidBodyVisualizerTarget();
         host.syncLuminousGlowLayer?.();
         host.syncGlobalIlluminationSceneModels?.();
+        host.syncIblShadowsScene?.();
 
         const activateAsCurrent = host.shouldActivateAsCurrent(modelInfo);
         if (activateAsCurrent) {

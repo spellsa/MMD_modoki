@@ -268,6 +268,12 @@ export interface ProjectLightingState {
     shadowNormalBias?: number;
     shadowFilteringQuality?: number;
     softTransparentShadowEnabled?: boolean;
+    iblShadowsEnabled?: boolean;
+    iblShadowOpacity?: number;
+    iblShadowDistanceScale?: number;
+    characterContactShadowEnabled?: boolean;
+    characterContactShadowOpacity?: number;
+    characterContactShadowScale?: number;
     shadowEdgeSoftness?: number;
     selfShadowEdgeSoftness?: number;
     occlusionShadowEdgeSoftness?: number;

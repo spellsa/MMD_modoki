@@ -6,6 +6,7 @@
 - [光・影実装メモ（Toon分離 + フラット光）](./light-shadow-implementation.md)
 - [影品質向上の検討メモ](./shadow-quality-investigation.md)
 - [セルフ影の横縞メモ](./self-shadow-horizontal-banding-note.md)
+- [IBL Shadows 検討メモ](./ibl-shadows-investigation-2026-05-07.md)
 
 ## PMX 材質フラグ（影関連）
 
@@ -148,6 +149,81 @@ Babylon.js の `enableSoftTransparentShadow` は、半透明 fragment の alpha 
 - 透明材質の影だけを弱める、または無効化する UI を追加する
 
 現時点では、Babylon 標準 shadow filter の切替だけで「CSM を維持しつつ半透明 dithering を完全に消す」ことは難しいと判断します。
+
+## 2026-05 IBL Shadows 試行
+
+Babylon.js 9.2.0 には `IblShadowsRenderPipeline` が入っているため、接地感補助用の実験機能として `IBL接地影` UI を追加しました。
+
+位置づけ:
+
+- 既存の `PCF + CascadedShadowGenerator` は維持する
+- IBL Shadows は、ディレクショナルライト影の置き換えではなく、室内ステージなどの接地感を補う別軸の影として扱う
+- 既定は OFF
+- ON 時のみ pipeline を生成する
+- 環境テクスチャ未設定でも確認できるよう、暫定の低輝度 cube environment を作る
+- `IBL影濃度` で `shadowOpacity` を調整する
+- `IBL影範囲` で screen-space shadow の `ssShadowDistanceScale` を調整する
+
+初期設定:
+
+- `resolutionExp = 5`
+- `sampleDirections = 2`
+- `shadowRenderSizeFactor = 0.5`
+- `shadowRemanence = 0.85`
+- `ssShadowsEnabled = true`
+- `ssShadowSampleCount = 8`
+- `ssShadowStride = 8`
+- `ssShadowDistanceScale = 4`
+- `triPlanarVoxelization = true`
+- `shadowOpacity = 0.25`
+
+制約:
+
+- `GeometryBufferRenderer` を使うため、通常の shadow map より描画負荷が高い可能性がある
+- shadow caster を voxel grid に書く方式なので、動く PMX モデルの影を毎フレーム正確に追従させる用途には向かない
+- 現行実装では、モデル/アクセサリ読み込み時や UI 操作時に voxelization を更新する。毎フレーム更新は行わない
+- WebGPU + PMX スキニングメッシュでは、voxelization 用 shader が `matricesWeights` 入力を期待して `Invalid ShaderModule` になるケースを確認した
+- そのため現行実装では、スケルトン付き mesh を IBL shadow caster から除外する
+- 半透明 shadow の dithering pattern を消す機能ではない
+
+2026-05-07 の追加判断:
+
+- IBL Shadows は、MMD キャラクターの足元接地影を作る本命にはしにくい
+- 使うなら、静的な室内ステージ/アクセサリの環境影確認に限定する
+- キャラクター足元の接地感が目的なら、別途 blob shadow / projected decal / screen-space contact shadow のような軽い専用表現を検討する
+- 現状の MMD_modoki には実 HDR/ENV の環境マップ読み込み導線はなく、IBL Shadows 有効時に確認用のニュートラル cube environment を生成しているだけです
+- スキニング付き PMX を除外しても、WebGPU 側で `r32float` texture の mipmap 生成に関する validation error が残るケースを確認しました
+
+## 2026-05 キャラクター接地影 PoC
+
+IBL Shadows は足下影の本命にしにくいため、別軸の軽量 PoC として `キャラ接地影` UI を追加しました。
+
+方式:
+
+- 各 PMX モデルごとに、床面上へ半透明の radial gradient メッシュを置く
+- モデルの hierarchy bounds から X/Z 中心とサイズを毎フレーム更新する
+- 通常 shadow map、CSM、IBL Shadows、WebGPU voxelization には依存しない
+- 影ではなく「接地感の補助表現」として扱う
+
+UI:
+
+- `キャラ接地影`: ON/OFF
+- `接地影濃度`: 透明度
+- `接地影サイズ`: bounds から計算する楕円サイズの倍率
+
+制約:
+
+- 本物の足ボーン投影ではなく、モデル全体 bounds ベースの簡易楕円です
+- 浮遊ポーズではモデル下端と床の距離に応じて薄くします
+- 階段や傾斜床、複数床面には未対応です
+- 床以外のステージ面へ正確に投影する用途には向きません
+
+確認観点:
+
+- 室内ステージで接地感が増えるか
+- FPS 低下が許容範囲か
+- MMD Standard 材質やアクセサリ材質へ影受け plugin が問題なく入るか
+- CSM 影、SSAO、Frame Graph post effects と併用して破綻しないか
 
 ## 2026-03 時点の実調整メモ
 

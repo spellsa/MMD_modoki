@@ -21,6 +21,8 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { RawCubeTexture } from "@babylonjs/core/Materials/Textures/rawCubeTexture";
+import { HDRCubeTexture } from "@babylonjs/core/Materials/Textures/hdrCubeTexture";
 import { ColorGradingTexture } from "@babylonjs/core/Materials/Textures/colorGradingTexture";
 import { Effect } from "@babylonjs/core/Materials/effect";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
@@ -33,13 +35,14 @@ import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPi
 import { LensRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/lensRenderingPipeline";
 import { SSAO2RenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssao2RenderingPipeline";
 import { SSRRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssrRenderingPipeline";
+import { IblShadowsRenderPipeline } from "@babylonjs/core/Rendering/IBLShadows/iblShadowsRenderPipeline";
 import { VolumetricLightScatteringPostProcess } from "@babylonjs/core/PostProcesses/volumetricLightScatteringPostProcess";
 import { DepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/depthOfFieldEffect";
 import { GizmoManager } from "@babylonjs/core/Gizmos/gizmoManager";
 import { DepthRenderer } from "@babylonjs/core/Rendering/depthRenderer";
 import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
 import type { PerfCounter } from "@babylonjs/core/Misc/perfCounter";
-import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type {
     BoneControlInfo,
     MmdModokiProjectFileV1,
@@ -468,6 +471,8 @@ import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/core/Rendering/prePassRendererSceneComponent";
 import "@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture";
+import "@babylonjs/core/Engines/Extensions/engine.rawTexture";
+import "@babylonjs/core/Engines/WebGPU/Extensions/engine.rawTexture";
 import "@babylonjs/core/ShadersWGSL/default.vertex";
 import "@babylonjs/core/ShadersWGSL/default.fragment";
 import "@babylonjs/core/ShadersWGSL/postprocess.vertex";
@@ -520,6 +525,8 @@ import glslangWasmUrl from "@babylonjs/core/assets/glslang/glslang.wasm?url";
 import twgslJsUrl from "@babylonjs/core/assets/twgsl/twgsl.js?url";
 // eslint-disable-next-line import/no-unresolved
 import twgslWasmUrl from "@babylonjs/core/assets/twgsl/twgsl.wasm?url";
+// eslint-disable-next-line import/no-unresolved
+import iblShadowTestEnvironmentUrl from "./assets/ibl-shadows/white.hdr?url";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
 // eslint-disable-next-line import/no-unresolved
 import animeSoftLutText from "../lut/anime-soft.3dl?raw";
@@ -603,6 +610,7 @@ type SceneModelEntry = {
     materials: SceneModelMaterialEntry[];
     rigidBodies: SceneModelRigidBodyEntry[];
     shadowCasterMeshes: Mesh[];
+    contactShadowMesh: Mesh | null;
     castShadow: boolean;
 };
 
@@ -1276,6 +1284,14 @@ ${beforeFogAppendBlock}
     private dirLight!: DirectionalLight;
     private hemiLight!: HemisphericLight;
     private shadowGenerator!: ShadowGenerator;
+    private iblShadowsPipeline: IblShadowsRenderPipeline | null = null;
+    private iblFallbackEnvironmentTexture: RawCubeTexture | null = null;
+    private iblTestEnvironmentTexture: HDRCubeTexture | null = null;
+    private contactShadowTexture: DynamicTexture | null = null;
+    private contactShadowMaterial: StandardMaterial | null = null;
+    private characterContactShadowEnabledValue = false;
+    private characterContactShadowOpacityValue = 0.35;
+    private characterContactShadowScaleValue = 1.0;
     private cameraRotationEulerDeg = new Vector3(0, 0, 0);
     private cameraAnimationHandle: MmdRuntimeAnimationHandle | null = null;
     private hasCameraMotion = false;
@@ -1355,6 +1371,9 @@ ${beforeFogAppendBlock}
     private shadowNormalBiasValue = 0.01;
     private shadowFilteringQualityValue = ShadowGenerator.QUALITY_MEDIUM;
     private softTransparentShadowEnabledValue = true;
+    private iblShadowsEnabledValue = false;
+    private iblShadowOpacityValue = 0.25;
+    private iblShadowDistanceScaleValue = 4;
     private selfShadowEdgeSoftnessValue = 0.05;
     private occlusionShadowEdgeSoftnessValue = 0.01;
     private toonShadowInfluenceValue = 1;
@@ -2063,6 +2082,7 @@ ${beforeFogAppendBlock}
         this.modelKeyframeTracksByModel.delete(removed.model);
         this.modelSourceAnimationsByModel.delete(removed.model);
         this.modelMotionImportsByModel.delete(removed.model);
+        this.disposeContactShadowForModel(removed);
         removed.mesh.dispose();
         this.sceneModels.splice(removeIndex, 1);
         this.syncLuminousGlowLayer();
@@ -2190,6 +2210,359 @@ ${beforeFogAppendBlock}
 
     public refreshGlobalIlluminationLightParameters(): void {
         this.globalIlluminationController?.updateLightParameters();
+    }
+
+    public isIblShadowsEnabled(): boolean {
+        return this.iblShadowsEnabledValue;
+    }
+
+    public setIblShadowsEnabled(enabled: boolean): boolean {
+        this.iblShadowsEnabledValue = Boolean(enabled);
+
+        if (!this.iblShadowsEnabledValue) {
+            this.iblShadowsPipeline?.toggleShadow(false);
+            return true;
+        }
+
+        if (!this.ensureIblShadowsPipeline()) {
+            this.iblShadowsEnabledValue = false;
+            return false;
+        }
+
+        this.iblShadowsPipeline?.toggleShadow(true);
+        this.syncIblShadowsScene();
+        return true;
+    }
+
+    public toggleIblShadowsEnabled(): boolean {
+        this.setIblShadowsEnabled(!this.iblShadowsEnabledValue);
+        return this.iblShadowsEnabledValue;
+    }
+
+    public get iblShadowOpacity(): number {
+        return this.iblShadowOpacityValue;
+    }
+
+    public set iblShadowOpacity(value: number) {
+        const next = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.25));
+        this.iblShadowOpacityValue = next;
+        if (this.iblShadowsPipeline) {
+            this.iblShadowsPipeline.shadowOpacity = next;
+            this.iblShadowsPipeline.resetAccumulation();
+        }
+    }
+
+    public get iblShadowDistanceScale(): number {
+        return this.iblShadowDistanceScaleValue;
+    }
+
+    public set iblShadowDistanceScale(value: number) {
+        const next = Math.max(0.5, Math.min(12, Number.isFinite(value) ? value : 4));
+        this.iblShadowDistanceScaleValue = next;
+        if (this.iblShadowsPipeline) {
+            this.iblShadowsPipeline.ssShadowDistanceScale = next;
+            this.iblShadowsPipeline.resetAccumulation();
+        }
+    }
+
+    public syncIblShadowsScene(): void {
+        if (!this.iblShadowsEnabledValue || !this.iblShadowsPipeline) return;
+
+        const castingMeshes = this.collectIblShadowCastingMeshes();
+        this.iblShadowsPipeline.clearShadowCastingMeshes();
+        if (castingMeshes.length > 0) {
+            this.iblShadowsPipeline.addShadowCastingMesh(castingMeshes);
+        }
+
+        this.iblShadowsPipeline.clearShadowReceivingMaterials();
+        this.iblShadowsPipeline.addShadowReceivingMaterial();
+        this.iblShadowsPipeline.shadowOpacity = this.iblShadowOpacityValue;
+
+        if (castingMeshes.length === 0) {
+            this.iblShadowsPipeline.resetAccumulation();
+            return;
+        }
+
+        try {
+            this.iblShadowsPipeline.updateSceneBounds();
+            this.iblShadowsPipeline.updateVoxelization();
+            this.iblShadowsPipeline.resetAccumulation();
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            logWarn("render", "IBL Shadows voxel update failed", { message });
+            this.onError?.(`IBL Shadows update failed: ${message}`);
+        }
+    }
+
+    private ensureIblShadowsPipeline(): boolean {
+        if (this.iblShadowsPipeline) return true;
+
+        if (!IblShadowsRenderPipeline.IsSupported) {
+            this.onError?.("IBL Shadows are not supported by this engine.");
+            return false;
+        }
+
+        this.ensureFallbackIblEnvironmentTexture();
+
+        try {
+            this.iblShadowsPipeline = new IblShadowsRenderPipeline(
+                "MmdModokiIblShadows",
+                this.scene,
+                {
+                    resolutionExp: 5,
+                    sampleDirections: 2,
+                    shadowOpacity: this.iblShadowOpacityValue,
+                    shadowRenderSizeFactor: 0.5,
+                    shadowRemanence: 0.85,
+                    ssShadowsEnabled: true,
+                    ssShadowSampleCount: 8,
+                    ssShadowStride: 8,
+                    ssShadowDistanceScale: this.iblShadowDistanceScaleValue,
+                    triPlanarVoxelization: true,
+                    voxelShadowOpacity: 1,
+                },
+                [this.camera],
+            );
+            this.iblShadowsPipeline.toggleShadow(this.iblShadowsEnabledValue);
+            this.iblShadowsPipeline.onVoxelizationCompleteObservable.add(() => {
+                logInfo("render", "IBL Shadows voxelization complete", {
+                    voxelGridSize: this.iblShadowsPipeline?.voxelGridSize ?? 0,
+                });
+            });
+            return true;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            logWarn("render", "IBL Shadows initialization failed", { message });
+            this.onError?.(`IBL Shadows initialization failed: ${message}`);
+            this.iblShadowsPipeline = null;
+            return false;
+        }
+    }
+
+    private ensureFallbackIblEnvironmentTexture(): void {
+        if (this.scene.environmentTexture) return;
+        if (!this.iblFallbackEnvironmentTexture) {
+            const face = new Uint8Array([190, 190, 190]);
+            this.iblFallbackEnvironmentTexture = new RawCubeTexture(
+                this.scene,
+                [face.slice(), face.slice(), face.slice(), face.slice(), face.slice(), face.slice()],
+                1,
+                Engine.TEXTUREFORMAT_RGB,
+                Engine.TEXTURETYPE_UNSIGNED_BYTE,
+                false,
+                false,
+                Texture.TRILINEAR_SAMPLINGMODE,
+            );
+            this.iblFallbackEnvironmentTexture.name = "mmdModokiIblFallbackEnvironment";
+            this.iblFallbackEnvironmentTexture.gammaSpace = false;
+            this.iblFallbackEnvironmentTexture.coordinatesMode = Texture.CUBIC_MODE;
+        }
+        this.scene.environmentTexture = this.iblFallbackEnvironmentTexture;
+    }
+
+    private configureIblTestEnvironmentTexture(): void {
+        if (this.scene.environmentTexture) return;
+
+        try {
+            this.iblTestEnvironmentTexture = new HDRCubeTexture(
+                iblShadowTestEnvironmentUrl,
+                this.scene,
+                128,
+                false,
+                true,
+                false,
+                false,
+                () => {
+                    logInfo("render", "IBL test environment texture loaded", {
+                        url: iblShadowTestEnvironmentUrl,
+                        name: this.iblTestEnvironmentTexture?.name ?? "iblShadowTestEnvironment",
+                    });
+                },
+                (message, exception) => {
+                    logWarn("render", "IBL test environment texture failed", {
+                        message: message ?? "unknown",
+                        exception: exception instanceof Error ? exception.message : String(exception ?? ""),
+                    });
+                },
+            );
+            this.iblTestEnvironmentTexture.name = "iblShadowTestEnvironment";
+            this.iblTestEnvironmentTexture.gammaSpace = false;
+            this.iblTestEnvironmentTexture.coordinatesMode = Texture.CUBIC_MODE;
+            this.scene.environmentTexture = this.iblTestEnvironmentTexture;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            logWarn("render", "IBL test environment texture initialization failed", { message });
+            this.iblTestEnvironmentTexture = null;
+        }
+    }
+
+    private collectIblShadowCastingMeshes(): Mesh[] {
+        const meshes: Mesh[] = [];
+        const seen = new Set<Mesh>();
+        const addMesh = (mesh: unknown): void => {
+            if (!(mesh instanceof Mesh)) return;
+            if (seen.has(mesh)) return;
+            if (mesh.isDisposed()) return;
+            if (!mesh.isEnabled() || !mesh.isVisible) return;
+            if (mesh.skeleton) return;
+            if ((mesh.getTotalVertices?.() ?? 0) <= 0) return;
+            seen.add(mesh);
+            meshes.push(mesh);
+        };
+
+        for (const entry of this.sceneModels) {
+            if (entry.castShadow === false) continue;
+            for (const mesh of entry.shadowCasterMeshes) {
+                addMesh(mesh);
+            }
+        }
+
+        const accessoryMeshes = (this as unknown as { getAccessoryMeshes?: () => unknown[] }).getAccessoryMeshes?.() ?? [];
+        for (const mesh of accessoryMeshes) {
+            addMesh(mesh);
+        }
+
+        return meshes;
+    }
+
+    public get characterContactShadowEnabled(): boolean {
+        return this.characterContactShadowEnabledValue;
+    }
+
+    public set characterContactShadowEnabled(enabled: boolean) {
+        this.characterContactShadowEnabledValue = Boolean(enabled);
+        this.updateCharacterContactShadows();
+    }
+
+    public get characterContactShadowOpacity(): number {
+        return this.characterContactShadowOpacityValue;
+    }
+
+    public set characterContactShadowOpacity(value: number) {
+        this.characterContactShadowOpacityValue = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.35));
+        this.updateCharacterContactShadows();
+    }
+
+    public get characterContactShadowScale(): number {
+        return this.characterContactShadowScaleValue;
+    }
+
+    public set characterContactShadowScale(value: number) {
+        this.characterContactShadowScaleValue = Math.max(0.5, Math.min(3, Number.isFinite(value) ? value : 1));
+        this.updateCharacterContactShadows();
+    }
+
+    private ensureContactShadowMaterial(): StandardMaterial {
+        if (this.contactShadowMaterial) return this.contactShadowMaterial;
+
+        const textureSize = 256;
+        const texture = new DynamicTexture(
+            "characterContactShadowTexture",
+            { width: textureSize, height: textureSize },
+            this.scene,
+            true,
+        );
+        const ctx = texture.getContext();
+        ctx.clearRect(0, 0, textureSize, textureSize);
+        const gradient = ctx.createRadialGradient(
+            textureSize * 0.5,
+            textureSize * 0.5,
+            textureSize * 0.05,
+            textureSize * 0.5,
+            textureSize * 0.5,
+            textureSize * 0.5,
+        );
+        gradient.addColorStop(0.0, "rgba(0, 0, 0, 0.85)");
+        gradient.addColorStop(0.45, "rgba(0, 0, 0, 0.42)");
+        gradient.addColorStop(0.8, "rgba(0, 0, 0, 0.12)");
+        gradient.addColorStop(1.0, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, textureSize, textureSize);
+        texture.hasAlpha = true;
+        texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+        texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+        texture.updateSamplingMode(Texture.TRILINEAR_SAMPLINGMODE);
+        texture.update();
+
+        const material = new StandardMaterial("characterContactShadowMaterial", this.scene);
+        material.diffuseTexture = texture;
+        material.opacityTexture = texture;
+        material.useAlphaFromDiffuseTexture = true;
+        material.diffuseColor = new Color3(0, 0, 0);
+        material.emissiveColor = new Color3(0, 0, 0);
+        material.specularColor = new Color3(0, 0, 0);
+        material.disableLighting = true;
+        material.backFaceCulling = false;
+        material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+        material.alpha = 1;
+
+        this.contactShadowTexture = texture;
+        this.contactShadowMaterial = material;
+        return material;
+    }
+
+    private ensureContactShadowMesh(entry: SceneModelEntry): Mesh {
+        if (entry.contactShadowMesh && !entry.contactShadowMesh.isDisposed()) {
+            return entry.contactShadowMesh;
+        }
+
+        const mesh = CreateGround(
+            `characterContactShadow:${entry.info.name}`,
+            { width: 1, height: 1, subdivisions: 1, updatable: false },
+            this.scene,
+        );
+        mesh.material = this.ensureContactShadowMaterial();
+        mesh.isPickable = false;
+        mesh.receiveShadows = false;
+        mesh.doNotSyncBoundingInfo = true;
+        mesh.alwaysSelectAsActiveMesh = true;
+        mesh.setEnabled(false);
+        entry.contactShadowMesh = mesh;
+        return mesh;
+    }
+
+    private disposeContactShadowForModel(entry: SceneModelEntry): void {
+        if (!entry.contactShadowMesh) return;
+        entry.contactShadowMesh.dispose();
+        entry.contactShadowMesh = null;
+    }
+
+    private updateCharacterContactShadows(): void {
+        const enabled = this.characterContactShadowEnabledValue && this.sceneModels.length > 0;
+        for (const entry of this.sceneModels) {
+            if (!enabled || !this.getModelVisibility(entry.mesh)) {
+                if (entry.contactShadowMesh) {
+                    entry.contactShadowMesh.setEnabled(false);
+                }
+                continue;
+            }
+
+            let vectors: { min: Vector3; max: Vector3 };
+            try {
+                vectors = entry.mesh.getHierarchyBoundingVectors(true);
+            } catch {
+                if (entry.contactShadowMesh) {
+                    entry.contactShadowMesh.setEnabled(false);
+                }
+                continue;
+            }
+
+            const min = vectors.min;
+            const max = vectors.max;
+            const width = Math.max(0.45, Math.min(5.0, (max.x - min.x) * 0.42 * this.characterContactShadowScaleValue));
+            const depth = Math.max(0.35, Math.min(4.0, (max.z - min.z) * 0.36 * this.characterContactShadowScaleValue));
+            if (!Number.isFinite(width) || !Number.isFinite(depth)) continue;
+
+            const groundY = this.ground?.position.y ?? 0;
+            const mesh = this.ensureContactShadowMesh(entry);
+            mesh.position.set((min.x + max.x) * 0.5, groundY + 0.012, (min.z + max.z) * 0.5);
+            mesh.scaling.set(width, 1, depth);
+
+            const heightAboveGround = Math.max(0, min.y - groundY);
+            const heightFade = Math.max(0, Math.min(1, 1 - heightAboveGround / 12));
+            mesh.visibility = this.characterContactShadowOpacityValue * heightFade;
+            mesh.setEnabled(mesh.visibility > 0.001);
+        }
     }
 
     public setBoneVisualizerSelectedBone(boneName: string | null): void {
@@ -3109,6 +3482,7 @@ ${beforeFogAppendBlock}
         groundMat.diffuseTexture = groundGridTexture;
         this.ground.material = groundMat;
         this.ground.receiveShadows = true;
+        this.configureIblTestEnvironmentTexture();
 
         this.skydome = CreateSphere("skydome", {
             diameter: 1200,
@@ -3173,6 +3547,7 @@ ${beforeFogAppendBlock}
                 this.handleBoneGizmoBeforeRender();
                 this.updateBoneVisualizer();
                 this.updateRigidBodyVisualizer();
+                this.updateCharacterContactShadows();
                 this.updateEditorDofFocusAndFStop();
                 return;
             }
@@ -3194,6 +3569,9 @@ ${beforeFogAppendBlock}
             sectionStartMs = performance.now();
             this.updateRigidBodyVisualizer();
             this.recordFramePerformanceSection("rigidBodyVisualizer", performance.now() - sectionStartMs);
+            sectionStartMs = performance.now();
+            this.updateCharacterContactShadows();
+            this.recordFramePerformanceSection("characterContactShadow", performance.now() - sectionStartMs);
             sectionStartMs = performance.now();
             this.updateEditorDofFocusAndFStop();
             this.recordFramePerformanceSection("editorDof", performance.now() - sectionStartMs);
@@ -4339,6 +4717,7 @@ ${beforeFogAppendBlock}
             this.modelKeyframeTracksByModel.delete(entry.model);
             this.modelSourceAnimationsByModel.delete(entry.model);
             this.modelMotionImportsByModel.delete(entry.model);
+            this.disposeContactShadowForModel(entry);
             entry.mesh.dispose();
         }
 
@@ -5600,6 +5979,13 @@ ${beforeFogAppendBlock}
             this.shadowGenerator.useOpacityTextureForTransparentShadow = true;
             this.engine.releaseEffects();
         }
+    }
+
+    get iblShadowsEnabled(): boolean {
+        return this.iblShadowsEnabledValue;
+    }
+    set iblShadowsEnabled(v: boolean) {
+        this.setIblShadowsEnabled(v);
     }
 
     getShadowEnabled(): boolean {
@@ -7075,6 +7461,7 @@ ${beforeFogAppendBlock}
             } catch {
                 // no-op
             }
+            this.disposeContactShadowForModel(sceneModel);
             sceneModel.mesh.dispose();
         }
         this.sceneModels = [];
@@ -7198,6 +7585,32 @@ ${beforeFogAppendBlock}
         if (MmdManager.toonContactAoFallbackTexture) {
             MmdManager.toonContactAoFallbackTexture.dispose();
             MmdManager.toonContactAoFallbackTexture = null;
+        }
+        if (this.iblShadowsPipeline) {
+            this.iblShadowsPipeline.dispose();
+            this.iblShadowsPipeline = null;
+        }
+        if (this.iblFallbackEnvironmentTexture) {
+            if (this.scene.environmentTexture === this.iblFallbackEnvironmentTexture) {
+                this.scene.environmentTexture = null;
+            }
+            this.iblFallbackEnvironmentTexture.dispose();
+            this.iblFallbackEnvironmentTexture = null;
+        }
+        if (this.iblTestEnvironmentTexture) {
+            if (this.scene.environmentTexture === this.iblTestEnvironmentTexture) {
+                this.scene.environmentTexture = null;
+            }
+            this.iblTestEnvironmentTexture.dispose();
+            this.iblTestEnvironmentTexture = null;
+        }
+        if (this.contactShadowMaterial) {
+            this.contactShadowMaterial.dispose();
+            this.contactShadowMaterial = null;
+        }
+        if (this.contactShadowTexture) {
+            this.contactShadowTexture.dispose();
+            this.contactShadowTexture = null;
         }
         if (this.skydome) {
             this.skydome.dispose();

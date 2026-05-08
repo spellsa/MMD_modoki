@@ -641,6 +641,12 @@ export class UIController {
         const elShadowMaxZ = document.getElementById("light-shadow-max-z") as HTMLInputElement;
         const elShadowFilteringQuality = document.getElementById("light-shadow-filter-quality") as HTMLInputElement;
         const elSoftTransparentShadow = document.getElementById("light-soft-transparent-shadow") as HTMLInputElement;
+        const elIblShadows = document.getElementById("light-ibl-shadows") as HTMLInputElement;
+        const elIblShadowOpacity = document.getElementById("light-ibl-shadow-opacity") as HTMLInputElement;
+        const elIblShadowRange = document.getElementById("light-ibl-shadow-range") as HTMLInputElement;
+        const elCharacterContactShadow = document.getElementById("light-character-contact-shadow") as HTMLInputElement;
+        const elCharacterContactShadowOpacity = document.getElementById("light-character-contact-shadow-opacity") as HTMLInputElement;
+        const elCharacterContactShadowScale = document.getElementById("light-character-contact-shadow-scale") as HTMLInputElement;
         const elShadowBias = document.getElementById("light-shadow-bias") as HTMLInputElement;
         const elShadowNormalBias = document.getElementById("light-shadow-normal-bias") as HTMLInputElement;
         const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
@@ -665,6 +671,12 @@ export class UIController {
         const valShadowMaxZ = document.getElementById("light-shadow-max-z-val")!;
         const valShadowFilteringQuality = document.getElementById("light-shadow-filter-quality-val")!;
         const valSoftTransparentShadow = document.getElementById("light-soft-transparent-shadow-val")!;
+        const valIblShadows = document.getElementById("light-ibl-shadows-val")!;
+        const valIblShadowOpacity = document.getElementById("light-ibl-shadow-opacity-val")!;
+        const valIblShadowRange = document.getElementById("light-ibl-shadow-range-val")!;
+        const valCharacterContactShadow = document.getElementById("light-character-contact-shadow-val")!;
+        const valCharacterContactShadowOpacity = document.getElementById("light-character-contact-shadow-opacity-val")!;
+        const valCharacterContactShadowScale = document.getElementById("light-character-contact-shadow-scale-val")!;
         const valShadowBias = document.getElementById("light-shadow-bias-val")!;
         const valShadowNormalBias = document.getElementById("light-shadow-normal-bias-val")!;
         const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
@@ -798,6 +810,38 @@ export class UIController {
             this.mmdManager.softTransparentShadowEnabled = enabled;
             valSoftTransparentShadow.textContent = enabled ? "Soft" : "Hard";
         });
+        elIblShadows.addEventListener("input", () => {
+            const enabled = Number(elIblShadows.value) > 0;
+            const applied = this.mmdManager.setIblShadowsEnabled(enabled);
+            const actual = applied ? this.mmdManager.iblShadowsEnabled : false;
+            elIblShadows.value = actual ? "1" : "0";
+            valIblShadows.textContent = actual ? "On" : "Off";
+        });
+        elIblShadowOpacity.addEventListener("input", () => {
+            const opacity = Number(elIblShadowOpacity.value) / 100;
+            this.mmdManager.iblShadowOpacity = opacity;
+            valIblShadowOpacity.textContent = `${Math.round(this.mmdManager.iblShadowOpacity * 100)}%`;
+        });
+        elIblShadowRange.addEventListener("input", () => {
+            const range = Number(elIblShadowRange.value) / 100;
+            this.mmdManager.iblShadowDistanceScale = range;
+            valIblShadowRange.textContent = this.mmdManager.iblShadowDistanceScale.toFixed(1);
+        });
+        elCharacterContactShadow.addEventListener("input", () => {
+            const enabled = Number(elCharacterContactShadow.value) > 0;
+            this.mmdManager.characterContactShadowEnabled = enabled;
+            valCharacterContactShadow.textContent = enabled ? "On" : "Off";
+        });
+        elCharacterContactShadowOpacity.addEventListener("input", () => {
+            const opacity = Number(elCharacterContactShadowOpacity.value) / 100;
+            this.mmdManager.characterContactShadowOpacity = opacity;
+            valCharacterContactShadowOpacity.textContent = `${Math.round(this.mmdManager.characterContactShadowOpacity * 100)}%`;
+        });
+        elCharacterContactShadowScale.addEventListener("input", () => {
+            const scale = Number(elCharacterContactShadowScale.value) / 100;
+            this.mmdManager.characterContactShadowScale = scale;
+            valCharacterContactShadowScale.textContent = this.mmdManager.characterContactShadowScale.toFixed(2);
+        });
         elShadowBias.addEventListener("input", () => {
             const v = Number(elShadowBias.value) / 1_000_000;
             valShadowBias.textContent = v.toFixed(5);
@@ -847,6 +891,18 @@ export class UIController {
         valShadowFilteringQuality.textContent = formatShadowFilteringQuality(this.mmdManager.shadowFilteringQuality);
         elSoftTransparentShadow.value = this.mmdManager.softTransparentShadowEnabled ? "1" : "0";
         valSoftTransparentShadow.textContent = this.mmdManager.softTransparentShadowEnabled ? "Soft" : "Hard";
+        elIblShadows.value = this.mmdManager.iblShadowsEnabled ? "1" : "0";
+        valIblShadows.textContent = this.mmdManager.iblShadowsEnabled ? "On" : "Off";
+        elIblShadowOpacity.value = String(Math.round(this.mmdManager.iblShadowOpacity * 100));
+        valIblShadowOpacity.textContent = `${Math.round(this.mmdManager.iblShadowOpacity * 100)}%`;
+        elIblShadowRange.value = String(Math.round(this.mmdManager.iblShadowDistanceScale * 100));
+        valIblShadowRange.textContent = this.mmdManager.iblShadowDistanceScale.toFixed(1);
+        elCharacterContactShadow.value = this.mmdManager.characterContactShadowEnabled ? "1" : "0";
+        valCharacterContactShadow.textContent = this.mmdManager.characterContactShadowEnabled ? "On" : "Off";
+        elCharacterContactShadowOpacity.value = String(Math.round(this.mmdManager.characterContactShadowOpacity * 100));
+        valCharacterContactShadowOpacity.textContent = `${Math.round(this.mmdManager.characterContactShadowOpacity * 100)}%`;
+        elCharacterContactShadowScale.value = String(Math.round(this.mmdManager.characterContactShadowScale * 100));
+        valCharacterContactShadowScale.textContent = this.mmdManager.characterContactShadowScale.toFixed(2);
         elShadowBias.value = String(Math.round(this.mmdManager.shadowBias * 1_000_000));
         valShadowBias.textContent = this.mmdManager.shadowBias.toFixed(5);
         elShadowNormalBias.value = String(Math.round(this.mmdManager.shadowNormalBias * 100_000));
@@ -3248,6 +3304,12 @@ export class UIController {
             return "Med";
         });
         setSliderValue("light-soft-transparent-shadow", "light-soft-transparent-shadow-val", this.mmdManager.softTransparentShadowEnabled ? 1 : 0, (value) => value > 0 ? "Soft" : "Hard");
+        setSliderValue("light-ibl-shadows", "light-ibl-shadows-val", this.mmdManager.iblShadowsEnabled ? 1 : 0, (value) => value > 0 ? "On" : "Off");
+        setSliderValue("light-ibl-shadow-opacity", "light-ibl-shadow-opacity-val", this.mmdManager.iblShadowOpacity * 100, (value) => `${Math.round(value)}%`);
+        setSliderValue("light-ibl-shadow-range", "light-ibl-shadow-range-val", this.mmdManager.iblShadowDistanceScale * 100, (value) => (value / 100).toFixed(1));
+        setSliderValue("light-character-contact-shadow", "light-character-contact-shadow-val", this.mmdManager.characterContactShadowEnabled ? 1 : 0, (value) => value > 0 ? "On" : "Off");
+        setSliderValue("light-character-contact-shadow-opacity", "light-character-contact-shadow-opacity-val", this.mmdManager.characterContactShadowOpacity * 100, (value) => `${Math.round(value)}%`);
+        setSliderValue("light-character-contact-shadow-scale", "light-character-contact-shadow-scale-val", this.mmdManager.characterContactShadowScale * 100, (value) => (value / 100).toFixed(2));
         setSliderValue("light-shadow-bias", "light-shadow-bias-val", this.mmdManager.shadowBias * 1_000_000, (value) => (value / 1_000_000).toFixed(5));
         setSliderValue("light-shadow-normal-bias", "light-shadow-normal-bias-val", this.mmdManager.shadowNormalBias * 100_000, (value) => (value / 100_000).toFixed(5));
         setSliderValue("light-shadow-color-r", "light-shadow-color-r-val", shadowColor.r * 255, (value) => String(Math.round(value)));
