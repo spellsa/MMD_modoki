@@ -63,6 +63,7 @@ declare module "./mmd-manager" {
         setAccessoryTransformKeyframes(index: number, track: ProjectSerializedAccessoryTransformTrack | null): boolean;
         getModelBoneNames(modelIndex: number): string[];
         getAccessoryMeshes(): AbstractMesh[];
+        getIblShadowAccessoryMeshes(): AbstractMesh[];
     }
 }
 
@@ -1085,6 +1086,14 @@ function setAccessoryVisible(entry: AccessoryEntry, visible: boolean): void {
     }
 }
 
+function isIblShadowAccessoryMeshCandidate(mesh: AbstractMesh): mesh is Mesh {
+    if (!(mesh instanceof Mesh)) return false;
+    if (mesh.isDisposed()) return false;
+    if (!mesh.isEnabled() || !mesh.isVisible) return false;
+    if ((mesh.getTotalVertices?.() ?? 0) <= 0) return false;
+    return true;
+}
+
 function toDegrees(rad: number): number {
     return rad * (180 / Math.PI);
 }
@@ -1111,6 +1120,7 @@ const mmdManagerProto = MmdManager.prototype as unknown as {
     setAccessoryTransformKeyframes?: (index: number, track: ProjectSerializedAccessoryTransformTrack | null) => boolean;
     getModelBoneNames?: (modelIndex: number) => string[];
     getAccessoryMeshes?: () => AbstractMesh[];
+    getIblShadowAccessoryMeshes?: () => AbstractMesh[];
 };
 
 if (!mmdManagerProto.loadX) {
@@ -1223,6 +1233,15 @@ if (!mmdManagerProto.getAccessoryMeshes) {
     mmdManagerProto.getAccessoryMeshes = function(): AbstractMesh[] {
         const entries = getAccessoryEntries(this as unknown as object);
         return entries.flatMap((entry) => entry.meshes);
+    };
+}
+
+if (!mmdManagerProto.getIblShadowAccessoryMeshes) {
+    mmdManagerProto.getIblShadowAccessoryMeshes = function(): AbstractMesh[] {
+        const entries = getAccessoryEntries(this as unknown as object);
+        return entries
+            .filter((entry) => entry.kind === "x" && isAccessoryVisible(entry))
+            .flatMap((entry) => entry.meshes.filter(isIblShadowAccessoryMeshCandidate));
     };
 }
 

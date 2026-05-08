@@ -802,19 +802,20 @@
               <input type="range" id="light-soft-transparent-shadow" class="light-slider" min="0" max="1" value="1" step="1">
               <span id="light-soft-transparent-shadow-val" class="light-value">Soft</span>
             </div>
-            <div class="light-row light-row--shadow">
+            <!-- IBL Shadows is a rejected/frozen experiment; keep the markup for old ids, but hide it from the UI. -->
+            <div class="light-row light-row--shadow" hidden data-experiment="ibl-shadows">
               <span class="light-label" data-i18n="label.iblShadows">IBL接地影</span>
-              <input type="range" id="light-ibl-shadows" class="light-slider" min="0" max="1" value="0" step="1">
+              <input type="range" id="light-ibl-shadows" class="light-slider" min="0" max="1" value="0" step="1" disabled>
               <span id="light-ibl-shadows-val" class="light-value">Off</span>
             </div>
-            <div class="light-row light-row--shadow">
+            <div class="light-row light-row--shadow" hidden data-experiment="ibl-shadows">
               <span class="light-label" data-i18n="label.iblShadowOpacity">IBL影濃度</span>
-              <input type="range" id="light-ibl-shadow-opacity" class="light-slider" min="0" max="100" value="25" step="1">
+              <input type="range" id="light-ibl-shadow-opacity" class="light-slider" min="0" max="100" value="25" step="1" disabled>
               <span id="light-ibl-shadow-opacity-val" class="light-value">25%</span>
             </div>
-            <div class="light-row light-row--shadow">
+            <div class="light-row light-row--shadow" hidden data-experiment="ibl-shadows">
               <span class="light-label" data-i18n="label.iblShadowRange">IBL影範囲</span>
-              <input type="range" id="light-ibl-shadow-range" class="light-slider" min="50" max="1200" value="400" step="10">
+              <input type="range" id="light-ibl-shadow-range" class="light-slider" min="50" max="1200" value="400" step="10" disabled>
               <span id="light-ibl-shadow-range-val" class="light-value">4.0</span>
             </div>
             <div class="light-row light-row--shadow">

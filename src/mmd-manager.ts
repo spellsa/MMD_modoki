@@ -8,6 +8,7 @@ import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { Material } from "@babylonjs/core/Materials/material";
+import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
@@ -21,6 +22,7 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { RawCubeTexture } from "@babylonjs/core/Materials/Textures/rawCubeTexture";
 import { HDRCubeTexture } from "@babylonjs/core/Materials/Textures/hdrCubeTexture";
 import { ColorGradingTexture } from "@babylonjs/core/Materials/Textures/colorGradingTexture";
@@ -542,6 +544,10 @@ import sepiaLutText from "../lut/sepia.3dl?raw";
 import tealOrangeLutText from "../lut/teal-orange.3dl?raw";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import type { MmdRuntimeAnimationHandle } from "babylon-mmd/esm/Runtime/mmdRuntimeAnimationHandle";
+
+// IBL Shadows is intentionally frozen: Babylon.js 9.2 WebGPU validation issues
+// and dynamic/skinned mesh costs made it unsuitable for MMD contact shadows.
+const IBL_SHADOWS_EXPERIMENT_ENABLED = false;
 
 export type WgslMaterialShaderPresetId =
     | "wgsl-mmd-standard"
@@ -1287,6 +1293,9 @@ ${beforeFogAppendBlock}
     private iblShadowsPipeline: IblShadowsRenderPipeline | null = null;
     private iblFallbackEnvironmentTexture: RawCubeTexture | null = null;
     private iblTestEnvironmentTexture: HDRCubeTexture | null = null;
+    private iblWebGpuCdfFallbackTexture: RawTexture | null = null;
+    private iblWebGpuSuppressedEnvironmentTexture: BaseTexture | null = null;
+    private iblShadowDebugPassSignature = "";
     private contactShadowTexture: DynamicTexture | null = null;
     private contactShadowMaterial: StandardMaterial | null = null;
     private characterContactShadowEnabledValue = false;
@@ -1372,7 +1381,7 @@ ${beforeFogAppendBlock}
     private shadowFilteringQualityValue = ShadowGenerator.QUALITY_MEDIUM;
     private softTransparentShadowEnabledValue = true;
     private iblShadowsEnabledValue = false;
-    private iblShadowOpacityValue = 0.25;
+    private iblShadowOpacityValue = 0.6;
     private iblShadowDistanceScaleValue = 4;
     private selfShadowEdgeSoftnessValue = 0.05;
     private occlusionShadowEdgeSoftnessValue = 0.01;
@@ -2217,6 +2226,14 @@ ${beforeFogAppendBlock}
     }
 
     public setIblShadowsEnabled(enabled: boolean): boolean {
+        // Keep old project data and debug code readable, but do not instantiate
+        // the rejected IBL Shadows pipeline in normal builds.
+        if (!IBL_SHADOWS_EXPERIMENT_ENABLED) {
+            this.iblShadowsEnabledValue = false;
+            this.iblShadowsPipeline?.toggleShadow(false);
+            return false;
+        }
+
         this.iblShadowsEnabledValue = Boolean(enabled);
 
         if (!this.iblShadowsEnabledValue) {
@@ -2230,6 +2247,7 @@ ${beforeFogAppendBlock}
         }
 
         this.iblShadowsPipeline?.toggleShadow(true);
+        this.applyIblShadowDebugSettings();
         this.syncIblShadowsScene();
         return true;
     }
@@ -2268,6 +2286,7 @@ ${beforeFogAppendBlock}
     public syncIblShadowsScene(): void {
         if (!this.iblShadowsEnabledValue || !this.iblShadowsPipeline) return;
 
+        this.applyIblShadowDebugSettings();
         const castingMeshes = this.collectIblShadowCastingMeshes();
         this.iblShadowsPipeline.clearShadowCastingMeshes();
         if (castingMeshes.length > 0) {
@@ -2285,6 +2304,10 @@ ${beforeFogAppendBlock}
 
         try {
             this.iblShadowsPipeline.updateSceneBounds();
+            logInfo("render", "IBL Shadows scene bounds updated", {
+                casterCount: castingMeshes.length,
+                voxelGridSize: this.iblShadowsPipeline.voxelGridSize,
+            });
             this.iblShadowsPipeline.updateVoxelization();
             this.iblShadowsPipeline.resetAccumulation();
         } catch (err: unknown) {
@@ -2305,25 +2328,28 @@ ${beforeFogAppendBlock}
         this.ensureFallbackIblEnvironmentTexture();
 
         try {
+            this.prepareIblCdfSourceForWebGpuBeforePipelineCreation();
             this.iblShadowsPipeline = new IblShadowsRenderPipeline(
                 "MmdModokiIblShadows",
                 this.scene,
                 {
                     resolutionExp: 5,
-                    sampleDirections: 2,
+                    sampleDirections: 8,
                     shadowOpacity: this.iblShadowOpacityValue,
-                    shadowRenderSizeFactor: 0.5,
-                    shadowRemanence: 0.85,
-                    ssShadowsEnabled: true,
+                    shadowRenderSizeFactor: 0.35,
+                    shadowRemanence: 0.9,
+                    ssShadowsEnabled: false,
                     ssShadowSampleCount: 8,
-                    ssShadowStride: 8,
-                    ssShadowDistanceScale: this.iblShadowDistanceScaleValue,
+                    ssShadowStride: 12,
+                    ssShadowDistanceScale: Math.min(this.iblShadowDistanceScaleValue, 2),
                     triPlanarVoxelization: true,
                     voxelShadowOpacity: 1,
                 },
                 [this.camera],
             );
+            this.configureIblCdfSourceForWebGpu();
             this.iblShadowsPipeline.toggleShadow(this.iblShadowsEnabledValue);
+            this.applyIblShadowDebugSettings();
             this.iblShadowsPipeline.onVoxelizationCompleteObservable.add(() => {
                 logInfo("render", "IBL Shadows voxelization complete", {
                     voxelGridSize: this.iblShadowsPipeline?.voxelGridSize ?? 0,
@@ -2336,6 +2362,101 @@ ${beforeFogAppendBlock}
             this.onError?.(`IBL Shadows initialization failed: ${message}`);
             this.iblShadowsPipeline = null;
             return false;
+        }
+    }
+
+    private shouldUseEnvironmentCdfForIblShadows(): boolean {
+        try {
+            const raw = globalThis.localStorage?.getItem("mmd_modoki.iblShadowUseEnvironmentCdf") ?? "";
+            return raw === "1" || raw.toLowerCase() === "true";
+        } catch {
+            return false;
+        }
+    }
+
+    private shouldUseIblWebGpuCdfFallback(): boolean {
+        return this.engine instanceof WebGPUEngine && !this.shouldUseEnvironmentCdfForIblShadows();
+    }
+
+    private ensureIblWebGpuCdfFallbackTexture(): RawTexture {
+        if (!this.iblWebGpuCdfFallbackTexture) {
+            this.iblWebGpuCdfFallbackTexture = new RawTexture(
+                new Uint8Array([255, 255, 255, 255]),
+                1,
+                1,
+                Engine.TEXTUREFORMAT_RGBA,
+                this.scene,
+                false,
+                false,
+                Texture.NEAREST_SAMPLINGMODE,
+                Engine.TEXTURETYPE_UNSIGNED_BYTE,
+            );
+            this.iblWebGpuCdfFallbackTexture.name = "mmdModokiIblWebGpuCdfFallback";
+            this.iblWebGpuCdfFallbackTexture.gammaSpace = false;
+        }
+        return this.iblWebGpuCdfFallbackTexture;
+    }
+
+    private prepareIblCdfSourceForWebGpuBeforePipelineCreation(): void {
+        if (!this.shouldUseIblWebGpuCdfFallback()) return;
+
+        const fallbackTexture = this.ensureIblWebGpuCdfFallbackTexture();
+        if (this.scene.environmentTexture !== fallbackTexture) {
+            this.iblWebGpuSuppressedEnvironmentTexture = this.scene.environmentTexture;
+            this.scene.environmentTexture = fallbackTexture;
+        }
+        logInfo("render", "IBL Shadows using WebGPU CDF fallback texture", {
+            reason: "avoid r32float mipmap validation errors",
+            timing: "before pipeline creation",
+        });
+    }
+
+    private configureIblCdfSourceForWebGpu(): void {
+        if (!this.shouldUseIblWebGpuCdfFallback()) return;
+
+        const cdfGenerator = this.scene.iblCdfGenerator;
+        if (!cdfGenerator) return;
+
+        cdfGenerator.iblSource = this.ensureIblWebGpuCdfFallbackTexture();
+    }
+
+    private getIblShadowDebugPasses(): Set<string> {
+        try {
+            const raw = globalThis.localStorage?.getItem("mmd_modoki.iblShadowDebugPasses") ?? "";
+            return new Set(raw.split(/[\s,]+/).map((value) => value.trim().toLowerCase()).filter(Boolean));
+        } catch {
+            return new Set<string>();
+        }
+    }
+
+    private applyIblShadowDebugSettings(): void {
+        if (!this.iblShadowsPipeline) return;
+
+        const passes = this.getIblShadowDebugPasses();
+        const all = passes.has("all") || passes.has("1") || passes.has("true");
+        const includesPass = (...names: string[]): boolean => all || names.some((name) => passes.has(name));
+        const gbuffer = includesPass("gbuffer", "g-buffer");
+        const cdf = includesPass("cdf");
+        const voxel = includesPass("voxel", "voxels");
+        const tracing = includesPass("trace", "tracing", "voxel-tracing");
+        const blur = includesPass("blur", "spatial-blur");
+        const accumulation = includesPass("accum", "accumulation");
+        const enabled = gbuffer || cdf || voxel || tracing || blur || accumulation;
+
+        this.iblShadowsPipeline.allowDebugPasses = enabled;
+        this.iblShadowsPipeline.gbufferDebugEnabled = gbuffer;
+        this.iblShadowsPipeline.cdfDebugEnabled = cdf;
+        this.iblShadowsPipeline.voxelDebugEnabled = voxel;
+        this.iblShadowsPipeline.voxelTracingDebugEnabled = tracing;
+        this.iblShadowsPipeline.spatialBlurPassDebugEnabled = blur;
+        this.iblShadowsPipeline.accumulationPassDebugEnabled = accumulation;
+
+        const signature = enabled ? [...passes].sort().join(",") || "all" : "";
+        if (signature !== this.iblShadowDebugPassSignature) {
+            this.iblShadowDebugPassSignature = signature;
+            if (enabled) {
+                logInfo("render", "IBL Shadows debug passes enabled", { passes: signature });
+            }
         }
     }
 
@@ -2361,6 +2482,7 @@ ${beforeFogAppendBlock}
     }
 
     private configureIblTestEnvironmentTexture(): void {
+        if (!IBL_SHADOWS_EXPERIMENT_ENABLED) return;
         if (this.scene.environmentTexture) return;
 
         try {
@@ -2417,7 +2539,7 @@ ${beforeFogAppendBlock}
             }
         }
 
-        const accessoryMeshes = (this as unknown as { getAccessoryMeshes?: () => unknown[] }).getAccessoryMeshes?.() ?? [];
+        const accessoryMeshes = (this as unknown as { getIblShadowAccessoryMeshes?: () => unknown[] }).getIblShadowAccessoryMeshes?.() ?? [];
         for (const mesh of accessoryMeshes) {
             addMesh(mesh);
         }
@@ -7604,6 +7726,11 @@ ${beforeFogAppendBlock}
             this.iblTestEnvironmentTexture.dispose();
             this.iblTestEnvironmentTexture = null;
         }
+        if (this.iblWebGpuCdfFallbackTexture) {
+            this.iblWebGpuCdfFallbackTexture.dispose();
+            this.iblWebGpuCdfFallbackTexture = null;
+        }
+        this.iblWebGpuSuppressedEnvironmentTexture = null;
         if (this.contactShadowMaterial) {
             this.contactShadowMaterial.dispose();
             this.contactShadowMaterial = null;

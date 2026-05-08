@@ -382,3 +382,178 @@ IBL Shadows は「使えない」と判断する段階ではありません。
 - WebGPU validation error の原因が未確定
 
 次に進めるなら、まず environment map 導入方針と debug pass の調査導線を決めるのが妥当です。
+
+## 2026-05-08 実装メモ: `.x` アクセサリ優先の IBL caster
+
+IBL Shadows の caster 対象を、当面は `.x` アクセサリを優先して検証する方針に寄せた。
+
+- `src/mmd-manager-x-extension.ts` に `getIblShadowAccessoryMeshes()` を追加した
+- 返す対象は `.x` アクセサリのみ
+- 非表示、無効、破棄済み、頂点数 0 の mesh は除外する
+- GLB アクセサリは現時点では IBL caster から外す
+- `src/mmd-manager.ts` の `collectIblShadowCastingMeshes()` は、通常の PMX/PMD 側の非 skinned mesh に加えて `getIblShadowAccessoryMeshes()` を使う
+
+理由:
+
+- GLB は現在 UI 導線が閉じているため、最初の検証対象にしない
+- PMX skinned mesh は WebGPU + voxelization shader で validation error が出ているため、直接 caster 化は後回し
+- `.x` アクセサリは MMD 用途で使用頻度があり、かつ skinned mesh 問題を避けやすい
+
+確認したいこと:
+
+- `.x` アクセサリを読み込んだときに `IBL Shadows scene bounds updated` / `IBL Shadows voxelization complete` が出るか
+- `casterCount` が `.x` mesh 数を含んで増えるか
+- `voxelGridSize` が極端に小さすぎないか、または大きすぎないか
+- transform、表示切替、削除時に voxelization が同期されるか
+
+## 2026-05-08 実装メモ: debug pass の隠し導線
+
+通常 UI には出さず、localStorage で IBL Shadows の debug pass を切り替える導線を追加した。
+
+キー:
+
+```text
+mmd_modoki.iblShadowDebugPasses
+```
+
+指定例:
+
+```javascript
+localStorage.setItem("mmd_modoki.iblShadowDebugPasses", "voxel");
+localStorage.setItem("mmd_modoki.iblShadowDebugPasses", "gbuffer,voxel,tracing");
+localStorage.setItem("mmd_modoki.iblShadowDebugPasses", "all");
+localStorage.removeItem("mmd_modoki.iblShadowDebugPasses");
+```
+
+対応値:
+
+- `gbuffer`
+- `cdf`
+- `voxel`
+- `trace` / `tracing` / `voxel-tracing`
+- `blur` / `spatial-blur`
+- `accum` / `accumulation`
+- `all`
+
+目的:
+
+- 影が出ない場合に、GBuffer、CDF、voxel、voxel tracing、blur、accumulation のどこで止まっているかを切り分ける
+- 通常ユーザー向け UI を増やさず、調査中だけ有効化できるようにする
+
+## 2026-05-08 実装メモ: WebGPU CDF fallback
+
+`.x` アクセサリで IBL Shadows が出ることは確認できたが、WebGPU で以下の warning / validation error が大量に出た。
+
+```text
+None of the supported sample types (UnfilterableFloat) ... r32float ... match the expected sample types (Float).
+create mipmaps for ... wmips_r32float ...
+Invalid CommandBuffer from CommandEncoder
+```
+
+原因候補:
+
+- Babylon.js 9.2.0 の `IblCdfGenerator` は `iblScaledLuminance` を `r32float + generateMipMaps` で生成する
+- WebGPU では `r32float` が `UnfilterableFloat` 扱いになる環境があり、mipmap 生成時の bind group validation に落ちる
+- 結果として `Queue.Submit` まで invalid になり、warning では済まない
+
+暫定対応:
+
+- WebGPU では IBL Shadows pipeline 生成前に `scene.environmentTexture` を 1x1 の白い `RawTexture` に一時差し替える
+- その状態で `IblShadowsRenderPipeline` を生成し、`IblCdfGenerator` が `white.hdr` から `r32float + mipmap` を作り始める前に逃がす
+- `scene.environmentTexture` を `white.hdr` のまま残して後から CDF だけ差し替える方式では、pipeline constructor 内で CDF 生成が先に走るため間に合わなかった
+- これにより、環境マップ由来の重要度サンプリング精度は落ちるが、`r32float` mipmap validation error を避ける
+
+検証用 escape hatch:
+
+```javascript
+localStorage.setItem("mmd_modoki.iblShadowUseEnvironmentCdf", "1");
+localStorage.removeItem("mmd_modoki.iblShadowUseEnvironmentCdf");
+```
+
+`mmd_modoki.iblShadowUseEnvironmentCdf = 1` の場合は、元の environment texture を CDF 入力に使う。Babylon.js / Chromium / GPU driver 側の改善を試すときだけ使う想定。
+
+## 2026-05-08 実装メモ: soft 寄りの IBL Shadows 設定
+
+Babylon.js 公式サンプルのような柔らかい IBL shadow と比べると、MMD_modoki 側は硬い接触影に見えた。
+
+原因候補:
+
+- `ssShadowsEnabled = true` だと screen-space shadow が近距離で強く出る
+- screen-space shadow は細部の接触を補うための成分なので、ふわっとした IBL shadow より硬く見えやすい
+- WebGPU CDF fallback により、環境マップ由来の方向性や光量分布が失われている
+- `.x` アクセサリ / PMX ステージは公式サンプルの PBR 単体オブジェクトよりスケールや材質がばらつく
+
+soft 寄りに変更した初期値:
+
+- `sampleDirections = 8`
+- `shadowRenderSizeFactor = 0.35`
+- `shadowRemanence = 0.9`
+- `ssShadowsEnabled = false`
+- `ssShadowStride = 12`
+- `ssShadowDistanceScale = min(UI値, 2)`
+- `voxelShadowOpacity = 1.0`
+
+狙い:
+
+- screen-space の硬い接触影を抑える
+- voxel tracing + spatial blur + accumulation の柔らかい成分を前面に出す
+- 公式サンプルのような影に近づくか確認する
+
+## 2026-05-08 実装メモ: soft 設定後の薄さ調整
+
+`ssShadowsEnabled = false` にすると硬い接触影は減るが、初期濃度 `iblShadowOpacityValue = 0.25` のままだと実用上ほぼ見えない。
+
+そのため、soft 寄りの方針は維持しつつ、以下を変更した。
+
+- `iblShadowOpacityValue = 0.6`
+- `voxelShadowOpacity = 1.0`
+
+意図:
+
+- screen-space contact shadow の硬さは戻さない
+- IBL shadow / voxel shadow 側の濃度だけ上げる
+- 影が濃すぎる場合は UI の IBL 影濃度で下げる
+
+## 2026-05-08 調査メモ: dynamic object との相性
+
+Babylon.js 公式ドキュメント上でも、IBL Shadows は dynamic object には向きにくい旨が示されている。
+
+MMD_modoki での確認結果とも整合する。
+
+- `.x` アクセサリのような静的 mesh では影が出る
+- ただし見た目は薄い、または接触影を足すと硬くなりやすい
+- PMX キャラのような skinned mesh は voxelization と相性が悪く、WebGPU shader validation error も確認済み
+- キャラはモーション、物理、SDEF、モーフで毎フレーム形状が変わるため、IBL Shadows の voxel 更新コストが重くなりやすい
+
+現時点の判断:
+
+- IBL Shadows は「静的ステージ / 静的アクセサリに環境由来の柔らかい影を足す」用途として調査を継続する
+- PMX キャラの足下影を IBL Shadows で解くのは優先度を下げる
+- キャラ接地影は、通常 shadow、contact shadow、blob shadow / projected decal など別系統の軽量表現も候補に戻す
+- IBL Shadows の UI は実験機能として扱い、MMD 本体ワークフローの必須機能にはしない
+
+## 2026-05-08 判断: IBL Shadows は凍結
+
+ここまでの検証結果から、MMD_modoki では IBL Shadows を採用しない方針にする。
+
+理由:
+
+- MMD キャラの足下影という主目的に対して、dynamic object / skinned mesh との相性が悪い
+- WebGPU では CDF / voxelization 周りで環境依存の validation error を踏みやすい
+- `.x` アクセサリでは影が出るが、期待していた柔らかい接地影としては見え方が弱い
+- 硬く見える screen-space shadow を足すと、IBL Shadows を使う意義が薄れる
+- 実装と UI の複雑さに対して、MMD 編集体験への寄与が小さい
+
+対応:
+
+- `IBL_SHADOWS_EXPERIMENT_ENABLED = false` として、実行時には IBL Shadows pipeline を生成しない
+- IBL Shadows 用の UI 行は非表示・無効化する
+- 検証用 HDR environment map は自動ロードしない
+- 調査メモと検証アセットは残し、Babylon.js 側の速度・WebGPU 対応改善が進んだ場合に再検討する
+
+今後の接地影候補:
+
+- 既存 CSM / 通常 shadow の調整
+- キャラ足元用の軽量 contact shadow
+- blob shadow / projected decal
+- 足 IK / 足ボーン由来の proxy shadow

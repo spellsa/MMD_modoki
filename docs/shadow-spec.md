@@ -7,6 +7,7 @@
 - [影品質向上の検討メモ](./shadow-quality-investigation.md)
 - [セルフ影の横縞メモ](./self-shadow-horizontal-banding-note.md)
 - [IBL Shadows 検討メモ](./ibl-shadows-investigation-2026-05-07.md)
+- [Blob Shadow 接地影検討メモ](./blob-shadow-contact-plan-2026-05-08.md)
 
 ## PMX 材質フラグ（影関連）
 
@@ -224,6 +225,14 @@ UI:
 - FPS 低下が許容範囲か
 - MMD Standard 材質やアクセサリ材質へ影受け plugin が問題なく入るか
 - CSM 影、SSAO、Frame Graph post effects と併用して破綻しないか
+
+2026-05-08 の追加判断:
+
+- 欲しかった表現は、IBL Shadows より MME の `BlobShadow` 系に近い可能性が高い
+- 目的は物理的に正しい環境影ではなく、真下方向へ落ちる薄くぼけた接地影
+- 現行の `キャラ接地影` は radial gradient mesh だが、モデル全体 bounds ベースなので足元に追従する blob shadow とはまだ違う
+- 次に改善するなら、足 IK / 足ボーン / モデル下端サンプルを使い、足元中心の複数楕円 shadow に寄せる
+- 床面が明確な場合は projected decal / transparent ground mesh、複雑なステージ床では簡易表現として割り切る
 
 ## 2026-03 時点の実調整メモ
 

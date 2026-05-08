@@ -77,6 +77,10 @@
   --radius-lg: 10px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 @font-face {
   font-family: 'Noto Sans CJK OTC';
   src: url('./assets/fonts/NotoSansCJK-Regular.ttc') format('collection');
