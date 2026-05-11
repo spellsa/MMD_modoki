@@ -16,6 +16,18 @@ export interface ElectronAPI {
     listBundledWgslFiles: () => Promise<{ name: string; path: string }[]>;
     writeTextFileToPath: (filePath: string, content: string) => Promise<boolean>;
     savePngFile: (dataUrl: string, defaultFileName?: string) => Promise<string | null>;
+    savePngRgbaFile: (
+        rgbaData: Uint8Array,
+        width: number,
+        height: number,
+        defaultFileName?: string,
+    ) => Promise<string | null>;
+    saveCanvasSnapshotPngFile: (
+        rect: { x: number; y: number; width: number; height: number },
+        outputWidth: number,
+        outputHeight: number,
+        defaultFileName?: string,
+    ) => Promise<string | null>;
     savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) => Promise<string | null>;
     savePngRgbaFileToPath: (
         rgbaData: Uint8Array,
@@ -283,6 +295,11 @@ export interface ProjectViewportState {
     groundVisible: boolean;
     skydomeVisible: boolean;
     antialiasEnabled: boolean;
+    mirroringFloorEnabled?: boolean;
+    mirroringFloorReflectance?: number;
+    mirroringFloorSize?: number;
+    mirroringFloorHeight?: number;
+    mirroringFloorResolution?: number;
     backgroundImagePath?: string | null;
     backgroundVideoPath?: string | null;
 }

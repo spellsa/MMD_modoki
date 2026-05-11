@@ -1077,6 +1077,114 @@ ipcMain.handle('file:savePng', async (_event, dataUrl: string, defaultFileName?:
   }
 });
 
+function encodeRgbaToPngBytes(rgbaData: Uint8Array, width: number, height: number): Buffer | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+
+  const pngWidth = Math.max(1, Math.floor(width));
+  const pngHeight = Math.max(1, Math.floor(height));
+  const expectedByteLength = pngWidth * pngHeight * 4;
+  if (!(rgbaData instanceof Uint8Array) || rgbaData.byteLength !== expectedByteLength) {
+    return null;
+  }
+
+  const bgraData = Buffer.from(rgbaData);
+  for (let i = 0; i < bgraData.length; i += 4) {
+    const r = bgraData[i];
+    bgraData[i] = bgraData[i + 2];
+    bgraData[i + 2] = r;
+  }
+  const image = nativeImage.createFromBitmap(bgraData, {
+    width: pngWidth,
+    height: pngHeight,
+  });
+  return image.toPNG();
+}
+
+ipcMain.handle(
+  'file:savePngRgba',
+  async (
+    _event,
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    defaultFileName?: string,
+  ) => {
+    try {
+      const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
+        ? defaultFileName
+        : `${defaultFileName ?? 'mmd_capture'}.png`;
+      const pngBytes = encodeRgbaToPngBytes(rgbaData, width, height);
+      if (!pngBytes) return null;
+
+      const result = await dialog.showSaveDialog({
+        title: 'Save PNG Image',
+        defaultPath: path.join(app.getPath('pictures'), safeName),
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+
+      await fs.promises.writeFile(result.filePath, pngBytes);
+      return result.filePath;
+    } catch (err) {
+      console.error('Failed to save RGBA PNG:', err);
+      return null;
+    }
+  },
+);
+
+ipcMain.handle(
+  'file:saveCanvasSnapshotPng',
+  async (
+    event,
+    rect: { x: number; y: number; width: number; height: number },
+    outputWidth: number,
+    outputHeight: number,
+    defaultFileName?: string,
+  ) => {
+    try {
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!ownerWindow) return null;
+
+      const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
+        ? defaultFileName
+        : `${defaultFileName ?? 'mmd_capture'}.png`;
+      const captureRect = {
+        x: Math.max(0, Math.floor(rect?.x ?? 0)),
+        y: Math.max(0, Math.floor(rect?.y ?? 0)),
+        width: Math.max(1, Math.floor(rect?.width ?? 1)),
+        height: Math.max(1, Math.floor(rect?.height ?? 1)),
+      };
+      const pngWidth = Math.max(1, Math.floor(outputWidth));
+      const pngHeight = Math.max(1, Math.floor(outputHeight));
+
+      const snapshot = await ownerWindow.webContents.capturePage(captureRect);
+      const outputImage = pngWidth !== captureRect.width || pngHeight !== captureRect.height
+        ? snapshot.resize({ width: pngWidth, height: pngHeight, quality: 'best' })
+        : snapshot;
+      const pngBytes = outputImage.toPNG();
+
+      const result = await dialog.showSaveDialog(ownerWindow, {
+        title: 'Save PNG Image',
+        defaultPath: path.join(app.getPath('pictures'), safeName),
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+
+      await fs.promises.writeFile(result.filePath, pngBytes);
+      return result.filePath;
+    } catch (err) {
+      console.error('Failed to save canvas snapshot PNG:', err);
+      return null;
+    }
+  },
+);
+
 ipcMain.handle('file:savePngToPath', async (_event, dataUrl: string, directoryPath: string, fileName: string) => {
   try {
     if (!directoryPath || !fileName) return null;
@@ -1110,28 +1218,11 @@ ipcMain.handle(
       if (!directoryPath || !fileName) return null;
       const safeFileName = path.basename(fileName);
       if (!safeFileName.toLowerCase().endsWith('.png')) return null;
-      if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-
-      const pngWidth = Math.max(1, Math.floor(width));
-      const pngHeight = Math.max(1, Math.floor(height));
-      const expectedByteLength = pngWidth * pngHeight * 4;
-      if (!(rgbaData instanceof Uint8Array) || rgbaData.byteLength !== expectedByteLength) {
-        return null;
-      }
+      const pngBytes = encodeRgbaToPngBytes(rgbaData, width, height);
+      if (!pngBytes) return null;
 
       await ensureDirectoryExists(directoryPath);
       const filePath = path.join(directoryPath, safeFileName);
-      const bgraData = Buffer.from(rgbaData);
-      for (let i = 0; i < bgraData.length; i += 4) {
-        const r = bgraData[i];
-        bgraData[i] = bgraData[i + 2];
-        bgraData[i + 2] = r;
-      }
-      const image = nativeImage.createFromBitmap(bgraData, {
-        width: pngWidth,
-        height: pngHeight,
-      });
-      const pngBytes = image.toPNG();
       await fs.promises.writeFile(filePath, pngBytes);
       return filePath;
     } catch (err) {

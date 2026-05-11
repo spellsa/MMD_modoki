@@ -24,6 +24,7 @@
 - [WebGPU / WGSL 実現可能性メモ](./webgpu-wgsl-feasibility.md)
 - [LUT / WGSL 外部ファイル運用仕様](./lut-wgsl-file-handling.md)
 - [現行MMD AutoLuminous 調査メモ](./mmd-autoluminous-research.md)
+- [MirroringFloor 実装検討メモ](./mirroring-floor-plan-2026-05-11.md)
 
 ## カメラ / タイムライン / キーフレーム
 

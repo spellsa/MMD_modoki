@@ -56,6 +56,11 @@ function createHost() {
         isGroundVisible: (): boolean => true,
         isSkydomeVisible: (): boolean => true,
         antialiasEnabled: true,
+        mirroringFloorEnabled: false,
+        mirroringFloorReflectance: 0.35,
+        mirroringFloorSize: 40,
+        mirroringFloorHeight: 0,
+        mirroringFloorResolution: 512,
         getBackgroundImagePath: (): null => null,
         getBackgroundVideoPath: (): null => null,
         physicsEnabled: true,
@@ -153,5 +158,24 @@ describe("exportProjectState", () => {
         expect("_x" in project.lighting).toBe(false);
         expect("_y" in project.lighting).toBe(false);
         expect("_z" in project.lighting).toBe(false);
+    });
+
+    it("writes mirroring floor viewport settings", () => {
+        const host = {
+            ...createHost(),
+            mirroringFloorEnabled: true,
+            mirroringFloorReflectance: 0.5,
+            mirroringFloorSize: 60,
+            mirroringFloorHeight: 0.02,
+            mirroringFloorResolution: 1024,
+        };
+
+        const project = exportProjectState(host);
+
+        expect(project.viewport.mirroringFloorEnabled).toBe(true);
+        expect(project.viewport.mirroringFloorReflectance).toBe(0.5);
+        expect(project.viewport.mirroringFloorSize).toBe(60);
+        expect(project.viewport.mirroringFloorHeight).toBe(0.02);
+        expect(project.viewport.mirroringFloorResolution).toBe(1024);
     });
 });

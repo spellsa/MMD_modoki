@@ -367,7 +367,11 @@ export function tryPickBoneVisualizerAtClientPosition(host: any, clientX: number
 export function syncBoneVisualizerVisibility(host: any): void {
     if (!host.boneOverlayCanvas) return;
 
-    const visible = host.timelineTarget === "model" && host.boneVisualizerTarget !== null && host.getActiveModelVisibility() && !host._isPlaying;
+    const visible = !host.captureEditorOverlaysSuppressed
+        && host.timelineTarget === "model"
+        && host.boneVisualizerTarget !== null
+        && host.getActiveModelVisibility()
+        && !host._isPlaying;
     host.boneOverlayCanvas.style.display = visible ? "block" : "none";
     if (!visible) {
         clearBoneOverlay(host);

@@ -373,21 +373,28 @@ export class ExportUiController {
         const outputSettings = this.getOutputSettings();
         const captureWidth = Math.max(320, Math.round(outputSettings.width * outputSettings.qualityScale));
         const captureHeight = Math.max(180, Math.round(outputSettings.height * outputSettings.qualityScale));
-        const dataUrl = await this.mmdManager.capturePngDataUrl({
-            width: captureWidth,
-            height: captureHeight,
-            precision: 1,
-        });
-        if (!dataUrl) {
-            this.setStatus("PNG export failed", false);
-            return;
-        }
-
         const now = new Date();
         const pad = (value: number): string => String(value).padStart(2, "0");
         const fileName = `mmd_capture_${captureWidth}x${captureHeight}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
 
-        const savedPath = await window.electronAPI.savePngFile(dataUrl, fileName);
+        let savedPath: string | null = null;
+        try {
+            this.mmdManager.setCaptureEditorOverlaysSuppressed(true);
+            await this.waitForNextPaint();
+            savedPath = await window.electronAPI.saveCanvasSnapshotPngFile(
+                this.mmdManager.getRenderingCanvasClientRect(),
+                captureWidth,
+                captureHeight,
+                fileName,
+            );
+        } catch (error: unknown) {
+            logError("ui", "PNG snapshot save IPC failed", { error: error instanceof Error ? error.message : String(error) });
+            this.setStatus("PNG export failed", false);
+            this.showToast("PNG export failed", "error");
+            return;
+        } finally {
+            this.mmdManager.setCaptureEditorOverlaysSuppressed(false);
+        }
         if (!savedPath) {
             this.setStatus("Ready", false);
             this.showToast("PNG export canceled", "info");
@@ -397,6 +404,11 @@ export class ExportUiController {
         const basename = savedPath.replace(/^.*[\\/]/, "");
         this.setStatus("PNG saved", false);
         this.showToast(`Saved PNG: ${basename}`, "success");
+    }
+
+    private async waitForNextPaint(): Promise<void> {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     }
 
     public async exportPNGSequence(): Promise<void> {

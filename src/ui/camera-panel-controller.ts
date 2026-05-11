@@ -11,6 +11,15 @@ type CameraPanelElements = {
     bottomButton: HTMLButtonElement | null;
     distanceSlider: HTMLInputElement | null;
     distanceValue: HTMLElement | null;
+    mirroringFloorEnabled: HTMLInputElement | null;
+    mirroringFloorEnabledValue: HTMLElement | null;
+    mirroringFloorReflectance: HTMLInputElement | null;
+    mirroringFloorReflectanceValue: HTMLElement | null;
+    mirroringFloorSize: HTMLInputElement | null;
+    mirroringFloorSizeValue: HTMLElement | null;
+    mirroringFloorHeight: HTMLInputElement | null;
+    mirroringFloorHeightValue: HTMLElement | null;
+    mirroringFloorResolution: HTMLSelectElement | null;
 };
 
 export type CameraPanelControllerDeps = {
@@ -32,6 +41,15 @@ function resolveCameraPanelElements(): CameraPanelElements {
         bottomButton: document.getElementById("btn-cam-bottom") as HTMLButtonElement | null,
         distanceSlider: document.getElementById("cam-distance") as HTMLInputElement | null,
         distanceValue: document.getElementById("cam-distance-value"),
+        mirroringFloorEnabled: document.getElementById("mirroring-floor-enabled") as HTMLInputElement | null,
+        mirroringFloorEnabledValue: document.getElementById("mirroring-floor-enabled-val"),
+        mirroringFloorReflectance: document.getElementById("mirroring-floor-reflectance") as HTMLInputElement | null,
+        mirroringFloorReflectanceValue: document.getElementById("mirroring-floor-reflectance-val"),
+        mirroringFloorSize: document.getElementById("mirroring-floor-size") as HTMLInputElement | null,
+        mirroringFloorSizeValue: document.getElementById("mirroring-floor-size-val"),
+        mirroringFloorHeight: document.getElementById("mirroring-floor-height") as HTMLInputElement | null,
+        mirroringFloorHeightValue: document.getElementById("mirroring-floor-height-val"),
+        mirroringFloorResolution: document.getElementById("mirroring-floor-resolution") as HTMLSelectElement | null,
     };
 }
 
@@ -67,6 +85,7 @@ export class CameraPanelController {
         slider.value = this.formatRangeInputValue(slider, clamped);
         valueEl.textContent = `${distance.toFixed(1)}m`;
         this.syncRangeNumberInput(slider);
+        this.refreshMirroringFloorControls();
     }
 
     private setupControls(): void {
@@ -94,7 +113,69 @@ export class CameraPanelController {
         });
 
         this.updateViewButtons("front");
+        this.setupMirroringFloorControls();
         this.refresh(true);
+    }
+
+    private setupMirroringFloorControls(): void {
+        this.elements.mirroringFloorEnabled?.addEventListener("change", () => {
+            const enabled = this.elements.mirroringFloorEnabled?.checked ?? false;
+            this.mmdManager.mirroringFloorEnabled = enabled;
+            this.refreshMirroringFloorControls();
+        });
+
+        this.elements.mirroringFloorReflectance?.addEventListener("input", () => {
+            const value = Number(this.elements.mirroringFloorReflectance?.value ?? 35) / 100;
+            this.mmdManager.mirroringFloorReflectance = value;
+            this.refreshMirroringFloorControls();
+        });
+
+        this.elements.mirroringFloorSize?.addEventListener("input", () => {
+            const value = Number(this.elements.mirroringFloorSize?.value ?? 40);
+            this.mmdManager.mirroringFloorSize = value;
+            this.refreshMirroringFloorControls();
+        });
+
+        this.elements.mirroringFloorHeight?.addEventListener("input", () => {
+            const value = Number(this.elements.mirroringFloorHeight?.value ?? 0) / 100;
+            this.mmdManager.mirroringFloorHeight = value;
+            this.refreshMirroringFloorControls();
+        });
+
+        this.elements.mirroringFloorResolution?.addEventListener("change", () => {
+            const value = Number(this.elements.mirroringFloorResolution?.value ?? 512);
+            this.mmdManager.mirroringFloorResolution = value;
+            this.refreshMirroringFloorControls();
+        });
+
+        this.refreshMirroringFloorControls();
+    }
+
+    private refreshMirroringFloorControls(): void {
+        if (this.elements.mirroringFloorEnabled) {
+            this.elements.mirroringFloorEnabled.checked = this.mmdManager.mirroringFloorEnabled;
+        }
+        if (this.elements.mirroringFloorEnabledValue) {
+            this.elements.mirroringFloorEnabledValue.textContent = this.mmdManager.mirroringFloorEnabled ? "ON" : "OFF";
+        }
+        if (this.elements.mirroringFloorReflectance && this.elements.mirroringFloorReflectanceValue) {
+            const value = Math.round(this.mmdManager.mirroringFloorReflectance * 100);
+            this.elements.mirroringFloorReflectance.value = String(value);
+            this.elements.mirroringFloorReflectanceValue.textContent = `${value}%`;
+        }
+        if (this.elements.mirroringFloorSize && this.elements.mirroringFloorSizeValue) {
+            const value = Math.round(this.mmdManager.mirroringFloorSize);
+            this.elements.mirroringFloorSize.value = String(value);
+            this.elements.mirroringFloorSizeValue.textContent = `${value}m`;
+        }
+        if (this.elements.mirroringFloorHeight && this.elements.mirroringFloorHeightValue) {
+            const value = Math.round(this.mmdManager.mirroringFloorHeight * 100);
+            this.elements.mirroringFloorHeight.value = String(value);
+            this.elements.mirroringFloorHeightValue.textContent = `${this.mmdManager.mirroringFloorHeight.toFixed(2)}m`;
+        }
+        if (this.elements.mirroringFloorResolution) {
+            this.elements.mirroringFloorResolution.value = String(this.mmdManager.mirroringFloorResolution);
+        }
     }
 
     private updateViewButtons(active: CameraViewPreset): void {

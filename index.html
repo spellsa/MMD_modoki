@@ -526,6 +526,38 @@
                 <span id="rigid-bodies-toggle-text" data-i18n="button.rigidBodies">剛体</span>
               </button>
             </div>
+            <div class="effect-row effect-row-toggle">
+              <span class="effect-label">Mirror床</span>
+              <label class="effect-check-wrap">
+                <input type="checkbox" id="mirroring-floor-enabled" class="effect-check">
+                <span data-i18n="status.enabled">有効</span>
+              </label>
+              <span id="mirroring-floor-enabled-val" class="effect-value" data-i18n="status.off">OFF</span>
+            </div>
+            <div class="effect-row">
+              <span class="effect-label">Mirror反射</span>
+              <input type="range" id="mirroring-floor-reflectance" class="effect-slider" min="0" max="100" value="35" step="1">
+              <span id="mirroring-floor-reflectance-val" class="effect-value">35%</span>
+            </div>
+            <div class="effect-row">
+              <span class="effect-label">Mirror床幅</span>
+              <input type="range" id="mirroring-floor-size" class="effect-slider" min="5" max="100" value="40" step="1">
+              <span id="mirroring-floor-size-val" class="effect-value">40m</span>
+            </div>
+            <div class="effect-row">
+              <span class="effect-label">Mirror高さ</span>
+              <input type="range" id="mirroring-floor-height" class="effect-slider" min="-200" max="200" value="0" step="1">
+              <span id="mirroring-floor-height-val" class="effect-value">0.00m</span>
+            </div>
+            <div class="effect-row effect-row-select-only">
+              <span class="effect-label">Mirror解像度</span>
+              <select id="mirroring-floor-resolution" class="effect-select">
+                <option value="256">256</option>
+                <option value="512" selected>512</option>
+                <option value="1024">1024</option>
+                <option value="2048">2048</option>
+              </select>
+            </div>
             <div class="control-row cam-slider-row dof-row-hidden">
               <label class="cam-axis-label" data-i18n="label.distance">距離</label>
               <input type="range" id="cam-distance" class="cam-slider" min="5" max="400" value="50" step="1">

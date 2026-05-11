@@ -155,6 +155,41 @@ describe("importProjectState", () => {
         expect(host.postEffectSsaoDebugView).toBe(true);
     });
 
+    it("restores mirroring floor viewport values", async () => {
+        const host = createHost();
+        const project = createProject({
+            viewport: {
+                ...createProject().viewport,
+                mirroringFloorEnabled: true,
+                mirroringFloorReflectance: 0.48,
+                mirroringFloorSize: 64,
+                mirroringFloorHeight: 0.03,
+                mirroringFloorResolution: 1024,
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.mirroringFloorEnabled).toBe(true);
+        expect(host.mirroringFloorReflectance).toBe(0.48);
+        expect(host.mirroringFloorSize).toBe(64);
+        expect(host.mirroringFloorHeight).toBe(0.03);
+        expect(host.mirroringFloorResolution).toBe(1024);
+    });
+
+    it("uses mirroring floor defaults for projects saved before the setting existed", async () => {
+        const host = createHost();
+        const project = createProject();
+
+        await importProjectState(host, project);
+
+        expect(host.mirroringFloorEnabled).toBe(false);
+        expect(host.mirroringFloorReflectance).toBe(0.35);
+        expect(host.mirroringFloorSize).toBe(40);
+        expect(host.mirroringFloorHeight).toBe(0);
+        expect(host.mirroringFloorResolution).toBe(512);
+    });
+
     it("restores embedded camera animation through the runtime camera path", async () => {
         const host = createHost();
         const project = createProject({

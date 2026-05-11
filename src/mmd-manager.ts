@@ -5,6 +5,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Plane } from "@babylonjs/core/Maths/math.plane";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { Material } from "@babylonjs/core/Materials/material";
@@ -21,6 +22,7 @@ import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
+import { MirrorTexture } from "@babylonjs/core/Materials/Textures/mirrorTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { RawCubeTexture } from "@babylonjs/core/Materials/Textures/rawCubeTexture";
@@ -1282,6 +1284,14 @@ ${beforeFogAppendBlock}
     private nextFramePerformanceLogMs = performance.now() + 10_000;
     private framePerformanceStats = MmdManager.createFramePerformanceStats();
     private ground: Mesh | null = null;
+    private mirroringFloor: Mesh | null = null;
+    private mirroringFloorMaterial: StandardMaterial | null = null;
+    private mirroringFloorTexture: MirrorTexture | null = null;
+    private mirroringFloorEnabledValue = false;
+    private mirroringFloorReflectanceValue = 0.35;
+    private mirroringFloorSizeValue = 40;
+    private mirroringFloorHeightValue = 0;
+    private mirroringFloorResolutionValue = 512;
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
     private backgroundImagePath: string | null = null;
@@ -1338,6 +1348,7 @@ ${beforeFogAppendBlock}
     private boneVisualizerSelectedBoneName: string | null = null;
     private boneVisualizerPickPoints: { boneName: string; x: number; y: number }[] = [];
     private bonePickPointerDown: { pointerId: number; clientX: number; clientY: number } | null = null;
+    private captureEditorOverlaysSuppressed = false;
     private rigidBodyVisualizerEnabled = false;
     private rigidBodyVisualizerTargets: {
         sceneModel: SceneModelEntry;
@@ -2769,9 +2780,140 @@ ${beforeFogAppendBlock}
         }
     }
 
+    private ensureMirroringFloor(): Mesh {
+        if (this.mirroringFloor && !this.mirroringFloor.isDisposed()) {
+            return this.mirroringFloor;
+        }
+
+        const mirrorTexture = new MirrorTexture(
+            "mirroringFloorTexture",
+            this.mirroringFloorResolutionValue,
+            this.scene,
+            true,
+            undefined,
+            Texture.TRILINEAR_SAMPLINGMODE,
+            true,
+        );
+        mirrorTexture.name = "mirroringFloorTexture";
+        mirrorTexture.wrapU = Texture.CLAMP_ADDRESSMODE;
+        mirrorTexture.wrapV = Texture.CLAMP_ADDRESSMODE;
+        mirrorTexture.blurKernel = 2;
+
+        const material = new StandardMaterial("mirroringFloorMaterial", this.scene);
+        material.reflectionTexture = mirrorTexture;
+        material.diffuseColor = new Color3(0.04, 0.04, 0.04);
+        material.ambientColor = new Color3(0, 0, 0);
+        material.emissiveColor = new Color3(0, 0, 0);
+        material.specularColor = new Color3(0, 0, 0);
+        material.backFaceCulling = false;
+        material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+        material.useLogarithmicDepth = true;
+        material.disableDepthWrite = true;
+        material.zOffset = -2;
+        material.zOffsetUnits = -8;
+
+        const floor = CreateGround(
+            "mirroringFloor",
+            { width: 1, height: 1, subdivisions: 1, updatable: false },
+            this.scene,
+        );
+        floor.material = material;
+        floor.isPickable = false;
+        floor.receiveShadows = false;
+        floor.alphaIndex = 8;
+
+        this.mirroringFloorTexture = mirrorTexture;
+        this.mirroringFloorMaterial = material;
+        this.mirroringFloor = floor;
+        this.applyMirroringFloorTransform();
+        this.applyMirroringFloorMirrorPlane();
+        this.applyMirroringFloorMaterialState();
+        this.updateMirroringFloorRenderList();
+        return floor;
+    }
+
+    private applyMirroringFloorTransform(): void {
+        if (!this.mirroringFloor) return;
+        const size = this.mirroringFloorSizeValue;
+        this.mirroringFloor.position.set(0, this.mirroringFloorHeightValue + 0.006, 0);
+        this.mirroringFloor.scaling.set(size, 1, size);
+    }
+
+    private applyMirroringFloorMirrorPlane(): void {
+        if (!this.mirroringFloorTexture) return;
+        this.mirroringFloorTexture.mirrorPlane = new Plane(0, -1, 0, this.mirroringFloorHeightValue);
+    }
+
+    private applyMirroringFloorMaterialState(): void {
+        if (!this.mirroringFloorMaterial || !this.mirroringFloorTexture) return;
+        const reflectance = this.mirroringFloorReflectanceValue;
+        this.mirroringFloorMaterial.alpha = reflectance;
+        this.mirroringFloorTexture.level = 1;
+    }
+
+    private collectMirroringFloorRenderMeshes(): Mesh[] {
+        const meshes: Mesh[] = [];
+        const seen = new Set<Mesh>();
+        const addMesh = (mesh: unknown): void => {
+            if (!(mesh instanceof Mesh)) return;
+            if (seen.has(mesh)) return;
+            if (mesh === this.ground || mesh === this.skydome || mesh === this.mirroringFloor) return;
+            if (mesh.name.startsWith("characterContactShadow:")) return;
+            if (mesh.isDisposed()) return;
+            if (!mesh.isEnabled() || !mesh.isVisible) return;
+            if ((mesh.getTotalVertices?.() ?? 0) <= 0) return;
+            seen.add(mesh);
+            meshes.push(mesh);
+        };
+
+        for (const entry of this.sceneModels) {
+            if (!this.getModelVisibility(entry.mesh)) continue;
+            addMesh(entry.mesh);
+            for (const mesh of entry.mesh.getChildMeshes(false)) {
+                addMesh(mesh);
+            }
+        }
+
+        return meshes;
+    }
+
+    private updateMirroringFloorRenderList(): void {
+        if (!this.mirroringFloorTexture) return;
+        this.mirroringFloorTexture.renderList = this.collectMirroringFloorRenderMeshes();
+    }
+
+    private syncMirroringFloorState(): void {
+        if (!this.mirroringFloorEnabledValue) {
+            this.mirroringFloor?.setEnabled(false);
+            return;
+        }
+
+        const floor = this.ensureMirroringFloor();
+        floor.setEnabled(true);
+        this.applyMirroringFloorTransform();
+        this.applyMirroringFloorMirrorPlane();
+        this.applyMirroringFloorMaterialState();
+        this.updateMirroringFloorRenderList();
+    }
+
+    private disposeMirroringFloorResources(): void {
+        this.mirroringFloor?.dispose();
+        this.mirroringFloor = null;
+        this.mirroringFloorMaterial?.dispose();
+        this.mirroringFloorMaterial = null;
+        this.mirroringFloorTexture?.dispose();
+        this.mirroringFloorTexture = null;
+    }
+
     public setBoneVisualizerSelectedBone(boneName: string | null): void {
         this.boneVisualizerSelectedBoneName = boneName && boneName.length > 0 ? boneName : null;
         this.updateBoneGizmoTarget();
+    }
+
+    public setCaptureEditorOverlaysSuppressed(suppressed: boolean): void {
+        if (this.captureEditorOverlaysSuppressed === suppressed) return;
+        this.captureEditorOverlaysSuppressed = suppressed;
+        this.syncBoneVisualizerVisibility();
     }
 
     private updateBoneGizmoTarget(): void {
@@ -3008,6 +3150,58 @@ ${beforeFogAppendBlock}
         const next = !this.isGroundVisible();
         this.setGroundVisible(next);
         return next;
+    }
+
+    public get mirroringFloorEnabled(): boolean {
+        return this.mirroringFloorEnabledValue;
+    }
+
+    public set mirroringFloorEnabled(enabled: boolean) {
+        this.mirroringFloorEnabledValue = Boolean(enabled);
+        this.syncMirroringFloorState();
+    }
+
+    public get mirroringFloorReflectance(): number {
+        return this.mirroringFloorReflectanceValue;
+    }
+
+    public set mirroringFloorReflectance(value: number) {
+        this.mirroringFloorReflectanceValue = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.35));
+        this.applyMirroringFloorMaterialState();
+    }
+
+    public get mirroringFloorSize(): number {
+        return this.mirroringFloorSizeValue;
+    }
+
+    public set mirroringFloorSize(value: number) {
+        this.mirroringFloorSizeValue = Math.max(1, Math.min(200, Number.isFinite(value) ? value : 40));
+        this.applyMirroringFloorTransform();
+    }
+
+    public get mirroringFloorHeight(): number {
+        return this.mirroringFloorHeightValue;
+    }
+
+    public set mirroringFloorHeight(value: number) {
+        this.mirroringFloorHeightValue = Math.max(-20, Math.min(20, Number.isFinite(value) ? value : 0));
+        this.applyMirroringFloorTransform();
+        this.applyMirroringFloorMirrorPlane();
+    }
+
+    public get mirroringFloorResolution(): number {
+        return this.mirroringFloorResolutionValue;
+    }
+
+    public set mirroringFloorResolution(value: number) {
+        const normalized = Number.isFinite(value) ? value : 512;
+        const next = normalized <= 256 ? 256 : normalized <= 512 ? 512 : normalized <= 1024 ? 1024 : 2048;
+        if (this.mirroringFloorResolutionValue === next) return;
+        this.mirroringFloorResolutionValue = next;
+        if (this.mirroringFloorTexture) {
+            this.disposeMirroringFloorResources();
+            this.syncMirroringFloorState();
+        }
     }
 
     public isSkydomeVisible(): boolean {
@@ -3752,6 +3946,7 @@ ${beforeFogAppendBlock}
                 this.updateBoneVisualizer();
                 this.updateRigidBodyVisualizer();
                 this.updateCharacterContactShadows();
+                this.updateMirroringFloorRenderList();
                 this.updateEditorDofFocusAndFStop();
                 return;
             }
@@ -3776,6 +3971,7 @@ ${beforeFogAppendBlock}
             sectionStartMs = performance.now();
             this.updateCharacterContactShadows();
             this.recordFramePerformanceSection("characterContactShadow", performance.now() - sectionStartMs);
+            this.updateMirroringFloorRenderList();
             sectionStartMs = performance.now();
             this.updateEditorDofFocusAndFStop();
             this.recordFramePerformanceSection("editorDof", performance.now() - sectionStartMs);
@@ -5388,7 +5584,105 @@ ${beforeFogAppendBlock}
         this.runtimeDiagnostics.add(message);
     }
 
-    /** Capture current viewport as PNG data URL */
+    private copyBgraToRgba(source: Uint8Array, target: Uint8Array, width: number, height: number): void {
+        const pixelCount = width * height;
+        for (let i = 0; i < pixelCount; i += 1) {
+            const offset = i * 4;
+            target[offset + 0] = source[offset + 2];
+            target[offset + 1] = source[offset + 1];
+            target[offset + 2] = source[offset + 0];
+            target[offset + 3] = source[offset + 3];
+        }
+    }
+
+    private async captureCurrentFramebufferPngRgbaData(
+        width: number | null,
+        height: number | null,
+    ): Promise<{ width: number; height: number; rgbaData: Uint8Array } | null> {
+        const sourceWidth = Math.max(1, Math.floor(this.engine.getRenderWidth(true) || this.renderingCanvas.width || 1));
+        const sourceHeight = Math.max(1, Math.floor(this.engine.getRenderHeight(true) || this.renderingCanvas.height || 1));
+        const outputWidth = width ?? sourceWidth;
+        const outputHeight = height ?? sourceHeight;
+        const engine = this.engine as typeof this.engine & {
+            readPixels: (
+                x: number,
+                y: number,
+                width: number,
+                height: number,
+                hasAlpha?: boolean,
+                flushRenderer?: boolean,
+                data?: Uint8Array | null,
+            ) => Promise<ArrayBufferView>;
+            flushFramebuffer?: () => void;
+        };
+
+        engine.flushFramebuffer?.();
+        const pixelData = await engine.readPixels(0, 0, sourceWidth, sourceHeight, true, true, null);
+        const source = pixelData instanceof Uint8Array
+            ? pixelData
+            : new Uint8Array(pixelData.buffer, pixelData.byteOffset, pixelData.byteLength);
+        const rgbaData = new Uint8Array(source.byteLength);
+        if (this.engine instanceof WebGPUEngine) {
+            this.copyBgraToRgba(source, rgbaData, sourceWidth, sourceHeight);
+        } else {
+            rgbaData.set(source);
+        }
+
+        const sourceCanvas = document.createElement("canvas");
+        sourceCanvas.width = sourceWidth;
+        sourceCanvas.height = sourceHeight;
+        const sourceContext = sourceCanvas.getContext("2d");
+        if (!sourceContext) return null;
+        sourceContext.putImageData(new ImageData(new Uint8ClampedArray(rgbaData.buffer), sourceWidth, sourceHeight), 0, 0);
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width = outputWidth;
+        outputCanvas.height = outputHeight;
+        const outputContext = outputCanvas.getContext("2d");
+        if (!outputContext) return null;
+        outputContext.drawImage(sourceCanvas, 0, 0, sourceWidth, sourceHeight, 0, 0, outputWidth, outputHeight);
+        const outputImage = outputContext.getImageData(0, 0, outputWidth, outputHeight);
+        return {
+            width: outputWidth,
+            height: outputHeight,
+            rgbaData: new Uint8Array(outputImage.data),
+        };
+    }
+
+    async capturePngRgbaData(
+        precisionOrOptions: number | { precision?: number; width?: number; height?: number } = 1
+    ): Promise<{ width: number; height: number; rgbaData: Uint8Array } | null> {
+        try {
+            const options = typeof precisionOrOptions === "number"
+                ? { precision: precisionOrOptions }
+                : (precisionOrOptions ?? {});
+            const clampedPrecision = Math.max(0.25, Math.min(4, options.precision ?? 1));
+            const width = Number.isFinite(options.width)
+                ? Math.max(320, Math.min(8192, Math.floor(options.width!)))
+                : Math.max(320, Math.min(8192, Math.floor(this.engine.getRenderWidth(true) * clampedPrecision)));
+            const height = Number.isFinite(options.height)
+                ? Math.max(180, Math.min(8192, Math.floor(options.height!)))
+                : Math.max(180, Math.min(8192, Math.floor(this.engine.getRenderHeight(true) * clampedPrecision)));
+
+            return await this.captureCurrentFramebufferPngRgbaData(width, height);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error("Failed to capture PNG RGBA:", message);
+            this.onError?.(`PNG RGBA capture error: ${message}`);
+            return null;
+        }
+    }
+
+    getRenderingCanvasClientRect(): { x: number; y: number; width: number; height: number } {
+        const rect = this.renderingCanvas.getBoundingClientRect();
+        return {
+            x: rect.left,
+            y: rect.top,
+            width: rect.width,
+            height: rect.height,
+        };
+    }
+
     /** Capture current viewport as PNG data URL */
     async capturePngDataUrl(
         precisionOrOptions: number | { precision?: number; width?: number; height?: number } = 1
@@ -5407,6 +5701,21 @@ ${beforeFogAppendBlock}
             const screenshotSize = width !== null && height !== null
                 ? { width, height }
                 : { precision: clampedPrecision };
+
+            if (this.mirroringFloorEnabledValue && this.scene.frameGraph) {
+                // Babylon's screenshot helpers can conflict with MirrorTexture + FrameGraph
+                // on WebGPU. Read the visible framebuffer directly, matching the WebM
+                // webgpu-copy capture path.
+                const rgbaFrame = await this.captureCurrentFramebufferPngRgbaData(width, height);
+                if (!rgbaFrame) return null;
+                const canvas = document.createElement("canvas");
+                canvas.width = rgbaFrame.width;
+                canvas.height = rgbaFrame.height;
+                const context = canvas.getContext("2d");
+                if (!context) return null;
+                context.putImageData(new ImageData(new Uint8ClampedArray(rgbaFrame.rgbaData), rgbaFrame.width, rgbaFrame.height), 0, 0);
+                return canvas.toDataURL("image/png");
+            }
 
             return await CreateScreenshotUsingRenderTargetAsync(
                 this.engine,
@@ -7829,6 +8138,7 @@ ${beforeFogAppendBlock}
             this.skydome.dispose();
             this.skydome = null;
         }
+        this.disposeMirroringFloorResources();
         this.clearBackgroundMedia();
         this.globalIlluminationController?.dispose();
         this.scene.dispose();

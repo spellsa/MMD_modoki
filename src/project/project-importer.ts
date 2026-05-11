@@ -363,6 +363,21 @@ export async function importProjectState(
     host.setGroundVisible(Boolean(data.viewport.groundVisible));
     host.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
+    host.mirroringFloorReflectance = typeof data.viewport.mirroringFloorReflectance === "number" && Number.isFinite(data.viewport.mirroringFloorReflectance)
+        ? data.viewport.mirroringFloorReflectance
+        : 0.35;
+    host.mirroringFloorSize = typeof data.viewport.mirroringFloorSize === "number" && Number.isFinite(data.viewport.mirroringFloorSize)
+        ? data.viewport.mirroringFloorSize
+        : 40;
+    host.mirroringFloorHeight = typeof data.viewport.mirroringFloorHeight === "number" && Number.isFinite(data.viewport.mirroringFloorHeight)
+        ? data.viewport.mirroringFloorHeight
+        : 0;
+    host.mirroringFloorResolution = typeof data.viewport.mirroringFloorResolution === "number" && Number.isFinite(data.viewport.mirroringFloorResolution)
+        ? data.viewport.mirroringFloorResolution
+        : 512;
+    host.mirroringFloorEnabled = typeof data.viewport.mirroringFloorEnabled === "boolean"
+        ? data.viewport.mirroringFloorEnabled
+        : false;
     if (typeof data.viewport.backgroundVideoPath === "string" && data.viewport.backgroundVideoPath.trim().length > 0) {
         try {
             await host.setBackgroundVideoFromPath(data.viewport.backgroundVideoPath);
