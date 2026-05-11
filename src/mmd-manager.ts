@@ -529,6 +529,8 @@ import twgslJsUrl from "@babylonjs/core/assets/twgsl/twgsl.js?url";
 import twgslWasmUrl from "@babylonjs/core/assets/twgsl/twgsl.wasm?url";
 // eslint-disable-next-line import/no-unresolved
 import iblShadowTestEnvironmentUrl from "./assets/ibl-shadows/white.hdr?url";
+// eslint-disable-next-line import/no-unresolved
+import blobShadowTextureUrl from "./assets/blob-shadows/BlobShadow.png?url";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
 // eslint-disable-next-line import/no-unresolved
 import animeSoftLutText from "../lut/anime-soft.3dl?raw";
@@ -618,6 +620,16 @@ type SceneModelEntry = {
     shadowCasterMeshes: Mesh[];
     contactShadowMesh: Mesh | null;
     castShadow: boolean;
+};
+
+type ContactShadowBlobKind = "body" | "leftFoot" | "rightFoot";
+type ContactShadowBlobMeshes = Partial<Record<ContactShadowBlobKind, Mesh>>;
+type ContactShadowTarget = {
+    kind: ContactShadowBlobKind;
+    position: Vector3;
+    width: number;
+    depth: number;
+    opacityScale: number;
 };
 
 type MaterialShaderDefaults = {
@@ -1297,7 +1309,9 @@ ${beforeFogAppendBlock}
     private iblWebGpuSuppressedEnvironmentTexture: BaseTexture | null = null;
     private iblShadowDebugPassSignature = "";
     private contactShadowTexture: DynamicTexture | null = null;
+    private contactShadowBlobTexture: Texture | null = null;
     private contactShadowMaterial: StandardMaterial | null = null;
+    private contactShadowMeshesByModel = new WeakMap<SceneModelEntry, ContactShadowBlobMeshes>();
     private characterContactShadowEnabledValue = false;
     private characterContactShadowOpacityValue = 0.35;
     private characterContactShadowScaleValue = 1.0;
@@ -2577,38 +2591,14 @@ ${beforeFogAppendBlock}
     private ensureContactShadowMaterial(): StandardMaterial {
         if (this.contactShadowMaterial) return this.contactShadowMaterial;
 
-        const textureSize = 256;
-        const texture = new DynamicTexture(
-            "characterContactShadowTexture",
-            { width: textureSize, height: textureSize },
-            this.scene,
-            true,
-        );
-        const ctx = texture.getContext();
-        ctx.clearRect(0, 0, textureSize, textureSize);
-        const gradient = ctx.createRadialGradient(
-            textureSize * 0.5,
-            textureSize * 0.5,
-            textureSize * 0.05,
-            textureSize * 0.5,
-            textureSize * 0.5,
-            textureSize * 0.5,
-        );
-        gradient.addColorStop(0.0, "rgba(0, 0, 0, 0.85)");
-        gradient.addColorStop(0.45, "rgba(0, 0, 0, 0.42)");
-        gradient.addColorStop(0.8, "rgba(0, 0, 0, 0.12)");
-        gradient.addColorStop(1.0, "rgba(0, 0, 0, 0)");
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, textureSize, textureSize);
+        const texture = new Texture(blobShadowTextureUrl, this.scene, false, false, Texture.TRILINEAR_SAMPLINGMODE);
+        texture.name = "characterContactBlobShadowTexture";
         texture.hasAlpha = true;
         texture.wrapU = Texture.CLAMP_ADDRESSMODE;
         texture.wrapV = Texture.CLAMP_ADDRESSMODE;
-        texture.updateSamplingMode(Texture.TRILINEAR_SAMPLINGMODE);
-        texture.update();
 
         const material = new StandardMaterial("characterContactShadowMaterial", this.scene);
         material.diffuseTexture = texture;
-        material.opacityTexture = texture;
         material.useAlphaFromDiffuseTexture = true;
         material.diffuseColor = new Color3(0, 0, 0);
         material.emissiveColor = new Color3(0, 0, 0);
@@ -2616,20 +2606,30 @@ ${beforeFogAppendBlock}
         material.disableLighting = true;
         material.backFaceCulling = false;
         material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+        material.useLogarithmicDepth = true;
+        material.disableDepthWrite = true;
+        material.zOffset = -1;
+        material.zOffsetUnits = -4;
         material.alpha = 1;
 
-        this.contactShadowTexture = texture;
+        this.contactShadowBlobTexture = texture;
         this.contactShadowMaterial = material;
         return material;
     }
 
-    private ensureContactShadowMesh(entry: SceneModelEntry): Mesh {
-        if (entry.contactShadowMesh && !entry.contactShadowMesh.isDisposed()) {
+    private ensureContactShadowMesh(entry: SceneModelEntry, kind: ContactShadowBlobKind): Mesh {
+        if (kind === "body" && entry.contactShadowMesh && !entry.contactShadowMesh.isDisposed()) {
             return entry.contactShadowMesh;
         }
 
+        const blobMeshes = this.contactShadowMeshesByModel.get(entry) ?? {};
+        const existing = blobMeshes[kind];
+        if (existing && !existing.isDisposed()) {
+            return existing;
+        }
+
         const mesh = CreateGround(
-            `characterContactShadow:${entry.info.name}`,
+            `characterContactShadow:${kind}:${entry.info.name}`,
             { width: 1, height: 1, subdivisions: 1, updatable: false },
             this.scene,
         );
@@ -2638,24 +2638,81 @@ ${beforeFogAppendBlock}
         mesh.receiveShadows = false;
         mesh.doNotSyncBoundingInfo = true;
         mesh.alwaysSelectAsActiveMesh = true;
+        mesh.alphaIndex = 10;
         mesh.setEnabled(false);
-        entry.contactShadowMesh = mesh;
+        if (kind === "body") {
+            entry.contactShadowMesh = mesh;
+        }
+        blobMeshes[kind] = mesh;
+        this.contactShadowMeshesByModel.set(entry, blobMeshes);
         return mesh;
     }
 
     private disposeContactShadowForModel(entry: SceneModelEntry): void {
-        if (!entry.contactShadowMesh) return;
-        entry.contactShadowMesh.dispose();
+        const blobMeshes = this.contactShadowMeshesByModel.get(entry);
+        if (blobMeshes) {
+            for (const mesh of Object.values(blobMeshes)) {
+                mesh?.dispose();
+            }
+            this.contactShadowMeshesByModel.delete(entry);
+        } else {
+            entry.contactShadowMesh?.dispose();
+        }
         entry.contactShadowMesh = null;
+    }
+
+    private hideContactShadowMeshes(entry: SceneModelEntry): void {
+        const blobMeshes = this.contactShadowMeshesByModel.get(entry);
+        if (blobMeshes) {
+            for (const mesh of Object.values(blobMeshes)) {
+                mesh?.setEnabled(false);
+            }
+            return;
+        }
+        entry.contactShadowMesh?.setEnabled(false);
+    }
+
+    private getContactShadowBoneWorldPosition(entry: SceneModelEntry, candidates: readonly string[]): Vector3 | null {
+        for (const boneName of candidates) {
+            const runtimeBone = this.getRuntimeBoneByNameFromModel(entry.model, boneName);
+            if (!runtimeBone) continue;
+            const worldMatrix = Matrix.Identity();
+            const worldPosition = Vector3.Zero();
+            runtimeBone.getWorldMatrixToRef(worldMatrix);
+            worldMatrix.getTranslationToRef(worldPosition);
+            if (Number.isFinite(worldPosition.x) && Number.isFinite(worldPosition.y) && Number.isFinite(worldPosition.z)) {
+                return worldPosition;
+            }
+        }
+        return null;
+    }
+
+    private collectContactShadowTargets(entry: SceneModelEntry, bounds: { min: Vector3; max: Vector3 }): ContactShadowTarget[] {
+        const min = bounds.min;
+        const max = bounds.max;
+        const modelWidth = Math.max(0.1, max.x - min.x);
+        const modelDepth = Math.max(0.1, max.z - min.z);
+        const targets: ContactShadowTarget[] = [];
+        const leftFoot = this.getContactShadowBoneWorldPosition(entry, ["左足首", "左足", "左つま先", "左足ＩＫ", "左足IK", "左つま先ＩＫ", "左つま先IK"]);
+        const rightFoot = this.getContactShadowBoneWorldPosition(entry, ["右足首", "右足", "右つま先", "右足ＩＫ", "右足IK", "右つま先ＩＫ", "右つま先IK"]);
+        const footWidth = Math.max(1.1, Math.min(3.6, modelWidth * 0.72 * this.characterContactShadowScaleValue));
+        const footDepth = Math.max(0.9, Math.min(3.0, modelDepth * 0.62 * this.characterContactShadowScaleValue));
+
+        if (leftFoot) {
+            targets.push({ kind: "leftFoot", position: leftFoot, width: footWidth, depth: footDepth, opacityScale: 1 });
+        }
+        if (rightFoot) {
+            targets.push({ kind: "rightFoot", position: rightFoot, width: footWidth, depth: footDepth, opacityScale: 1 });
+        }
+
+        return targets;
     }
 
     private updateCharacterContactShadows(): void {
         const enabled = this.characterContactShadowEnabledValue && this.sceneModels.length > 0;
         for (const entry of this.sceneModels) {
             if (!enabled || !this.getModelVisibility(entry.mesh)) {
-                if (entry.contactShadowMesh) {
-                    entry.contactShadowMesh.setEnabled(false);
-                }
+                this.hideContactShadowMeshes(entry);
                 continue;
             }
 
@@ -2663,27 +2720,52 @@ ${beforeFogAppendBlock}
             try {
                 vectors = entry.mesh.getHierarchyBoundingVectors(true);
             } catch {
-                if (entry.contactShadowMesh) {
-                    entry.contactShadowMesh.setEnabled(false);
-                }
+                this.hideContactShadowMeshes(entry);
                 continue;
             }
 
-            const min = vectors.min;
-            const max = vectors.max;
-            const width = Math.max(0.45, Math.min(5.0, (max.x - min.x) * 0.42 * this.characterContactShadowScaleValue));
-            const depth = Math.max(0.35, Math.min(4.0, (max.z - min.z) * 0.36 * this.characterContactShadowScaleValue));
-            if (!Number.isFinite(width) || !Number.isFinite(depth)) continue;
-
             const groundY = this.ground?.position.y ?? 0;
-            const mesh = this.ensureContactShadowMesh(entry);
-            mesh.position.set((min.x + max.x) * 0.5, groundY + 0.012, (min.z + max.z) * 0.5);
-            mesh.scaling.set(width, 1, depth);
+            const targets = this.collectContactShadowTargets(entry, vectors);
+            const visibleKinds = new Set<ContactShadowBlobKind>();
+            const maxDistance = 5.0;
+            const liftAboveFloor = 0.018;
+            const footTargets = targets.filter((target) => target.kind === "leftFoot" || target.kind === "rightFoot");
+            const footOverlapScale = new Map<ContactShadowBlobKind, number>();
+            if (footTargets.length >= 2) {
+                const [first, second] = footTargets;
+                const dx = first.position.x - second.position.x;
+                const dz = first.position.z - second.position.z;
+                const centerDistance = Math.sqrt(dx * dx + dz * dz);
+                const overlapDistance = Math.max(0.1, (first.width + second.width + first.depth + second.depth) * 0.18);
+                const overlap = Math.max(0, Math.min(1, 1 - centerDistance / overlapDistance));
+                const scale = 1 - overlap * 0.45;
+                footOverlapScale.set(first.kind, scale);
+                footOverlapScale.set(second.kind, scale);
+            }
 
-            const heightAboveGround = Math.max(0, min.y - groundY);
-            const heightFade = Math.max(0, Math.min(1, 1 - heightAboveGround / 12));
-            mesh.visibility = this.characterContactShadowOpacityValue * heightFade;
-            mesh.setEnabled(mesh.visibility > 0.001);
+            for (const target of targets) {
+                if (!Number.isFinite(target.width) || !Number.isFinite(target.depth)) continue;
+                const distance = Math.max(0, target.position.y - groundY);
+                const t = Math.max(0, Math.min(1, 1 - distance / maxDistance));
+                const heightFade = Math.pow(t, 1.25);
+                const overlapOpacityScale = footOverlapScale.get(target.kind) ?? 1;
+                const opacity = this.characterContactShadowOpacityValue * target.opacityScale * heightFade * overlapOpacityScale;
+                const mesh = this.ensureContactShadowMesh(entry, target.kind);
+                mesh.position.set(target.position.x, groundY + liftAboveFloor, target.position.z);
+                mesh.scaling.set(target.width, 1, target.depth);
+                mesh.visibility = opacity;
+                mesh.setEnabled(opacity > 0.001);
+                visibleKinds.add(target.kind);
+            }
+
+            const blobMeshes = this.contactShadowMeshesByModel.get(entry);
+            if (blobMeshes) {
+                for (const [kind, mesh] of Object.entries(blobMeshes) as Array<[ContactShadowBlobKind, Mesh | undefined]>) {
+                    if (!visibleKinds.has(kind)) {
+                        mesh?.setEnabled(false);
+                    }
+                }
+            }
         }
     }
 
@@ -7738,6 +7820,10 @@ ${beforeFogAppendBlock}
         if (this.contactShadowTexture) {
             this.contactShadowTexture.dispose();
             this.contactShadowTexture = null;
+        }
+        if (this.contactShadowBlobTexture) {
+            this.contactShadowBlobTexture.dispose();
+            this.contactShadowBlobTexture = null;
         }
         if (this.skydome) {
             this.skydome.dispose();
