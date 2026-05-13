@@ -25,6 +25,7 @@
 - [LUT / WGSL 外部ファイル運用仕様](./lut-wgsl-file-handling.md)
 - [現行MMD AutoLuminous 調査メモ](./mmd-autoluminous-research.md)
 - [MirroringFloor 実装検討メモ](./mirroring-floor-plan-2026-05-11.md)
+- [SSR / Frame Graph 実装検討メモ](./ssr-frame-graph-plan-2026-05-12.md)
 
 ## カメラ / タイムライン / キーフレーム
 
