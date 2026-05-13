@@ -5427,6 +5427,10 @@ ${beforeFogAppendBlock}
             ssrEnabled: this.postEffectSsrEnabledValue,
             ssrStrength: this.postEffectSsrStrengthValue,
             ssrStep: this.postEffectSsrStepValue,
+            lutEnabled: this.postEffectLutEnabledValue && isLutSourceReadyImpl(this),
+            lutIntensity: this.postEffectLutIntensityValue,
+            lutRuntimeText: this.getFrameGraphPostEffectLutRuntimeText(),
+            lutTextureKey: this.getFrameGraphPostEffectLutTextureKey(),
             antialiasEnabled: this.antialiasEnabledValue,
         }));
 
@@ -5450,8 +5454,33 @@ ${beforeFogAppendBlock}
         return this.postEffectToneMappingEnabledValue
             || this.postEffectDitheringEnabledValue
             || this.postEffectColorCurvesEnabledValue
-            || (this.postEffectLutEnabledValue && isLutSourceReadyImpl(this))
             || Math.abs(this.postEffectExposureValue - 1) > epsilon;
+    }
+
+    private getFrameGraphPostEffectLutRuntimeText(): string | null {
+        if (!this.postEffectLutEnabledValue || !isLutSourceReadyImpl(this)) {
+            return null;
+        }
+        if (this.postEffectLutSourceModeValue === "builtin") {
+            return MmdManager.POST_EFFECT_LUT_TEXT_BY_ID[this.postEffectLutPresetValue] ?? null;
+        }
+        return this.postEffectLutExternalTextValue;
+    }
+
+    private getFrameGraphPostEffectLutTextureKey(): string | null {
+        if (!this.postEffectLutEnabledValue || !isLutSourceReadyImpl(this)) {
+            return null;
+        }
+        if (this.postEffectLutSourceModeValue === "builtin") {
+            return `builtin:${this.postEffectLutPresetValue}`;
+        }
+        return [
+            "external",
+            this.postEffectLutSourceModeValue,
+            this.postEffectLutExternalPathValue ?? "",
+            this.postEffectLutExternalSourceFormatValue ?? "",
+            String(this.postEffectLutExternalRevision),
+        ].join(":");
     }
 
     private createFrameGraphPostEffectsSceneColorTarget(): RenderTargetTexture | null {

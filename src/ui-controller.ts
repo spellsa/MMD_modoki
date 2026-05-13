@@ -2495,22 +2495,6 @@ export class UIController {
                     <input data-postfx="gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row effect-row-check" data-postfx-classic-only="lut">
-                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
-                    <label class="effect-check-wrap">
-                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
-                        <span data-i18n="status.on">On</span>
-                    </label>
-                    <select data-postfx-select="lut-preset" class="effect-select">
-                        ${lutPresetOptionsHtml}
-                    </select>
-                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
-                </div>
-                <div class="effect-row" data-postfx-classic-only="lut">
-                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
-                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
-                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
-                </div>
                 <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row" style="display:none;">
                     <span class="effect-label" data-i18n="shader.postfx.exposure">Exposure</span>
@@ -2634,10 +2618,26 @@ export class UIController {
                     <span data-postfx-val="tone-mapping" class="effect-value" data-i18n="option.none">None</span>
                 </div>
                 </div>
+                <div class="effect-row effect-row-check">
+                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
+                    <label class="effect-check-wrap">
+                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
+                        <span data-i18n="status.on">On</span>
+                    </label>
+                    <select data-postfx-select="lut-preset" class="effect-select">
+                        ${lutPresetOptionsHtml}
+                    </select>
+                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
+                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
+                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
+                </div>
                 <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
                     <div class="postfx-backend-note">
                         <strong>Frame Graph</strong><br>
-                        Experimental backend. Gamma / Contrast, SSAO2, DoF, Bloom, Sharpen, Grain, Chroma, Vignette, EdgeBlur, Distortion, and FXAA are available above; LUT remains on the Classic backend for now.
+                        Experimental backend. Gamma / Contrast, LUT, SSAO2, DoF, Bloom, Sharpen, Grain, Chroma, Vignette, EdgeBlur, Distortion, and FXAA are available above.
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
@@ -2646,6 +2646,7 @@ export class UIController {
                         <span class="effect-value">SSAO</span>
                         <span class="effect-value">DoF</span>
                         <span class="effect-value">Bloom</span>
+                        <span class="effect-value">LUT</span>
                         <span class="effect-value">Color</span>
                         <span class="effect-value">Sharp</span>
                         <span class="effect-value">Grain</span>
@@ -3225,8 +3226,17 @@ export class UIController {
         const backendValue = root.querySelector<HTMLElement>('span[data-postfx-val="backend"]');
         const dofControls = root.querySelector<HTMLElement>(".shader-postfx-dof-controls");
         const classicOnlyRows = Array.from(root.querySelectorAll<HTMLElement>("[data-postfx-classic-only]"));
+        const lutEnabledRow = root.querySelector<HTMLElement>('input[data-postfx-check="lut"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const lutIntensityRow = root.querySelector<HTMLElement>('input[data-postfx="lut-intensity"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const classicSsrRow = root.querySelector<HTMLElement>('input[data-postfx="ssr-strength"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const frameGraphSsrRow = root.querySelector<HTMLElement>('input[data-frame-graph-ssr-check="enabled"]')?.closest<HTMLElement>(".effect-row") ?? null;
         const dofRowByControlId = (id: string): HTMLElement | null => {
             return root.querySelector<HTMLElement>(`#${id}`)?.closest<HTMLElement>(".effect-row") ?? null;
+        };
+        const moveLutRowsBefore = (anchor: HTMLElement | null): void => {
+            if (!anchor || !anchor.parentElement || !lutEnabledRow || !lutIntensityRow) return;
+            anchor.parentElement.insertBefore(lutEnabledRow, anchor);
+            anchor.parentElement.insertBefore(lutIntensityRow, anchor);
         };
         const setFrameGraphDofRowState = (row: HTMLElement | null, visibleInFrameGraph: boolean): void => {
             if (!row) return;
@@ -3299,6 +3309,7 @@ export class UIController {
             row.hidden = backend !== "classic";
             row.style.display = backend === "classic" ? "" : "none";
         }
+        moveLutRowsBefore(backend === "frameGraph" ? frameGraphSsrRow : classicSsrRow);
         if (backendValue) {
             backendValue.textContent = backend === "frameGraph" ? "Frame Graph" : "Classic";
         }

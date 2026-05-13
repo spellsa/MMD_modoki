@@ -349,3 +349,38 @@ MMD_modoki 固有として残すもの:
 まずは built-in `.3dl` preset を Frame Graph backend 上で明示 texture bind し、`intensity 0 / 100` と preset 切替が確実に効くところまでを最小ゴールにする。
 
 外部 `.cube` / project-relative LUT は既存入力経路を活かせるはずだが、最初の PoC では範囲を広げすぎない。
+## 実装メモ 2026-05-13
+
+Frame Graph backend 向けに、Classic の `ColorGradingTexture` ではなく独自の LUT post process task を追加した。
+
+実装内容:
+
+- `src/render/lut-atlas-texture.ts`
+  - runtime `.3dl` text を読み、`N * N` x `N` の 2D atlas texture 用 RGBA データに変換する。
+  - `.cube` は既存の `src/lut-file.ts` 側で runtime `.3dl` に正規化済みなので、Frame Graph 側では `.3dl` text だけを入力として扱う。
+- `src/render/frame-graph-post-effects-controller.ts`
+  - `FrameGraphPostEffectsLutTask` を追加。
+  - shader 内で 2D atlas を 3D LUT として trilinear sampling し、`lutIntensity` で元画像と blend する。
+  - chain は `Bloom -> LUT -> ColorCorrection -> Sharpen` の順にした。
+- `src/mmd-manager.ts`
+  - Frame Graph settings に LUT の enabled / intensity / runtime text / texture key を渡す。
+  - LUT だけが有効な場合に `FrameGraphImageProcessingTask` を起こさないよう、LUT は独自 task 側で扱う。
+- `src/render/post-process-controller.ts`
+  - Frame Graph backend では Classic 用 `ColorGradingTexture` を明示的に無効化し、二重適用や stale texture を避ける。
+- `src/ui-controller.ts`
+  - Frame Graph backend でも LUT の ON/OFF、preset、intensity を表示する。
+
+確認:
+
+- `npm.cmd run test:unit -- --run src/render/lut-atlas-texture.test.ts`
+  - runtime `.3dl` のサンプル順が atlas の `x = r + b * size`, `y = g` に入ることを確認。
+- `npm.cmd run lint`
+  - 既存 warning は残るが error はなし。
+- `npm.cmd run smoke:launch`
+  - Electron 起動、renderer runtime 初期化、WebGPU 到達を確認。
+
+未確認 / 次に見ること:
+
+- 実機 UI で Frame Graph backend + built-in LUT を ON にしたときの見た目比較。
+- 外部 `.3dl` / `.cube` 読み込み後の Frame Graph texture 更新。
+- PNG / WebM 出力時に LUT が反映されるか。

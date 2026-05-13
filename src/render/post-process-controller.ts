@@ -1172,7 +1172,7 @@ export function isImageProcessingEffectsEnabled(host: any): boolean {
         || host.postEffectDitheringEnabledValue
         || host.postEffectVignetteEnabledValue
         || host.postEffectColorCurvesEnabledValue
-        || (host.postEffectLutEnabledValue && isLutSourceReady(host))
+        || (host.postEffectBackend !== "frameGraph" && host.postEffectLutEnabledValue && isLutSourceReady(host))
         || Math.abs(host.postEffectExposureValue - 1) > epsilon;
 }
 
@@ -1224,6 +1224,17 @@ export function isLutSourceReady(host: any): boolean {
 
 export function applyLutSettings(host: any): void {
     const imageProcessing = host.scene.imageProcessingConfiguration;
+    if (host.postEffectBackend === "frameGraph") {
+        imageProcessing.colorGradingEnabled = false;
+        imageProcessing.colorGradingTexture = null;
+        if (host.postEffectLutTexture) {
+            host.postEffectLutTexture.dispose();
+            host.postEffectLutTexture = null;
+        }
+        host.postEffectLutTextureKey = null;
+        return;
+    }
+
     const mode = host.postEffectLutSourceModeValue;
     const enabled = host.postEffectLutEnabledValue && isLutSourceReady(host);
     if (!enabled) {

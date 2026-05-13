@@ -21,6 +21,7 @@ import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGr
 import { EffectWrapper } from "@babylonjs/core/Materials/effectRenderer";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
 import type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
+import type { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Vector2 } from "@babylonjs/core/Maths/math.vector";
 import { ThinChromaticAberrationPostProcess } from "@babylonjs/core/PostProcesses/thinChromaticAberrationPostProcess";
 import { ThinDepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/thinDepthOfFieldEffect";
@@ -30,6 +31,7 @@ import { ThinImageProcessingPostProcess } from "@babylonjs/core/PostProcesses/th
 import { ThinSharpenPostProcess } from "@babylonjs/core/PostProcesses/thinSharpenPostProcess";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
+import { createLutAtlasTextureFrom3dlText } from "./lut-atlas-texture";
 
 export type FrameGraphPostEffectsWarning = {
     message: string;
@@ -70,8 +72,117 @@ export type FrameGraphPostEffectsSettings = {
     ssrEnabled: boolean;
     ssrStrength: number;
     ssrStep: number;
+    lutEnabled: boolean;
+    lutIntensity: number;
+    lutRuntimeText: string | null;
+    lutTextureKey: string | null;
     antialiasEnabled: boolean;
 };
+
+function ensureLutShaders(): void {
+    const shaderKey = "mmdFrameGraphLutPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform sampler2D lutSampler;
+            uniform float lutSize;
+            uniform float lutIntensity;
+
+            vec3 sampleLutCell(float r, float g, float b) {
+                float size = max(lutSize, 2.0);
+                float atlasWidth = size * size;
+                vec2 uv = vec2((r + b * size + 0.5) / atlasWidth, (g + 0.5) / size);
+                return texture2D(lutSampler, uv).rgb;
+            }
+
+            vec3 sampleLut(vec3 color) {
+                float size = max(lutSize, 2.0);
+                vec3 scaled = clamp(color, vec3(0.0), vec3(1.0)) * (size - 1.0);
+                vec3 lower = floor(scaled);
+                vec3 upper = min(lower + vec3(1.0), vec3(size - 1.0));
+                vec3 factor = scaled - lower;
+
+                vec3 c000 = sampleLutCell(lower.r, lower.g, lower.b);
+                vec3 c100 = sampleLutCell(upper.r, lower.g, lower.b);
+                vec3 c010 = sampleLutCell(lower.r, upper.g, lower.b);
+                vec3 c110 = sampleLutCell(upper.r, upper.g, lower.b);
+                vec3 c001 = sampleLutCell(lower.r, lower.g, upper.b);
+                vec3 c101 = sampleLutCell(upper.r, lower.g, upper.b);
+                vec3 c011 = sampleLutCell(lower.r, upper.g, upper.b);
+                vec3 c111 = sampleLutCell(upper.r, upper.g, upper.b);
+
+                vec3 c00 = mix(c000, c100, factor.r);
+                vec3 c10 = mix(c010, c110, factor.r);
+                vec3 c01 = mix(c001, c101, factor.r);
+                vec3 c11 = mix(c011, c111, factor.r);
+                vec3 c0 = mix(c00, c10, factor.g);
+                vec3 c1 = mix(c01, c11, factor.g);
+                return mix(c0, c1, factor.b);
+            }
+
+            void main(void) {
+                vec4 color = texture2D(textureSampler, vUV);
+                vec3 graded = sampleLut(color.rgb);
+                gl_FragColor = vec4(mix(color.rgb, graded, clamp(lutIntensity, 0.0, 1.0)), color.a);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            var lutSamplerSampler: sampler;
+            var lutSampler: texture_2d<f32>;
+            uniform lutSize: f32;
+            uniform lutIntensity: f32;
+
+            fn sampleLutCell(r: f32, g: f32, b: f32) -> vec3f {
+                let size: f32 = max(uniforms.lutSize, 2.0);
+                let atlasWidth: f32 = size * size;
+                let uv: vec2f = vec2f((r + b * size + 0.5) / atlasWidth, (g + 0.5) / size);
+                return textureSampleLevel(lutSampler, lutSamplerSampler, uv, 0.0).rgb;
+            }
+
+            fn sampleLut(color: vec3f) -> vec3f {
+                let size: f32 = max(uniforms.lutSize, 2.0);
+                let scaled: vec3f = clamp(color, vec3f(0.0), vec3f(1.0)) * (size - 1.0);
+                let lower: vec3f = floor(scaled);
+                let upper: vec3f = min(lower + vec3f(1.0), vec3f(size - 1.0));
+                let factor: vec3f = scaled - lower;
+
+                let c000: vec3f = sampleLutCell(lower.r, lower.g, lower.b);
+                let c100: vec3f = sampleLutCell(upper.r, lower.g, lower.b);
+                let c010: vec3f = sampleLutCell(lower.r, upper.g, lower.b);
+                let c110: vec3f = sampleLutCell(upper.r, upper.g, lower.b);
+                let c001: vec3f = sampleLutCell(lower.r, lower.g, upper.b);
+                let c101: vec3f = sampleLutCell(upper.r, lower.g, upper.b);
+                let c011: vec3f = sampleLutCell(lower.r, upper.g, upper.b);
+                let c111: vec3f = sampleLutCell(upper.r, upper.g, upper.b);
+
+                let c00: vec3f = mix(c000, c100, vec3f(factor.r));
+                let c10: vec3f = mix(c010, c110, vec3f(factor.r));
+                let c01: vec3f = mix(c001, c101, vec3f(factor.r));
+                let c11: vec3f = mix(c011, c111, vec3f(factor.r));
+                let c0: vec3f = mix(c00, c10, vec3f(factor.g));
+                let c1: vec3f = mix(c01, c11, vec3f(factor.g));
+                return mix(c0, c1, vec3f(factor.b));
+            }
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let color: vec4f = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+                let graded: vec3f = sampleLut(color.rgb);
+                let amount: f32 = clamp(uniforms.lutIntensity, 0.0, 1.0);
+                fragmentOutputs.color = vec4f(mix(color.rgb, graded, vec3f(amount)), color.a);
+                return fragmentOutputs;
+            }
+        `;
+    }
+}
 
 function ensureColorCorrectionShaders(): void {
     const shaderKey = "mmdFrameGraphColorCorrectionPixelShader";
@@ -527,6 +638,44 @@ function ensureLensDistortionShaders(): void {
     }
 }
 
+class FrameGraphPostEffectsLutTask extends FrameGraphPostProcessTask {
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+        private readonly getLutTexture: () => RawTexture | null,
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsLutTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        return super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const texture = this.getLutTexture();
+                const effect = this.postProcess.effect;
+                effect.setFloat("lutSize", texture?.getSize().height ?? 2);
+                effect.setFloat("lutIntensity", settings.lutEnabled ? Math.max(0, Math.min(1, settings.lutIntensity)) : 0);
+                if (texture) {
+                    effect.setTexture("lutSampler", texture);
+                }
+                additionalBindings?.(context);
+            },
+        );
+    }
+}
+
 class FrameGraphPostEffectsColorCorrectionTask extends FrameGraphPostProcessTask {
     constructor(
         name: string,
@@ -684,6 +833,10 @@ class FrameGraphPostEffectsLensDistortionTask extends FrameGraphPostProcessTask 
 export class FrameGraphPostEffectsController {
     private activationWarningEmitted = false;
     private colorCorrectionEffect: EffectWrapper | null = null;
+    private lutEffect: EffectWrapper | null = null;
+    private lutTask: FrameGraphPostEffectsLutTask | null = null;
+    private lutTexture: RawTexture | null = null;
+    private lutTextureKey: string | null = null;
     private imageProcessingEffect: ThinImageProcessingPostProcess | null = null;
     private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
     private geometryRendererTask: FrameGraphGeometryRendererTask | null = null;
@@ -706,6 +859,7 @@ export class FrameGraphPostEffectsController {
     private fxaaEffect: ThinFXAAPostProcess | null = null;
     private fxaaTask: FrameGraphFXAATask | null = null;
     private frameGraph: FrameGraph | null = null;
+    private activeScene: Scene | null = null;
     private ready = false;
     private active = false;
     private executedFrameCount = 0;
@@ -743,6 +897,10 @@ export class FrameGraphPostEffectsController {
             ssrEnabled: false,
             ssrStrength: 0.3,
             ssrStep: 4,
+            lutEnabled: false,
+            lutIntensity: 1,
+            lutRuntimeText: null,
+            lutTextureKey: null,
             antialiasEnabled: true,
         }),
     ) {}
@@ -765,6 +923,7 @@ export class FrameGraphPostEffectsController {
         }
 
         ensureColorCorrectionShaders();
+        ensureLutShaders();
         ensureSsaoToonCompositeShaders();
         ensureVignetteEdgeBlurShaders();
         ensureLensDistortionShaders();
@@ -807,6 +966,7 @@ export class FrameGraphPostEffectsController {
             this.imageProcessingEffect,
         );
         const initialSettings = this.getSettings();
+        this.updateLutTexture(scene, initialSettings);
         imageProcessingTask.sourceTexture = sourceTextureHandle;
         imageProcessingTask.disabled = !initialSettings.imageProcessingEnabled;
         this.lastImageProcessingEnabled = initialSettings.imageProcessingEnabled;
@@ -966,6 +1126,28 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(bloomTask);
         this.bloomTask = bloomTask;
 
+        this.lutEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphLut",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["lutSize", "lutIntensity"],
+            samplers: ["lutSampler"],
+            name: "mmdFrameGraphLut",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const lutTask = new FrameGraphPostEffectsLutTask(
+            "frameGraphPostEffectsLut",
+            frameGraph,
+            this.lutEffect,
+            this.getSettings,
+            () => this.lutTexture,
+        );
+        lutTask.sourceTexture = bloomTask.outputTexture;
+        lutTask.disabled = !this.isLutEnabled(initialSettings);
+        frameGraph.addTask(lutTask);
+        this.lutTask = lutTask;
+
         const colorCorrectionTask = new FrameGraphPostEffectsColorCorrectionTask(
             "frameGraphPostEffectsColorCorrection",
             frameGraph,
@@ -975,7 +1157,7 @@ export class FrameGraphPostEffectsController {
             },
             this.getSettings,
         );
-        colorCorrectionTask.sourceTexture = bloomTask.outputTexture;
+        colorCorrectionTask.sourceTexture = lutTask.outputTexture;
         frameGraph.addTask(colorCorrectionTask);
 
         this.sharpenEffect = new ThinSharpenPostProcess(
@@ -1097,9 +1279,10 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(outputTask);
 
         this.frameGraph = frameGraph;
+        this.activeScene = scene;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Bloom + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
+            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Bloom + LUT + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -1125,6 +1308,9 @@ export class FrameGraphPostEffectsController {
             return;
         }
         const settings = this.getSettings();
+        if (this.activeScene) {
+            this.updateLutTexture(this.activeScene, settings);
+        }
         if (this.imageProcessingTask) {
             this.imageProcessingTask.disabled = !settings.imageProcessingEnabled;
         }
@@ -1156,6 +1342,9 @@ export class FrameGraphPostEffectsController {
         if (this.bloomTask) {
             this.bloomTask.disabled = !settings.bloomEnabled;
             this.applyBloomSettings(this.bloomTask, settings);
+        }
+        if (this.lutTask) {
+            this.lutTask.disabled = !this.isLutEnabled(settings);
         }
         if (this.sharpenTask) {
             this.sharpenTask.disabled = settings.sharpenEdge <= 0.0001;
@@ -1195,6 +1384,10 @@ export class FrameGraphPostEffectsController {
     dispose(): void {
         this.colorCorrectionEffect?.dispose();
         this.colorCorrectionEffect = null;
+        this.lutEffect?.dispose();
+        this.lutEffect = null;
+        this.lutTask = null;
+        this.disposeLutTexture();
         this.imageProcessingEffect?.dispose();
         this.imageProcessingEffect = null;
         this.imageProcessingTask = null;
@@ -1228,6 +1421,7 @@ export class FrameGraphPostEffectsController {
         this.fxaaTask = null;
         this.frameGraph?.dispose();
         this.frameGraph = null;
+        this.activeScene = null;
         this.ready = false;
         this.active = false;
         this.executedFrameCount = 0;
@@ -1252,6 +1446,48 @@ export class FrameGraphPostEffectsController {
         bloomTask.bloom.weight = Math.max(0, settings.bloomWeight);
         bloomTask.bloom.threshold = Math.max(0, settings.bloomThreshold);
         bloomTask.bloom.kernel = Math.max(1, settings.bloomKernel);
+    }
+
+    private isLutEnabled(settings: FrameGraphPostEffectsSettings): boolean {
+        return settings.lutEnabled
+            && settings.lutIntensity > 0.00001
+            && !!settings.lutRuntimeText
+            && !!this.lutTexture
+            && this.lutTexture.isReady();
+    }
+
+    private updateLutTexture(scene: Scene, settings: FrameGraphPostEffectsSettings): void {
+        const textureKey = settings.lutTextureKey;
+        if (!settings.lutEnabled || !settings.lutRuntimeText || !textureKey) {
+            this.disposeLutTexture();
+            return;
+        }
+        if (this.lutTexture && this.lutTextureKey === textureKey) {
+            return;
+        }
+
+        this.disposeLutTexture();
+        try {
+            this.lutTexture = createLutAtlasTextureFrom3dlText(
+                scene,
+                `frameGraphLut:${textureKey}`,
+                settings.lutRuntimeText,
+            );
+            this.lutTextureKey = textureKey;
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.warn(`Failed to create Frame Graph LUT '${textureKey}': ${message}`);
+            this.lutTexture = null;
+            this.lutTextureKey = null;
+        }
+    }
+
+    private disposeLutTexture(): void {
+        if (this.lutTexture) {
+            this.lutTexture.dispose();
+            this.lutTexture = null;
+        }
+        this.lutTextureKey = null;
     }
 
     private applySsaoSettings(
