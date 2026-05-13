@@ -634,10 +634,10 @@ export async function importProjectState(
         : false;
     host.postEffectSsrStrength = typeof data.effects.ssrStrength === "number" && Number.isFinite(data.effects.ssrStrength)
         ? data.effects.ssrStrength
-        : 0.8;
+        : 0.3;
     host.postEffectSsrStep = typeof data.effects.ssrStep === "number" && Number.isFinite(data.effects.ssrStep)
         ? data.effects.ssrStep
-        : 0.75;
+        : 4;
     host.postEffectVlsEnabled = typeof data.effects.vlsEnabled === "boolean"
         ? data.effects.vlsEnabled
         : false;

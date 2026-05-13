@@ -49,6 +49,7 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-semi-matte-highlight"
     | "wgsl-matte-highlight"
     | "wgsl-specular"
+    | "wgsl-ssr-reflective"
     | "wgsl-cel-sharp"
     | "wgsl-cel-shadow-sharp"
     | "wgsl-accessory-toon"
@@ -58,6 +59,7 @@ export type WgslMaterialShaderPresetId =
 type MaterialShaderDefaults = {
     disableLighting: boolean | null;
     specularPower: number | null;
+    specularColor: Color3 | null;
     emissiveColor: Color3 | null;
     ambientColor: Color3 | null;
     transparencyMode: number | null;
@@ -1201,6 +1203,7 @@ export function ensureMaterialShaderDefaults(host: any, material: any): Material
             specularPower: "specularPower" in material && Number.isFinite(Number(material.specularPower))
                 ? Number(material.specularPower)
                 : null,
+            specularColor: cloneColor3OrNull(material.specularColor),
             emissiveColor: cloneColor3OrNull(material.emissiveColor),
             ambientColor: cloneColor3OrNull(material.ambientColor),
             transparencyMode: "transparencyMode" in material && typeof material.transparencyMode === "number"
@@ -1236,6 +1239,10 @@ function restoreMaterialShaderDefaults(host: any, material: any, defaults: Mater
 
     if (defaults.specularPower !== null && "specularPower" in material) {
         material.specularPower = defaults.specularPower;
+    }
+
+    if (defaults.specularColor) {
+        setMaterialColorProperty(material, "specularColor", defaults.specularColor);
     }
 
     if ("transparencyMode" in material) {
@@ -1512,6 +1519,21 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
             if ("specularPower" in material) {
                 const base = defaults.specularPower ?? 32;
                 material.specularPower = Math.min(512, Math.max(32, base * 1.85));
+            }
+            break;
+        }
+        case "wgsl-ssr-reflective": {
+            if ("disableLighting" in material) {
+                material.disableLighting = false;
+            }
+            if ("specularPower" in material) {
+                material.specularPower = Math.min(768, Math.max(128, defaults.specularPower ?? 128));
+            }
+            if ("specularColor" in material) {
+                setMaterialColorProperty(material, "specularColor", new Color3(1, 1, 1));
+            }
+            if ("roughness" in material) {
+                material.roughness = 0.08;
             }
             break;
         }

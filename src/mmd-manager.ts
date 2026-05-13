@@ -572,8 +572,10 @@ export type WgslMaterialShaderPresetId =
     | "wgsl-semi-matte-highlight"
     | "wgsl-matte-highlight"
     | "wgsl-specular"
+    | "wgsl-ssr-reflective"
     | "wgsl-cel-sharp"
     | "wgsl-cel-shadow-sharp"
+    | "wgsl-accessory-toon"
     | "wgsl-rim-lift"
     | "wgsl-mono-flat";
 
@@ -637,6 +639,7 @@ type ContactShadowTarget = {
 type MaterialShaderDefaults = {
     disableLighting: boolean | null;
     specularPower: number | null;
+    specularColor: Color3 | null;
     emissiveColor: Color3 | null;
 };
 
@@ -753,6 +756,11 @@ export class MmdManager {
             id: "wgsl-specular",
             label: "Specular Boost",
             description: "Sharper highlights for glossy materials",
+        },
+        {
+            id: "wgsl-ssr-reflective",
+            label: "SSR Reflective",
+            description: "Marks a stage material as reflective for Frame Graph SSR",
         },
         {
             id: "wgsl-cel-sharp",
@@ -1458,8 +1466,8 @@ ${beforeFogAppendBlock}
     private postEffectMotionBlurStrengthValue = 0.5;
     private postEffectMotionBlurSamplesValue = 32;
     private postEffectSsrEnabledValue = false;
-    private postEffectSsrStrengthValue = 0.8;
-    private postEffectSsrStepValue = 1;
+    private postEffectSsrStrengthValue = 0.3;
+    private postEffectSsrStepValue = 4;
     private postEffectVlsEnabledValue = false;
     private postEffectVlsExposureValue = 0.3;
     private postEffectVlsDecayValue = 0.95;
@@ -5416,6 +5424,9 @@ ${beforeFogAppendBlock}
             ssaoRadius: this.postEffectSsaoRadiusValue,
             ssaoShadowColor: this.getShadowColor(),
             ssaoToonInfluence: this.toonShadowInfluenceValue,
+            ssrEnabled: this.postEffectSsrEnabledValue,
+            ssrStrength: this.postEffectSsrStrengthValue,
+            ssrStep: this.postEffectSsrStepValue,
             antialiasEnabled: this.antialiasEnabledValue,
         }));
 

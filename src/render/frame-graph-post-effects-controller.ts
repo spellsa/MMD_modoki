@@ -11,6 +11,7 @@ import { FrameGraphImageProcessingTask } from "@babylonjs/core/FrameGraph/Tasks/
 import { FrameGraphPostProcessTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/postProcessTask";
 import { FrameGraphSharpenTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/sharpenTask";
 import { FrameGraphSSAO2RenderingPipelineTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/ssao2RenderingPipelineTask";
+import { FrameGraphSSRRenderingPipelineTask } from "@babylonjs/core/FrameGraph/Tasks/PostProcesses/ssrRenderingPipelineTask";
 import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask";
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
@@ -66,6 +67,9 @@ export type FrameGraphPostEffectsSettings = {
     ssaoRadius: number;
     ssaoShadowColor: { r: number; g: number; b: number };
     ssaoToonInfluence: number;
+    ssrEnabled: boolean;
+    ssrStrength: number;
+    ssrStep: number;
     antialiasEnabled: boolean;
 };
 
@@ -686,6 +690,7 @@ export class FrameGraphPostEffectsController {
     private ssaoTask: FrameGraphSSAO2RenderingPipelineTask | null = null;
     private ssaoToonCompositeEffect: EffectWrapper | null = null;
     private ssaoToonCompositeTask: FrameGraphPostEffectsSsaoToonCompositeTask | null = null;
+    private ssrTask: FrameGraphSSRRenderingPipelineTask | null = null;
     private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
     private bloomTask: FrameGraphBloomTask | null = null;
     private chromaticAberrationEffect: ThinChromaticAberrationPostProcess | null = null;
@@ -735,6 +740,9 @@ export class FrameGraphPostEffectsController {
             ssaoRadius: 2,
             ssaoShadowColor: { r: 0.15, g: 0.15, b: 0.2 },
             ssaoToonInfluence: 1,
+            ssrEnabled: false,
+            ssrStrength: 0.3,
+            ssrStep: 4,
             antialiasEnabled: true,
         }),
     ) {}
@@ -858,10 +866,30 @@ export class FrameGraphPostEffectsController {
                     textureType: Constants.TEXTURETYPE_HALF_FLOAT,
                     textureFormat: Constants.TEXTUREFORMAT_RED,
                 },
+                {
+                    type: Constants.PREPASS_REFLECTIVITY_TEXTURE_TYPE,
+                    textureType: Constants.TEXTURETYPE_HALF_FLOAT,
+                    textureFormat: Constants.TEXTUREFORMAT_RGBA,
+                },
             ];
-            geometryRendererTask.disabled = !initialSettings.ssaoEnabled || initialSettings.ssaoStrength <= 0.00001;
+            geometryRendererTask.disabled = !this.isGeometryRendererNeeded(initialSettings);
             frameGraph.addTask(geometryRendererTask);
             this.geometryRendererTask = geometryRendererTask;
+
+            const ssrTask = new FrameGraphSSRRenderingPipelineTask(
+                "frameGraphPostEffectsSSR",
+                frameGraph,
+                Constants.TEXTURETYPE_HALF_FLOAT,
+            );
+            ssrTask.sourceTexture = imageProcessingTask.outputTexture;
+            ssrTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+            ssrTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+            ssrTask.reflectivityTexture = geometryRendererTask.geometryReflectivityTexture;
+            ssrTask.camera = camera;
+            ssrTask.disabled = !this.isSsrEnabled(initialSettings);
+            this.applySsrSettings(ssrTask, initialSettings);
+            frameGraph.addTask(ssrTask);
+            this.ssrTask = ssrTask;
 
             const ssaoTask = new FrameGraphSSAO2RenderingPipelineTask(
                 "frameGraphPostEffectsSSAO2",
@@ -869,7 +897,7 @@ export class FrameGraphPostEffectsController {
                 0.75,
                 0.75,
             );
-            ssaoTask.sourceTexture = imageProcessingTask.outputTexture;
+            ssaoTask.sourceTexture = ssrTask.outputTexture;
             ssaoTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
             ssaoTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
             ssaoTask.camera = camera;
@@ -1112,7 +1140,11 @@ export class FrameGraphPostEffectsController {
             this.applyDepthOfFieldSettings(this.depthOfFieldTask, settings);
         }
         if (this.geometryRendererTask) {
-            this.geometryRendererTask.disabled = !settings.ssaoEnabled || settings.ssaoStrength <= 0.00001;
+            this.geometryRendererTask.disabled = !this.isGeometryRendererNeeded(settings);
+        }
+        if (this.ssrTask) {
+            this.ssrTask.disabled = !this.isSsrEnabled(settings);
+            this.applySsrSettings(this.ssrTask, settings);
         }
         if (this.ssaoTask) {
             this.ssaoTask.disabled = !settings.ssaoEnabled || settings.ssaoStrength <= 0.00001;
@@ -1167,6 +1199,8 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingEffect = null;
         this.imageProcessingTask = null;
         this.geometryRendererTask = null;
+        this.ssrTask?.dispose();
+        this.ssrTask = null;
         this.ssaoTask?.dispose();
         this.ssaoTask = null;
         this.ssaoToonCompositeEffect?.dispose();
@@ -1236,6 +1270,37 @@ export class FrameGraphPostEffectsController {
         ssaoTask.ssao.maxZ = Math.max(50, Math.min(2000, camera.maxZ));
         ssaoTask.ssao.minZAspect = 0.2;
         ssaoTask.ssao.epsilon = 0.02;
+    }
+
+    private applySsrSettings(
+        ssrTask: FrameGraphSSRRenderingPipelineTask,
+        settings: FrameGraphPostEffectsSettings,
+    ): void {
+        ssrTask.ssr.strength = Math.max(0, settings.ssrStrength);
+        ssrTask.ssr.step = 4;
+        ssrTask.ssr.maxDistance = 1000;
+        ssrTask.ssr.maxSteps = 192;
+        ssrTask.ssr.thickness = 0.22;
+        ssrTask.ssr.reflectivityThreshold = 0.85;
+        ssrTask.ssr.roughnessFactor = 0.28;
+        ssrTask.ssr.blurDispersionStrength = 0.08;
+        ssrTask.ssr.ssrDownsample = 0;
+        ssrTask.ssr.blurDownsample = 0;
+        ssrTask.ssr.enableSmoothReflections = true;
+        ssrTask.ssr.inputTextureColorIsInGammaSpace = true;
+        ssrTask.ssr.generateOutputInGammaSpace = true;
+        ssrTask.ssr.normalsAreInWorldSpace = false;
+        ssrTask.ssr.useScreenspaceDepth = false;
+        ssrTask.ssr.debug = false;
+    }
+
+    private isSsrEnabled(settings: FrameGraphPostEffectsSettings): boolean {
+        return settings.ssrEnabled && settings.ssrStrength > 0.00001;
+    }
+
+    private isGeometryRendererNeeded(settings: FrameGraphPostEffectsSettings): boolean {
+        return this.isSsrEnabled(settings)
+            || (settings.ssaoEnabled && settings.ssaoStrength > 0.00001);
     }
 
     private applyChromaticAberrationSettings(

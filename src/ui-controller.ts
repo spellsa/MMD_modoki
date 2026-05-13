@@ -2642,6 +2642,7 @@ export class UIController {
                     <div class="effect-row">
                         <span class="effect-label">Pass</span>
                         <span class="effect-value">Image</span>
+                        <span class="effect-value">SSR</span>
                         <span class="effect-value">SSAO</span>
                         <span class="effect-value">DoF</span>
                         <span class="effect-value">Bloom</span>
@@ -2693,6 +2694,19 @@ export class UIController {
                         <span class="effect-label" data-i18n="shader.postfx.sharpen">Sharpen</span>
                         <input data-postfx="frame-graph-sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
                         <span data-postfx-val="frame-graph-sharpen-edge" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label">SSR</span>
+                        <label class="effect-check-wrap">
+                            <input data-frame-graph-ssr-check="enabled" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-frame-graph-ssr-val="enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">SSR Strength</span>
+                        <input data-frame-graph-ssr="strength" type="range" class="effect-slider" min="0" max="200" value="30" step="1">
+                        <span data-frame-graph-ssr-val="strength" class="effect-value">0.30</span>
                     </div>
                     <div class="effect-row effect-row-toggle">
                         <span class="effect-label">SSAO</span>
@@ -2798,6 +2812,7 @@ export class UIController {
         this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
         this.installPostEffectBackendControls(postFxControls);
         this.installFrameGraphLensEffectControls(postFxControls);
+        this.installFrameGraphSsrControls(postFxControls);
         this.installFrameGraphSsaoControls(postFxControls);
         this.installFrameGraphDofControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
@@ -3018,6 +3033,37 @@ export class UIController {
         enabledInput.addEventListener("change", applyValues);
         strengthSlider.addEventListener("input", applyValues);
         radiusSlider.addEventListener("input", applyValues);
+        refreshValues();
+    }
+
+    private installFrameGraphSsrControls(root: HTMLElement): void {
+        const enabledInput = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssr-check="enabled"]');
+        const enabledValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssr-val="enabled"]');
+        const strengthSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssr="strength"]');
+        const strengthValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssr-val="strength"]');
+        if (!enabledInput || !enabledValue || !strengthSlider || !strengthValue) {
+            return;
+        }
+
+        const refreshValues = (): void => {
+            const enabled = this.mmdManager.postEffectSsrEnabled;
+            enabledInput.checked = enabled;
+            enabledValue.textContent = enabled ? t("status.on") : t("status.off");
+            strengthSlider.value = String(Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectSsrStrength * 100))));
+            strengthValue.textContent = enabled
+                ? this.mmdManager.postEffectSsrStrength.toFixed(2)
+                : t("status.off");
+            strengthSlider.disabled = !enabled;
+        };
+
+        const applyValues = (): void => {
+            this.mmdManager.postEffectSsrEnabled = enabledInput.checked;
+            this.mmdManager.postEffectSsrStrength = Number(strengthSlider.value) / 100;
+            refreshValues();
+        };
+
+        enabledInput.addEventListener("change", applyValues);
+        strengthSlider.addEventListener("input", applyValues);
         refreshValues();
     }
 

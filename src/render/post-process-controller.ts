@@ -1351,6 +1351,14 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
 }
 
 export function applySsrSettings(host: any): void {
+    if (host.postEffectBackend === "frameGraph") {
+        if (host.ssrRenderingPipeline) {
+            host.ssrRenderingPipeline.dispose(false);
+            host.ssrRenderingPipeline = null;
+        }
+        return;
+    }
+
     if (!host.postEffectSsrEnabledValue) {
         if (host.ssrRenderingPipeline) {
             host.ssrRenderingPipeline.dispose(false);

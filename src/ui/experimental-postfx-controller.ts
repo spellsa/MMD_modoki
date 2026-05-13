@@ -67,6 +67,12 @@ export class ExperimentalPostFxController {
         };
 
         const applySsr = (): void => {
+            if (this.mmdManager.getPostEffectBackend() === "frameGraph") {
+                elements.ssrStrengthValue.textContent = this.mmdManager.postEffectSsrEnabled
+                    ? this.mmdManager.postEffectSsrStrength.toFixed(2)
+                    : t("status.off");
+                return;
+            }
             this.mmdManager.postEffectSsrStrength = 0;
             this.mmdManager.postEffectSsrStep = 1;
             this.mmdManager.postEffectSsrEnabled = false;
