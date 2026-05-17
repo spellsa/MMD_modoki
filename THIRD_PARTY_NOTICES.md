@@ -3,7 +3,7 @@
 This project includes third-party software.
 Each component remains licensed by its original author under its own license.
 
-Last updated: 2026-03-15
+Last updated: 2026-05-17
 
 ## Runtime dependencies
 
@@ -38,7 +38,8 @@ Last updated: 2026-03-15
 | `eslint` | `8.57.1` | MIT | https://github.com/eslint/eslint |
 | `eslint-plugin-import` | `2.32.0` | MIT | https://github.com/import-js/eslint-plugin-import |
 | `typescript` | `5.9.3` | Apache-2.0 | https://github.com/microsoft/TypeScript |
-| `vite` | `5.4.21` | MIT | https://github.com/vitejs/vite |
+| `vite` | `7.3.3` | MIT | https://github.com/vitejs/vite |
+| `vitest` | `4.1.6` | MIT | https://github.com/vitest-dev/vitest |
 
 ## Notes
 

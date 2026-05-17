@@ -74,6 +74,7 @@
 - [v0.2 作業チェックリスト](./v0.2-task-checklist.md)
 - [v0.2 依存更新メモ 2026-04-27](./dependency-upgrade-v0.2-note-2026-04-27.md)
 - [v0.2 ライブラリ追加調査メモ 2026-05-17](./library-adoption-investigation-v0.2-2026-05-17.md)
+- [Vite / Vitest バージョン選定メモ 2026-05-17](./vite-vitest-version-security-note-2026-05-17.md)
 - [v0.1.1 フィードバック台帳](./v0.1.1-feedback.md)
 - [v0.1.0 フィードバック台帳](./v0.1.0-feedback.md)
 - [リリース手順メモ](./release-process.md)

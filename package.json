@@ -40,8 +40,8 @@
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
     "typescript": "^5.9.3",
-    "vite": "^5.4.21",
-    "vitest": "^2.1.9"
+    "vite": "^7.3.3",
+    "vitest": "^4.1.6"
   },
   "dependencies": {
     "@babylonjs/core": "9.2.0",
