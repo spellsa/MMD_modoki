@@ -34,6 +34,8 @@
 - [カメラVMD対応メモ](./camera-vmd.md)
 - [タイムライン仕様](./timeline-spec.md)
 - [Undo / Redo 検討メモ](./undo-redo-investigation.md)
+- [Action / Command / 入力管理 調査メモ 2026-05-17](./action-command-input-management-note-2026-05-17.md)
+- [Action Catalog Draft 2026-05-17](./action-catalog-draft-2026-05-17.md)
 - [タイムライン データフロー](./data-flow-timeline.md)
 - [編集状態遷移メモ](./edit-state-machine.md)
 - [キーフレーム保存仕様](./keyframe-storage-spec.md)
