@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 import type { ExportUiController } from "./export-ui-controller";
 
 type ToastType = "success" | "error" | "info";
@@ -25,6 +26,7 @@ export type LayoutUiControllerDeps = {
     mmdManager: MmdManager;
     exportUiController: ExportUiController;
     showToast: (message: string, type?: ToastType) => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 const MIN_TIMELINE_WIDTH = 160;
@@ -57,6 +59,7 @@ export class LayoutUiController {
     private readonly mmdManager: MmdManager;
     private readonly exportUiController: ExportUiController;
     private readonly showToast: (message: string, type?: ToastType) => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
     private viewportAspectResizeObserver: ResizeObserver | null = null;
     private isTimelineResizing = false;
     private isShaderResizing = false;
@@ -76,6 +79,7 @@ export class LayoutUiController {
         this.mmdManager = deps.mmdManager;
         this.exportUiController = deps.exportUiController;
         this.showToast = deps.showToast;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupEventListeners();
         this.setupTimelineResizer();
@@ -110,6 +114,12 @@ export class LayoutUiController {
             return;
         }
         this.enterUiFullscreenMode();
+    }
+
+    public toggleShaderPanel(): void {
+        const nextVisible = !this.isShaderPanelExpanded();
+        this.setShaderPanelVisible(nextVisible);
+        this.showToast(nextVisible ? t("toast.fx.shown") : t("toast.fx.hidden"), "info");
     }
 
     public exitUiFullscreenMode(): void {
@@ -157,11 +167,11 @@ export class LayoutUiController {
 
     private setupEventListeners(): void {
         this.elements.btnToggleShaderPanel?.addEventListener("click", () => {
-            const nextVisible = !this.isShaderPanelExpanded();
-            this.setShaderPanelVisible(nextVisible);
-            this.showToast(nextVisible ? t("toast.fx.shown") : t("toast.fx.hidden"), "info");
+            if (this.dispatchAction?.({ type: "layout.shaderPanel.toggle", source: "button" })) return;
+            this.toggleShaderPanel();
         });
         this.elements.btnToggleFullscreenUi?.addEventListener("click", () => {
+            if (this.dispatchAction?.({ type: "layout.fullscreen.toggle", source: "button" })) return;
             this.toggleUiFullscreenMode();
         });
     }

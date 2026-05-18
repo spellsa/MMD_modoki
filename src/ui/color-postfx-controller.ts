@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type ColorPostFxElements = {
     contrastInput: HTMLInputElement;
@@ -30,6 +31,7 @@ type ColorPostFxElements = {
 
 export type ColorPostFxControllerDeps = {
     mmdManager: MmdManager;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function queryRequired<T extends Element>(root: ParentNode, selector: string): T | null {
@@ -113,9 +115,12 @@ function resolveColorPostFxElements(root: ParentNode): ColorPostFxElements | nul
 
 export class ColorPostFxController {
     private readonly mmdManager: MmdManager;
+    private readonly dispatchAction?: (action: EditorAction) => boolean;
+    private elements: ColorPostFxElements | null = null;
 
     constructor(deps: ColorPostFxControllerDeps) {
         this.mmdManager = deps.mmdManager;
+        this.dispatchAction = deps.dispatchAction;
     }
 
     public connect(root: ParentNode): boolean {
@@ -123,124 +128,82 @@ export class ColorPostFxController {
         if (!elements) {
             return false;
         }
+        this.elements = elements;
 
-        const syncContrastUi = (): void => {
-            const roundedOffset = Math.round((this.mmdManager.postEffectContrast - 1) * 100);
-            const value = String(roundedOffset);
-            elements.contrastInput.value = value;
-            elements.contrastValue.textContent = `${roundedOffset}%`;
-            if (elements.frameGraphContrastInput && elements.frameGraphContrastValue) {
-                elements.frameGraphContrastInput.value = value;
-                elements.frameGraphContrastValue.textContent = `${roundedOffset}%`;
-            }
-        };
-        const syncGammaUi = (): void => {
-            const roundedOffset = Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100);
-            const value = String(roundedOffset);
-            elements.gammaInput.value = value;
-            elements.gammaValue.textContent = `${roundedOffset}%`;
-            if (elements.frameGraphGammaInput && elements.frameGraphGammaValue) {
-                elements.frameGraphGammaInput.value = value;
-                elements.frameGraphGammaValue.textContent = `${roundedOffset}%`;
-            }
-        };
         const applyContrast = (input: HTMLInputElement): void => {
             const offsetPercent = Number(input.value);
-            this.mmdManager.postEffectContrast = 1 + offsetPercent / 100;
-            syncContrastUi();
+            if (!this.dispatchAction?.({ type: "effect.setContrastOffset", source: "panel", offsetPercent })) {
+                this.setContrastOffsetPercent(offsetPercent);
+            }
         };
 
         const applyGamma = (input: HTMLInputElement): void => {
             const offsetPercent = Number(input.value);
-            const gammaPower = Math.pow(2, -offsetPercent / 100);
-            this.mmdManager.postEffectGamma = gammaPower;
-            syncGammaUi();
+            if (!this.dispatchAction?.({ type: "effect.setGammaOffset", source: "panel", offsetPercent })) {
+                this.setGammaOffsetPercent(offsetPercent);
+            }
         };
 
         const applyExposure = (): void => {
-            this.mmdManager.postEffectExposure = Number(elements.exposureInput.value);
-            elements.exposureValue.textContent = `x${this.mmdManager.postEffectExposure.toFixed(2)}`;
+            const value = Number(elements.exposureInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setExposure", source: "panel", value })) {
+                this.setExposure(value);
+            }
         };
 
         const applyDithering = (): void => {
-            this.mmdManager.postEffectDitheringIntensity = Number(elements.ditheringInput.value);
-            this.mmdManager.postEffectDitheringEnabled = this.mmdManager.postEffectDitheringIntensity > 0.000001;
-            const effectivePercent = this.mmdManager.postEffectDitheringIntensity * 100;
-            elements.ditheringValue.textContent = this.mmdManager.postEffectDitheringEnabled
-                ? `${effectivePercent.toFixed(2)}%`
-                : t("status.off");
+            const value = Number(elements.ditheringInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setDitheringIntensity", source: "panel", value })) {
+                this.setDitheringIntensity(value);
+            }
         };
 
         const applyVignette = (): void => {
-            this.mmdManager.postEffectVignetteWeight = Number(elements.vignetteInput.value);
-            this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.000001;
-            elements.vignetteValue.textContent = this.mmdManager.postEffectVignetteEnabled
-                ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
-                : t("status.off");
+            const value = Number(elements.vignetteInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setVignetteWeight", source: "panel", value })) {
+                this.setVignetteWeight(value);
+            }
         };
 
         const applyGrainIntensity = (): void => {
-            this.mmdManager.postEffectGrainIntensity = Number(elements.grainInput.value);
-            syncGrainUi();
+            const value = Number(elements.grainInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setGrainIntensity", source: "panel", value })) {
+                this.setGrainIntensity(value);
+            }
         };
 
         const applyFrameGraphGrainIntensity = (): void => {
             if (!elements.frameGraphGrainInput) {
                 return;
             }
-            this.mmdManager.postEffectGrainIntensity = Number(elements.frameGraphGrainInput.value);
-            syncGrainUi();
-        };
-
-        const syncGrainUi = (): void => {
-            const value = String(Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectGrainIntensity))));
-            const label = this.mmdManager.postEffectGrainIntensity > 0.000001
-                ? this.mmdManager.postEffectGrainIntensity.toFixed(1)
-                : t("status.off");
-            elements.grainInput.value = value;
-            elements.grainValue.textContent = label;
-            if (elements.frameGraphGrainInput && elements.frameGraphGrainValue) {
-                elements.frameGraphGrainInput.value = value;
-                elements.frameGraphGrainValue.textContent = label;
+            const value = Number(elements.frameGraphGrainInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setGrainIntensity", source: "panel", value })) {
+                this.setGrainIntensity(value);
             }
         };
 
         const applySharpenEdge = (): void => {
-            this.mmdManager.postEffectSharpenEdge = Number(elements.sharpenInput.value) / 100;
-            syncSharpenUi();
+            const percent = Number(elements.sharpenInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setSharpenEdge", source: "panel", percent })) {
+                this.setSharpenEdgePercent(percent);
+            }
         };
 
         const applyFrameGraphSharpenEdge = (): void => {
             if (!elements.frameGraphSharpenInput) {
                 return;
             }
-            this.mmdManager.postEffectSharpenEdge = Number(elements.frameGraphSharpenInput.value) / 100;
-            syncSharpenUi();
-        };
-
-        const syncSharpenUi = (): void => {
-            const value = String(Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))));
-            const label = this.mmdManager.postEffectSharpenEdge > 0.000001
-                ? this.mmdManager.postEffectSharpenEdge.toFixed(2)
-                : t("status.off");
-            elements.sharpenInput.value = value;
-            elements.sharpenValue.textContent = label;
-            if (elements.frameGraphSharpenInput && elements.frameGraphSharpenValue) {
-                elements.frameGraphSharpenInput.value = value;
-                elements.frameGraphSharpenValue.textContent = label;
+            const percent = Number(elements.frameGraphSharpenInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setSharpenEdge", source: "panel", percent })) {
+                this.setSharpenEdgePercent(percent);
             }
         };
 
         const applyColorCurves = (): void => {
-            this.mmdManager.postEffectColorCurvesHue = 30;
-            this.mmdManager.postEffectColorCurvesDensity = 0;
-            this.mmdManager.postEffectColorCurvesSaturation = Number(elements.colorCurvesInput.value);
-            this.mmdManager.postEffectColorCurvesExposure = 0;
-            this.mmdManager.postEffectColorCurvesEnabled = Math.abs(this.mmdManager.postEffectColorCurvesSaturation) > 0.000001;
-
-            elements.colorCurvesValue.textContent = this.mmdManager.postEffectColorCurvesEnabled
-                ? `${Math.round(this.mmdManager.postEffectColorCurvesSaturation)}`
-                : t("status.off");
+            const value = Number(elements.colorCurvesInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setColorCurvesSaturation", source: "panel", value })) {
+                this.setColorCurvesSaturation(value);
+            }
         };
 
         elements.exposureInput.value = String(Math.max(0, Math.min(8, this.mmdManager.postEffectExposure)).toFixed(2));
@@ -269,14 +232,14 @@ export class ColorPostFxController {
             ),
         );
 
-        syncContrastUi();
-        syncGammaUi();
-        applyExposure();
-        applyDithering();
-        applyVignette();
-        syncGrainUi();
-        syncSharpenUi();
-        applyColorCurves();
+        this.refreshContrastUi();
+        this.refreshGammaUi();
+        this.refreshExposureUi();
+        this.refreshDitheringUi();
+        this.refreshVignetteUi();
+        this.refreshGrainUi();
+        this.refreshSharpenUi();
+        this.refreshColorCurvesUi();
 
         elements.contrastInput.addEventListener("input", () => applyContrast(elements.contrastInput));
         elements.gammaInput.addEventListener("input", () => applyGamma(elements.gammaInput));
@@ -296,5 +259,151 @@ export class ColorPostFxController {
         elements.colorCurvesInput.addEventListener("input", applyColorCurves);
 
         return true;
+    }
+
+    public setContrastOffsetPercent(offsetPercent: number): void {
+        this.mmdManager.postEffectContrast = 1 + offsetPercent / 100;
+        this.refreshContrastUi();
+    }
+
+    public setGammaOffsetPercent(offsetPercent: number): void {
+        this.mmdManager.postEffectGamma = Math.pow(2, -offsetPercent / 100);
+        this.refreshGammaUi();
+    }
+
+    public setExposure(value: number): void {
+        this.mmdManager.postEffectExposure = value;
+        this.refreshExposureUi();
+    }
+
+    public setDitheringIntensity(value: number): void {
+        this.mmdManager.postEffectDitheringIntensity = value;
+        this.mmdManager.postEffectDitheringEnabled = this.mmdManager.postEffectDitheringIntensity > 0.000001;
+        this.refreshDitheringUi();
+    }
+
+    public setVignetteWeight(value: number): void {
+        this.mmdManager.postEffectVignetteWeight = value;
+        this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.000001;
+        this.refreshVignetteUi();
+    }
+
+    public setGrainIntensity(value: number): void {
+        this.mmdManager.postEffectGrainIntensity = value;
+        this.refreshGrainUi();
+    }
+
+    public setSharpenEdgePercent(percent: number): void {
+        this.mmdManager.postEffectSharpenEdge = percent / 100;
+        this.refreshSharpenUi();
+    }
+
+    public setColorCurvesSaturation(value: number): void {
+        this.mmdManager.postEffectColorCurvesHue = 30;
+        this.mmdManager.postEffectColorCurvesDensity = 0;
+        this.mmdManager.postEffectColorCurvesSaturation = value;
+        this.mmdManager.postEffectColorCurvesExposure = 0;
+        this.mmdManager.postEffectColorCurvesEnabled = Math.abs(this.mmdManager.postEffectColorCurvesSaturation) > 0.000001;
+        this.refreshColorCurvesUi();
+    }
+
+    private refreshContrastUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        const roundedOffset = Math.round((this.mmdManager.postEffectContrast - 1) * 100);
+        const value = String(roundedOffset);
+        elements.contrastInput.value = value;
+        elements.contrastValue.textContent = `${roundedOffset}%`;
+        if (elements.frameGraphContrastInput && elements.frameGraphContrastValue) {
+            elements.frameGraphContrastInput.value = value;
+            elements.frameGraphContrastValue.textContent = `${roundedOffset}%`;
+        }
+    }
+
+    private refreshGammaUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        const roundedOffset = Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100);
+        const value = String(roundedOffset);
+        elements.gammaInput.value = value;
+        elements.gammaValue.textContent = `${roundedOffset}%`;
+        if (elements.frameGraphGammaInput && elements.frameGraphGammaValue) {
+            elements.frameGraphGammaInput.value = value;
+            elements.frameGraphGammaValue.textContent = `${roundedOffset}%`;
+        }
+    }
+
+    private refreshExposureUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        elements.exposureInput.value = String(Math.max(0, Math.min(8, this.mmdManager.postEffectExposure)).toFixed(2));
+        elements.exposureValue.textContent = `x${this.mmdManager.postEffectExposure.toFixed(2)}`;
+    }
+
+    private refreshDitheringUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        elements.ditheringInput.value = String(
+            Math.max(0, Math.min(1, this.mmdManager.postEffectDitheringEnabled ? this.mmdManager.postEffectDitheringIntensity : 0)).toFixed(4),
+        );
+        const effectivePercent = this.mmdManager.postEffectDitheringIntensity * 100;
+        elements.ditheringValue.textContent = this.mmdManager.postEffectDitheringEnabled
+            ? `${effectivePercent.toFixed(2)}%`
+            : t("status.off");
+    }
+
+    private refreshVignetteUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        elements.vignetteInput.value = String(
+            Math.max(0, Math.min(4, this.mmdManager.postEffectVignetteEnabled ? this.mmdManager.postEffectVignetteWeight : 0)).toFixed(2),
+        );
+        elements.vignetteValue.textContent = this.mmdManager.postEffectVignetteEnabled
+            ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
+            : t("status.off");
+    }
+
+    private refreshGrainUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        const value = String(Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectGrainIntensity))));
+        const label = this.mmdManager.postEffectGrainIntensity > 0.000001
+            ? this.mmdManager.postEffectGrainIntensity.toFixed(1)
+            : t("status.off");
+        elements.grainInput.value = value;
+        elements.grainValue.textContent = label;
+        if (elements.frameGraphGrainInput && elements.frameGraphGrainValue) {
+            elements.frameGraphGrainInput.value = value;
+            elements.frameGraphGrainValue.textContent = label;
+        }
+    }
+
+    private refreshSharpenUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        const value = String(Math.max(0, Math.min(400, Math.round(this.mmdManager.postEffectSharpenEdge * 100))));
+        const label = this.mmdManager.postEffectSharpenEdge > 0.000001
+            ? this.mmdManager.postEffectSharpenEdge.toFixed(2)
+            : t("status.off");
+        elements.sharpenInput.value = value;
+        elements.sharpenValue.textContent = label;
+        if (elements.frameGraphSharpenInput && elements.frameGraphSharpenValue) {
+            elements.frameGraphSharpenInput.value = value;
+            elements.frameGraphSharpenValue.textContent = label;
+        }
+    }
+
+    private refreshColorCurvesUi(): void {
+        const elements = this.elements;
+        if (!elements) return;
+        elements.colorCurvesInput.value = String(
+            Math.max(
+                -100,
+                Math.min(100, Math.round(this.mmdManager.postEffectColorCurvesEnabled ? this.mmdManager.postEffectColorCurvesSaturation : 0)),
+            ),
+        );
+        elements.colorCurvesValue.textContent = this.mmdManager.postEffectColorCurvesEnabled
+            ? `${Math.round(this.mmdManager.postEffectColorCurvesSaturation)}`
+            : t("status.off");
     }
 }

@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type DofPanelElements = {
     cameraControls: HTMLElement | null;
@@ -32,6 +33,7 @@ export type DofPanelControllerDeps = {
     mmdManager: MmdManager;
     syncRangeNumberInput: (slider: HTMLInputElement) => void;
     isRangeInputEditing: (slider: HTMLInputElement) => boolean;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveDofPanelElements(): DofPanelElements {
@@ -68,12 +70,14 @@ export class DofPanelController {
     private readonly mmdManager: MmdManager;
     private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
     private readonly isRangeInputEditing: (slider: HTMLInputElement) => boolean;
+    private readonly dispatchAction?: (action: EditorAction) => boolean;
 
     constructor(deps: DofPanelControllerDeps) {
         this.elements = resolveDofPanelElements();
         this.mmdManager = deps.mmdManager;
         this.syncRangeNumberInput = deps.syncRangeNumberInput;
         this.isRangeInputEditing = deps.isRangeInputEditing;
+        this.dispatchAction = deps.dispatchAction;
 
         this.setupControls();
     }
@@ -238,139 +242,99 @@ export class DofPanelController {
             return;
         }
 
-        const blurLabels = [t("option.low"), t("option.medium"), t("option.high")];
         const autoFocusEnabled = this.mmdManager.dofAutoFocusEnabled;
         const focalLengthLinkedToFov = this.mmdManager.dofFocalLengthLinkedToCameraFov;
         const enabledInput = elements.enabledInput;
-        const enabledValue = elements.enabledValue;
         const qualitySelect = elements.qualitySelect;
-        const qualityValue = elements.qualityValue;
         const focusSlider = elements.focusSlider;
-        const focusValue = elements.focusValue;
         const focusOffsetSlider = elements.focusOffsetSlider;
-        const focusOffsetValue = elements.focusOffsetValue;
         const fStopSlider = elements.fStopSlider;
-        const fStopValue = elements.fStopValue;
         const nearSuppressionSlider = elements.nearSuppressionSlider;
-        const nearSuppressionValue = elements.nearSuppressionValue;
         const focalInvertInput = elements.focalInvertInput;
-        const focalInvertValue = elements.focalInvertValue;
         const lensBlurSlider = elements.lensBlurSlider;
         const lensBlurValue = elements.lensBlurValue;
         const lensSizeSlider = elements.lensSizeSlider;
-        const lensSizeValue = elements.lensSizeValue;
         const focalLengthSlider = elements.focalLengthSlider;
-        const focalLengthValue = elements.focalLengthValue;
 
         const applyDofEnabled = (): void => {
-            enabledInput.checked = this.mmdManager.dofEnabled = enabledInput.checked;
-            enabledValue.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
+            const enabled = enabledInput.checked;
+            if (!this.dispatchAction?.({ type: "effect.setDofEnabled", source: "panel", enabled })) {
+                this.setDofEnabled(enabled);
+            }
         };
         const applyDofQuality = (): void => {
             const level = Number(qualitySelect.value);
-            this.mmdManager.dofBlurLevel = level;
-            qualityValue.textContent = blurLabels[this.mmdManager.dofBlurLevel] ?? t("option.high");
+            if (!this.dispatchAction?.({ type: "effect.setDofQuality", source: "panel", level })) {
+                this.setDofQuality(level);
+            }
         };
         const applyDofFocus = (): void => {
-            if (autoFocusEnabled) {
-                this.refreshAutoFocusReadout();
-                return;
-            }
             const mm = Number(focusSlider.value);
-            this.mmdManager.dofFocusDistanceMm = mm;
-            focusValue.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
+            if (!this.dispatchAction?.({ type: "effect.setDofFocusDistance", source: "panel", millimeters: mm })) {
+                this.setDofFocusDistanceMm(mm);
+            }
         };
         const applyDofFocusOffset = (): void => {
             const mm = Number(focusOffsetSlider.value);
-            this.mmdManager.dofAutoFocusNearOffsetMm = mm;
-            focusOffsetValue.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
-            if (autoFocusEnabled) {
-                this.refreshAutoFocusReadout();
+            if (!this.dispatchAction?.({ type: "effect.setDofFocusOffset", source: "panel", millimeters: mm })) {
+                this.setDofFocusOffsetMm(mm);
             }
         };
         const applyDofFStop = (): void => {
             const fStop = Number(fStopSlider.value) / 100;
-            this.mmdManager.dofFStop = fStop;
-            if (autoFocusEnabled) {
-                this.refreshAutoFocusReadout();
-                return;
+            if (!this.dispatchAction?.({ type: "effect.setDofFStop", source: "panel", value: fStop })) {
+                this.setDofFStop(fStop);
             }
-            fStopValue.textContent = this.mmdManager.dofFStop.toFixed(2);
         };
         const applyDofNearSuppression = (): void => {
-            const scale = Number(nearSuppressionSlider.value) / 100;
-            this.mmdManager.dofNearSuppressionScale = scale;
-            nearSuppressionValue.textContent = `${Math.round(this.mmdManager.dofNearSuppressionScale * 100)}%`;
-            if (autoFocusEnabled) {
-                this.refreshAutoFocusReadout();
+            const percent = Number(nearSuppressionSlider.value);
+            if (!this.dispatchAction?.({ type: "effect.setDofNearSuppression", source: "panel", percent })) {
+                this.setDofNearSuppressionPercent(percent);
             }
         };
         const applyDofFocalInvert = (): void => {
-            this.mmdManager.dofFocalLengthDistanceInverted = focalInvertInput.checked;
-            focalInvertValue.textContent = this.mmdManager.dofFocalLengthDistanceInverted ? t("status.on") : t("status.off");
-            if (focalLengthLinkedToFov) {
-                focalLengthSlider.title = this.mmdManager.dofFocalLengthDistanceInverted
-                    ? "Auto focal length (linked to camera FoV, inverted)"
-                    : "Auto focal length (linked to camera FoV)";
-                this.refreshAutoFocusReadout();
+            const enabled = focalInvertInput.checked;
+            if (!this.dispatchAction?.({ type: "effect.setDofFocalInvert", source: "panel", enabled })) {
+                this.setDofFocalInvert(enabled);
             }
         };
         const applyDofLensBlur = (): void => {
             if (!lensBlurSlider || !lensBlurValue) {
                 return;
             }
-            const strength = Number(lensBlurSlider.value) / 100;
-            this.mmdManager.dofLensBlurStrength = strength;
-            lensBlurValue.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
-            this.syncRangeNumberInput(lensBlurSlider);
+            const percent = Number(lensBlurSlider.value);
+            if (!this.dispatchAction?.({ type: "effect.setDofLensBlur", source: "panel", percent })) {
+                this.setDofLensBlurPercent(percent);
+            }
         };
         const applyDofLensSize = (): void => {
             const lensSize = Number(lensSizeSlider.value);
-            this.mmdManager.dofLensSize = lensSize;
-            lensSizeValue.textContent = `${Math.round(this.mmdManager.dofLensSize)}`;
-            if (autoFocusEnabled) {
-                this.refreshAutoFocusReadout();
+            if (!this.dispatchAction?.({ type: "effect.setDofLensSize", source: "panel", value: lensSize })) {
+                this.setDofLensSize(lensSize);
             }
         };
         const applyDofFocalLength = (): void => {
-            if (focalLengthLinkedToFov) {
-                this.refreshAutoFocusReadout();
-                return;
-            }
             const focalLength = Number(focalLengthSlider.value);
-            this.mmdManager.dofFocalLength = focalLength;
-            focalLengthValue.textContent = `${Math.round(this.mmdManager.dofFocalLength)}`;
-            if (autoFocusEnabled) {
-                this.refreshAutoFocusReadout();
+            if (!this.dispatchAction?.({ type: "effect.setDofFocalLength", source: "panel", value: focalLength })) {
+                this.setDofFocalLength(focalLength);
             }
         };
         const applyDofTargetModel = (): void => {
             if (!elements.targetModelSelect) return;
             const modelIndex = Number.parseInt(elements.targetModelSelect.value, 10);
-            if (Number.isNaN(modelIndex)) {
-                this.mmdManager.setDofFocusTargetByIndex(null, null);
-                this.refreshFocusTargetControls();
-                this.refreshAutoFocusReadout();
-                return;
+            const resolvedIndex = Number.isNaN(modelIndex) ? null : modelIndex;
+            if (!this.dispatchAction?.({ type: "effect.setDofTargetModel", source: "panel", modelIndex: resolvedIndex })) {
+                this.setDofTargetModel(resolvedIndex);
             }
-            const preferredBoneName = this.mmdManager.getPreferredDofFocusBoneName(modelIndex);
-            this.mmdManager.setDofFocusTargetByIndex(modelIndex, preferredBoneName);
-            this.refreshFocusTargetControls();
-            this.refreshAutoFocusReadout();
         };
         const applyDofTargetBone = (): void => {
             if (!elements.targetModelSelect || !elements.targetBoneSelect) return;
             const modelIndex = Number.parseInt(elements.targetModelSelect.value, 10);
-            if (Number.isNaN(modelIndex)) {
-                this.mmdManager.setDofFocusTargetByIndex(null, null);
-                this.refreshFocusTargetControls();
-                this.refreshAutoFocusReadout();
-                return;
-            }
+            const resolvedIndex = Number.isNaN(modelIndex) ? null : modelIndex;
             const boneName = elements.targetBoneSelect.value || null;
-            this.mmdManager.setDofFocusTargetByIndex(modelIndex, boneName);
-            this.refreshFocusTargetControls();
-            this.refreshAutoFocusReadout();
+            if (!this.dispatchAction?.({ type: "effect.setDofTargetBone", source: "panel", modelIndex: resolvedIndex, boneName })) {
+                this.setDofTargetBone(resolvedIndex, boneName);
+            }
         };
 
         enabledInput.checked = this.mmdManager.dofEnabled;
@@ -429,5 +393,137 @@ export class DofPanelController {
         if (!focalLengthLinkedToFov) {
             focalLengthSlider.addEventListener("input", applyDofFocalLength);
         }
+    }
+
+    public setDofEnabled(enabled: boolean): void {
+        const elements = this.elements;
+        if (!elements.enabledInput || !elements.enabledValue) return;
+        elements.enabledInput.checked = this.mmdManager.dofEnabled = enabled;
+        elements.enabledValue.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
+    }
+
+    public setDofQuality(level: number): void {
+        const elements = this.elements;
+        if (!elements.qualitySelect || !elements.qualityValue) return;
+        const blurLabels = [t("option.low"), t("option.medium"), t("option.high")];
+        this.mmdManager.dofBlurLevel = level;
+        elements.qualitySelect.value = String(level);
+        elements.qualityValue.textContent = blurLabels[this.mmdManager.dofBlurLevel] ?? t("option.high");
+    }
+
+    public setDofFocusDistanceMm(millimeters: number): void {
+        const elements = this.elements;
+        if (!elements.focusSlider || !elements.focusValue) return;
+        if (this.mmdManager.dofAutoFocusEnabled) {
+            this.refreshAutoFocusReadout();
+            return;
+        }
+        this.mmdManager.dofFocusDistanceMm = millimeters;
+        elements.focusSlider.value = String(Math.round(millimeters));
+        elements.focusValue.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
+    }
+
+    public setDofFocusOffsetMm(millimeters: number): void {
+        const elements = this.elements;
+        if (!elements.focusOffsetSlider || !elements.focusOffsetValue) return;
+        this.mmdManager.dofAutoFocusNearOffsetMm = millimeters;
+        elements.focusOffsetSlider.value = String(Math.round(millimeters));
+        elements.focusOffsetValue.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
+        if (this.mmdManager.dofAutoFocusEnabled) {
+            this.refreshAutoFocusReadout();
+        }
+    }
+
+    public setDofFStop(value: number): void {
+        const elements = this.elements;
+        if (!elements.fStopSlider || !elements.fStopValue) return;
+        this.mmdManager.dofFStop = value;
+        elements.fStopSlider.value = String(Math.round(value * 100));
+        if (this.mmdManager.dofAutoFocusEnabled) {
+            this.refreshAutoFocusReadout();
+            return;
+        }
+        elements.fStopValue.textContent = this.mmdManager.dofFStop.toFixed(2);
+    }
+
+    public setDofNearSuppressionPercent(percent: number): void {
+        const elements = this.elements;
+        if (!elements.nearSuppressionSlider || !elements.nearSuppressionValue) return;
+        this.mmdManager.dofNearSuppressionScale = percent / 100;
+        elements.nearSuppressionSlider.value = String(Math.round(percent));
+        elements.nearSuppressionValue.textContent = `${Math.round(this.mmdManager.dofNearSuppressionScale * 100)}%`;
+        if (this.mmdManager.dofAutoFocusEnabled) {
+            this.refreshAutoFocusReadout();
+        }
+    }
+
+    public setDofFocalInvert(enabled: boolean): void {
+        const elements = this.elements;
+        if (!elements.focalInvertInput || !elements.focalInvertValue || !elements.focalLengthSlider) return;
+        this.mmdManager.dofFocalLengthDistanceInverted = enabled;
+        elements.focalInvertInput.checked = enabled;
+        elements.focalInvertValue.textContent = this.mmdManager.dofFocalLengthDistanceInverted ? t("status.on") : t("status.off");
+        if (this.mmdManager.dofFocalLengthLinkedToCameraFov) {
+            elements.focalLengthSlider.title = this.mmdManager.dofFocalLengthDistanceInverted
+                ? "Auto focal length (linked to camera FoV, inverted)"
+                : "Auto focal length (linked to camera FoV)";
+            this.refreshAutoFocusReadout();
+        }
+    }
+
+    public setDofLensBlurPercent(percent: number): void {
+        const elements = this.elements;
+        if (!elements.lensBlurSlider || !elements.lensBlurValue) return;
+        this.mmdManager.dofLensBlurStrength = percent / 100;
+        elements.lensBlurSlider.value = String(Math.round(percent));
+        elements.lensBlurValue.textContent = `${Math.round(this.mmdManager.dofLensBlurStrength * 100)}%`;
+        this.syncRangeNumberInput(elements.lensBlurSlider);
+    }
+
+    public setDofLensSize(value: number): void {
+        const elements = this.elements;
+        if (!elements.lensSizeSlider || !elements.lensSizeValue) return;
+        this.mmdManager.dofLensSize = value;
+        elements.lensSizeSlider.value = String(Math.round(value));
+        elements.lensSizeValue.textContent = `${Math.round(this.mmdManager.dofLensSize)}`;
+        if (this.mmdManager.dofAutoFocusEnabled) {
+            this.refreshAutoFocusReadout();
+        }
+    }
+
+    public setDofFocalLength(value: number): void {
+        const elements = this.elements;
+        if (!elements.focalLengthSlider || !elements.focalLengthValue) return;
+        if (this.mmdManager.dofFocalLengthLinkedToCameraFov) {
+            this.refreshAutoFocusReadout();
+            return;
+        }
+        this.mmdManager.dofFocalLength = value;
+        elements.focalLengthSlider.value = String(Math.round(value));
+        elements.focalLengthValue.textContent = `${Math.round(this.mmdManager.dofFocalLength)}`;
+        if (this.mmdManager.dofAutoFocusEnabled) {
+            this.refreshAutoFocusReadout();
+        }
+    }
+
+    public setDofTargetModel(modelIndex: number | null): void {
+        if (modelIndex === null) {
+            this.mmdManager.setDofFocusTargetByIndex(null, null);
+        } else {
+            const preferredBoneName = this.mmdManager.getPreferredDofFocusBoneName(modelIndex);
+            this.mmdManager.setDofFocusTargetByIndex(modelIndex, preferredBoneName);
+        }
+        this.refreshFocusTargetControls();
+        this.refreshAutoFocusReadout();
+    }
+
+    public setDofTargetBone(modelIndex: number | null, boneName: string | null): void {
+        if (modelIndex === null) {
+            this.mmdManager.setDofFocusTargetByIndex(null, null);
+        } else {
+            this.mmdManager.setDofFocusTargetByIndex(modelIndex, boneName);
+        }
+        this.refreshFocusTargetControls();
+        this.refreshAutoFocusReadout();
     }
 }

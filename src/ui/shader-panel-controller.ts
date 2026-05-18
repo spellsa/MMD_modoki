@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager, WgslMaterialShaderPresetId } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type ToastType = "success" | "error" | "info";
 
@@ -28,6 +29,7 @@ export type ShaderPanelControllerDeps = {
     getBaseNameForRenderer: (filePath: string) => string;
     showToast: (message: string, type?: ToastType) => void;
     onExternalWgslToonChanged: (path: string | null, text: string | null) => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 const CAMERA_SELECT_VALUE = "__camera__";
@@ -67,6 +69,7 @@ export class ShaderPanelController {
     private readonly getBaseNameForRenderer: (filePath: string) => string;
     private readonly showToast: (message: string, type?: ToastType) => void;
     private readonly onExternalWgslToonChanged: (path: string | null, text: string | null) => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
     private readonly selectedMaterialKeys = new Map<number, string>();
     private bundledWgslShaderFiles: { name: string; path: string }[] = [];
     private bundledWgslScanInFlight = false;
@@ -83,6 +86,7 @@ export class ShaderPanelController {
         this.getBaseNameForRenderer = deps.getBaseNameForRenderer;
         this.showToast = deps.showToast;
         this.onExternalWgslToonChanged = deps.onExternalWgslToonChanged;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupEventListeners();
     }
@@ -332,6 +336,22 @@ export class ShaderPanelController {
         this.onExternalWgslToonChanged(path, text);
     }
 
+    public selectModelTarget(value: string, showToast: boolean): void {
+        this.onModelTargetSelected(value, showToast);
+    }
+
+    public async applySelectedShaderPreset(): Promise<void> {
+        await this.applyShaderPresetFromPanel(false, "selected");
+    }
+
+    public async applyShaderPresetToAll(): Promise<void> {
+        await this.applyShaderPresetFromPanel(false, "all");
+    }
+
+    public async resetShaderPreset(): Promise<void> {
+        await this.applyShaderPresetFromPanel(true, "auto");
+    }
+
     public validateExternalWgslToonSnippet(source: string): string | null {
         const text = source.trim();
         if (text.length === 0) {
@@ -371,16 +391,26 @@ export class ShaderPanelController {
 
     private setupEventListeners(): void {
         this.elements.modelSelect?.addEventListener("change", () => {
-            this.onModelTargetSelected(this.elements.modelSelect?.value ?? "", true);
+            const value = this.elements.modelSelect?.value ?? "";
+            if (this.dispatchAction?.({
+                type: "shader.selectModelTarget",
+                source: "panel",
+                value,
+                showToast: true,
+            })) return;
+            this.selectModelTarget(value, true);
         });
         this.elements.applySelectedButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(false, "selected");
+            if (this.dispatchAction?.({ type: "shader.applySelected", source: "button" })) return;
+            void this.applySelectedShaderPreset();
         });
         this.elements.applyAllButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(false, "all");
+            if (this.dispatchAction?.({ type: "shader.applyAll", source: "button" })) return;
+            void this.applyShaderPresetToAll();
         });
         this.elements.resetButton?.addEventListener("click", () => {
-            void this.applyShaderPresetFromPanel(true, "auto");
+            if (this.dispatchAction?.({ type: "shader.reset", source: "button" })) return;
+            void this.resetShaderPreset();
         });
     }
 

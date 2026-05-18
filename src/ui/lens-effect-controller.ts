@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type LensEffectElements = {
     distortionInput: HTMLInputElement | null;
@@ -23,6 +24,7 @@ export type LensEffectControllerDeps = {
     mmdManager: MmdManager;
     syncRangeNumberInput: (slider: HTMLInputElement) => void;
     isRangeInputEditing: (slider: HTMLInputElement) => boolean;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveLensEffectElements(): LensEffectElements {
@@ -70,12 +72,14 @@ export class LensEffectController {
     private readonly mmdManager: MmdManager;
     private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
     private readonly isRangeInputEditing: (slider: HTMLInputElement) => boolean;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: LensEffectControllerDeps) {
         this.elements = resolveLensEffectElements();
         this.mmdManager = deps.mmdManager;
         this.syncRangeNumberInput = deps.syncRangeNumberInput;
         this.isRangeInputEditing = deps.isRangeInputEditing;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupStaticControls();
     }
@@ -87,7 +91,9 @@ export class LensEffectController {
         }
 
         const applyChromaticAberration = (): void => {
-            this.mmdManager.postEffectChromaticAberration = Number(elements.chromaticInput.value);
+            const value = Number(elements.chromaticInput.value);
+            if (this.dispatchAction?.({ type: "effect.setChromaticAberration", source: "panel", value })) return;
+            this.setChromaticAberration(value);
             syncChromaticAberrationUi();
         };
 
@@ -95,7 +101,9 @@ export class LensEffectController {
             if (!elements.frameGraphChromaticInput) {
                 return;
             }
-            this.mmdManager.postEffectChromaticAberration = Number(elements.frameGraphChromaticInput.value);
+            const value = Number(elements.frameGraphChromaticInput.value);
+            if (this.dispatchAction?.({ type: "effect.setChromaticAberration", source: "panel", value })) return;
+            this.setChromaticAberration(value);
             syncChromaticAberrationUi();
         };
 
@@ -113,7 +121,10 @@ export class LensEffectController {
         };
 
         const applyDistortionInfluence = (): void => {
-            this.applyDistortionInfluenceInput(elements.influenceInput);
+            const percent = Number(elements.influenceInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensDistortionInfluence", source: "panel", percent })) {
+                this.setLensDistortionInfluencePercent(percent);
+            }
             this.refreshDistortionInfluenceValue(elements.influenceInput, elements.influenceValue);
             this.refreshStaticDistortionControls();
         };
@@ -122,7 +133,10 @@ export class LensEffectController {
             if (!elements.edgeBlurInput || !elements.edgeBlurValue) {
                 return;
             }
-            this.mmdManager.dofLensEdgeBlur = Number(elements.edgeBlurInput.value) / 100;
+            const percent = Number(elements.edgeBlurInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensEdgeBlur", source: "panel", percent })) {
+                this.setLensEdgeBlurPercent(percent);
+            }
             this.refreshEdgeBlurValue(elements.edgeBlurInput, elements.edgeBlurValue);
         };
 
@@ -197,8 +211,10 @@ export class LensEffectController {
                 this.refreshAutoReadout();
                 return;
             }
-            const scale = Number(input.value) / 100;
-            this.mmdManager.dofLensDistortion = scale;
+            const percent = Number(input.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensDistortion", source: "panel", percent })) {
+                this.setLensDistortionPercent(percent);
+            }
             value.textContent = `${Math.round(this.mmdManager.dofLensDistortion * 100)}%`;
         };
 
@@ -220,7 +236,10 @@ export class LensEffectController {
         }
 
         const applyLensDistortionInfluence = (): void => {
-            this.applyDistortionInfluenceInput(input);
+            const percent = Number(input.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensDistortionInfluence", source: "panel", percent })) {
+                this.setLensDistortionInfluencePercent(percent);
+            }
             this.refreshDistortionInfluenceValue(input, value);
             this.refreshAutoReadout();
 
@@ -235,9 +254,20 @@ export class LensEffectController {
         input.addEventListener("input", applyLensDistortionInfluence);
     }
 
-    private applyDistortionInfluenceInput(input: HTMLInputElement): void {
-        const scale = Number(input.value) / 100;
-        this.mmdManager.dofLensDistortionInfluence = scale;
+    public setChromaticAberration(value: number): void {
+        this.mmdManager.postEffectChromaticAberration = value;
+    }
+
+    public setLensDistortionPercent(percent: number): void {
+        this.mmdManager.dofLensDistortion = percent / 100;
+    }
+
+    public setLensDistortionInfluencePercent(percent: number): void {
+        this.mmdManager.dofLensDistortionInfluence = percent / 100;
+    }
+
+    public setLensEdgeBlurPercent(percent: number): void {
+        this.mmdManager.dofLensEdgeBlur = percent / 100;
     }
 
     private refreshStaticControls(): void {

@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type ToastType = "success" | "error" | "info";
 
@@ -29,6 +30,7 @@ type RuntimeFeatureUiElements = {
 export type RuntimeFeatureUiControllerDeps = {
     mmdManager: MmdManager;
     showToast: (message: string, type?: ToastType) => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveRuntimeFeatureUiElements(): RuntimeFeatureUiElements {
@@ -60,11 +62,13 @@ export class RuntimeFeatureUiController {
     private readonly elements: RuntimeFeatureUiElements;
     private readonly mmdManager: MmdManager;
     private readonly showToast: (message: string, type?: ToastType) => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: RuntimeFeatureUiControllerDeps) {
         this.elements = resolveRuntimeFeatureUiElements();
         this.mmdManager = deps.mmdManager;
         this.showToast = deps.showToast;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupEventListeners();
         this.setupPhysicsControls();
@@ -132,61 +136,86 @@ export class RuntimeFeatureUiController {
             ? t("toolbar.gi.title.loading")
             : active
                 ? t("toolbar.gi.title.on")
-                : t("toolbar.gi.title.off");
+            : t("toolbar.gi.title.off");
+    }
+
+    public toggleAntialias(): void {
+        this.mmdManager.antialiasEnabled = !this.mmdManager.antialiasEnabled;
+        this.refreshAa();
+        this.showToast(this.mmdManager.antialiasEnabled ? t("toast.aa.on") : t("toast.aa.off"), "info");
+    }
+
+    public togglePhysics(): void {
+        if (!this.mmdManager.isPhysicsAvailable()) {
+            this.updatePhysicsToggleButton(false, false);
+            this.showToast(t("toast.physics.unavailable"), "error");
+            return;
+        }
+
+        const enabled = this.mmdManager.togglePhysicsEnabled();
+        this.updatePhysicsToggleButton(enabled, true);
+        this.showToast(enabled ? t("toast.physics.on") : t("toast.physics.off"), "info");
+    }
+
+    public toggleShadow(): void {
+        const enabled = !this.mmdManager.getShadowEnabled();
+        this.mmdManager.setShadowEnabled(enabled);
+        this.refreshShadow();
+        this.showToast(enabled ? t("toast.shadow.on") : t("toast.shadow.off"), "info");
+    }
+
+    public toggleRigidBodies(): void {
+        if (!this.mmdManager.isRigidBodyVisualizerAvailable()) {
+            this.refreshRigidBodies();
+            this.showToast(t("toast.rigidBodies.unavailable"), "error");
+            return;
+        }
+
+        const enabled = this.mmdManager.toggleRigidBodyVisualizerEnabled();
+        this.refreshRigidBodies();
+        this.showToast(enabled ? t("toast.rigidBodies.on") : t("toast.rigidBodies.off"), "info");
+    }
+
+    public toggleGlobalIllumination(): void {
+        const wasEnabled = this.mmdManager.isGlobalIlluminationEnabled();
+        const enabled = this.mmdManager.toggleGlobalIlluminationEnabled();
+        this.refreshGi();
+        this.showToast(
+            this.mmdManager.isGlobalIlluminationPending()
+                ? t("toast.gi.loading")
+                : !wasEnabled && !enabled
+                    ? t("toast.gi.unavailable")
+                    : enabled
+                        ? t("toast.gi.on")
+                        : t("toast.gi.off"),
+            "info",
+        );
     }
 
     private setupEventListeners(): void {
         this.elements.btnToggleAa?.addEventListener("click", () => {
-            this.mmdManager.antialiasEnabled = !this.mmdManager.antialiasEnabled;
-            this.refreshAa();
-            this.showToast(this.mmdManager.antialiasEnabled ? t("toast.aa.on") : t("toast.aa.off"), "info");
+            if (this.dispatchAction?.({ type: "runtime.toggleAntialias", source: "button" })) return;
+            this.toggleAntialias();
         });
 
         this.elements.btnTogglePhysics?.addEventListener("click", () => {
-            if (!this.mmdManager.isPhysicsAvailable()) {
-                this.updatePhysicsToggleButton(false, false);
-                this.showToast(t("toast.physics.unavailable"), "error");
-                return;
-            }
-
-            const enabled = this.mmdManager.togglePhysicsEnabled();
-            this.updatePhysicsToggleButton(enabled, true);
-            this.showToast(enabled ? t("toast.physics.on") : t("toast.physics.off"), "info");
+            if (this.dispatchAction?.({ type: "runtime.togglePhysics", source: "button" })) return;
+            this.togglePhysics();
         });
 
         this.elements.btnToggleShadow?.addEventListener("click", () => {
-            const enabled = !this.mmdManager.getShadowEnabled();
-            this.mmdManager.setShadowEnabled(enabled);
-            this.refreshShadow();
-            this.showToast(enabled ? t("toast.shadow.on") : t("toast.shadow.off"), "info");
+            if (this.dispatchAction?.({ type: "runtime.toggleShadow", source: "button" })) return;
+            this.toggleShadow();
         });
 
         this.elements.btnToggleRigidBodies?.addEventListener("click", () => {
-            if (!this.mmdManager.isRigidBodyVisualizerAvailable()) {
-                this.refreshRigidBodies();
-                this.showToast(t("toast.rigidBodies.unavailable"), "error");
-                return;
-            }
-
-            const enabled = this.mmdManager.toggleRigidBodyVisualizerEnabled();
-            this.refreshRigidBodies();
-            this.showToast(enabled ? t("toast.rigidBodies.on") : t("toast.rigidBodies.off"), "info");
+            if (this.dispatchAction?.({ type: "runtime.toggleRigidBodies", source: "button" })) return;
+            this.toggleRigidBodies();
         });
 
         this.elements.btnToggleGi?.addEventListener("click", () => {
-            const wasEnabled = this.mmdManager.isGlobalIlluminationEnabled();
-            const enabled = this.mmdManager.toggleGlobalIlluminationEnabled();
-            this.refreshGi();
-            this.showToast(
-                this.mmdManager.isGlobalIlluminationPending()
-                    ? t("toast.gi.loading")
-                    : !wasEnabled && !enabled
-                        ? t("toast.gi.unavailable")
-                        : enabled
-                            ? t("toast.gi.on")
-                            : t("toast.gi.off"),
-                "info",
-            );
+            if (this.dispatchAction?.({ type: "runtime.toggleGlobalIllumination", source: "button" })) return;
+            this.toggleGlobalIllumination();
         });
     }
 

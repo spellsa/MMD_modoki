@@ -17,6 +17,8 @@
  */
 import type { KeyframeTrack, TimelineRotationOverlay, TrackCategory } from "./types";
 
+export type TimelineSeekPhase = "jump" | "dragStart" | "dragMove" | "dragEnd";
+
 // ── Layout ─────────────────────────────────────────────────────────
 const RULER_H = 20;
 const ROW_H = 18;
@@ -136,7 +138,7 @@ export class Timeline {
     // Scroll sync guard
     private syncingScroll = false;
 
-    public onSeek: ((frame: number) => void) | null = null;
+    public onSeek: ((frame: number, phase: TimelineSeekPhase) => void) | null = null;
     public onSelectionChanged: ((track: KeyframeTrack | null, frame: number | null) => void) | null = null;
 
     // ── Constructor ─────────────────────────────────────────────────
@@ -177,7 +179,7 @@ export class Timeline {
             this.isDragging = true;
             this.dragBaseFrame = this.currentFrame;
             this.dragBaseX = e.clientX;
-            this.seekFromEvent(e, this.staticCanvas);
+            this.seekFromEvent(e, this.staticCanvas, "dragStart");
         });
 
         // Seek only: overlay layer
@@ -186,7 +188,7 @@ export class Timeline {
             this.isDragging = true;
             this.dragBaseFrame = this.currentFrame;
             this.dragBaseX = e.clientX;
-            this.seekFromEvent(e, this.overlayCanvas);
+            this.seekFromEvent(e, this.overlayCanvas, "dragStart");
         });
 
         // Select from labels
@@ -202,13 +204,17 @@ export class Timeline {
             if (frame !== this.currentFrame) {
                 this.currentFrame = frame;
                 this.viewOffset = frame * PX_PER_F;
-                this.onSeek?.(frame);
+                this.onSeek?.(frame, "dragMove");
                 this.scheduleOverlay();
                 this.scheduleStatic();
                 this.scheduleWaveform();
             }
         });
-        window.addEventListener("mouseup", () => { this.isDragging = false; });
+        window.addEventListener("mouseup", () => {
+            if (!this.isDragging) return;
+            this.isDragging = false;
+            this.onSeek?.(this.currentFrame, "dragEnd");
+        });
 
         // ── Bidirectional scroll sync ──────────────────────────────
         this.trackScrollEl.addEventListener("scroll", () => {
@@ -235,7 +241,7 @@ export class Timeline {
         return Math.max(12, Math.round((trackWidth - labelWidth) / 2));
     }
 
-    private seekFromEvent(e: MouseEvent, canvas: HTMLCanvasElement): void {
+    private seekFromEvent(e: MouseEvent, canvas: HTMLCanvasElement, phase: TimelineSeekPhase = "jump"): void {
         const rect = canvas.getBoundingClientRect();
         const playheadX = this.getPlayheadX();
         const frame = Math.max(
@@ -244,7 +250,7 @@ export class Timeline {
         );
         this.currentFrame = frame;
         this.viewOffset = frame * PX_PER_F;
-        this.onSeek?.(frame);
+        this.onSeek?.(frame, phase);
         this.scheduleOverlay();
         this.scheduleStatic();
         this.scheduleWaveform();

@@ -176,6 +176,8 @@ PoC では `keyframe.registerBone` / `registerMorph` / `registerAccessoryTransfo
 
 Timeline は `timeline.*` と `playback.*` が混ざりやすい。`seek` は playback 側、track/frame selection は timeline 側に寄せる。
 
+2026-05-18: timeline canvas 由来の seek は `timeline.seekFrame` に寄せた。`phase` は `dragStart` / `dragMove` / `dragEnd` を持つ。current frame input / shortcut などの汎用 seek は `playback.seekFrame` のまま分けて扱う。
+
 ## Viewport / Canvas Actions
 
 `src/mmd-manager.ts` の canvas event 由来。
@@ -191,6 +193,8 @@ Timeline は `timeline.*` と `playback.*` が混ざりやすい。`seek` は pl
 | auxclick middle | `viewport.suppressAuxClick` | `preventDefault()` | no | Action 化しない可能性あり |
 
 Viewport camera 操作は将来 Gamepad stick / MIDI knob と対応しやすい。ただし初期 undo 対象にはしない。カメラ keyframe 登録時に `keyframe.registerCamera` / `registerBone` 側で履歴化する。
+
+2026-05-18: viewport bone pick は `selection.pickBone` に接続済み。camera drag / gizmo drag は begin/change/commit 設計後に扱う。
 
 ## Selection Actions
 
@@ -212,7 +216,7 @@ Selection は undo 対象外から始める。将来「選択状態も undo し�
 | copy button | `interpolation.copy` | `copyInterpolationCurves()` | no | clipboard 的操作 |
 | paste button | `interpolation.paste` | `pasteInterpolationCurves()` | yes | 差分対象 |
 | linear button | `interpolation.applyLinear` | `resetInterpolationCurvesToLinear()` | yes | 差分対象 |
-| interpolation handle drag | `interpolation.dragHandle` | SVG pointer handlers | yes | merge 必須、後回し |
+| interpolation handle drag | `interpolation.updateHandle` / `interpolation.finishHandleDrag` | SVG pointer handlers -> Action | yes | pointer lifecycle は UI 内、値更新と確定処理を Action 化 |
 
 初期 PoC では後回し。`keyframe.addCurrent` 時に補間 snapshot が関係するため、CommandDiff 設計時に参照は必要。
 
@@ -390,7 +394,8 @@ Accessory は keyframe と project state の両方に関わるため、初期 Po
 
 | Action type 案 | 現在の入口 | undo 対象 | History への影響 |
 | --- | --- | --- | --- |
-| `project.openFile` | load file button / drag drop | no | 内容に応じて clear |
+| `project.openFile` | load file button | no | 内容に応じて clear |
+| `project.dropFiles` | drag drop | no | drop 順序を拡張子 priority で並べて `loadFileByPath(..., "drop")` |
 | `project.openModel` | `Ctrl+O` | no | clear するか要検討 |
 | `project.openMotion` | `Ctrl+M` | no | clear するか要検討 |
 | `project.openCameraMotion` | `Ctrl+Shift+M` | no | clear するか要検討 |

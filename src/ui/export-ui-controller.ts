@@ -7,6 +7,7 @@
 import { t } from "../i18n";
 import { logError, logInfo } from "../app-logger";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 import type {
     MmdModokiProjectFileV1,
     PngSequenceExportProgress,
@@ -57,6 +58,7 @@ export type ExportUiControllerDeps = {
     onPausePlayback: () => void;
     getViewportSize: () => { width: number; height: number };
     onOutputAspectChanged: () => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveExportUiElements(): ExportUiElements {
@@ -127,6 +129,7 @@ export class ExportUiController {
     private readonly onPausePlayback: () => void;
     private readonly getViewportSize: () => { width: number; height: number };
     private readonly onOutputAspectChanged: () => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     private pngSequenceExportStateUnsubscribe: (() => void) | null = null;
     private pngSequenceExportProgressUnsubscribe: (() => void) | null = null;
@@ -154,6 +157,7 @@ export class ExportUiController {
         this.onPausePlayback = deps.onPausePlayback;
         this.getViewportSize = deps.getViewportSize;
         this.onOutputAspectChanged = deps.onOutputAspectChanged;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupOutputControls();
         this.setupPngSequenceExportStateBridge();
@@ -611,85 +615,48 @@ export class ExportUiController {
             return;
         }
 
-        const applyPreset = (): void => {
-            const ratio = this.resolveSelectedOutputAspectRatio();
-            const longEdgeRaw = Number.parseInt(this.elements.outputSizePresetSelect?.value ?? "1920", 10);
-            const longEdge = Number.isFinite(longEdgeRaw) ? Math.max(320, Math.min(8192, longEdgeRaw)) : 1920;
-
-            let nextWidth = longEdge;
-            let nextHeight = Math.max(180, Math.round(longEdge / Math.max(0.1, ratio)));
-            if (ratio < 1) {
-                nextHeight = longEdge;
-                nextWidth = Math.max(320, Math.round(longEdge * ratio));
-            }
-
-            this.isSyncingOutputSettings = true;
-            this.elements.outputWidthInput.value = String(this.clampOutputWidth(nextWidth));
-            this.elements.outputHeightInput.value = String(this.clampOutputHeight(nextHeight));
-            this.isSyncingOutputSettings = false;
-
-            const width = Number.parseInt(this.elements.outputWidthInput.value, 10);
-            const height = Number.parseInt(this.elements.outputHeightInput.value, 10);
-            if (Number.isFinite(width) && Number.isFinite(height) && height > 0) {
-                this.outputAspectRatio = Math.max(0.1, width / height);
-            }
-
-            this.onOutputAspectChanged();
-        };
-
-        const syncDimensionWithLock = (source: "width" | "height"): void => {
-            if (!this.elements.outputWidthInput || !this.elements.outputHeightInput) return;
-            if (this.isSyncingOutputSettings) return;
-
-            let width = this.clampOutputWidth(Number.parseInt(this.elements.outputWidthInput.value, 10));
-            let height = this.clampOutputHeight(Number.parseInt(this.elements.outputHeightInput.value, 10));
-            const locked = this.elements.outputLockAspectInput?.checked === true;
-            const ratio = Math.max(0.1, this.outputAspectRatio);
-
-            if (locked) {
-                if (source === "width") {
-                    height = this.clampOutputHeight(Math.round(width / ratio));
-                } else {
-                    width = this.clampOutputWidth(Math.round(height * ratio));
-                }
-            } else if (height > 0) {
-                this.outputAspectRatio = Math.max(0.1, width / height);
-            }
-
-            this.isSyncingOutputSettings = true;
-            this.elements.outputWidthInput.value = String(width);
-            this.elements.outputHeightInput.value = String(height);
-            this.isSyncingOutputSettings = false;
-        };
-
-        this.elements.outputAspectSelect.addEventListener("change", applyPreset);
-        this.elements.outputSizePresetSelect.addEventListener("change", applyPreset);
-        this.elements.outputWidthInput.addEventListener("input", () => syncDimensionWithLock("width"));
-        this.elements.outputHeightInput.addEventListener("input", () => syncDimensionWithLock("height"));
-        this.elements.outputLockAspectInput?.addEventListener("change", () => {
-            if (!this.elements.outputLockAspectInput) return;
-            if (this.elements.outputLockAspectInput.checked) {
-                this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
-                syncDimensionWithLock("width");
-            }
+        this.elements.outputAspectSelect.addEventListener("change", () => {
+            if (this.dispatchAction?.({ type: "output.applyPreset", source: "panel" })) return;
+            this.applyOutputPreset();
         });
-        const markFrameRangeCustomized = (): void => {
-            if (this.isSyncingFrameRange) return;
-            this.isFrameRangeCustomized = true;
-        };
-        this.elements.outputStartFrameInput.addEventListener("input", markFrameRangeCustomized);
-        this.elements.outputEndFrameInput.addEventListener("input", markFrameRangeCustomized);
+        this.elements.outputSizePresetSelect.addEventListener("change", () => {
+            if (this.dispatchAction?.({ type: "output.applyPreset", source: "panel" })) return;
+            this.applyOutputPreset();
+        });
+        this.elements.outputWidthInput.addEventListener("input", () => {
+            if (this.dispatchAction?.({ type: "output.syncDimension", source: "panel", dimension: "width" })) return;
+            this.syncOutputDimensionWithLock("width");
+        });
+        this.elements.outputHeightInput.addEventListener("input", () => {
+            if (this.dispatchAction?.({ type: "output.syncDimension", source: "panel", dimension: "height" })) return;
+            this.syncOutputDimensionWithLock("height");
+        });
+        this.elements.outputLockAspectInput?.addEventListener("change", () => {
+            const locked = this.elements.outputLockAspectInput?.checked ?? false;
+            if (this.dispatchAction?.({ type: "output.setLockAspect", source: "panel", locked })) return;
+            this.setOutputLockAspect(locked);
+        });
+        this.elements.outputStartFrameInput.addEventListener("input", () => {
+            if (this.dispatchAction?.({ type: "output.markFrameRangeCustomized", source: "panel" })) return;
+            this.markOutputFrameRangeCustomized();
+        });
+        this.elements.outputEndFrameInput.addEventListener("input", () => {
+            if (this.dispatchAction?.({ type: "output.markFrameRangeCustomized", source: "panel" })) return;
+            this.markOutputFrameRangeCustomized();
+        });
         this.elements.outputStartFrameInput.addEventListener("change", () => {
-            this.sanitizeFrameRangeInputs("start");
+            if (this.dispatchAction?.({ type: "output.sanitizeFrameRange", source: "panel", boundary: "start" })) return;
+            this.sanitizeOutputFrameRange("start");
         });
         this.elements.outputEndFrameInput.addEventListener("change", () => {
-            this.sanitizeFrameRangeInputs("end");
+            if (this.dispatchAction?.({ type: "output.sanitizeFrameRange", source: "panel", boundary: "end" })) return;
+            this.sanitizeOutputFrameRange("end");
         });
 
         this.elements.outputQualitySelect.value = this.elements.outputQualitySelect.value || "1";
         this.elements.outputFpsSelect.value = this.elements.outputFpsSelect.value || "30";
         this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
-        applyPreset();
+        this.applyOutputPreset();
         this.syncFrameRangeFromTimeline(true);
         this.onOutputAspectChanged();
     }
@@ -733,6 +700,78 @@ export class ExportUiController {
 
     public isPlaybackFrameStopEnabled(): boolean {
         return Boolean(this.elements.playbackFrameStopToggleInput?.checked);
+    }
+
+    public applyOutputPreset(): void {
+        if (!this.elements.outputWidthInput || !this.elements.outputHeightInput) return;
+
+        const ratio = this.resolveSelectedOutputAspectRatio();
+        const longEdgeRaw = Number.parseInt(this.elements.outputSizePresetSelect?.value ?? "1920", 10);
+        const longEdge = Number.isFinite(longEdgeRaw) ? Math.max(320, Math.min(8192, longEdgeRaw)) : 1920;
+
+        let nextWidth = longEdge;
+        let nextHeight = Math.max(180, Math.round(longEdge / Math.max(0.1, ratio)));
+        if (ratio < 1) {
+            nextHeight = longEdge;
+            nextWidth = Math.max(320, Math.round(longEdge * ratio));
+        }
+
+        this.isSyncingOutputSettings = true;
+        this.elements.outputWidthInput.value = String(this.clampOutputWidth(nextWidth));
+        this.elements.outputHeightInput.value = String(this.clampOutputHeight(nextHeight));
+        this.isSyncingOutputSettings = false;
+
+        const width = Number.parseInt(this.elements.outputWidthInput.value, 10);
+        const height = Number.parseInt(this.elements.outputHeightInput.value, 10);
+        if (Number.isFinite(width) && Number.isFinite(height) && height > 0) {
+            this.outputAspectRatio = Math.max(0.1, width / height);
+        }
+
+        this.onOutputAspectChanged();
+    }
+
+    public syncOutputDimensionWithLock(source: "width" | "height"): void {
+        if (!this.elements.outputWidthInput || !this.elements.outputHeightInput) return;
+        if (this.isSyncingOutputSettings) return;
+
+        let width = this.clampOutputWidth(Number.parseInt(this.elements.outputWidthInput.value, 10));
+        let height = this.clampOutputHeight(Number.parseInt(this.elements.outputHeightInput.value, 10));
+        const locked = this.elements.outputLockAspectInput?.checked === true;
+        const ratio = Math.max(0.1, this.outputAspectRatio);
+
+        if (locked) {
+            if (source === "width") {
+                height = this.clampOutputHeight(Math.round(width / ratio));
+            } else {
+                width = this.clampOutputWidth(Math.round(height * ratio));
+            }
+        } else if (height > 0) {
+            this.outputAspectRatio = Math.max(0.1, width / height);
+        }
+
+        this.isSyncingOutputSettings = true;
+        this.elements.outputWidthInput.value = String(width);
+        this.elements.outputHeightInput.value = String(height);
+        this.isSyncingOutputSettings = false;
+    }
+
+    public setOutputLockAspect(locked: boolean): void {
+        if (this.elements.outputLockAspectInput) {
+            this.elements.outputLockAspectInput.checked = locked;
+        }
+        if (!locked) return;
+
+        this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
+        this.syncOutputDimensionWithLock("width");
+    }
+
+    public markOutputFrameRangeCustomized(): void {
+        if (this.isSyncingFrameRange) return;
+        this.isFrameRangeCustomized = true;
+    }
+
+    public sanitizeOutputFrameRange(source: "start" | "end"): void {
+        this.sanitizeFrameRangeInputs(source);
     }
 
     private sanitizeFrameRangeInputs(source: "start" | "end"): void {

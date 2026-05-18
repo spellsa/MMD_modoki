@@ -1,4 +1,5 @@
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type ModelEdgeElements = {
     staticInput: HTMLInputElement | null;
@@ -8,6 +9,7 @@ type ModelEdgeElements = {
 export type ModelEdgeControllerDeps = {
     mmdManager: MmdManager;
     syncRangeNumberInput: (slider: HTMLInputElement) => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveModelEdgeElements(): ModelEdgeElements {
@@ -31,11 +33,13 @@ export class ModelEdgeController {
     private readonly elements: ModelEdgeElements;
     private readonly mmdManager: MmdManager;
     private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: ModelEdgeControllerDeps) {
         this.elements = resolveModelEdgeElements();
         this.mmdManager = deps.mmdManager;
         this.syncRangeNumberInput = deps.syncRangeNumberInput;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupStaticControls();
     }
@@ -47,7 +51,10 @@ export class ModelEdgeController {
         }
 
         const applyEdgeWidth = (): void => {
-            this.applyInputValue(elements.input);
+            const percent = Number(elements.input.value);
+            if (!this.dispatchAction?.({ type: "effect.setModelEdgeWidth", source: "panel", percent })) {
+                this.setModelEdgeWidthPercent(percent);
+            }
             this.refreshPanelValue(elements.input, elements.value);
             this.refreshStaticControls();
         };
@@ -74,7 +81,10 @@ export class ModelEdgeController {
         }
 
         input.addEventListener("input", () => {
-            this.applyInputValue(input);
+            const percent = Number(input.value);
+            if (!this.dispatchAction?.({ type: "effect.setModelEdgeWidth", source: "panel", percent })) {
+                this.setModelEdgeWidthPercent(percent);
+            }
             this.refreshStaticControls();
 
             const panelElements = queryPanelElements(document);
@@ -85,9 +95,9 @@ export class ModelEdgeController {
         this.refreshStaticControls();
     }
 
-    private applyInputValue(input: HTMLInputElement): void {
-        const scale = Number(input.value) / 100;
-        this.mmdManager.modelEdgeWidth = scale;
+    public setModelEdgeWidthPercent(percent: number): void {
+        const normalized = Number.isFinite(percent) ? percent : 100;
+        this.mmdManager.modelEdgeWidth = normalized / 100;
     }
 
     private refreshStaticControls(): void {

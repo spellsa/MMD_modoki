@@ -1,4 +1,5 @@
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 export type CameraViewPreset = "left" | "front" | "right" | "top" | "back" | "bottom";
 
@@ -29,6 +30,7 @@ export type CameraPanelControllerDeps = {
     formatRangeInputValue: (slider: HTMLInputElement, value: number) => string;
     isRangeInputEditing: (slider: HTMLInputElement) => boolean;
     onCameraEdited: () => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveCameraPanelElements(): CameraPanelElements {
@@ -61,6 +63,7 @@ export class CameraPanelController {
     private readonly formatRangeInputValue: (slider: HTMLInputElement, value: number) => string;
     private readonly isRangeInputEditing: (slider: HTMLInputElement) => boolean;
     private readonly onCameraEdited: () => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: CameraPanelControllerDeps) {
         this.elements = resolveCameraPanelElements();
@@ -70,6 +73,7 @@ export class CameraPanelController {
         this.formatRangeInputValue = deps.formatRangeInputValue;
         this.isRangeInputEditing = deps.isRangeInputEditing;
         this.onCameraEdited = deps.onCameraEdited;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupControls();
     }
@@ -88,11 +92,26 @@ export class CameraPanelController {
         this.refreshMirroringFloorControls();
     }
 
+    public setCameraViewPreset(view: CameraViewPreset): void {
+        this.mmdManager.setCameraView(view);
+        this.updateViewButtons(view);
+        this.onCameraEdited();
+    }
+
+    public setMirroringFloorEnabled(enabled: boolean): void {
+        this.mmdManager.mirroringFloorEnabled = enabled;
+        this.refreshMirroringFloorControls();
+    }
+
+    public setMirroringFloorResolution(resolution: number): void {
+        this.mmdManager.mirroringFloorResolution = resolution;
+        this.refreshMirroringFloorControls();
+    }
+
     private setupControls(): void {
         const switchCameraView = (view: CameraViewPreset): void => {
-            this.mmdManager.setCameraView(view);
-            this.updateViewButtons(view);
-            this.onCameraEdited();
+            if (this.dispatchAction?.({ type: "camera.setViewPreset", source: "button", view })) return;
+            this.setCameraViewPreset(view);
         };
 
         this.elements.leftButton?.addEventListener("click", () => switchCameraView("left"));
@@ -120,8 +139,8 @@ export class CameraPanelController {
     private setupMirroringFloorControls(): void {
         this.elements.mirroringFloorEnabled?.addEventListener("change", () => {
             const enabled = this.elements.mirroringFloorEnabled?.checked ?? false;
-            this.mmdManager.mirroringFloorEnabled = enabled;
-            this.refreshMirroringFloorControls();
+            if (this.dispatchAction?.({ type: "camera.setMirroringFloorEnabled", source: "panel", enabled })) return;
+            this.setMirroringFloorEnabled(enabled);
         });
 
         this.elements.mirroringFloorReflectance?.addEventListener("input", () => {
@@ -144,8 +163,12 @@ export class CameraPanelController {
 
         this.elements.mirroringFloorResolution?.addEventListener("change", () => {
             const value = Number(this.elements.mirroringFloorResolution?.value ?? 512);
-            this.mmdManager.mirroringFloorResolution = value;
-            this.refreshMirroringFloorControls();
+            if (this.dispatchAction?.({
+                type: "camera.setMirroringFloorResolution",
+                source: "panel",
+                resolution: value,
+            })) return;
+            this.setMirroringFloorResolution(value);
         });
 
         this.refreshMirroringFloorControls();

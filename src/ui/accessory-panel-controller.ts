@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type ToastType = "success" | "error" | "info";
@@ -19,6 +20,7 @@ export type AccessoryPanelControllerDeps = {
     syncRangeNumberInput: (slider: HTMLInputElement) => void;
     onAccessoryTransformChanged: (accessoryIndex: number) => void;
     onSelectionChanged: () => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveAccessoryPanelElements(): AccessoryPanelElements {
@@ -39,6 +41,7 @@ export class AccessoryPanelController {
     private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
     private readonly onAccessoryTransformChanged: (accessoryIndex: number) => void;
     private readonly onSelectionChanged: () => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
     private readonly transformSliders = new Map<AccessoryTransformSliderKey, HTMLInputElement>();
     private readonly transformValueEls = new Map<AccessoryTransformSliderKey, HTMLElement>();
     private isSyncingTransformUi = false;
@@ -51,6 +54,7 @@ export class AccessoryPanelController {
         this.syncRangeNumberInput = deps.syncRangeNumberInput;
         this.onAccessoryTransformChanged = deps.onAccessoryTransformChanged;
         this.onSelectionChanged = deps.onSelectionChanged;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupControls();
     }
@@ -100,6 +104,67 @@ export class AccessoryPanelController {
         return parsed;
     }
 
+    public selectAccessory(): void {
+        this.syncTransformSlidersFromSelection();
+        this.syncParentControlsFromSelection();
+        this.updateActionButtons();
+        this.onSelectionChanged();
+    }
+
+    public setParentModelFromPanel(): void {
+        if (this.isSyncingParentUi) return;
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+
+        const modelIndex = this.parseParentModelIndex();
+        this.refreshParentBoneOptions(modelIndex, null);
+        this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, null);
+    }
+
+    public setParentBoneFromPanel(): void {
+        if (this.isSyncingParentUi) return;
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+
+        const modelIndex = this.parseParentModelIndex();
+        if (modelIndex === null) {
+            this.mmdManager.setAccessoryParent(selectedIndex, null, null);
+            return;
+        }
+
+        const boneName = this.elements.parentBoneSelect?.value || null;
+        this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, boneName);
+    }
+
+    public toggleSelectedAccessoryVisibility(): void {
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+        const visible = this.mmdManager.toggleAccessoryVisibility(selectedIndex);
+        this.updateActionButtons();
+        this.showToast(visible ? "Accessory visible" : "Accessory hidden", "info");
+    }
+
+    public deleteSelectedAccessory(): void {
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+
+        const accessories = this.mmdManager.getLoadedAccessories();
+        const current = accessories.find((item) => item.index === selectedIndex);
+        const targetName = current?.name ?? "Accessory";
+
+        const ok = window.confirm(`Delete accessory '${targetName}'?`);
+        if (!ok) return;
+
+        const removed = this.mmdManager.removeAccessory(selectedIndex);
+        if (!removed) {
+            this.showToast("Failed to delete accessory", "error");
+            return;
+        }
+
+        this.refresh();
+        this.showToast(`Accessory deleted: ${targetName}`, "success");
+    }
+
     private setupControls(): void {
         const select = this.elements.select;
         const parentModelSelect = this.elements.parentModelSelect;
@@ -116,64 +181,28 @@ export class AccessoryPanelController {
         this.registerSlider("s", "accessory-scale", "accessory-scale-val");
 
         select?.addEventListener("change", () => {
-            this.syncTransformSlidersFromSelection();
-            this.syncParentControlsFromSelection();
-            this.updateActionButtons();
-            this.onSelectionChanged();
+            if (this.dispatchAction?.({ type: "accessory.select", source: "panel" })) return;
+            this.selectAccessory();
         });
 
         parentModelSelect?.addEventListener("change", () => {
-            if (this.isSyncingParentUi) return;
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const modelIndex = this.parseParentModelIndex();
-            this.refreshParentBoneOptions(modelIndex, null);
-            this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, null);
+            if (this.dispatchAction?.({ type: "accessory.setParentModel", source: "panel" })) return;
+            this.setParentModelFromPanel();
         });
 
         parentBoneSelect?.addEventListener("change", () => {
-            if (this.isSyncingParentUi) return;
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const modelIndex = this.parseParentModelIndex();
-            if (modelIndex === null) {
-                this.mmdManager.setAccessoryParent(selectedIndex, null, null);
-                return;
-            }
-
-            const boneName = parentBoneSelect.value || null;
-            this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, boneName);
+            if (this.dispatchAction?.({ type: "accessory.setParentBone", source: "panel" })) return;
+            this.setParentBoneFromPanel();
         });
 
         btnVisibility?.addEventListener("click", () => {
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-            const visible = this.mmdManager.toggleAccessoryVisibility(selectedIndex);
-            this.updateActionButtons();
-            this.showToast(visible ? "Accessory visible" : "Accessory hidden", "info");
+            if (this.dispatchAction?.({ type: "accessory.toggleVisibility", source: "button" })) return;
+            this.toggleSelectedAccessoryVisibility();
         });
 
         btnDelete?.addEventListener("click", () => {
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const accessories = this.mmdManager.getLoadedAccessories();
-            const current = accessories.find((item) => item.index === selectedIndex);
-            const targetName = current?.name ?? "Accessory";
-
-            const ok = window.confirm(`Delete accessory '${targetName}'?`);
-            if (!ok) return;
-
-            const removed = this.mmdManager.removeAccessory(selectedIndex);
-            if (!removed) {
-                this.showToast("Failed to delete accessory", "error");
-                return;
-            }
-
-            this.refresh();
-            this.showToast(`Accessory deleted: ${targetName}`, "success");
+            if (this.dispatchAction?.({ type: "accessory.deleteSelected", source: "button" })) return;
+            this.deleteSelectedAccessory();
         });
 
         this.updateValueLabelsFromSliders();
