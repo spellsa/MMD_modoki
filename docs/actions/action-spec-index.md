@@ -10,6 +10,7 @@
 - [Action / Command / 入力管理 調査メモ](../action-command-input-management-note-2026-05-17.md)
 - [Action Catalog Draft](../action-catalog-draft-2026-05-17.md)
 - [Action Dispatcher 進捗メモ](../action-dispatcher-progress-note-2026-05-18.md)
+- [Command 設計メモ](../command-design-note-2026-05-19.md)
 
 ## 共通方針
 
