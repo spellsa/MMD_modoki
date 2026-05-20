@@ -196,6 +196,7 @@ export function handleBoneGizmoBeforeRender(host: any): void {
     const boneGizmoDragging = host.boneGizmoManager?.isDragging === true && boneRuntime !== null;
     if (boneGizmoDragging && boneRuntime) {
         if (host.physicsEnabledBeforeBoneGizmoDrag === null) {
+            host.onBoneTransformEditStarted?.(boneRuntime.name);
             const currentPhysicsState = host.getPhysicsEnabled();
             host.physicsEnabledBeforeBoneGizmoDrag = currentPhysicsState;
             if (currentPhysicsState) {
@@ -213,6 +214,9 @@ export function handleBoneGizmoBeforeRender(host: any): void {
         host.physicsEnabledBeforeBoneGizmoDrag = null;
         if (resumePhysics) {
             host.setPhysicsEnabled(true);
+        }
+        if (boneRuntime) {
+            host.onBoneTransformEditCommitted?.(boneRuntime.name);
         }
     }
 

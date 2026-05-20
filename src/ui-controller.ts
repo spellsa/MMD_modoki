@@ -35,6 +35,15 @@ import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controll
 import { ShaderPanelController } from "./ui/shader-panel-controller";
 import { ActionDispatcher } from "./actions/action-dispatcher";
 import type { ActionSource } from "./actions/types";
+import { executeCommand, type CommandExecutionContext } from "./actions/command-executor";
+import { HistoryManager } from "./actions/history-manager";
+import {
+    buildKeyframeCommand,
+    createCommandTrackKey,
+    type KeyframeCommandSnapshot,
+} from "./actions/keyframe-command-builder";
+import { buildBoneTransformCommand } from "./actions/bone-transform-command-builder";
+import type { BoneTransformCommandSnapshot } from "./actions/command-types";
 import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     normalizePostEffectBackend,
@@ -50,6 +59,12 @@ type SelectedBonePoseSnapshot = {
     target?: { x: number; y: number; z: number };
     distance?: number;
     fov?: number;
+};
+
+type PendingBoneTransformCommand = {
+    boneName: string;
+    frame: number;
+    before: BoneTransformCommandSnapshot;
 };
 
 type RuntimeMovableBoneTrackLike = {
@@ -251,6 +266,8 @@ export class UIController {
     private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
     private shaderPanelController: ShaderPanelController | null = null;
     private readonly actionDispatcher = new ActionDispatcher();
+    private readonly commandHistory = new HistoryManager();
+    private pendingBoneTransformCommand: PendingBoneTransformCommand | null = null;
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
     private currentProjectFilePath: string | null = null;
@@ -623,11 +640,23 @@ export class UIController {
         this.bottomPanel.onMorphFrameSelectionChanged = () => {
             this.actionDispatcher.dispatch({ type: "selection.setMorphFrame", source: "panel" });
         };
+        this.bottomPanel.onBoneTransformEditStarted = (boneName) => {
+            this.beginBoneTransformCommand(boneName);
+        };
         this.bottomPanel.onBoneTransformEdited = (boneName) => {
             this.actionDispatcher.dispatch({ type: "edit.boneTransformChanged", source: "panel", boneName });
         };
+        this.bottomPanel.onBoneTransformEditCommitted = (boneName) => {
+            this.commitBoneTransformCommand(boneName);
+        };
+        this.mmdManager.onBoneTransformEditStarted = (boneName) => {
+            this.beginBoneTransformCommand(boneName);
+        };
         this.mmdManager.onBoneTransformEdited = (boneName) => {
             this.actionDispatcher.dispatch({ type: "edit.boneTransformChanged", source: "viewport", boneName });
+        };
+        this.mmdManager.onBoneTransformEditCommitted = (boneName) => {
+            this.commitBoneTransformCommand(boneName);
         };
         this.mmdManager.onCameraTransformEdited = () => {
             this.actionDispatcher.dispatch({ type: "edit.cameraTransformChanged", source: "viewport" });
@@ -1431,6 +1460,18 @@ export class UIController {
                 return;
             }
 
+            if (!e.metaKey && !e.altKey && e.ctrlKey && !e.shiftKey && lowerKey === "z") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "history.undo", source: "shortcut" });
+                return;
+            }
+
+            if (!e.metaKey && !e.altKey && e.ctrlKey && !e.shiftKey && lowerKey === "y") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "history.redo", source: "shortcut" });
+                return;
+            }
+
             // Ctrl + arrow: jump to previous/next keyframe point
             if (!e.metaKey && !e.altKey && e.ctrlKey) {
                 if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
@@ -1621,11 +1662,13 @@ export class UIController {
         this.actionDispatcher.register("playback.seekAdjacentKeyframe", (action) => {
             this.seekToAdjacentKeyframePoint(action.direction);
         });
-        this.actionDispatcher.register("keyframe.addCurrent", () => this.addKeyframeAtCurrentFrame());
-        this.actionDispatcher.register("keyframe.deleteSelected", () => this.deleteSelectedKeyframe());
+        this.actionDispatcher.register("keyframe.addCurrent", (action) => this.addKeyframeAtCurrentFrame(null, action.source));
+        this.actionDispatcher.register("keyframe.deleteSelected", (action) => this.deleteSelectedKeyframe(action.source));
         this.actionDispatcher.register("keyframe.nudgeSelected", (action) => {
             this.nudgeSelectedKeyframe(action.deltaFrames);
         });
+        this.actionDispatcher.register("history.undo", () => this.undoLastCommand());
+        this.actionDispatcher.register("history.redo", () => this.redoLastCommand());
         this.actionDispatcher.register("keyframe.registerInfo", () => this.registerInfoKeyframe());
         this.actionDispatcher.register("keyframe.registerBone", () => this.registerBoneKeyframeAtCurrentFrame());
         this.actionDispatcher.register("keyframe.registerMorph", () => this.registerMorphKeyframesAtCurrentFrame());
@@ -4033,6 +4076,76 @@ export class UIController {
         this.updateSectionKeyframeButtons();
     }
 
+    private beginBoneTransformCommand(boneName: string | null): void {
+        if (!boneName || boneName === "Camera") return;
+        if (this.pendingBoneTransformCommand?.boneName === boneName) return;
+
+        const snapshot = this.captureBoneTransformCommandSnapshot(boneName);
+        if (!snapshot) return;
+
+        this.pendingBoneTransformCommand = {
+            boneName,
+            frame: this.mmdManager.currentFrame,
+            before: snapshot,
+        };
+    }
+
+    private commitBoneTransformCommand(boneName: string | null): void {
+        const pending = this.pendingBoneTransformCommand;
+        this.pendingBoneTransformCommand = null;
+        if (!pending) return;
+        if (!boneName || pending.boneName !== boneName) return;
+
+        const after = this.captureBoneTransformCommandSnapshot(boneName);
+        const command = buildBoneTransformCommand({
+            boneName,
+            frame: pending.frame,
+            before: pending.before,
+            after,
+        });
+        if (!command) return;
+
+        this.commandHistory.push(command);
+    }
+
+    private captureBoneTransformCommandSnapshot(boneName: string): BoneTransformCommandSnapshot | null {
+        const snapshot = this.captureCurrentBonePoseSnapshot(boneName);
+        if (!snapshot) return null;
+        return {
+            position: { ...snapshot.position },
+            rotation: { ...snapshot.rotation },
+        };
+    }
+
+    private applyBoneTransformSnapshotFromCommand(
+        boneName: string,
+        snapshot: BoneTransformCommandSnapshot,
+    ): boolean {
+        if (!boneName || boneName === "Camera") return false;
+        if (!this.mmdManager.getBoneTransform(boneName)) return false;
+
+        this.mmdManager.setBoneTranslation(
+            boneName,
+            snapshot.position.x,
+            snapshot.position.y,
+            snapshot.position.z,
+            false,
+        );
+        this.mmdManager.setBoneRotation(
+            boneName,
+            snapshot.rotation.x,
+            snapshot.rotation.y,
+            snapshot.rotation.z,
+            false,
+        );
+        this.rememberEditedBonePoseSnapshot(boneName, snapshot);
+        this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
+        this.syncBottomPanelBoneFromEditedPose(boneName);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateSectionKeyframeButtons();
+        return true;
+    }
+
     private handleCameraControlEdited(): void {
         this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
         this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
@@ -4067,6 +4180,42 @@ export class UIController {
         const track = this.timeline.getSelectedTrack();
         if (!track) return null;
         return track;
+    }
+
+    private collectKeyframeCommandSnapshot(): KeyframeCommandSnapshot {
+        const selectedTrack = this.getSelectedTimelineTrack();
+        const framesByTrackKey: Record<string, number[]> = {};
+        if (selectedTrack) {
+            framesByTrackKey[createCommandTrackKey(selectedTrack)] = Array.from(selectedTrack.frames);
+        }
+
+        return {
+            selectedTrack: selectedTrack
+                ? { category: selectedTrack.category, name: selectedTrack.name }
+                : null,
+            selectedFrame: this.timeline.getSelectedFrame(),
+            currentFrame: this.mmdManager.currentFrame,
+            framesByTrackKey,
+        };
+    }
+
+    private createCommandExecutionContext(options: { seekToFrame?: boolean } = {}): CommandExecutionContext {
+        const seekToFrame = options.seekToFrame ?? true;
+        return {
+            addTimelineKeyframe: (track, frame) => this.mmdManager.addTimelineKeyframe(track, frame),
+            removeTimelineKeyframe: (track, frame) => this.mmdManager.removeTimelineKeyframe(track, frame),
+            moveTimelineKeyframe: (track, fromFrame, toFrame) => this.mmdManager.moveTimelineKeyframe(
+                track,
+                fromFrame,
+                toFrame,
+            ),
+            applyBoneTransform: (boneName, snapshot) => this.applyBoneTransformSnapshotFromCommand(boneName, snapshot),
+            setSelectedFrame: (frame) => this.timeline.setSelectedFrame(frame),
+            seekToBoundary: (frame) => {
+                if (seekToFrame) this.mmdManager.seekToBoundary(frame);
+            },
+            refreshAfterKeyframeEdit: () => this.updateTimelineEditState(),
+        };
     }
 
     private getTrackTypeLabel(track: Pick<KeyframeTrack, "category">): string {
@@ -5862,7 +6011,10 @@ export class UIController {
         };
     }
 
-    private addKeyframeAtCurrentFrame(poseSnapshotOverride: SelectedBonePoseSnapshot | null = null): void {
+    private addKeyframeAtCurrentFrame(
+        poseSnapshotOverride: SelectedBonePoseSnapshot | null = null,
+        source: ActionSource = "system",
+    ): void {
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
@@ -5895,7 +6047,13 @@ export class UIController {
             shouldRefreshRuntimePreview,
         });
         const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
-        const created = this.mmdManager.addTimelineKeyframe(track, frame);
+        const command = buildKeyframeCommand(
+            { type: "keyframe.addCurrent", source },
+            this.collectKeyframeCommandSnapshot(),
+        );
+        const created = command
+            ? executeCommand(command, "apply", this.createCommandExecutionContext())
+            : false;
         if (!created) {
             const overwritten = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
             if (overwritten) {
@@ -5930,6 +6088,7 @@ export class UIController {
         this.refreshSelectedTrackRotationOverlay();
         this.updateTimelineEditState();
         this.updateSectionKeyframeButtons();
+        this.commandHistory.push(command);
         this.showToast(`Frame ${frame}: keyframe added`, "success");
     }
 
@@ -5972,7 +6131,7 @@ export class UIController {
         }
 
         this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
-        this.addKeyframeAtCurrentFrame(poseSnapshot);
+        this.addKeyframeAtCurrentFrame(poseSnapshot, "button");
     }
 
     private registerMorphKeyframesAtCurrentFrame(): void {
@@ -6444,7 +6603,7 @@ export class UIController {
         return block;
     }
 
-    private deleteSelectedKeyframe(): void {
+    private deleteSelectedKeyframe(source: ActionSource = "system"): void {
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
@@ -6452,17 +6611,63 @@ export class UIController {
         }
 
         const frame = this.timeline.getSelectedFrame() ?? this.mmdManager.currentFrame;
-        const removed = this.mmdManager.removeTimelineKeyframe(track, frame);
+        const command = buildKeyframeCommand(
+            { type: "keyframe.deleteSelected", source },
+            this.collectKeyframeCommandSnapshot(),
+        );
+        const removed = command
+            ? executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }))
+            : false;
         if (!removed) {
             this.showToast(`Frame ${frame}: no keyframe`, "info");
             return;
         }
 
-        if (this.timeline.getSelectedFrame() === frame) {
-            this.timeline.setSelectedFrame(null);
-        }
         this.updateTimelineEditState();
+        this.commandHistory.push(command);
         this.showToast(`Frame ${frame}: keyframe deleted`, "success");
+    }
+
+    private undoLastCommand(): void {
+        const command = this.commandHistory.undo();
+        if (!command) {
+            this.showToast("Nothing to undo", "info");
+            return;
+        }
+
+        const reverted = executeCommand(
+            command,
+            "revert",
+            this.createCommandExecutionContext({ seekToFrame: false }),
+        );
+        if (!reverted) {
+            this.commandHistory.redo();
+            this.showToast(`Undo failed: ${command.label}`, "error");
+            return;
+        }
+
+        this.showToast(`Undo: ${command.label}`, "success");
+    }
+
+    private redoLastCommand(): void {
+        const command = this.commandHistory.redo();
+        if (!command) {
+            this.showToast("Nothing to redo", "info");
+            return;
+        }
+
+        const applied = executeCommand(
+            command,
+            "apply",
+            this.createCommandExecutionContext({ seekToFrame: false }),
+        );
+        if (!applied) {
+            this.commandHistory.undo();
+            this.showToast(`Redo failed: ${command.label}`, "error");
+            return;
+        }
+
+        this.showToast(`Redo: ${command.label}`, "success");
     }
 
     private nudgeSelectedKeyframe(deltaFrame: number): void {
@@ -6479,17 +6684,28 @@ export class UIController {
             return;
         }
 
-        const toFrame = Math.max(0, fromFrame + deltaFrame);
-        const moved = this.mmdManager.moveTimelineKeyframe(track, fromFrame, toFrame);
+        if (deltaFrame !== -1 && deltaFrame !== 1) {
+            seekByDelta();
+            return;
+        }
+
+        const command = buildKeyframeCommand(
+            { type: "keyframe.nudgeSelected", source: "shortcut", deltaFrames: deltaFrame },
+            this.collectKeyframeCommandSnapshot(),
+        );
+        if (!command || command.diff.type !== "keyframe.move") {
+            seekByDelta();
+            return;
+        }
+
+        const moved = executeCommand(command, "apply", this.createCommandExecutionContext());
         if (!moved) {
             seekByDelta();
             return;
         }
 
-        this.timeline.setSelectedFrame(toFrame);
-        this.mmdManager.seekToBoundary(toFrame);
-        this.updateTimelineEditState();
-        this.showToast(`Key moved: ${fromFrame} -> ${toFrame}`, "success");
+        this.commandHistory.push(command);
+        this.showToast(`Key moved: ${command.diff.fromFrame} -> ${command.diff.toFrame}`, "success");
     }
 
     private getPlaybackFrameRange(): { startFrame: number; endFrame: number } {

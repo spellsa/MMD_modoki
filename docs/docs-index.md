@@ -38,6 +38,8 @@
 - [Action Catalog Draft 2026-05-17](./action-catalog-draft-2026-05-17.md)
 - [Action Dispatcher 進捗メモ 2026-05-18](./action-dispatcher-progress-note-2026-05-18.md)
 - [Command 設計メモ 2026-05-19](./command-design-note-2026-05-19.md)
+- [Command 実装進捗メモ 2026-05-19](./command-implementation-progress-note-2026-05-19.md)
+- [Undo / Redo Command 接続メモ 2026-05-19](./undo-redo-command-connection-note-2026-05-19.md)
 - [Action 仕様 Index](./actions/action-spec-index.md)
 - [タイムライン データフロー](./data-flow-timeline.md)
 - [編集状態遷移メモ](./edit-state-machine.md)

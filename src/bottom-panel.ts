@@ -28,7 +28,9 @@ export class BottomPanel {
     private mmdManager: MmdManager | null = null;
     public onBoneSelectionChanged: ((boneName: string | null) => void) | null = null;
     public onMorphFrameSelectionChanged: ((frameIndex: number | null) => void) | null = null;
+    public onBoneTransformEditStarted: ((boneName: string | null) => void) | null = null;
     public onBoneTransformEdited: ((boneName: string | null) => void) | null = null;
+    public onBoneTransformEditCommitted: ((boneName: string | null) => void) | null = null;
     public onMorphValueEdited: ((frameIndex: number | null) => void) | null = null;
     public onRangeInputsRendered: ((root: ParentNode) => void) | null = null;
     public onRangeSliderSynced: ((slider: HTMLInputElement) => void) | null = null;
@@ -370,9 +372,11 @@ export class BottomPanel {
 
             const beginSliderInteraction = (): void => {
                 this.activeSliderInteractions.add(slider);
+                this.onBoneTransformEditStarted?.(this.currentBoneName);
             };
             const endSliderInteraction = (): void => {
                 this.activeSliderInteractions.delete(slider);
+                this.onBoneTransformEditCommitted?.(this.currentBoneName);
             };
             slider.addEventListener("pointerdown", beginSliderInteraction);
             slider.addEventListener("pointerup", endSliderInteraction);

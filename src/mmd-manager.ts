@@ -1778,7 +1778,9 @@ ${beforeFogAppendBlock}
     public onAudioLoaded: ((name: string) => void) | null = null;
     public onPhysicsStateChanged: ((enabled: boolean, available: boolean) => void) | null = null;
     public onBoneVisualizerBonePicked: ((boneName: string) => void) | null = null;
+    public onBoneTransformEditStarted: ((boneName: string) => void) | null = null;
     public onBoneTransformEdited: ((boneName: string) => void) | null = null;
+    public onBoneTransformEditCommitted: ((boneName: string) => void) | null = null;
     public onCameraTransformEdited: (() => void) | null = null;
     public onMaterialShaderStateChanged: (() => void) | null = null;
     public onGlobalIlluminationStateChanged: ((enabled: boolean) => void) | null = null;

@@ -91,7 +91,7 @@ Action type は次の namespace に分ける。
 | `Alt+Enter` | `layout.fullscreen.toggle` | `layoutUiController.toggleUiFullscreenMode()` | no | MMD-like fullscreen |
 | `Ctrl+S` | `project.save` | `saveProject()` | no | overwrite when possible |
 | `Ctrl+Alt+S` | `project.saveAs` | `saveProject(true)` | no | save as |
-| `Ctrl+Alt+O` | `project.load` | `loadProject()` | no | history clear 契機 |
+| `Ctrl+Alt+O` | `project.load` | `loadProject()` | no | history は保持 |
 | `Ctrl+O` | `project.openModel` | `loadPMX()` | no | PMX / PMD |
 | `Ctrl+M` | `project.openMotion` | `loadVMD()` | no | VMD / VPD |
 | `Ctrl+Shift+M` | `project.openCameraMotion` | `loadCameraVMD()` | no | camera VMD |
@@ -118,8 +118,8 @@ Action type は次の namespace に分ける。
 
 | Action type 案 | 入力候補 | メモ |
 | --- | --- | --- |
-| `history.undo` | `Ctrl+Z` | HistoryManager 導入後 |
-| `history.redo` | `Ctrl+Y` / `Ctrl+Shift+Z` | MMD 互換は別途確認 |
+| `history.undo` | `Ctrl+Z` | 実装済み |
+| `history.redo` | `Ctrl+Y` | 実装済み。`Ctrl+Shift+Z` は redo として扱わない |
 | `keyframe.copySelected` | `Ctrl+C` | 既存 MMD shortcut 調査に候補あり |
 | `keyframe.paste` | `Ctrl+V` | 既存 MMD shortcut 調査に候補あり |
 
@@ -131,7 +131,7 @@ Action type は次の namespace に分ける。
 | --- | --- | --- | --- | --- |
 | load file button | `project.openFile` | `loadFileFromDialog()` | no | model / motion / audio 等の入口 |
 | save project button | `project.saveAs` | `saveProject(true)` | no | button は save as |
-| load project button | `project.load` | `loadProject()` | no | history clear 契機 |
+| load project button | `project.load` | `loadProject()` | no | history は保持 |
 | export PNG button | `project.exportPng` | `exportPNG()` | no | background export lock あり |
 | export PNG sequence button | `project.exportPngSequence` | `exportPNGSequence()` | no | 出力系 |
 | export WebM button | `project.exportWebm` | `exportWebm()` | no | 出力系 |
@@ -394,20 +394,20 @@ Accessory は keyframe と project state の両方に関わるため、初期 Po
 
 | Action type 案 | 現在の入口 | undo 対象 | History への影響 |
 | --- | --- | --- | --- |
-| `project.openFile` | load file button | no | 内容に応じて clear |
+| `project.openFile` | load file button | no | history は保持 |
 | `project.dropFiles` | drag drop | no | drop 順序を拡張子 priority で並べて `loadFileByPath(..., "drop")` |
-| `project.openModel` | `Ctrl+O` | no | clear するか要検討 |
-| `project.openMotion` | `Ctrl+M` | no | clear するか要検討 |
-| `project.openCameraMotion` | `Ctrl+Shift+M` | no | clear するか要検討 |
-| `project.openAudio` | `Ctrl+Shift+A` | no | clear 不要か要検討 |
+| `project.openModel` | `Ctrl+O` | no | history は保持 |
+| `project.openMotion` | `Ctrl+M` | no | history は保持 |
+| `project.openCameraMotion` | `Ctrl+Shift+M` | no | history は保持 |
+| `project.openAudio` | `Ctrl+Shift+A` | no | history は保持 |
 | `project.save` | `Ctrl+S` | no | なし |
 | `project.saveAs` | button / `Ctrl+Alt+S` | no | なし |
-| `project.load` | button / `Ctrl+Alt+O` | no | clear |
+| `project.load` | button / `Ctrl+Alt+O` | no | history は保持 |
 | `project.exportPng` | button / `Ctrl+Shift+S` | no | なし |
 | `project.exportPngSequence` | button | no | なし |
 | `project.exportWebm` | button | no | なし |
 
-Project 系 Action は command history に積まない。load / open 系は HistoryManager の clear reason として扱う。
+Project 系 Action は command history に積まない。load / open 系でも、アプリ起動中は command history を保持する。
 
 ## Action 型の初期イメージ
 
@@ -455,7 +455,7 @@ type EditorAction =
 - `nudgeSelectedKeyframe()` は selected frame がない場合 seek に fallback する。Action 化時は `keyframe.nudgeSelected` と `playback.stepFrame` / `seekFrame` を分けるべき。
 - `Enter` は text input 内では current frame commit、通常時は keyframe add。InputBinding で focus guard が必要。
 - `Space` は playback toggle だが、button focus 中や text input 中の扱いを明確にする。
-- `project.openModel` / `openMotion` 後に HistoryManager を clear するかは、編集対象と読み込み方式によって判断する。
+- `project.openModel` / `openMotion` 後も HistoryManager は clear しない。対象 track がなくなった command は executor 失敗として扱う。
 - Effect / Accessory の slider は drag start / change / commit の分離が必要。
 - Viewport camera drag は将来 Gamepad / MIDI と同じ `viewport.camera*` Action に寄せられるが、初期は runtime 操作のままでもよい。
 

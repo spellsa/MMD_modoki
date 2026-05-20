@@ -196,6 +196,23 @@
 - 注意:
   - gizmoの連続更新はpreviewとして扱い、commitだけ履歴に積む。
 
+2026-05-20 追加方針:
+
+- ボーン移動回転はメイン操作なので undo / redo 対象にする。
+- ただし `edit.boneTransformChanged` は「変更後通知」であり、単独では before snapshot を持てない。
+- slider 操作は `pointerdown` / `change` または `blur` を境界にして、開始前 snapshot と確定後 snapshot を 1 command にまとめる。
+- gizmo 操作は `isDragging` が false -> true になった時点で before snapshot を取り、true -> false になった時点で after snapshot を command 化する。
+- `input` / `beforeRender` の連続更新は履歴に積まない。
+- command payload はまず `boneName`, `before.position`, `before.rotation`, `after.position`, `after.rotation`, `frame` を持つ `edit.boneTransform` diff とする。
+- undo / redo 時は `MmdManager.setBoneTranslation(..., false)` / `setBoneRotation(..., false)` で runtime に反映し、bottom panel と dirty state を同期する。
+
+2026-05-20 実装:
+
+- `edit.boneTransform` command を追加。
+- bottom panel slider は pointer 操作開始時に before snapshot、終了時に after snapshot を取り、1 command として積む。
+- bone gizmo drag は `GizmoManager.isDragging` の開始 / 終了で before / after snapshot を取り、1 command として積む。
+- 連続 preview 更新は履歴に積まない。
+
 ### contextmenu / auxclick suppress
 
 - 現状:

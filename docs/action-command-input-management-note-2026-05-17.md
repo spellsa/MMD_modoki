@@ -373,7 +373,7 @@ type HistoryManager = {
 
 注意:
 
-- project load / model load の後は履歴を clear する。
+- project load / model load の後も履歴は clear しない。アプリ起動中は保持し、対象が存在しない command は executor 失敗として扱う。
 - undo / redo 後は timeline 表示、source animation、Babylon runtime を同期する。
 - 再生中編集は初期段階では禁止か、pause してから実行する。
 
@@ -834,7 +834,7 @@ type BuiltCommand = {
 - `project.exportPngSequence`
 - `project.exportWebm`
 
-履歴対象外。load / open 系は history clear の契機。
+履歴対象外。load / open 系でも history は保持する。
 
 ### effect
 

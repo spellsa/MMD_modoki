@@ -11,6 +11,8 @@ export type EditorActionAvailabilitySnapshot = {
     hasSelectedBone?: boolean;
     hasSelectedMorphFrame?: boolean;
     hasSelectedAccessory?: boolean;
+    canUndo?: boolean;
+    canRedo?: boolean;
 };
 
 const hasFiniteFrame = (frame: number): boolean => Number.isFinite(frame) && frame >= 0;
@@ -33,6 +35,10 @@ export function canExecuteEditorAction(
             return snapshot.hasSelectedMorphFrame ?? true;
         case "keyframe.registerAccessoryTransform":
             return snapshot.hasSelectedAccessory ?? true;
+        case "history.undo":
+            return snapshot.canUndo ?? true;
+        case "history.redo":
+            return snapshot.canRedo ?? true;
         case "selection.pickBone":
             return action.boneName.length > 0;
         case "playback.seekAdjacentKeyframe":

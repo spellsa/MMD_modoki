@@ -36,6 +36,25 @@ describe("canExecuteEditorAction", () => {
         )).toBe(false);
     });
 
+    it("uses history availability for undo and redo", () => {
+        expect(canExecuteEditorAction(
+            { type: "history.undo", source: "shortcut" },
+            { ...readySnapshot, canUndo: true },
+        )).toBe(true);
+        expect(canExecuteEditorAction(
+            { type: "history.undo", source: "shortcut" },
+            { ...readySnapshot, canUndo: false },
+        )).toBe(false);
+        expect(canExecuteEditorAction(
+            { type: "history.redo", source: "shortcut" },
+            { ...readySnapshot, canRedo: true },
+        )).toBe(true);
+        expect(canExecuteEditorAction(
+            { type: "history.redo", source: "shortcut" },
+            { ...readySnapshot, canRedo: false },
+        )).toBe(false);
+    });
+
     it("requires keyframes on the selected track for adjacent keyframe seek", () => {
         expect(canExecuteEditorAction(
             { type: "playback.seekAdjacentKeyframe", source: "shortcut", direction: 1 },

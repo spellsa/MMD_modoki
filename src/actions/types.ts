@@ -31,6 +31,10 @@ export type KeyframeAction =
     | { type: "keyframe.registerMorph"; source: ActionSource }
     | { type: "keyframe.registerAccessoryTransform"; source: ActionSource };
 
+export type HistoryAction =
+    | { type: "history.undo"; source: ActionSource }
+    | { type: "history.redo"; source: ActionSource };
+
 export type InterpolationAction =
     | { type: "interpolation.copy"; source: ActionSource }
     | { type: "interpolation.paste"; source: ActionSource }
@@ -196,6 +200,7 @@ export type EffectAction =
 export type EditorAction =
     | PlaybackAction
     | KeyframeAction
+    | HistoryAction
     | InterpolationAction
     | SelectionAction
     | ViewportAction
