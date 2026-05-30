@@ -395,8 +395,15 @@ export class UIController {
         });
         this.setupActionHandlers();
         this.appMenuController = new AppMenuController({
+            mmdManager: this.mmdManager,
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
+            setStatus: (text, loading) => this.setStatus(text, loading ?? false),
             showToast: (message, type) => this.showToast(message, type),
+            refreshEnvironmentUi: () => this.sceneEnvironmentUiController?.refresh(),
+            refreshCameraUi: () => this.cameraPanelController?.refresh(true),
+            refreshRuntimeUi: () => this.runtimeFeatureUiController?.refresh(),
+            refreshModelEdgeUi: () => this.modelEdgeController?.refresh(),
+            refreshLightingUi: () => this.refreshLightingUiFromRuntime(),
         });
         this.setupEventListeners();
         this.setupCallbacks();

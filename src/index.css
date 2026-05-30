@@ -515,6 +515,37 @@ select.popup-form-control {
   padding: 0 8px;
 }
 
+.popup-form-range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.popup-form-range {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.popup-form-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-form-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .popup-form-inline {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);

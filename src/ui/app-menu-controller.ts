@@ -1,17 +1,29 @@
 import { setLocale, t } from "../i18n";
+import type { MmdManager } from "../mmd-manager";
 import type { UiLocale } from "../types";
 import type { EditorAction } from "../actions/types";
+import { BackgroundSettingsDialogController } from "./background-settings-dialog-controller";
+import { EdgeSettingsDialogController } from "./edge-settings-dialog-controller";
+import { GravitySettingsDialogController } from "./gravity-settings-dialog-controller";
+import { LightingShadowSettingsDialogController } from "./lighting-shadow-settings-dialog-controller";
 import { PopupDialogController } from "./popup-dialog-controller";
 import { WebmExportDialogController } from "./webm-export-dialog-controller";
 
 type ToastType = "success" | "error" | "info";
 
 type AppMenuControllerDeps = {
+    mmdManager: MmdManager;
     dispatchAction: (action: EditorAction) => boolean;
+    setStatus: (text: string, loading?: boolean) => void;
     showToast: (message: string, type?: ToastType) => void;
+    refreshEnvironmentUi: () => void;
+    refreshCameraUi: () => void;
+    refreshRuntimeUi: () => void;
+    refreshModelEdgeUi: () => void;
+    refreshLightingUi: () => void;
 };
 
-type DialogKind = "about" | "shortcuts" | "preferences" | "background" | "gravity";
+type DialogKind = "about" | "shortcuts" | "preferences";
 
 type AppMenuElements = {
     root: HTMLElement | null;
@@ -30,15 +42,29 @@ function resolveElements(): AppMenuElements {
 
 export class AppMenuController {
     private readonly elements: AppMenuElements;
+    private readonly mmdManager: MmdManager;
     private readonly dispatchAction: (action: EditorAction) => boolean;
+    private readonly setStatus: (text: string, loading?: boolean) => void;
     private readonly showToast: (message: string, type?: ToastType) => void;
+    private readonly refreshEnvironmentUi: () => void;
+    private readonly refreshCameraUi: () => void;
+    private readonly refreshRuntimeUi: () => void;
+    private readonly refreshModelEdgeUi: () => void;
+    private readonly refreshLightingUi: () => void;
     private readonly popupDialogController: PopupDialogController;
     private openGroup: HTMLElement | null = null;
 
     constructor(deps: AppMenuControllerDeps) {
         this.elements = resolveElements();
+        this.mmdManager = deps.mmdManager;
         this.dispatchAction = deps.dispatchAction;
+        this.setStatus = deps.setStatus;
         this.showToast = deps.showToast;
+        this.refreshEnvironmentUi = deps.refreshEnvironmentUi;
+        this.refreshCameraUi = deps.refreshCameraUi;
+        this.refreshRuntimeUi = deps.refreshRuntimeUi;
+        this.refreshModelEdgeUi = deps.refreshModelEdgeUi;
+        this.refreshLightingUi = deps.refreshLightingUi;
         this.popupDialogController = new PopupDialogController();
         this.setupMenuEvents();
     }
@@ -197,6 +223,9 @@ export class AppMenuController {
             case "view.toggleEdge":
                 this.dispatchAction({ type: "viewport.toggleEdge", source: "menu" });
                 return;
+            case "view.edgeSettings":
+                this.openEdgeSettingsDialog(invoker ?? null);
+                return;
             case "view.toggleSkydome":
                 this.dispatchAction({ type: "viewport.toggleSkydome", source: "menu" });
                 return;
@@ -208,6 +237,9 @@ export class AppMenuController {
                 return;
             case "view.toggleGi":
                 this.dispatchAction({ type: "runtime.toggleGlobalIllumination", source: "menu" });
+                return;
+            case "view.lightShadowSettings":
+                this.openLightingShadowSettingsDialog(invoker ?? null);
                 return;
             case "view.toggleRigidBodies":
                 this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });
@@ -277,10 +309,10 @@ export class AppMenuController {
                 this.openDialog("preferences", invoker ?? null);
                 return;
             case "background.settings":
-                this.openDialog("background", invoker ?? null);
+                this.openBackgroundSettingsDialog(invoker ?? null);
                 return;
             case "physics.gravitySettings":
-                this.openDialog("gravity", invoker ?? null);
+                this.openGravitySettingsDialog(invoker ?? null);
                 return;
             case "dialog.shortcuts":
                 this.openDialog("shortcuts", invoker ?? null);
@@ -356,17 +388,72 @@ export class AppMenuController {
                     title: t("dialog.preferences.title"),
                     body: `<p>${t("dialog.preferences.body")}</p>`,
                 };
-            case "background":
-                return {
-                    title: t("dialog.background.title"),
-                    body: `<p>${t("dialog.background.body")}</p>`,
-                };
-            case "gravity":
-                return {
-                    title: t("dialog.gravity.title"),
-                    body: `<p>${t("dialog.gravity.body")}</p>`,
-                };
         }
+    }
+
+    private openBackgroundSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "background-settings",
+            surface: "modal",
+            title: t("dialog.background.title"),
+            size: "md",
+            restoreFocusTo: invoker,
+            content: new BackgroundSettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                setStatus: this.setStatus,
+                showToast: this.showToast,
+                refreshUi: () => {
+                    this.refreshEnvironmentUi();
+                    this.refreshCameraUi();
+                },
+            }),
+        });
+    }
+
+    private openEdgeSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "edge-settings",
+            surface: "modal",
+            title: t("dialog.edge.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new EdgeSettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshModelEdgeUi(),
+            }),
+        });
+    }
+
+    private openGravitySettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "gravity-settings",
+            surface: "modal",
+            title: t("dialog.gravity.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new GravitySettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshRuntimeUi(),
+            }),
+        });
+    }
+
+    private openLightingShadowSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "lighting-shadow-settings",
+            surface: "modal",
+            title: t("dialog.lightShadow.title"),
+            size: "md",
+            restoreFocusTo: invoker,
+            content: new LightingShadowSettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshLightingUi(),
+            }),
+        });
     }
 
     private openWebmExportDialog(invoker: HTMLElement | null): void {

@@ -36,3 +36,24 @@ export function createPopupFormButton(labelText: string, variant: "primary" | "s
     button.textContent = labelText;
     return button;
 }
+
+export function createPopupFormValueText(text = ""): HTMLSpanElement {
+    const value = document.createElement("span");
+    value.className = "popup-form-value";
+    value.textContent = text;
+    return value;
+}
+
+export function createPopupFormRange(input: HTMLInputElement, value: HTMLElement): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "popup-form-range-row";
+    row.append(input, value);
+    return row;
+}
+
+export function createPopupFormButtonRow(buttons: readonly HTMLButtonElement[]): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "popup-form-button-row";
+    buttons.forEach((button) => row.appendChild(button));
+    return row;
+}
