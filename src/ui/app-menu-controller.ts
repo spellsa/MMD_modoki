@@ -1,4 +1,5 @@
-import { t } from "../i18n";
+import { setLocale, t } from "../i18n";
+import type { UiLocale } from "../types";
 import type { EditorAction } from "../actions/types";
 
 type ToastType = "success" | "error" | "info";
@@ -181,6 +182,18 @@ export class AppMenuController {
             case "edit.redo":
                 this.dispatchAction({ type: "history.redo", source: "menu" });
                 return;
+            case "edit.addKeyframe":
+                this.dispatchAction({ type: "keyframe.addCurrent", source: "menu" });
+                return;
+            case "edit.deleteKeyframe":
+                this.dispatchAction({ type: "keyframe.deleteSelected", source: "menu" });
+                return;
+            case "edit.prevKeyframe":
+                this.dispatchAction({ type: "playback.seekAdjacentKeyframe", source: "menu", direction: -1 });
+                return;
+            case "edit.nextKeyframe":
+                this.dispatchAction({ type: "playback.seekAdjacentKeyframe", source: "menu", direction: 1 });
+                return;
             case "view.toggleGround":
                 this.dispatchAction({ type: "viewport.toggleGround", source: "menu" });
                 return;
@@ -190,8 +203,44 @@ export class AppMenuController {
             case "view.toggleSkydome":
                 this.dispatchAction({ type: "viewport.toggleSkydome", source: "menu" });
                 return;
+            case "view.toggleAntialias":
+                this.dispatchAction({ type: "runtime.toggleAntialias", source: "menu" });
+                return;
+            case "view.toggleShadow":
+                this.dispatchAction({ type: "runtime.toggleShadow", source: "menu" });
+                return;
+            case "view.toggleGi":
+                this.dispatchAction({ type: "runtime.toggleGlobalIllumination", source: "menu" });
+                return;
+            case "view.toggleRigidBodies":
+                this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });
+                return;
             case "view.toggleFxPanel":
                 this.dispatchAction({ type: "layout.shaderPanel.toggle", source: "menu" });
+                return;
+            case "view.camera.front":
+                this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "front" });
+                return;
+            case "view.camera.back":
+                this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "back" });
+                return;
+            case "view.camera.left":
+                this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "left" });
+                return;
+            case "view.camera.right":
+                this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "right" });
+                return;
+            case "view.camera.top":
+                this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "top" });
+                return;
+            case "view.camera.bottom":
+                this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "bottom" });
+                return;
+            case "view.toggleActiveModel":
+                this.dispatchAction({ type: "model.toggleActiveVisibility", source: "menu" });
+                return;
+            case "view.deleteActiveModel":
+                this.dispatchAction({ type: "model.deleteActive", source: "menu" });
                 return;
             case "view.toggleFullscreenUi":
                 this.dispatchAction({ type: "layout.fullscreen.toggle", source: "menu" });
@@ -201,6 +250,22 @@ export class AppMenuController {
                 return;
             case "background.toggleBlack":
                 this.dispatchAction({ type: "viewport.toggleBackgroundBlack", source: "menu" });
+                return;
+            case "background.toggleMirrorFloor":
+                this.dispatchAction({
+                    type: "camera.setMirroringFloorEnabled",
+                    source: "menu",
+                    enabled: !this.isMirroringFloorEnabled(),
+                });
+                return;
+            case "background.mirrorResolution512":
+                this.dispatchAction({ type: "camera.setMirroringFloorResolution", source: "menu", resolution: 512 });
+                return;
+            case "background.mirrorResolution1024":
+                this.dispatchAction({ type: "camera.setMirroringFloorResolution", source: "menu", resolution: 1024 });
+                return;
+            case "expression.addKeyframe":
+                this.dispatchAction({ type: "keyframe.addCurrent", source: "menu" });
                 return;
             case "expression.registerMorph":
                 this.dispatchAction({ type: "keyframe.registerMorph", source: "menu" });
@@ -226,6 +291,27 @@ export class AppMenuController {
             case "dialog.about":
                 this.openDialog("about");
                 return;
+            case "language.ja":
+                this.setLanguage("ja");
+                return;
+            case "language.en":
+                this.setLanguage("en");
+                return;
+            case "language.zh-Hant":
+                this.setLanguage("zh-Hant");
+                return;
+            case "language.zh-Hans":
+                this.setLanguage("zh-Hans");
+                return;
+            case "language.ko":
+                this.setLanguage("ko");
+                return;
+            case "runtime.classic":
+                this.setRuntimeMode("classic");
+                return;
+            case "runtime.wasm":
+                this.setRuntimeMode("wasm");
+                return;
             case "help.openLogFolder":
                 void this.openLogFolder();
                 return;
@@ -242,7 +328,7 @@ export class AppMenuController {
             <section class="app-menu-dialog" role="dialog" aria-modal="true" aria-labelledby="app-menu-dialog-title">
                 <header class="app-menu-dialog-header">
                     <h2 id="app-menu-dialog-title" class="app-menu-dialog-title"></h2>
-                    <button class="app-menu-dialog-close" type="button" aria-label="Close">×</button>
+                    <button class="app-menu-dialog-close" type="button" aria-label="Close">&times;</button>
                 </header>
                 <div class="app-menu-dialog-body"></div>
             </section>
@@ -314,5 +400,26 @@ export class AppMenuController {
     private async openLogFolder(): Promise<void> {
         const opened = await window.electronAPI.openLogFolder();
         this.showToast(opened ? t("menu.toast.logFolderOpened") : t("menu.toast.logFolderFailed"), opened ? "success" : "error");
+    }
+
+    private setLanguage(locale: UiLocale): void {
+        setLocale(locale);
+        this.showToast(t("menu.toast.languageChanged"), "success");
+    }
+
+    private setRuntimeMode(mode: "classic" | "wasm"): void {
+        const select = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
+        if (!select) return;
+        if (select.value === mode) {
+            this.showToast(t("menu.toast.runtimeAlreadySelected"), "info");
+            return;
+        }
+        select.value = mode;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    private isMirroringFloorEnabled(): boolean {
+        const checkbox = document.getElementById("mirroring-floor-enabled") as HTMLInputElement | null;
+        return checkbox?.checked ?? false;
     }
 }

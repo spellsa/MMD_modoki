@@ -145,7 +145,7 @@ optgroup {
    ============================================ */
 #app {
   display: grid;
-  grid-template-rows: var(--app-menu-height) var(--toolbar-height) 1fr var(--bottom-panel-resizer-height) var(--bottom-panel-height);
+  grid-template-rows: var(--toolbar-height) 1fr var(--bottom-panel-resizer-height) var(--bottom-panel-height);
   grid-template-columns: 1fr;
   width: 100%;
   height: 100vh;
@@ -221,15 +221,22 @@ body.exporter-mode #bone-overlay-canvas {
   display: flex;
   align-items: stretch;
   gap: 2px;
+  grid-row: 1;
+  grid-column: 1;
+  align-self: stretch;
+  justify-self: stretch;
   min-width: 0;
-  padding: 0 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-  background: linear-gradient(180deg, #1d1d1d 0%, #141414 100%);
+  margin-left: 148px;
+  margin-right: 640px;
+  padding: 0 6px;
+  border-bottom: 1px solid transparent;
+  background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1;
   user-select: none;
   z-index: 320;
+  -webkit-app-region: no-drag;
 }
 
 .app-menu-group {
@@ -417,8 +424,10 @@ body.exporter-mode #bone-overlay-canvas {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  grid-row: 1;
+  grid-column: 1;
   padding: 0 12px;
-  background: var(--bg-secondary);
+  background: linear-gradient(180deg, #1d1d1d 0%, #141414 100%);
   border-bottom: 1px solid var(--border-color);
   z-index: 100;
   -webkit-app-region: drag;
@@ -498,7 +507,7 @@ body.exporter-mode #bone-overlay-canvas {
   font-weight: 600;
   font-size: 14px;
   color: currentColor;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .toolbar-divider {
@@ -506,6 +515,50 @@ body.exporter-mode #bone-overlay-canvas {
   height: 24px;
   background: var(--border-color);
   margin: 0 4px;
+}
+
+.toolbar-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 2px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+
+.toolbar-mode-btn {
+  min-width: 48px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.toolbar-mode-btn:hover,
+.toolbar-mode-btn:focus-visible {
+  color: var(--text-primary);
+  outline: none;
+}
+
+.toolbar-mode-btn.is-active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.toolbar-mode-btn:disabled {
+  color: rgba(255, 255, 255, 0.28);
+  cursor: not-allowed;
 }
 
 .toolbar-btn {
@@ -3826,6 +3879,16 @@ body.bottom-panel-resizing {
 }
 
 @media (max-width: 1760px) {
+  #app-menu-bar {
+    margin-left: 136px;
+    margin-right: 568px;
+    padding: 0 4px;
+  }
+
+  .app-menu-trigger {
+    padding: 0 8px;
+  }
+
   #toolbar {
     gap: 6px;
     padding: 0 8px;
@@ -3910,6 +3973,11 @@ body.bottom-panel-resizing {
   html,
   body {
     font-size: 14px;
+  }
+
+  #app-menu-bar {
+    margin-left: 168px;
+    margin-right: 700px;
   }
 
   #toolbar {
@@ -4180,6 +4248,11 @@ body.bottom-panel-resizing {
 }
 
 @media (min-width: 1600px) and (max-width: 1760px) and (min-height: 900px) {
+  #app-menu-bar {
+    margin-left: 152px;
+    margin-right: 610px;
+  }
+
   #toolbar {
     gap: 6px;
     padding: 0 8px;

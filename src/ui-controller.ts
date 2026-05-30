@@ -193,6 +193,8 @@ export class UIController {
     private btnExportWebm: HTMLElement | null = null;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
     private toolbarRuntimeModeSelect: HTMLSelectElement | null = null;
+    private toolbarModelModeButton: HTMLButtonElement | null = null;
+    private toolbarCameraModeButton: HTMLButtonElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
     private btnStop: HTMLElement | null;
@@ -304,6 +306,8 @@ export class UIController {
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
         this.toolbarRuntimeModeSelect = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
+        this.toolbarModelModeButton = document.getElementById("btn-toolbar-model-mode") as HTMLButtonElement | null;
+        this.toolbarCameraModeButton = document.getElementById("btn-toolbar-camera-mode") as HTMLButtonElement | null;
         this.btnPlay = document.getElementById("btn-play")!;
         this.btnPause = document.getElementById("btn-pause")!;
         this.btnStop = document.getElementById("btn-stop");
@@ -570,6 +574,28 @@ export class UIController {
             window.setTimeout(() => {
                 window.location.reload();
             }, 120);
+        });
+        this.toolbarModelModeButton?.addEventListener("click", () => {
+            const models = this.mmdManager.getLoadedModels();
+            const target = models.find((model) => model.active) ?? models[0] ?? null;
+            if (!target) {
+                this.refreshToolbarTimelineTargetSwitch();
+                return;
+            }
+            this.actionDispatcher.dispatch({
+                type: "model.selectTimelineTarget",
+                source: "button",
+                value: String(target.index),
+                showToast: true,
+            });
+        });
+        this.toolbarCameraModeButton?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({
+                type: "model.selectTimelineTarget",
+                source: "button",
+                value: MODEL_INFO_CAMERA_SELECT_VALUE,
+                showToast: true,
+            });
         });
         // Playback
         this.btnPlay.addEventListener("click", () => {
@@ -2838,6 +2864,19 @@ export class UIController {
         this.updateInfoActionButtons();
         this.runtimeFeatureUiController?.refreshRigidBodies();
         this.accessoryPanelController?.refresh();
+        this.refreshToolbarTimelineTargetSwitch();
+    }
+
+    private refreshToolbarTimelineTargetSwitch(): void {
+        const hasLoadedModels = this.mmdManager.getLoadedModels().length > 0;
+        const target = hasLoadedModels ? this.mmdManager.getTimelineTarget() : "camera";
+        this.toolbarModelModeButton?.classList.toggle("is-active", target === "model");
+        this.toolbarCameraModeButton?.classList.toggle("is-active", target === "camera");
+        this.toolbarModelModeButton?.setAttribute("aria-pressed", target === "model" ? "true" : "false");
+        this.toolbarCameraModeButton?.setAttribute("aria-pressed", target === "camera" ? "true" : "false");
+        if (this.toolbarModelModeButton) {
+            this.toolbarModelModeButton.disabled = !hasLoadedModels;
+        }
     }
 
     private getInfoModelSelectState(): ModelInfoSelectState {
