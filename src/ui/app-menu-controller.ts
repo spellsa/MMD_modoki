@@ -1,6 +1,5 @@
-import { setLocale, t } from "../i18n";
+import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
-import type { UiLocale } from "../types";
 import type { EditorAction } from "../actions/types";
 import { BackgroundSettingsDialogController } from "./background-settings-dialog-controller";
 import { EdgeSettingsDialogController } from "./edge-settings-dialog-controller";
@@ -217,6 +216,9 @@ export class AppMenuController {
             case "edit.nextKeyframe":
                 this.dispatchAction({ type: "playback.seekAdjacentKeyframe", source: "menu", direction: 1 });
                 return;
+            case "edit.deleteActiveModel":
+                this.dispatchAction({ type: "model.deleteActive", source: "menu" });
+                return;
             case "view.toggleGround":
                 this.dispatchAction({ type: "viewport.toggleGround", source: "menu" });
                 return;
@@ -240,9 +242,6 @@ export class AppMenuController {
                 return;
             case "view.lightShadowSettings":
                 this.openLightingShadowSettingsDialog(invoker ?? null);
-                return;
-            case "view.toggleRigidBodies":
-                this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });
                 return;
             case "view.toggleFxPanel":
                 this.dispatchAction({ type: "layout.shaderPanel.toggle", source: "menu" });
@@ -268,9 +267,6 @@ export class AppMenuController {
             case "view.toggleActiveModel":
                 this.dispatchAction({ type: "model.toggleActiveVisibility", source: "menu" });
                 return;
-            case "view.deleteActiveModel":
-                this.dispatchAction({ type: "model.deleteActive", source: "menu" });
-                return;
             case "view.toggleFullscreenUi":
                 this.dispatchAction({ type: "layout.fullscreen.toggle", source: "menu" });
                 return;
@@ -286,12 +282,6 @@ export class AppMenuController {
                     source: "menu",
                     enabled: !this.isMirroringFloorEnabled(),
                 });
-                return;
-            case "background.mirrorResolution512":
-                this.dispatchAction({ type: "camera.setMirroringFloorResolution", source: "menu", resolution: 512 });
-                return;
-            case "background.mirrorResolution1024":
-                this.dispatchAction({ type: "camera.setMirroringFloorResolution", source: "menu", resolution: 1024 });
                 return;
             case "expression.addKeyframe":
                 this.dispatchAction({ type: "keyframe.addCurrent", source: "menu" });
@@ -319,21 +309,6 @@ export class AppMenuController {
                 return;
             case "dialog.about":
                 this.openDialog("about", invoker ?? null);
-                return;
-            case "language.ja":
-                this.setLanguage("ja");
-                return;
-            case "language.en":
-                this.setLanguage("en");
-                return;
-            case "language.zh-Hant":
-                this.setLanguage("zh-Hant");
-                return;
-            case "language.zh-Hans":
-                this.setLanguage("zh-Hans");
-                return;
-            case "language.ko":
-                this.setLanguage("ko");
                 return;
             case "runtime.classic":
                 this.setRuntimeMode("classic");
@@ -475,11 +450,6 @@ export class AppMenuController {
     private async openLogFolder(): Promise<void> {
         const opened = await window.electronAPI.openLogFolder();
         this.showToast(opened ? t("menu.toast.logFolderOpened") : t("menu.toast.logFolderFailed"), opened ? "success" : "error");
-    }
-
-    private setLanguage(locale: UiLocale): void {
-        setLocale(locale);
-        this.showToast(t("menu.toast.languageChanged"), "success");
     }
 
     private setRuntimeMode(mode: "classic" | "wasm"): void {

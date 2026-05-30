@@ -41,6 +41,8 @@
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="edit.prevKeyframe"><span data-i18n="menu.edit.prevKeyframe">前のキーフレームへ</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="edit.nextKeyframe"><span data-i18n="menu.edit.nextKeyframe">次のキーフレームへ</span></button>
           <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="edit.deleteActiveModel"><span data-i18n="menu.edit.deleteActiveModel">選択モデルを削除</span></button>
+          <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="dialog.preferences"><span data-i18n="menu.edit.preferences">設定...</span></button>
         </div>
       </div>
@@ -55,7 +57,6 @@
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleShadow"><span data-i18n="menu.view.toggleShadow">影表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.lightShadowSettings"><span data-i18n="menu.view.lightShadowSettings">照明/影品質設定...</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleGi"><span data-i18n="menu.view.toggleGi">グローバルイルミネーション</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleRigidBodies"><span data-i18n="menu.view.toggleRigidBodies">剛体表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleFxPanel"><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.front"><span data-i18n="menu.view.camera.front">正面</span></button>
@@ -66,7 +67,6 @@
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.bottom"><span data-i18n="menu.view.camera.bottom">下面</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleActiveModel"><span data-i18n="menu.view.toggleActiveModel">選択モデルを表示/非表示</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.deleteActiveModel"><span data-i18n="menu.view.deleteActiveModel">選択モデルを削除</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleFullscreenUi"><span data-i18n="menu.view.toggleFullscreenUi">表示UIを隠す</span><span class="app-menu-shortcut">Esc</span></button>
         </div>
@@ -77,8 +77,6 @@
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleMedia"><span data-i18n="menu.background.toggleMedia">背景画像/動画を表示/非表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleBlack"><span data-i18n="menu.background.toggleBlack">黒背景を表示/非表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleMirrorFloor"><span data-i18n="menu.background.toggleMirrorFloor">Mirror床を有効/無効</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.mirrorResolution512"><span data-i18n="menu.background.mirrorResolution512">Mirror解像度 512</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.mirrorResolution1024"><span data-i18n="menu.background.mirrorResolution1024">Mirror解像度 1024</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.settings"><span data-i18n="menu.background.settings">背景設定...</span></button>
         </div>
@@ -106,12 +104,6 @@
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="runtime.classic"><span data-i18n="menu.runtime.classic">Runtime: Classic</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="runtime.wasm"><span data-i18n="menu.runtime.wasm">Runtime: WASM</span></button>
-          <div class="app-menu-separator" role="separator"></div>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="language.ja"><span data-i18n="menu.language.ja">日本語</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="language.en"><span data-i18n="menu.language.en">English</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="language.zh-Hant"><span data-i18n="menu.language.zh-Hant">繁體中文</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="language.zh-Hans"><span data-i18n="menu.language.zh-Hans">简体中文</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="language.ko"><span data-i18n="menu.language.ko">한국어</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="dialog.about"><span data-i18n="menu.help.about">MMD modoki について</span></button>
         </div>
