@@ -10,6 +10,84 @@
 <body>
   <!-- App Shell -->
   <div id="app">
+    <!-- App Menu Bar -->
+    <nav id="app-menu-bar" aria-label="Application menu" data-i18n-aria-label="menu.ariaLabel">
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.file">ファイル</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.openFile"><span data-i18n="menu.file.openFile">ファイル読込...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.openModel"><span data-i18n="menu.file.openModel">モデル読込...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.openMotion"><span data-i18n="menu.file.openMotion">モーション読込...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.openCameraMotion"><span data-i18n="menu.file.openCameraMotion">カメラモーション読込...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.openAudio"><span data-i18n="menu.file.openAudio">音源読込...</span></button>
+          <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.loadProject"><span data-i18n="menu.file.loadProject">プロジェクト読込...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.saveProject"><span data-i18n="menu.file.saveProject">プロジェクト保存...</span><span class="app-menu-shortcut">Ctrl+S</span></button>
+          <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.exportPng"><span data-i18n="menu.file.exportPng">PNG出力...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.exportPngSequence"><span data-i18n="menu.file.exportPngSequence">PNG連番出力...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="file.exportWebm"><span data-i18n="menu.file.exportWebm">WebM出力...</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.edit">編集</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="edit.undo"><span data-i18n="menu.edit.undo">元に戻す</span><span class="app-menu-shortcut">Ctrl+Z</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="edit.redo"><span data-i18n="menu.edit.redo">やり直し</span><span class="app-menu-shortcut">Ctrl+Y</span></button>
+          <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="dialog.preferences"><span data-i18n="menu.edit.preferences">設定...</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.view">表示</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleGround"><span data-i18n="menu.view.toggleGround">床を表示/非表示</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleEdge"><span data-i18n="menu.view.toggleEdge">エッジを表示/非表示</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleSkydome"><span data-i18n="menu.view.toggleSkydome">空を表示/非表示</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleFxPanel"><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
+          <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleFullscreenUi"><span data-i18n="menu.view.toggleFullscreenUi">表示UIを隠す</span><span class="app-menu-shortcut">Esc</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.background">背景</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleMedia"><span data-i18n="menu.background.toggleMedia">背景画像/動画を表示/非表示</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleBlack"><span data-i18n="menu.background.toggleBlack">黒背景を表示/非表示</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.settings"><span data-i18n="menu.background.settings">背景設定...</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.expression">表情</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="expression.registerMorph"><span data-i18n="menu.expression.registerMorph">モーフを登録</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.physics">物理演算</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="physics.togglePhysics"><span data-i18n="menu.physics.togglePhysics">物理演算を有効/無効</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="physics.toggleRigidBodies"><span data-i18n="menu.physics.toggleRigidBodies">剛体表示を有効/無効</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="physics.gravitySettings"><span data-i18n="menu.physics.gravitySettings">重力設定...</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.motionCapture">モーションキャプチャ</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" disabled><span data-i18n="menu.motionCapture.comingSoon">Coming soon</span></button>
+        </div>
+      </div>
+      <div class="app-menu-group">
+        <button class="app-menu-trigger" type="button" data-i18n="menu.help">ヘルプ</button>
+        <div class="app-menu-list" role="menu">
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="dialog.shortcuts"><span data-i18n="menu.help.shortcuts">キーボードショートカット</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="help.openLogFolder"><span data-i18n="menu.help.openLogFolder">ログフォルダを開く</span></button>
+          <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="dialog.about"><span data-i18n="menu.help.about">MMD modoki について</span></button>
+        </div>
+      </div>
+    </nav>
+
     <!-- Top Toolbar -->
     <header id="toolbar">
       <div class="toolbar-left">

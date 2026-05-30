@@ -5,6 +5,7 @@ export type ActionSource =
     | "shortcut"
     | "timeline"
     | "viewport"
+    | "menu"
     | "panel"
     | "drop"
     | "gamepad"

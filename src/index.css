@@ -1,3 +1,7 @@
+@layer theme, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
 /* ============================================
    MMD modoki - Design System
    ============================================ */
@@ -42,6 +46,7 @@
   --border-accent: rgba(255, 255, 255, 0.18);
 
   /* Spacing */
+  --app-menu-height: 28px;
   --toolbar-height: 44px;
   --timeline-width: 270px;
   --timeline-label-width: 72px;
@@ -140,7 +145,7 @@ optgroup {
    ============================================ */
 #app {
   display: grid;
-  grid-template-rows: var(--toolbar-height) 1fr var(--bottom-panel-resizer-height) var(--bottom-panel-height);
+  grid-template-rows: var(--app-menu-height) var(--toolbar-height) 1fr var(--bottom-panel-resizer-height) var(--bottom-panel-height);
   grid-template-columns: 1fr;
   width: 100%;
   height: 100vh;
@@ -151,6 +156,7 @@ body.exporter-mode #app {
   grid-template-rows: 1fr;
 }
 
+body.exporter-mode #app-menu-bar,
 body.exporter-mode #toolbar,
 body.exporter-mode #timeline-panel,
 body.exporter-mode #timeline-resizer,
@@ -179,6 +185,7 @@ body.exporter-mode #bone-overlay-canvas {
   grid-template-rows: 1fr;
 }
 
+#app.ui-presentation-mode #app-menu-bar,
 #app.ui-presentation-mode #toolbar,
 #app.ui-presentation-mode #timeline-panel,
 #app.ui-presentation-mode #timeline-resizer,
@@ -205,6 +212,201 @@ body.exporter-mode #bone-overlay-canvas {
 
 #app.ui-presentation-mode #bone-overlay-canvas {
   display: none !important;
+}
+
+/* ============================================
+   App Menu Bar
+   ============================================ */
+#app-menu-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(180deg, #1d1d1d 0%, #141414 100%);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  user-select: none;
+  z-index: 320;
+}
+
+.app-menu-group {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.app-menu-trigger {
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.app-menu-trigger:hover,
+.app-menu-trigger:focus-visible,
+.app-menu-group.menu-open > .app-menu-trigger {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.app-menu-list {
+  position: absolute;
+  top: calc(100% + 1px);
+  left: 0;
+  z-index: 420;
+  display: none;
+  min-width: 224px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md);
+  background: rgba(28, 28, 28, 0.98);
+  box-shadow: var(--shadow-lg);
+}
+
+.app-menu-group.menu-open > .app-menu-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-menu-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 26px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.app-menu-item:hover,
+.app-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.app-menu-item:disabled {
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.app-menu-item:disabled:hover {
+  background: transparent;
+}
+
+.app-menu-shortcut {
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+}
+
+.app-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.app-menu-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 520;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.app-menu-dialog-backdrop[hidden] {
+  display: none !important;
+}
+
+.app-menu-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(72vh, 640px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-md);
+  background: #1c1c1c;
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+}
+
+.app-menu-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-menu-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.app-menu-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 18px;
+}
+
+.app-menu-dialog-close:hover,
+.app-menu-dialog-close:focus-visible {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.app-menu-dialog-body {
+  overflow: auto;
+  padding: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.app-menu-dialog-body p {
+  margin: 0 0 10px;
+}
+
+.app-menu-dialog-body dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 18px;
+  margin: 0;
+}
+
+.app-menu-dialog-body dt {
+  color: var(--text-primary);
+}
+
+.app-menu-dialog-body dd {
+  margin: 0;
 }
 
 /* ============================================

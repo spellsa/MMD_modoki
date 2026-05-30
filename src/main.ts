@@ -181,6 +181,11 @@ const SMOKE_TEST_TIMEOUT_MS = Math.max(
 );
 const SMOKE_TEST_REQUIRE_WEBGPU = process.env.MMD_MODOKI_SMOKE_REQUIRE_WEBGPU !== '0';
 const SMOKE_TEST_RESULT_PATH = process.env.MMD_MODOKI_SMOKE_RESULT_PATH ?? null;
+const SMOKE_TEST_SCREENSHOT_PATH = process.env.MMD_MODOKI_SMOKE_SCREENSHOT_PATH ?? null;
+const SMOKE_TEST_SCREENSHOT_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(process.env.MMD_MODOKI_SMOKE_SCREENSHOT_DELAY_MS ?? '500', 10) || 0,
+);
 
 const pngSequenceExportJobMap = new Map<string, PngSequenceExportRequest>();
 const pngSequenceExportActiveCountByOwner = new Map<number, number>();
@@ -548,6 +553,37 @@ const finishSmokeTest = (success: boolean, reason: string, data?: AppLogData): v
   app.exit(success ? 0 : 1);
 };
 
+const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+
+const captureSmokeScreenshot = async (
+  mainWindow: BrowserWindow,
+  data: AppLogData,
+): Promise<AppLogData> => {
+  if (!SMOKE_TEST_SCREENSHOT_PATH) return data;
+
+  try {
+    if (SMOKE_TEST_SCREENSHOT_DELAY_MS > 0) {
+      await wait(SMOKE_TEST_SCREENSHOT_DELAY_MS);
+    }
+    const image = await mainWindow.webContents.capturePage();
+    await fs.promises.mkdir(path.dirname(SMOKE_TEST_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(SMOKE_TEST_SCREENSHOT_PATH, image.toPNG());
+    return {
+      ...data,
+      screenshotPath: SMOKE_TEST_SCREENSHOT_PATH,
+    };
+  } catch (err: unknown) {
+    const errorData = createLogErrorData(err);
+    writeAppLog('warn', 'main', 'failed to capture smoke screenshot', errorData);
+    return {
+      ...data,
+      screenshotError: errorData,
+    };
+  }
+};
+
 const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise<void>): void => {
   if (!isSmokeMode) return;
 
@@ -631,12 +667,15 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
       return;
     }
     console.log(`[smoke] renderer ready: engine=${engine} physics=${physicsBackend} isolated=${crossOriginIsolated}`);
-    complete(true, 'renderer runtime initialized', {
+    const successData = {
       engine,
       physicsBackend,
       crossOriginIsolated,
       sharedArrayBufferAvailable,
       webContentsId: mainWindow.webContents.id,
+    };
+    void captureSmokeScreenshot(mainWindow, successData).then((data) => {
+      complete(true, 'renderer runtime initialized', data);
     });
   };
 

@@ -18,6 +18,7 @@ import type {
     TimelineInterpolationPreview,
 } from "./types";
 import { AccessoryPanelController } from "./ui/accessory-panel-controller";
+import { AppMenuController } from "./ui/app-menu-controller";
 import { BloomToneMapController } from "./ui/bloom-tone-map-controller";
 import { CameraPanelController } from "./ui/camera-panel-controller";
 import { ColorPostFxController } from "./ui/color-postfx-controller";
@@ -250,6 +251,7 @@ export class UIController {
     private timelineWaveformRequestId = 0;
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
+    private appMenuController: AppMenuController | null = null;
     private bloomToneMapController: BloomToneMapController | null = null;
     private cameraPanelController: CameraPanelController | null = null;
     private colorPostFxController: ColorPostFxController | null = null;
@@ -388,6 +390,10 @@ export class UIController {
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.setupActionHandlers();
+        this.appMenuController = new AppMenuController({
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
+            showToast: (message, type) => this.showToast(message, type),
+        });
         this.setupEventListeners();
         this.setupCallbacks();
         this.setupKeyboard();
