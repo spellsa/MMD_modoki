@@ -1,6 +1,8 @@
 import { setLocale, t } from "../i18n";
 import type { UiLocale } from "../types";
 import type { EditorAction } from "../actions/types";
+import { PopupDialogController } from "./popup-dialog-controller";
+import { WebmExportDialogController } from "./webm-export-dialog-controller";
 
 type ToastType = "success" | "error" | "info";
 
@@ -30,23 +32,20 @@ export class AppMenuController {
     private readonly elements: AppMenuElements;
     private readonly dispatchAction: (action: EditorAction) => boolean;
     private readonly showToast: (message: string, type?: ToastType) => void;
-    private dialogBackdrop: HTMLElement | null = null;
-    private dialogTitle: HTMLElement | null = null;
-    private dialogBody: HTMLElement | null = null;
-    private dialogCloseButton: HTMLButtonElement | null = null;
+    private readonly popupDialogController: PopupDialogController;
     private openGroup: HTMLElement | null = null;
 
     constructor(deps: AppMenuControllerDeps) {
         this.elements = resolveElements();
         this.dispatchAction = deps.dispatchAction;
         this.showToast = deps.showToast;
-        this.setupDialogHost();
+        this.popupDialogController = new PopupDialogController();
         this.setupMenuEvents();
     }
 
     public closeAll(): void {
         this.setOpenGroup(null);
-        this.closeDialog();
+        this.popupDialogController.close();
     }
 
     private setupMenuEvents(): void {
@@ -68,7 +67,7 @@ export class AppMenuController {
             if (!item || item.disabled) return;
             const command = item.dataset.menuCommand;
             if (!command) return;
-            this.executeCommand(command);
+            this.executeCommand(command, item);
             this.setOpenGroup(null);
         });
 
@@ -83,11 +82,6 @@ export class AppMenuController {
 
     private handleKeyDown(event: KeyboardEvent): void {
         if (event.key === "Escape") {
-            if (this.dialogBackdrop && !this.dialogBackdrop.hidden) {
-                event.preventDefault();
-                this.closeDialog();
-                return;
-            }
             if (this.openGroup) {
                 event.preventDefault();
                 this.setOpenGroup(null);
@@ -144,7 +138,7 @@ export class AppMenuController {
         this.openGroup = group;
     }
 
-    private executeCommand(command: string): void {
+    private executeCommand(command: string, invoker?: HTMLElement | null): void {
         switch (command) {
             case "file.openFile":
                 this.dispatchAction({ type: "project.openFile", source: "menu" });
@@ -175,6 +169,9 @@ export class AppMenuController {
                 return;
             case "file.exportWebm":
                 this.dispatchAction({ type: "project.exportWebm", source: "menu" });
+                return;
+            case "file.webmExportSettings":
+                this.openWebmExportDialog(invoker ?? null);
                 return;
             case "edit.undo":
                 this.dispatchAction({ type: "history.undo", source: "menu" });
@@ -277,19 +274,19 @@ export class AppMenuController {
                 this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });
                 return;
             case "dialog.preferences":
-                this.openDialog("preferences");
+                this.openDialog("preferences", invoker ?? null);
                 return;
             case "background.settings":
-                this.openDialog("background");
+                this.openDialog("background", invoker ?? null);
                 return;
             case "physics.gravitySettings":
-                this.openDialog("gravity");
+                this.openDialog("gravity", invoker ?? null);
                 return;
             case "dialog.shortcuts":
-                this.openDialog("shortcuts");
+                this.openDialog("shortcuts", invoker ?? null);
                 return;
             case "dialog.about":
-                this.openDialog("about");
+                this.openDialog("about", invoker ?? null);
                 return;
             case "language.ja":
                 this.setLanguage("ja");
@@ -320,43 +317,18 @@ export class AppMenuController {
         }
     }
 
-    private setupDialogHost(): void {
-        const backdrop = document.createElement("div");
-        backdrop.className = "app-menu-dialog-backdrop";
-        backdrop.hidden = true;
-        backdrop.innerHTML = `
-            <section class="app-menu-dialog" role="dialog" aria-modal="true" aria-labelledby="app-menu-dialog-title">
-                <header class="app-menu-dialog-header">
-                    <h2 id="app-menu-dialog-title" class="app-menu-dialog-title"></h2>
-                    <button class="app-menu-dialog-close" type="button" aria-label="Close">&times;</button>
-                </header>
-                <div class="app-menu-dialog-body"></div>
-            </section>
-        `;
-        document.body.appendChild(backdrop);
-        this.dialogBackdrop = backdrop;
-        this.dialogTitle = backdrop.querySelector("#app-menu-dialog-title");
-        this.dialogBody = backdrop.querySelector(".app-menu-dialog-body");
-        this.dialogCloseButton = backdrop.querySelector(".app-menu-dialog-close");
-
-        backdrop.addEventListener("pointerdown", (event) => {
-            if (event.target === backdrop) this.closeDialog();
-        });
-        this.dialogCloseButton?.addEventListener("click", () => this.closeDialog());
-    }
-
-    private openDialog(kind: DialogKind): void {
-        if (!this.dialogBackdrop || !this.dialogTitle || !this.dialogBody) return;
+    private openDialog(kind: DialogKind, invoker: HTMLElement | null): void {
         const content = this.createDialogContent(kind);
-        this.dialogTitle.textContent = content.title;
-        this.dialogBody.innerHTML = content.body;
-        this.dialogBackdrop.hidden = false;
-        this.dialogCloseButton?.focus();
-    }
-
-    private closeDialog(): void {
-        if (!this.dialogBackdrop) return;
-        this.dialogBackdrop.hidden = true;
+        this.popupDialogController.open({
+            id: kind,
+            surface: "modal",
+            title: content.title,
+            size: kind === "shortcuts" ? "lg" : "md",
+            restoreFocusTo: invoker,
+            content: (container) => {
+                container.innerHTML = content.body;
+            },
+        });
     }
 
     private createDialogContent(kind: DialogKind): { title: string; body: string } {
@@ -395,6 +367,22 @@ export class AppMenuController {
                     body: `<p>${t("dialog.gravity.body")}</p>`,
                 };
         }
+    }
+
+    private openWebmExportDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "webm-export",
+            surface: "modal",
+            title: t("dialog.webmExport.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new WebmExportDialogController({
+                dispatchAction: (action) => this.dispatchAction(action),
+                close: () => {
+                    this.popupDialogController.close();
+                },
+            }),
+        });
     }
 
     private async openLogFolder(): Promise<void> {

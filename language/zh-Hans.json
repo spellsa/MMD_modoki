@@ -366,6 +366,7 @@
     "menu.file.exportPng": "Export PNG...",
     "menu.file.exportPngSequence": "Export PNG Sequence...",
     "menu.file.exportWebm": "Export WebM...",
+    "menu.file.webmExportSettings": "Movie Export Settings...",
     "menu.edit": "Edit",
     "menu.edit.undo": "Undo",
     "menu.edit.redo": "Redo",
@@ -437,5 +438,18 @@
     "dialog.background.title": "Background Settings",
     "dialog.background.body": "Background image, video, skydome, and black background management will be consolidated here in a later slice.",
     "dialog.gravity.title": "Gravity Settings",
-    "dialog.gravity.body": "Gravity and physics details will be consolidated here in a later slice. The current physics controls remain in the bottom panel for now."
+    "dialog.gravity.body": "Gravity and physics details will be consolidated here in a later slice. The current physics controls remain in the bottom panel for now.",
+    "dialog.webmExport.title": "Movie Export Settings",
+    "dialog.webmExport.aspect": "Aspect",
+    "dialog.webmExport.longSide": "Long side",
+    "dialog.webmExport.size": "Size",
+    "dialog.webmExport.fps": "FPS",
+    "dialog.webmExport.includeAudio": "Include audio",
+    "dialog.webmExport.usePlaybackRange": "Use playback range",
+    "dialog.webmExport.frameRange": "Output frames",
+    "dialog.webmExport.captureMode": "Mode",
+    "dialog.webmExport.captureModeStable": "Stable",
+    "dialog.webmExport.captureModeSpeed": "Speed priority",
+    "dialog.webmExport.cancel": "Cancel",
+    "dialog.webmExport.export": "Export WebM"
 }

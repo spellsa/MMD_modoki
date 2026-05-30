@@ -499,6 +499,8 @@ import "@babylonjs/core/ShadersWGSL/motionBlur.fragment";
 import "@babylonjs/core/ShadersWGSL/oitBackBlend.fragment";
 import "@babylonjs/core/ShadersWGSL/oitFinalSimpleBlend.fragment";
 import "@babylonjs/core/ShadersWGSL/sharpen.fragment";
+import "@babylonjs/core/ShadersWGSL/shadowMap.vertex";
+import "@babylonjs/core/ShadersWGSL/shadowMap.fragment";
 import "@babylonjs/core/ShadersWGSL/screenSpaceReflection2.fragment";
 import "@babylonjs/core/ShadersWGSL/screenSpaceReflection2Blur.fragment";
 import "@babylonjs/core/ShadersWGSL/screenSpaceReflection2BlurCombiner.fragment";
@@ -507,6 +509,8 @@ import "@babylonjs/core/ShadersWGSL/ssaoCombine.fragment";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.vertex";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.fragment";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingBlendVolume.fragment";
+import "babylon-mmd/esm/Loader/ShadersWGSL/textureAlphaChecker.vertex";
+import "babylon-mmd/esm/Loader/ShadersWGSL/textureAlphaChecker.fragment";
 
 import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
 import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";

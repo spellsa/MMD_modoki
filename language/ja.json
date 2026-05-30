@@ -366,6 +366,7 @@
     "menu.file.exportPng": "PNG出力...",
     "menu.file.exportPngSequence": "PNG連番出力...",
     "menu.file.exportWebm": "WebM出力...",
+    "menu.file.webmExportSettings": "動画出力設定...",
     "menu.edit": "編集",
     "menu.edit.undo": "元に戻す",
     "menu.edit.redo": "やり直し",
@@ -437,5 +438,18 @@
     "dialog.background.title": "背景設定",
     "dialog.background.body": "背景画像、動画、スカイドーム、黒背景の詳細管理は後続スライスでこの画面に統合します。",
     "dialog.gravity.title": "重力設定",
-    "dialog.gravity.body": "重力と物理演算の詳細設定は後続スライスでこの画面に統合します。現行の物理欄はまだ下パネルに残しています。"
+    "dialog.gravity.body": "重力と物理演算の詳細設定は後続スライスでこの画面に統合します。現行の物理欄はまだ下パネルに残しています。",
+    "dialog.webmExport.title": "動画出力設定",
+    "dialog.webmExport.aspect": "比率",
+    "dialog.webmExport.longSide": "長辺",
+    "dialog.webmExport.size": "サイズ",
+    "dialog.webmExport.fps": "FPS",
+    "dialog.webmExport.includeAudio": "音声あり",
+    "dialog.webmExport.usePlaybackRange": "再生範囲を使う",
+    "dialog.webmExport.frameRange": "出力フレーム",
+    "dialog.webmExport.captureMode": "方式",
+    "dialog.webmExport.captureModeStable": "安定",
+    "dialog.webmExport.captureModeSpeed": "速度優先",
+    "dialog.webmExport.cancel": "キャンセル",
+    "dialog.webmExport.export": "WebM出力"
 }

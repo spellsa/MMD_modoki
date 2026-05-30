@@ -228,9 +228,10 @@ body.exporter-mode #bone-overlay-canvas {
   min-width: 0;
   margin-left: 148px;
   margin-right: 640px;
-  padding: 0 6px;
-  border-bottom: 1px solid transparent;
-  background: transparent;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-top: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.032));
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1;
@@ -347,7 +348,7 @@ body.exporter-mode #bone-overlay-canvas {
   display: flex;
   flex-direction: column;
   width: min(560px, 100%);
-  max-height: min(72vh, 640px);
+  max-height: min(68vh, 560px);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-md);
   background: #1c1c1c;
@@ -355,12 +356,24 @@ body.exporter-mode #bone-overlay-canvas {
   color: var(--text-primary);
 }
 
+.app-menu-dialog[data-popup-size="sm"] {
+  width: min(460px, 100%);
+}
+
+.app-menu-dialog[data-popup-size="lg"] {
+  width: min(680px, 100%);
+}
+
+.app-menu-dialog[data-popup-size="wide"] {
+  width: min(880px, 100%);
+}
+
 .app-menu-dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -392,9 +405,30 @@ body.exporter-mode #bone-overlay-canvas {
 
 .app-menu-dialog-body {
   overflow: auto;
-  padding: 14px;
+  padding: 12px 14px;
   color: var(--text-secondary);
   line-height: 1.6;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.42) transparent;
+}
+
+.app-menu-dialog-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.app-menu-dialog-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-menu-dialog-body::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(24, 24, 24, 0.96);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.38);
+}
+
+.app-menu-dialog-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.58);
 }
 
 .app-menu-dialog-body p {
@@ -414,6 +448,178 @@ body.exporter-mode #bone-overlay-canvas {
 
 .app-menu-dialog-body dd {
   margin: 0;
+}
+
+.popup-form {
+  color: var(--text-primary);
+}
+
+.popup-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.popup-form-field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.popup-form-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.popup-form-control {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-sm);
+  background-color: #242424;
+  color: var(--text-primary);
+  color-scheme: dark;
+  font-size: 12px;
+  outline: none;
+}
+
+select.popup-form-control {
+  background-color: #242424;
+}
+
+.popup-form-control option {
+  background-color: #242424;
+  color: var(--text-primary);
+}
+
+.popup-form-control option:checked {
+  background-color: rgba(76, 141, 255, 0.72);
+  color: #ffffff;
+}
+
+.popup-form-control:focus {
+  border-color: rgba(117, 161, 255, 0.62);
+  box-shadow: 0 0 0 2px rgba(117, 161, 255, 0.16);
+}
+
+.popup-form-control:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.popup-form-number {
+  padding: 0 8px;
+}
+
+.popup-form-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.popup-form-separator {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.popup-form-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  background: #242424;
+  accent-color: #6ea8ff;
+  color-scheme: dark;
+  display: grid;
+  place-items: center;
+  outline: none;
+}
+
+.popup-form-checkbox::after {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  opacity: 0;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.popup-form-checkbox:checked {
+  border-color: rgba(117, 161, 255, 0.82);
+  background: #5f97f6;
+}
+
+.popup-form-checkbox:checked::after {
+  opacity: 1;
+}
+
+.popup-form-checkbox:focus-visible {
+  border-color: rgba(117, 161, 255, 0.86);
+  box-shadow: 0 0 0 2px rgba(117, 161, 255, 0.16);
+}
+
+.popup-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.popup-form-button {
+  min-width: 92px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.popup-form-button-secondary {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.popup-form-button-primary {
+  border-color: rgba(76, 141, 255, 0.62);
+  background: rgba(76, 141, 255, 0.24);
+}
+
+.popup-form-button:hover,
+.popup-form-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.popup-form-button-primary:hover,
+.popup-form-button-primary:focus-visible {
+  border-color: rgba(117, 161, 255, 0.8);
+  background: rgba(76, 141, 255, 0.34);
+}
+
+@media (max-width: 640px) {
+  .app-menu-dialog-backdrop {
+    padding: 12px;
+  }
+
+  .popup-form-actions {
+    flex-wrap: wrap;
+  }
+
+  .popup-form-button {
+    flex: 1 1 120px;
+  }
 }
 
 /* ============================================
