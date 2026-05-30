@@ -95,6 +95,87 @@ npm.cmd run lint
 - `smoke:launch` の成功条件は、Electron が起動し、renderer runtime が初期化され、`engine=WebGPU` まで到達することとする
 - `smoke:launch` は UI 操作、描画品質、PMX/VMD 実読み込みの確認までは含まない
 
+## 単体テスト方針
+
+v0.2 では Action / Command / UI state / project state の整理を進めるため、単体テストを積極的に増やしてください。
+
+特に優先してテストする対象:
+
+- `Action -> canExecute`
+- `Action -> Command`
+- `Action -> diff`
+- undo / redo に必要な最小差分
+- `mergeKey`
+- project save / load の変換・互換
+- UI state helper
+- FrameGraph / PostFX の backend selection や保存値変換
+- DOM や Babylon runtime に依存しない pure helper
+
+テストしにくい場合は、巨大 controller や runtime へ直接 mock を当てるより、まず判定・変換・差分生成を小さな helper / service に切り出すことを優先してください。
+
+Action 単位のテストでは、button click や keydown そのものより、DOM 入力を Action に変換した後の「編集意図」と「編集結果」を確認してください。
+
+例:
+
+```text
+button / shortcut / timeline
+  -> same Action
+  -> same CommandDiff
+  -> same undo / redo behavior
+```
+
+TDD 的に進められる範囲では、t-wada 氏の TDD の考え方を参考にしてよいです。ただし、実験機能や描画調査では無理に完全な Red-Green-Refactor を押し切らず、次のように軽量に適用してください。
+
+- まずテストリストを短く書く。
+- pure helper や command builder では、失敗する小さいテストから始める。
+- 1 つの振る舞いを通してから、必要最小限の実装にする。
+- 通った後に重複や責務境界を整理する。
+- UI / Babylon / WebGPU 実描画に近い領域では、単体テストに固執せず smoke や設計メモで補う。
+
+テスト追加後は、可能な範囲で次を実行してください。
+
+```powershell
+npm.cmd run test:unit
+npm.cmd run lint
+```
+
+起動導線や runtime 初期化に触った場合は、追加で `npm.cmd run smoke:launch` も確認してください。
+
+## E2E / UI 動作確認方針
+
+UI を実際に動かさないと確認しづらい変更では、現行の `smoke:launch` と必要に応じた手動確認で補ってください。
+
+現行で使える確認:
+
+- 既存の `smoke:launch`
+- 必要に応じた手動確認チェックリスト
+
+確認したい対象:
+
+- HTML / CSS メニューバーの表示
+- popup / dialog / drawer の表示
+- Model Mode / Camera Mode の切替
+- 下パネルや Effect panel の表示切替
+- Help / Keyboard Shortcuts / Preferences / Export Settings の表示
+- 初期 disabled 状態や `canUndo` / `canRedo` 表示
+- locale 切替後のメニュー / dialog 文言
+- アプリだけで完結する UI 導線
+
+無理に自動確認しない対象:
+
+- 実 PMX / PMD / VMD 読み込みの品質
+- ボーン操作やカメラ操作の手触り
+- WebGPU 描画品質
+- 物理挙動の品質
+- OS のファイルダイアログそのもの
+
+方針:
+
+- UI 動作確認は `lint` / `test:unit` / `smoke:launch` の代替ではなく追加確認として扱う。
+- 自動化できない UI 導線は、手動確認結果を `docs/` に残すだけでもよい。
+- file dialog は直接自動操作の対象にしない。
+- 詳細な E2E 導入検討は [docs/electron-local-smoke-test-plan.md](/d:/DevTools/Projects/MMD_modoki/docs/electron-local-smoke-test-plan.md) を参照する。
+
 ## コードベースの主要箇所
 
 - `src/mmd-manager.ts`
@@ -144,3 +225,39 @@ npm.cmd run lint
 - 楽観的な言い回しより、制約とトレードオフを明示する
 - `src/timeline.ts` は今後の実装の手本として扱う。特に、更新頻度の違う表示をレイヤーごとに分離する、状態変更と描画実行を直結させず更新要求を局所的にスケジュールする、可視範囲だけを描画・計算する、座標計算・選択判定・描画を小さな関数に分ける、という方針を優先する
 - タイムライン系や編集系 UI に機能を足すときは、既存ロジックにベタ書きで混ぜず、`timeline.ts` のように追加機能を局所化できるデータ構造・描画関数・更新経路を先に設計する
+
+## サブエージェント利用方針
+
+長めのタスク、調査範囲が広いタスク、影響範囲が読み切りにくいタスクでは、サブエージェントを積極的に使ってよいです。
+
+サブエージェントに向いている作業:
+
+- Babylon.js / babylon-mmd / Electron / WebGPU 公式情報の調査
+- 既存 docs と実装の差分確認
+- UI 設計の観点出し
+- Action / Command / undo / redo のテスト観点出し
+- FrameGraph / RenderTarget / shader 周辺のリスク洗い出し
+- 変更前のコードレビュー
+- 実装後の回帰リスク・不足テスト確認
+
+使い方の方針:
+
+- サブエージェントは調査、比較、レビュー、観点出しに使う。
+- サブエージェントの回答をそのまま採用せず、メインエージェントが統合して最終判断する。
+- ファイル編集、コミット対象の選定、ユーザーへの最終報告はメインエージェントが行う。
+- サブエージェントの結論は、一次情報、既存 docs、実コードで確認してから採用する。
+- 同じファイルを複数エージェントで同時に編集しない。
+- サブエージェントの結果で重要な知見が出た場合は、必要に応じて `docs/` に残す。
+
+長めの実装タスクでは、最初に次を分けて考えるとよいです。
+
+```text
+main agent
+  実装方針、編集、検証、最終判断
+
+sub-agent
+  公式 docs 調査
+  既存設計メモ確認
+  テスト観点整理
+  リスクレビュー
+```

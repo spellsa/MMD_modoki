@@ -1,6 +1,6 @@
 # Electron ローカル起動スモークテスト方針
 
-更新日: 2026-04-16
+更新日: 2026-05-30
 
 ## 目的
 
@@ -17,6 +17,12 @@ MMD_modoki は Electron / Babylon.js / WebGPU / ファイル読み込みが絡�
 
 このアプリは WebGPU モードでの利用を前提にしているため、ローカル smoke test では **renderer runtime 初期化後の engine が `WebGPU` であること** も成功条件に含める。
 
+2026-05-30 追記:
+
+- v0.2 UI 実装に入る前に、まず既存 smoke script をスクリーンショット付き起動確認へ拡張する方針にする。
+- Playwright Electron はローカル E2E 候補として残すが、現時点では未導入。
+- メニューバー / popup / dialog / mode switch の実装が進み、クリック操作の自動確認が必要になった段階で Playwright Electron の spike を検討する。
+
 目標コマンド:
 
 ```powershell
@@ -31,6 +37,8 @@ npm.cmd run smoke:launch
 - `MmdManager` が初期化される。
 - engine が `WebGPU` として報告される。
 - 一定時間内に renderer runtime 初期化が完了する。
+- 必要に応じて、初期画面スクリーンショットを保存する。
+- 必要に応じて、初期 UI の主要領域が存在するかを smoke payload に含める。
 - smoke mode では自動終了する。
 
 確認しないもの:
@@ -43,15 +51,26 @@ npm.cmd run smoke:launch
 
 ## なぜ Playwright から始めないか
 
-Playwright Electron は有効だが、最初の一歩としては重い。
+Playwright Electron は有効だが、最初の一歩としては既存 smoke script の拡張を優先する。
 
 - `@playwright/test` の追加が必要。
+- Playwright Electron の `_electron` API は experimental support。
 - CI / agent 環境では Xvfb や GPU なし環境の調整が必要。
-- Babylon.js 初期化に依存すると false negative が出やすい。
+- Babylon.js / WebGPU 初期化に依存すると false negative が出やすい。
 - 最初に欲しいのは「起動直後に落ちない」の確認であり、DOM 操作までは必須ではない。
 
 そのため、まずは依存追加なしで回せる smoke script を作る。  
-Playwright は、この smoke script が安定してから次段階で導入する。
+Playwright は、この smoke script が安定し、UI click / dialog / mode switch の確認が必要になってから次段階で導入する。
+
+ただし、Playwright Electron の導入自体はローカル用途なら過度に重いものではない。v0.2 UI のメニューバーや popup / dialog が固まった段階で、最小 spike として次のような 1 本から始める候補にする。
+
+```text
+launch Electron
+  -> first window
+  -> body / main UI visibility
+  -> screenshot
+  -> close
+```
 
 ## 全体構成案
 
@@ -131,6 +150,7 @@ scripts/smoke-launch.mjs
 - result JSON の `success` が `true` なら成功。
 - result JSON の `success` が `false` なら失敗。
 - 親側 timeout に到達したら子プロセスを kill して失敗。
+- 任意で screenshot path を環境変数から受け取り、成功直前に初期画面スクリーンショットを保存する。
 
 `package.json` 追加候補:
 
@@ -167,6 +187,63 @@ await waitForResultJsonOrTimeout(resultPath);
 - 成功判定は Electron の終了コードだけでなく、main process が書いた result JSON を見る。
 - 子プロセス kill は Windows で残プロセスが出ないか確認する。
 
+## スクリーンショット拡張案
+
+既存 smoke mode では renderer ready を受けたらすぐ result JSON を書いて終了する。ここに、任意の screenshot 出力を追加する。
+
+環境変数案:
+
+```text
+MMD_MODOKI_SMOKE_SCREENSHOT_PATH=artifacts/smoke/launch.png
+MMD_MODOKI_SMOKE_SCREENSHOT_DELAY_MS=500
+```
+
+main process 側の動作案:
+
+```text
+renderer ready
+  -> WebGPU requirement check
+  -> screenshot path があれば少し待つ
+  -> mainWindow.webContents.capturePage()
+  -> PNG を保存
+  -> result.json に screenshotPath を含める
+  -> app.exit(0)
+```
+
+確認できること:
+
+- window が描画されている。
+- 起動直後の画面が真っ黒 / 真っ白ではない。
+- v0.2 UI 実装後、メニューバー / timeline / viewport / bottom panel などの大枠が目視確認できる。
+- エージェントがスクリーンショット artifact を見て簡易確認できる。
+
+確認しないこと:
+
+- UI click。
+- popup / dialog の open / close。
+- pixel 完全一致の visual regression。
+- PMX / VMD 読み込み後の描画品質。
+
+スクリーンショット保存先:
+
+```text
+artifacts/smoke/
+```
+
+このディレクトリは Git 追跡しない。必要に応じて `artifacts/e2e/` も UI automation 用に使う。
+
+将来の script 候補:
+
+```json
+{
+  "scripts": {
+    "smoke:launch:screenshot": "node scripts/smoke-launch.mjs"
+  }
+}
+```
+
+実際には環境変数指定が必要になるため、Windows / cross-platform の扱いを見て、必要なら専用 wrapper script を追加する。
+
 ## コーディングエージェントでの使い方
 
 エージェントがコード変更後に確認する場合:
@@ -202,7 +279,16 @@ npm.cmd run smoke:launch
 - 確認コマンドは基本 `npm.cmd run lint` のままにする。
 - 起動に関わる変更では `npm.cmd run smoke:launch` も推奨する、と追記する。
 
-### Step 4: Playwright へ拡張
+### Step 4: screenshot 付き smoke へ拡張
+
+v0.2 UI 実装前の次候補。
+
+- `MMD_MODOKI_SMOKE_SCREENSHOT_PATH` を追加する。
+- 成功時に `capturePage()` で PNG を保存する。
+- result JSON に `screenshotPath` を含める。
+- `artifacts/smoke/` を Git ignore する。
+
+### Step 5: Playwright へ拡張
 
 smoke script が安定してから、必要に応じて Playwright Electron を追加する。
 

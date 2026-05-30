@@ -91,6 +91,10 @@ typings/
 # Electron-Forge
 out/
 
+# Local smoke / UI test artifacts
+artifacts/smoke/
+artifacts/e2e/
+
 # Local backup artifacts
 .git copy/
 .gitignore copy
