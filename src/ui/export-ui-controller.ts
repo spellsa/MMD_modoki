@@ -26,23 +26,69 @@ export type WebmOutputOptions = {
     captureMode: WebmCaptureMode;
 };
 
+export type OutputFormState = {
+    aspectPreset: string;
+    sizePreset: string;
+    width: number;
+    height: number;
+    lockAspect: boolean;
+    qualityScale: number;
+    fps: number;
+    includeAudio: boolean;
+    preferredVideoCodec: "auto" | "vp8" | "vp9";
+    captureMode: WebmCaptureMode;
+    usePlaybackRange: boolean;
+    startFrame: number;
+    endFrame: number;
+};
+
+export type WebmExportSettingsAdapter = {
+    getState: () => OutputFormState;
+    setAspectPreset: (value: string) => void;
+    setSizePreset: (value: string) => void;
+    setWidth: (value: number) => void;
+    setHeight: (value: number) => void;
+    setFps: (value: number) => void;
+    setIncludeAudio: (value: boolean) => void;
+    setUsePlaybackRange: (value: boolean) => void;
+    setStartFrame: (value: number) => void;
+    setEndFrame: (value: number) => void;
+    setCaptureMode: (value: WebmCaptureMode) => void;
+};
+
+export const OUTPUT_ASPECT_OPTIONS: ReadonlyArray<{ value: string; labelKey: string }> = [
+    { value: "16:9", labelKey: "output.aspect.landscape169" },
+    { value: "9:16", labelKey: "output.aspect.portrait916" },
+    { value: "1:1", labelKey: "output.aspect.square11" },
+    { value: "4:3", labelKey: "output.aspect.landscape43" },
+    { value: "3:4", labelKey: "output.aspect.portrait34" },
+    { value: "viewport", labelKey: "output.aspect.viewport" },
+];
+
+export const OUTPUT_SIZE_PRESET_OPTIONS: ReadonlyArray<{ value: string; labelKey: string }> = [
+    { value: "1280", labelKey: "output.sizePreset.hd" },
+    { value: "1920", labelKey: "output.sizePreset.fullhd" },
+    { value: "2560", labelKey: "output.sizePreset.qhd" },
+    { value: "3840", labelKey: "output.sizePreset.k4" },
+];
+
+export const OUTPUT_FPS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+    { value: "24", label: "24" },
+    { value: "30", label: "30" },
+    { value: "60", label: "60" },
+];
+
+export const WEBM_CAPTURE_MODE_OPTIONS: ReadonlyArray<{ value: WebmCaptureMode; labelKey: string }> = [
+    { value: "readpixels", labelKey: "dialog.webmExport.captureModeStable" },
+    { value: "webgpu-copy", labelKey: "dialog.webmExport.captureModeSpeed" },
+];
+
 type ToastType = "success" | "error" | "info";
 
 type ExportUiElements = {
     appRoot: HTMLElement;
     busyOverlay: HTMLElement | null;
     busyText: HTMLElement | null;
-    outputAspectSelect: HTMLSelectElement | null;
-    outputSizePresetSelect: HTMLSelectElement | null;
-    outputWidthInput: HTMLInputElement | null;
-    outputHeightInput: HTMLInputElement | null;
-    outputLockAspectInput: HTMLInputElement | null;
-    outputQualitySelect: HTMLSelectElement | null;
-    outputFpsSelect: HTMLSelectElement | null;
-    outputWebmCodecSelect: HTMLSelectElement | null;
-    outputWebmCaptureModeSelect: HTMLSelectElement | null;
-    outputIncludeAudioInput: HTMLInputElement | null;
-    outputUsePlaybackRangeInput: HTMLInputElement | null;
     outputStartFrameInput: HTMLInputElement | null;
     outputEndFrameInput: HTMLInputElement | null;
     playbackFrameStartToggleInput: HTMLInputElement | null;
@@ -66,17 +112,6 @@ function resolveExportUiElements(): ExportUiElements {
         appRoot: document.getElementById("app") as HTMLElement,
         busyOverlay: document.getElementById("ui-busy-overlay"),
         busyText: document.getElementById("ui-busy-text"),
-        outputAspectSelect: document.getElementById("output-aspect") as HTMLSelectElement | null,
-        outputSizePresetSelect: document.getElementById("output-size-preset") as HTMLSelectElement | null,
-        outputWidthInput: document.getElementById("output-width") as HTMLInputElement | null,
-        outputHeightInput: document.getElementById("output-height") as HTMLInputElement | null,
-        outputLockAspectInput: document.getElementById("output-lock-aspect") as HTMLInputElement | null,
-        outputQualitySelect: document.getElementById("output-quality") as HTMLSelectElement | null,
-        outputFpsSelect: document.getElementById("output-fps") as HTMLSelectElement | null,
-        outputWebmCodecSelect: document.getElementById("output-webm-codec") as HTMLSelectElement | null,
-        outputWebmCaptureModeSelect: document.getElementById("output-webm-capture-mode") as HTMLSelectElement | null,
-        outputIncludeAudioInput: document.getElementById("output-include-audio") as HTMLInputElement | null,
-        outputUsePlaybackRangeInput: document.getElementById("output-use-playback-range") as HTMLInputElement | null,
         outputStartFrameInput: document.getElementById("output-start-frame") as HTMLInputElement | null,
         outputEndFrameInput: document.getElementById("output-end-frame") as HTMLInputElement | null,
         playbackFrameStartToggleInput: document.getElementById("playback-frame-start-toggle") as HTMLInputElement | null,
@@ -146,6 +181,21 @@ export class ExportUiController {
     private isSyncingOutputSettings = false;
     private isSyncingFrameRange = false;
     private isFrameRangeCustomized = false;
+    private outputState: OutputFormState = {
+        aspectPreset: "16:9",
+        sizePreset: "1920",
+        width: 1920,
+        height: 1080,
+        lockAspect: false,
+        qualityScale: 1,
+        fps: 30,
+        includeAudio: false,
+        preferredVideoCodec: "vp8",
+        captureMode: "webgpu-copy",
+        usePlaybackRange: false,
+        startFrame: 0,
+        endFrame: 0,
+    };
 
     constructor(deps: ExportUiControllerDeps) {
         this.elements = resolveExportUiElements();
@@ -192,21 +242,19 @@ export class ExportUiController {
     public exportProjectState(): ProjectOutputState {
         const outputSettings = this.getOutputSettings();
         const playbackFrameRange = this.getPlaybackFrameRange();
-        const qualityRaw = Number.parseFloat(this.elements.outputQualitySelect?.value ?? "1");
-        const fpsRaw = Number.parseInt(this.elements.outputFpsSelect?.value ?? "30", 10);
 
         return {
-            aspectPreset: this.elements.outputAspectSelect?.value ?? "16:9",
-            sizePreset: this.elements.outputSizePresetSelect?.value ?? "1920",
+            aspectPreset: this.outputState.aspectPreset,
+            sizePreset: this.outputState.sizePreset,
             width: outputSettings.width,
             height: outputSettings.height,
-            lockAspect: Boolean(this.elements.outputLockAspectInput?.checked),
-            qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
-            fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
-            includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
+            lockAspect: this.outputState.lockAspect,
+            qualityScale: outputSettings.qualityScale,
+            fps: outputSettings.fps,
+            includeAudio: this.outputState.includeAudio,
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
             webmCaptureMode: this.getWebmOutputOptions().captureMode,
-            usePlaybackRange: Boolean(this.elements.outputUsePlaybackRangeInput?.checked),
+            usePlaybackRange: this.outputState.usePlaybackRange,
             startFrame: playbackFrameRange.startFrame,
             endFrame: playbackFrameRange.endFrame,
             frameStartEnabled: Boolean(this.elements.playbackFrameStartToggleInput?.checked),
@@ -217,72 +265,34 @@ export class ExportUiController {
     public applyProjectState(state: ProjectOutputState | null | undefined): void {
         if (!state) return;
 
-        const hasOption = (select: HTMLSelectElement, value: string): boolean =>
-            Array.from(select.options).some((option) => option.value === value);
-
-        if (
-            this.elements.outputAspectSelect &&
-            typeof state.aspectPreset === "string" &&
-            hasOption(this.elements.outputAspectSelect, state.aspectPreset)
-        ) {
-            this.elements.outputAspectSelect.value = state.aspectPreset;
+        if (typeof state.aspectPreset === "string" && this.isOutputAspectPreset(state.aspectPreset)) {
+            this.outputState.aspectPreset = state.aspectPreset;
         }
-        if (
-            this.elements.outputSizePresetSelect &&
-            typeof state.sizePreset === "string" &&
-            hasOption(this.elements.outputSizePresetSelect, state.sizePreset)
-        ) {
-            this.elements.outputSizePresetSelect.value = state.sizePreset;
+        if (typeof state.sizePreset === "string" && this.isOutputSizePreset(state.sizePreset)) {
+            this.outputState.sizePreset = state.sizePreset;
         }
-        if (this.elements.outputWidthInput && Number.isFinite(state.width)) {
-            this.elements.outputWidthInput.value = String(this.clampOutputWidth(state.width));
+        if (Number.isFinite(state.width)) {
+            this.outputState.width = this.clampOutputWidth(state.width);
         }
-        if (this.elements.outputHeightInput && Number.isFinite(state.height)) {
-            this.elements.outputHeightInput.value = String(this.clampOutputHeight(state.height));
+        if (Number.isFinite(state.height)) {
+            this.outputState.height = this.clampOutputHeight(state.height);
         }
-        if (this.elements.outputLockAspectInput) {
-            this.elements.outputLockAspectInput.checked = Boolean(state.lockAspect);
+        this.outputState.lockAspect = Boolean(state.lockAspect);
+        if (Number.isFinite(state.qualityScale)) {
+            this.outputState.qualityScale = this.clampOutputQuality(state.qualityScale);
         }
-        if (
-            this.elements.outputQualitySelect &&
-            Number.isFinite(state.qualityScale) &&
-            hasOption(this.elements.outputQualitySelect, String(state.qualityScale))
-        ) {
-            this.elements.outputQualitySelect.value = String(state.qualityScale);
+        if (Number.isFinite(state.fps)) {
+            this.outputState.fps = this.clampOutputFps(state.fps);
         }
-        if (
-            this.elements.outputFpsSelect &&
-            Number.isFinite(state.fps) &&
-            hasOption(this.elements.outputFpsSelect, String(state.fps))
-        ) {
-            this.elements.outputFpsSelect.value = String(state.fps);
+        this.outputState.includeAudio = Boolean(state.includeAudio);
+        this.outputState.usePlaybackRange = Boolean(state.usePlaybackRange);
+        if (state.webmCodec === "auto" || state.webmCodec === "vp8" || state.webmCodec === "vp9") {
+            this.outputState.preferredVideoCodec = state.webmCodec;
         }
-        if (this.elements.outputIncludeAudioInput) {
-            this.elements.outputIncludeAudioInput.checked = Boolean(state.includeAudio);
+        if (this.isWebmCaptureMode(state.webmCaptureMode)) {
+            this.outputState.captureMode = state.webmCaptureMode;
         }
-        if (this.elements.outputUsePlaybackRangeInput) {
-            this.elements.outputUsePlaybackRangeInput.checked = Boolean(state.usePlaybackRange);
-        }
-        if (
-            this.elements.outputWebmCodecSelect &&
-            typeof state.webmCodec === "string" &&
-            hasOption(this.elements.outputWebmCodecSelect, state.webmCodec)
-        ) {
-            this.elements.outputWebmCodecSelect.value = state.webmCodec;
-        }
-        if (
-            this.elements.outputWebmCaptureModeSelect &&
-            typeof state.webmCaptureMode === "string" &&
-            hasOption(this.elements.outputWebmCaptureModeSelect, state.webmCaptureMode)
-        ) {
-            this.elements.outputWebmCaptureModeSelect.value = state.webmCaptureMode;
-        }
-        if (
-            this.elements.outputStartFrameInput &&
-            this.elements.outputEndFrameInput &&
-            Number.isFinite(state.startFrame) &&
-            Number.isFinite(state.endFrame)
-        ) {
+        if (Number.isFinite(state.startFrame) && Number.isFinite(state.endFrame)) {
             this.isFrameRangeCustomized = true;
             this.setOutputFrameRangeValues(state.startFrame ?? 0, state.endFrame ?? 0);
         } else {
@@ -296,8 +306,8 @@ export class ExportUiController {
             this.elements.playbackFrameStopToggleInput.checked = Boolean(state.frameStopEnabled);
         }
 
-        const width = this.clampOutputWidth(Number.parseInt(this.elements.outputWidthInput?.value ?? "1920", 10));
-        const height = this.clampOutputHeight(Number.parseInt(this.elements.outputHeightInput?.value ?? "1080", 10));
+        const width = this.outputState.width;
+        const height = this.outputState.height;
         this.outputAspectRatio = height > 0
             ? Math.max(0.1, width / height)
             : this.resolveSelectedOutputAspectRatio();
@@ -305,7 +315,6 @@ export class ExportUiController {
     }
 
     public syncFrameRangeFromTimeline(force = false): void {
-        if (!this.elements.outputStartFrameInput || !this.elements.outputEndFrameInput) return;
         if (!force && this.isFrameRangeCustomized) return;
 
         const maxFrame = this.getMaxOutputFrame();
@@ -313,12 +322,11 @@ export class ExportUiController {
     }
 
     public getSelectedAspectPreset(): string {
-        return this.elements.outputAspectSelect?.value ?? "16:9";
+        return this.outputState.aspectPreset;
     }
 
     public resolveSelectedOutputAspectRatio(): number {
-        if (!this.elements.outputAspectSelect) return this.outputAspectRatio > 0 ? this.outputAspectRatio : 16 / 9;
-        const value = this.elements.outputAspectSelect.value;
+        const value = this.outputState.aspectPreset;
         if (value === "viewport") {
             const { width, height } = this.getViewportSize();
             if (width > 0 && height > 0) {
@@ -340,34 +348,19 @@ export class ExportUiController {
     }
 
     public getOutputSettings(): OutputSettings {
-        const widthRaw = Number.parseInt(this.elements.outputWidthInput?.value ?? "1920", 10);
-        const heightRaw = Number.parseInt(this.elements.outputHeightInput?.value ?? "1080", 10);
-        const qualityRaw = Number.parseFloat(this.elements.outputQualitySelect?.value ?? "1");
-        const fpsRaw = Number.parseInt(this.elements.outputFpsSelect?.value ?? "30", 10);
-
         return {
-            width: this.clampOutputWidth(widthRaw),
-            height: this.clampOutputHeight(heightRaw),
-            qualityScale: Number.isFinite(qualityRaw) ? Math.max(0.25, Math.min(4, qualityRaw)) : 1,
-            fps: Number.isFinite(fpsRaw) ? Math.max(1, Math.min(120, fpsRaw)) : 30,
+            width: this.clampOutputWidth(this.outputState.width),
+            height: this.clampOutputHeight(this.outputState.height),
+            qualityScale: this.clampOutputQuality(this.outputState.qualityScale),
+            fps: this.clampOutputFps(this.outputState.fps),
         };
     }
 
     public getWebmOutputOptions(): WebmOutputOptions {
-        const selectedCodec = this.elements.outputWebmCodecSelect?.value;
-        const selectedCaptureMode = this.elements.outputWebmCaptureModeSelect?.value;
-        const preferredVideoCodec = selectedCodec === "auto" || selectedCodec === "vp8" || selectedCodec === "vp9"
-            ? selectedCodec
-            : "vp8";
-        const captureMode: WebmCaptureMode = selectedCaptureMode === "canvas"
-            || selectedCaptureMode === "webgpu-copy"
-            || selectedCaptureMode === "readpixels"
-            ? selectedCaptureMode
-            : "webgpu-copy";
         return {
-            includeAudio: Boolean(this.elements.outputIncludeAudioInput?.checked),
-            preferredVideoCodec,
-            captureMode,
+            includeAudio: this.outputState.includeAudio,
+            preferredVideoCodec: this.outputState.preferredVideoCodec,
+            captureMode: this.outputState.captureMode,
         };
     }
 
@@ -602,59 +595,25 @@ export class ExportUiController {
     }
 
     private setupOutputControls(): void {
-        if (
-            !this.elements.outputAspectSelect ||
-            !this.elements.outputSizePresetSelect ||
-            !this.elements.outputWidthInput ||
-            !this.elements.outputHeightInput ||
-            !this.elements.outputQualitySelect ||
-            !this.elements.outputFpsSelect ||
-            !this.elements.outputStartFrameInput ||
-            !this.elements.outputEndFrameInput
-        ) {
-            return;
-        }
-
-        this.elements.outputAspectSelect.addEventListener("change", () => {
-            if (this.dispatchAction?.({ type: "output.applyPreset", source: "panel" })) return;
-            this.applyOutputPreset();
-        });
-        this.elements.outputSizePresetSelect.addEventListener("change", () => {
-            if (this.dispatchAction?.({ type: "output.applyPreset", source: "panel" })) return;
-            this.applyOutputPreset();
-        });
-        this.elements.outputWidthInput.addEventListener("input", () => {
-            if (this.dispatchAction?.({ type: "output.syncDimension", source: "panel", dimension: "width" })) return;
-            this.syncOutputDimensionWithLock("width");
-        });
-        this.elements.outputHeightInput.addEventListener("input", () => {
-            if (this.dispatchAction?.({ type: "output.syncDimension", source: "panel", dimension: "height" })) return;
-            this.syncOutputDimensionWithLock("height");
-        });
-        this.elements.outputLockAspectInput?.addEventListener("change", () => {
-            const locked = this.elements.outputLockAspectInput?.checked ?? false;
-            if (this.dispatchAction?.({ type: "output.setLockAspect", source: "panel", locked })) return;
-            this.setOutputLockAspect(locked);
-        });
-        this.elements.outputStartFrameInput.addEventListener("input", () => {
+        this.elements.outputStartFrameInput?.addEventListener("input", () => {
+            this.outputState.startFrame = this.parseOutputFrameDraft(this.elements.outputStartFrameInput?.value, 0);
             if (this.dispatchAction?.({ type: "output.markFrameRangeCustomized", source: "panel" })) return;
             this.markOutputFrameRangeCustomized();
         });
-        this.elements.outputEndFrameInput.addEventListener("input", () => {
+        this.elements.outputEndFrameInput?.addEventListener("input", () => {
+            this.outputState.endFrame = this.parseOutputFrameDraft(this.elements.outputEndFrameInput?.value, this.getMaxOutputFrame());
             if (this.dispatchAction?.({ type: "output.markFrameRangeCustomized", source: "panel" })) return;
             this.markOutputFrameRangeCustomized();
         });
-        this.elements.outputStartFrameInput.addEventListener("change", () => {
+        this.elements.outputStartFrameInput?.addEventListener("change", () => {
             if (this.dispatchAction?.({ type: "output.sanitizeFrameRange", source: "panel", boundary: "start" })) return;
             this.sanitizeOutputFrameRange("start");
         });
-        this.elements.outputEndFrameInput.addEventListener("change", () => {
+        this.elements.outputEndFrameInput?.addEventListener("change", () => {
             if (this.dispatchAction?.({ type: "output.sanitizeFrameRange", source: "panel", boundary: "end" })) return;
             this.sanitizeOutputFrameRange("end");
         });
 
-        this.elements.outputQualitySelect.value = this.elements.outputQualitySelect.value || "1";
-        this.elements.outputFpsSelect.value = this.elements.outputFpsSelect.value || "30";
         this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
         this.applyOutputPreset();
         this.syncFrameRangeFromTimeline(true);
@@ -667,7 +626,7 @@ export class ExportUiController {
     }
 
     public getOutputFrameRange(): { startFrame: number; endFrame: number } {
-        if (!this.elements.outputUsePlaybackRangeInput?.checked) {
+        if (!this.outputState.usePlaybackRange) {
             const maxFrame = this.getMaxOutputFrame();
             return { startFrame: 0, endFrame: maxFrame };
         }
@@ -676,13 +635,13 @@ export class ExportUiController {
     }
 
     public isUsingPlaybackRangeForOutput(): boolean {
-        return Boolean(this.elements.outputUsePlaybackRangeInput?.checked);
+        return this.outputState.usePlaybackRange;
     }
 
     public getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
         const maxFrame = this.getMaxOutputFrame();
-        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? "0", 10);
-        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(maxFrame), 10);
+        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? String(this.outputState.startFrame), 10);
+        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(this.outputState.endFrame), 10);
 
         let startFrame = Number.isFinite(startRaw) ? Math.floor(startRaw) : 0;
         let endFrame = Number.isFinite(endRaw) ? Math.floor(endRaw) : maxFrame;
@@ -702,11 +661,52 @@ export class ExportUiController {
         return Boolean(this.elements.playbackFrameStopToggleInput?.checked);
     }
 
-    public applyOutputPreset(): void {
-        if (!this.elements.outputWidthInput || !this.elements.outputHeightInput) return;
+    public getOutputFormState(): OutputFormState {
+        this.getPlaybackFrameRange();
+        return { ...this.outputState };
+    }
 
+    public createWebmExportSettingsAdapter(): WebmExportSettingsAdapter {
+        return {
+            getState: () => this.getOutputFormState(),
+            setAspectPreset: (value) => {
+                if (this.isOutputAspectPreset(value)) this.outputState.aspectPreset = value;
+            },
+            setSizePreset: (value) => {
+                if (this.isOutputSizePreset(value)) this.outputState.sizePreset = value;
+            },
+            setWidth: (value) => {
+                this.outputState.width = this.clampOutputWidth(value);
+            },
+            setHeight: (value) => {
+                this.outputState.height = this.clampOutputHeight(value);
+            },
+            setFps: (value) => {
+                this.outputState.fps = this.clampOutputFps(value);
+            },
+            setIncludeAudio: (value) => {
+                this.outputState.includeAudio = value;
+            },
+            setUsePlaybackRange: (value) => {
+                this.outputState.usePlaybackRange = value;
+            },
+            setStartFrame: (value) => {
+                this.outputState.startFrame = this.parseOutputFrameDraft(value, 0);
+                if (this.elements.outputStartFrameInput) this.elements.outputStartFrameInput.value = String(this.outputState.startFrame);
+            },
+            setEndFrame: (value) => {
+                this.outputState.endFrame = this.parseOutputFrameDraft(value, this.getMaxOutputFrame());
+                if (this.elements.outputEndFrameInput) this.elements.outputEndFrameInput.value = String(this.outputState.endFrame);
+            },
+            setCaptureMode: (value) => {
+                if (this.isWebmCaptureMode(value)) this.outputState.captureMode = value;
+            },
+        };
+    }
+
+    public applyOutputPreset(): void {
         const ratio = this.resolveSelectedOutputAspectRatio();
-        const longEdgeRaw = Number.parseInt(this.elements.outputSizePresetSelect?.value ?? "1920", 10);
+        const longEdgeRaw = Number.parseInt(this.outputState.sizePreset, 10);
         const longEdge = Number.isFinite(longEdgeRaw) ? Math.max(320, Math.min(8192, longEdgeRaw)) : 1920;
 
         let nextWidth = longEdge;
@@ -717,12 +717,12 @@ export class ExportUiController {
         }
 
         this.isSyncingOutputSettings = true;
-        this.elements.outputWidthInput.value = String(this.clampOutputWidth(nextWidth));
-        this.elements.outputHeightInput.value = String(this.clampOutputHeight(nextHeight));
+        this.outputState.width = this.clampOutputWidth(nextWidth);
+        this.outputState.height = this.clampOutputHeight(nextHeight);
         this.isSyncingOutputSettings = false;
 
-        const width = Number.parseInt(this.elements.outputWidthInput.value, 10);
-        const height = Number.parseInt(this.elements.outputHeightInput.value, 10);
+        const width = this.outputState.width;
+        const height = this.outputState.height;
         if (Number.isFinite(width) && Number.isFinite(height) && height > 0) {
             this.outputAspectRatio = Math.max(0.1, width / height);
         }
@@ -731,12 +731,11 @@ export class ExportUiController {
     }
 
     public syncOutputDimensionWithLock(source: "width" | "height"): void {
-        if (!this.elements.outputWidthInput || !this.elements.outputHeightInput) return;
         if (this.isSyncingOutputSettings) return;
 
-        let width = this.clampOutputWidth(Number.parseInt(this.elements.outputWidthInput.value, 10));
-        let height = this.clampOutputHeight(Number.parseInt(this.elements.outputHeightInput.value, 10));
-        const locked = this.elements.outputLockAspectInput?.checked === true;
+        let width = this.clampOutputWidth(this.outputState.width);
+        let height = this.clampOutputHeight(this.outputState.height);
+        const locked = this.outputState.lockAspect;
         const ratio = Math.max(0.1, this.outputAspectRatio);
 
         if (locked) {
@@ -750,15 +749,13 @@ export class ExportUiController {
         }
 
         this.isSyncingOutputSettings = true;
-        this.elements.outputWidthInput.value = String(width);
-        this.elements.outputHeightInput.value = String(height);
+        this.outputState.width = width;
+        this.outputState.height = height;
         this.isSyncingOutputSettings = false;
     }
 
     public setOutputLockAspect(locked: boolean): void {
-        if (this.elements.outputLockAspectInput) {
-            this.elements.outputLockAspectInput.checked = locked;
-        }
+        this.outputState.lockAspect = locked;
         if (!locked) return;
 
         this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
@@ -776,8 +773,8 @@ export class ExportUiController {
 
     private sanitizeFrameRangeInputs(source: "start" | "end"): void {
         const maxFrame = this.getMaxOutputFrame();
-        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? "0", 10);
-        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(maxFrame), 10);
+        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? String(this.outputState.startFrame), 10);
+        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(this.outputState.endFrame), 10);
 
         let startFrame = Number.isFinite(startRaw) ? Math.floor(startRaw) : 0;
         let endFrame = Number.isFinite(endRaw) ? Math.floor(endRaw) : maxFrame;
@@ -797,10 +794,13 @@ export class ExportUiController {
     }
 
     private setOutputFrameRangeValues(startFrame: number, endFrame: number): void {
-        if (!this.elements.outputStartFrameInput || !this.elements.outputEndFrameInput) return;
+        const normalizedStart = Math.max(0, Math.floor(startFrame));
+        const normalizedEnd = Math.max(normalizedStart, Math.floor(endFrame));
+        this.outputState.startFrame = normalizedStart;
+        this.outputState.endFrame = normalizedEnd;
         this.isSyncingFrameRange = true;
-        this.elements.outputStartFrameInput.value = String(Math.max(0, Math.floor(startFrame)));
-        this.elements.outputEndFrameInput.value = String(Math.max(Math.floor(startFrame), Math.floor(endFrame)));
+        if (this.elements.outputStartFrameInput) this.elements.outputStartFrameInput.value = String(normalizedStart);
+        if (this.elements.outputEndFrameInput) this.elements.outputEndFrameInput.value = String(normalizedEnd);
         this.isSyncingFrameRange = false;
     }
 
@@ -812,6 +812,34 @@ export class ExportUiController {
     private clampOutputHeight(value: number): number {
         if (!Number.isFinite(value)) return 1080;
         return Math.max(180, Math.min(8192, Math.round(value)));
+    }
+
+    private clampOutputQuality(value: number): number {
+        if (!Number.isFinite(value)) return 1;
+        return Math.max(0.25, Math.min(4, value));
+    }
+
+    private clampOutputFps(value: number): number {
+        if (!Number.isFinite(value)) return 30;
+        return Math.max(1, Math.min(120, Math.round(value)));
+    }
+
+    private parseOutputFrameDraft(value: string | number | null | undefined, fallback: number): number {
+        const raw = typeof value === "number" ? value : Number.parseInt(value ?? String(fallback), 10);
+        if (!Number.isFinite(raw)) return Math.max(0, Math.floor(fallback));
+        return Math.max(0, Math.floor(raw));
+    }
+
+    private isOutputAspectPreset(value: string): boolean {
+        return OUTPUT_ASPECT_OPTIONS.some((option) => option.value === value);
+    }
+
+    private isOutputSizePreset(value: string): boolean {
+        return OUTPUT_SIZE_PRESET_OPTIONS.some((option) => option.value === value);
+    }
+
+    private isWebmCaptureMode(value: unknown): value is WebmCaptureMode {
+        return value === "canvas" || value === "webgpu-copy" || value === "readpixels";
     }
 
     private setupPngSequenceExportStateBridge(): void {

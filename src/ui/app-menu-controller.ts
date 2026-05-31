@@ -6,6 +6,7 @@ import { EdgeSettingsDialogController } from "./edge-settings-dialog-controller"
 import { GravitySettingsDialogController } from "./gravity-settings-dialog-controller";
 import { LightingShadowSettingsDialogController } from "./lighting-shadow-settings-dialog-controller";
 import { PopupDialogController } from "./popup-dialog-controller";
+import type { WebmExportSettingsAdapter } from "./export-ui-controller";
 import { WebmExportDialogController } from "./webm-export-dialog-controller";
 
 type ToastType = "success" | "error" | "info";
@@ -20,6 +21,7 @@ type AppMenuControllerDeps = {
     refreshRuntimeUi: () => void;
     refreshModelEdgeUi: () => void;
     refreshLightingUi: () => void;
+    createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
 };
 
 type DialogKind = "about" | "shortcuts" | "preferences";
@@ -50,6 +52,7 @@ export class AppMenuController {
     private readonly refreshRuntimeUi: () => void;
     private readonly refreshModelEdgeUi: () => void;
     private readonly refreshLightingUi: () => void;
+    private readonly createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
     private readonly popupDialogController: PopupDialogController;
     private openGroup: HTMLElement | null = null;
 
@@ -64,6 +67,7 @@ export class AppMenuController {
         this.refreshRuntimeUi = deps.refreshRuntimeUi;
         this.refreshModelEdgeUi = deps.refreshModelEdgeUi;
         this.refreshLightingUi = deps.refreshLightingUi;
+        this.createWebmExportSettingsAdapter = deps.createWebmExportSettingsAdapter;
         this.popupDialogController = new PopupDialogController();
         this.setupMenuEvents();
     }
@@ -440,6 +444,7 @@ export class AppMenuController {
             restoreFocusTo: invoker,
             content: new WebmExportDialogController({
                 dispatchAction: (action) => this.dispatchAction(action),
+                output: this.createWebmExportSettingsAdapter(),
                 close: () => {
                     this.popupDialogController.close();
                 },
@@ -464,7 +469,6 @@ export class AppMenuController {
     }
 
     private isMirroringFloorEnabled(): boolean {
-        const checkbox = document.getElementById("mirroring-floor-enabled") as HTMLInputElement | null;
-        return checkbox?.checked ?? false;
+        return this.mmdManager.mirroringFloorEnabled;
     }
 }

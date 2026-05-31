@@ -20,6 +20,7 @@ import type {
 import { AccessoryPanelController } from "./ui/accessory-panel-controller";
 import { AppMenuController } from "./ui/app-menu-controller";
 import { BloomToneMapController } from "./ui/bloom-tone-map-controller";
+import { BottomPanelLayoutController } from "./ui/bottom-panel-layout-controller";
 import { CameraPanelController } from "./ui/camera-panel-controller";
 import { ColorPostFxController } from "./ui/color-postfx-controller";
 import { DofPanelController } from "./ui/dof-panel-controller";
@@ -183,12 +184,13 @@ export class UIController {
     private mmdManager: MmdManager;
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
+    private bottomPanelLayoutController: BottomPanelLayoutController | null = null;
 
     // Button elements
     private btnLoadFile: HTMLElement;
     private btnSaveProject: HTMLElement;
     private btnLoadProject: HTMLElement;
-    private btnExportPng: HTMLElement;
+    private btnExportPng: HTMLElement | null = null;
     private btnExportPngSeq: HTMLElement | null = null;
     private btnExportWebm: HTMLElement | null = null;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
@@ -301,7 +303,7 @@ export class UIController {
         this.btnLoadFile = document.getElementById("btn-load-file")!;
         this.btnSaveProject = document.getElementById("btn-save-project")!;
         this.btnLoadProject = document.getElementById("btn-load-project")!;
-        this.btnExportPng = document.getElementById("btn-export-png")!;
+        this.btnExportPng = document.getElementById("btn-export-png");
         this.btnExportPngSeq = document.getElementById("btn-export-png-seq");
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
@@ -384,31 +386,12 @@ export class UIController {
         });
         this.cameraPanelController = new CameraPanelController({
             mmdManager: this.mmdManager,
-            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
-            normalizeRangeInputValue: (slider, value) => this.normalizeRangeInputValue(slider, value),
-            formatRangeInputValue: (slider, value) => this.formatRangeInputValue(slider, value),
-            isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
             onCameraEdited: () => {
                 this.actionDispatcher.dispatch({ type: "edit.cameraTransformChanged", source: "panel" });
             },
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.setupActionHandlers();
-        this.appMenuController = new AppMenuController({
-            mmdManager: this.mmdManager,
-            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
-            setStatus: (text, loading) => this.setStatus(text, loading ?? false),
-            showToast: (message, type) => this.showToast(message, type),
-            refreshEnvironmentUi: () => this.sceneEnvironmentUiController?.refresh(),
-            refreshCameraUi: () => this.cameraPanelController?.refresh(true),
-            refreshRuntimeUi: () => this.runtimeFeatureUiController?.refresh(),
-            refreshModelEdgeUi: () => this.modelEdgeController?.refresh(),
-            refreshLightingUi: () => this.refreshLightingUiFromRuntime(),
-        });
-        this.setupEventListeners();
-        this.setupCallbacks();
-        this.setupKeyboard();
-        this.setupFileDrop();
         this.exportUiController = new ExportUiController({
             mmdManager: this.mmdManager,
             buildProjectState: () => this.buildProjectStateForPersistence(),
@@ -426,6 +409,50 @@ export class UIController {
             },
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
+        this.appMenuController = new AppMenuController({
+            mmdManager: this.mmdManager,
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
+            setStatus: (text, loading) => this.setStatus(text, loading ?? false),
+            showToast: (message, type) => this.showToast(message, type),
+            refreshEnvironmentUi: () => this.sceneEnvironmentUiController?.refresh(),
+            refreshCameraUi: () => this.cameraPanelController?.refresh(true),
+            refreshRuntimeUi: () => this.runtimeFeatureUiController?.refresh(),
+            refreshModelEdgeUi: () => this.modelEdgeController?.refresh(),
+            refreshLightingUi: () => this.refreshLightingUiFromRuntime(),
+            createWebmExportSettingsAdapter: () => this.exportUiController?.createWebmExportSettingsAdapter() ?? {
+                getState: () => ({
+                    aspectPreset: "16:9",
+                    sizePreset: "1920",
+                    width: 1920,
+                    height: 1080,
+                    lockAspect: false,
+                    qualityScale: 1,
+                    fps: 30,
+                    includeAudio: false,
+                    preferredVideoCodec: "vp8",
+                    captureMode: "webgpu-copy",
+                    usePlaybackRange: false,
+                    startFrame: 0,
+                    endFrame: 0,
+                }),
+                setAspectPreset: () => undefined,
+                setSizePreset: () => undefined,
+                setWidth: () => undefined,
+                setHeight: () => undefined,
+                setFps: () => undefined,
+                setIncludeAudio: () => undefined,
+                setUsePlaybackRange: () => undefined,
+                setStartFrame: () => undefined,
+                setEndFrame: () => undefined,
+                setCaptureMode: () => undefined,
+            },
+        });
+        this.setupEventListeners();
+        this.setupCallbacks();
+        this.setupKeyboard();
+        this.setupFileDrop();
+        this.bottomPanelLayoutController = new BottomPanelLayoutController();
+        this.bottomPanelLayoutController.applyMode(this.mmdManager.getTimelineTarget() === "model" ? "model" : "camera");
         this.layoutUiController = new LayoutUiController({
             mmdManager: this.mmdManager,
             exportUiController: this.exportUiController,
@@ -446,7 +473,6 @@ export class UIController {
         this.accessoryPanelController = new AccessoryPanelController({
             mmdManager: this.mmdManager,
             showToast: (message, type) => this.showToast(message, type),
-            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             onAccessoryTransformChanged: (accessoryIndex) => {
                 this.markSectionKeyframeDirty("accessory", this.getAccessoryKeyframeContextKey(accessoryIndex));
                 this.updateSectionKeyframeButtons();
@@ -533,7 +559,7 @@ export class UIController {
         this.btnLoadProject.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "project.load", source: "button" });
         });
-        this.btnExportPng.addEventListener("click", () => {
+        this.btnExportPng?.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "project.exportPng", source: "button" });
         });
         this.btnExportPngSeq?.addEventListener("click", () => {
@@ -815,6 +841,15 @@ export class UIController {
         };
 
         const applyLightMode = () => {
+            if (!elLightMode) {
+                for (const row of lightRows) {
+                    row.classList.remove("light-row--hidden");
+                }
+                for (const row of shadowRows) {
+                    row.classList.remove("light-row--hidden");
+                }
+                return;
+            }
             const mode = elLightMode?.value === "shadow" ? "shadow" : "light";
             for (const row of lightRows) {
                 row.classList.toggle("light-row--hidden", mode !== "light");
@@ -1844,10 +1879,14 @@ export class UIController {
             this.cameraPanelController?.setCameraViewPreset(action.view);
         });
         this.actionDispatcher.register("camera.setMirroringFloorEnabled", (action) => {
-            this.cameraPanelController?.setMirroringFloorEnabled(action.enabled);
+            this.mmdManager.mirroringFloorEnabled = action.enabled;
+            this.sceneEnvironmentUiController?.refresh();
+            this.cameraPanelController?.refresh(true);
         });
         this.actionDispatcher.register("camera.setMirroringFloorResolution", (action) => {
-            this.cameraPanelController?.setMirroringFloorResolution(action.resolution);
+            this.mmdManager.mirroringFloorResolution = action.resolution;
+            this.sceneEnvironmentUiController?.refresh();
+            this.cameraPanelController?.refresh(true);
         });
         this.actionDispatcher.register("output.applyPreset", () => {
             this.exportUiController?.applyOutputPreset();
@@ -2845,6 +2884,7 @@ export class UIController {
         this.refreshCameraUiFromRuntime(true);
         this.mmdManager.setBoneVisualizerSelectedBone(null);
         this.updateInfoActionButtons();
+        this.bottomPanelLayoutController?.applyMode("camera");
     }
 
     private applyActiveModelSelectionUI(): void {
@@ -2858,6 +2898,7 @@ export class UIController {
         this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
         this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
         this.updateInfoActionButtons();
+        this.bottomPanelLayoutController?.applyMode("model");
     }
 
     private updateInfoActionButtons(): void {
@@ -2954,7 +2995,7 @@ export class UIController {
 
     private installRangeNumberInputs(root: ParentNode = document): void {
         const sliders = root.querySelectorAll<HTMLInputElement>(
-            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].accessory-slider, input[type="range"].effect-slider',
+            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].effect-slider',
         );
 
         for (const slider of sliders) {

@@ -13,15 +13,15 @@ type BonePoseSnapshot = {
 
 export class BottomPanel {
     private static readonly CAMERA_CONTROL_NAME = "Camera";
-    private boneSelect: HTMLSelectElement;
+    private boneSelectionSummary: HTMLElement | null;
     private boneContainer: HTMLElement;
-    private morphFrameSelect: HTMLSelectElement;
     private morphContainer: HTMLElement;
     private boneSliders: Map<BoneSliderKey, HTMLInputElement> = new Map();
     private boneSliderValues: Map<BoneSliderKey, HTMLElement> = new Map();
     private morphSliders: Map<string, HTMLInputElement> = new Map();
     private morphFrames: MorphDisplayFrameInfo[] = [];
     private boneControlMap: Map<string, BoneControlInfo> = new Map();
+    private boneNames: Set<string> = new Set();
     private activeSliderInteractions: WeakSet<HTMLInputElement> = new WeakSet();
     private currentBoneName: string | null = null;
     private currentMorphFrameIndex: number | null = null;
@@ -36,24 +36,9 @@ export class BottomPanel {
     public onRangeSliderSynced: ((slider: HTMLInputElement) => void) | null = null;
 
     constructor() {
-        this.boneSelect = document.getElementById("bone-select") as HTMLSelectElement;
+        this.boneSelectionSummary = document.getElementById("bone-selection-summary");
         this.boneContainer = document.getElementById("bone-controls") as HTMLElement;
-        this.morphFrameSelect = document.getElementById("morph-frame-select") as HTMLSelectElement;
         this.morphContainer = document.getElementById("morph-controls") as HTMLElement;
-
-        this.boneSelect.addEventListener("change", () => {
-            this.currentBoneName = this.boneSelect.value || null;
-            this.renderSelectedBone();
-            this.onBoneSelectionChanged?.(this.currentBoneName);
-        });
-
-        this.morphFrameSelect.addEventListener("change", () => {
-            const selectedIndex = Number.parseInt(this.morphFrameSelect.value, 10);
-            const normalizedIndex = Number.isNaN(selectedIndex) ? -1 : selectedIndex;
-            this.renderMorphFrame(normalizedIndex);
-            this.currentMorphFrameIndex = normalizedIndex >= 0 ? normalizedIndex : null;
-            this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
-        });
     }
 
     setMmdManager(manager: MmdManager): void {
@@ -62,10 +47,10 @@ export class BottomPanel {
 
     updateBoneControls(info: ModelInfo): void {
         const previousBoneName = this.currentBoneName;
-        this.boneSelect.innerHTML = "";
         this.boneSliders.clear();
         this.boneSliderValues.clear();
         this.boneControlMap.clear();
+        this.boneNames = new Set(info.boneNames);
 
         for (const boneControlInfo of info.boneControlInfos ?? []) {
             this.boneControlMap.set(boneControlInfo.name, boneControlInfo);
@@ -73,19 +58,11 @@ export class BottomPanel {
 
         if (info.boneNames.length === 0) {
             this.currentBoneName = null;
-            this.boneSelect.disabled = true;
+            this.updateBoneSelectionSummary();
             this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noBones")}</div>`;
             return;
         }
 
-        for (const boneName of info.boneNames) {
-            const option = document.createElement("option");
-            option.value = boneName;
-            option.textContent = boneName;
-            this.boneSelect.appendChild(option);
-        }
-
-        this.boneSelect.disabled = false;
         const preferredBoneName = previousBoneName && info.boneNames.includes(previousBoneName)
             ? previousBoneName
             : info.boneNames[0];
@@ -93,7 +70,6 @@ export class BottomPanel {
     }
 
     updateMorphControls(info: ModelInfo): void {
-        this.morphFrameSelect.innerHTML = "";
         this.morphSliders.clear();
         this.morphFrames = info.morphDisplayFrames.length > 0
             ? info.morphDisplayFrames
@@ -105,22 +81,14 @@ export class BottomPanel {
                 : [];
 
         if (this.morphFrames.length === 0) {
-            this.morphFrameSelect.disabled = true;
+            this.morphContainer.classList.remove("morph-category-grid");
             this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noMorphs")}</div>`;
             return;
         }
 
-        this.morphFrames.forEach((frame, index) => {
-            const option = document.createElement("option");
-            option.value = String(index);
-            option.textContent = frame.name;
-            this.morphFrameSelect.appendChild(option);
-        });
-
-        this.morphFrameSelect.disabled = this.morphFrames.length <= 1;
-        this.morphFrameSelect.value = "0";
-        this.currentMorphFrameIndex = 0;
-        this.renderMorphFrame(0);
+        const firstNonEmptyIndex = this.morphFrames.findIndex((frame) => frame.morphs.length > 0);
+        this.currentMorphFrameIndex = firstNonEmptyIndex >= 0 ? firstNonEmptyIndex : null;
+        this.renderMorphGroups();
         this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
     }
 
@@ -141,8 +109,8 @@ export class BottomPanel {
         this.boneSliders.clear();
         this.boneSliderValues.clear();
         this.boneControlMap.clear();
-        this.boneSelect.innerHTML = '<option value="">-</option>';
-        this.boneSelect.disabled = true;
+        this.boneNames.clear();
+        this.updateBoneSelectionSummary();
         this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
     }
 
@@ -150,8 +118,7 @@ export class BottomPanel {
         this.morphFrames = [];
         this.morphSliders.clear();
         this.currentMorphFrameIndex = null;
-        this.morphFrameSelect.innerHTML = '<option value="">-</option>';
-        this.morphFrameSelect.disabled = true;
+        this.morphContainer.classList.remove("morph-category-grid");
         this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
     }
 
@@ -228,35 +195,35 @@ export class BottomPanel {
     }
 
     syncSelectedMorphFrameSlidersFromRuntime(force = false): void {
-        if (!this.mmdManager || this.currentMorphFrameIndex === null) return;
-        const frame = this.morphFrames[this.currentMorphFrameIndex];
-        if (!frame) return;
+        if (!this.mmdManager) return;
 
-        for (const morphInfo of frame.morphs) {
-            const slider = this.morphSliders.get(`${morphInfo.index}:${morphInfo.name}`);
-            if (!slider) continue;
-            if (!force && this.isSliderEditing(slider)) continue;
+        for (const frame of this.morphFrames) {
+            for (const morphInfo of frame.morphs) {
+                const slider = this.morphSliders.get(`${morphInfo.index}:${morphInfo.name}`);
+                if (!slider) continue;
+                if (!force && this.isSliderEditing(slider)) continue;
 
-            const rawValue = morphInfo.index >= 0
-                ? this.mmdManager.getMorphWeightByIndex(morphInfo.index)
-                : this.mmdManager.getMorphWeight(morphInfo.name);
-            const normalized = Number.isFinite(rawValue) ? rawValue : 0;
-            const nextValue = normalized.toFixed(2);
-            if (slider.value !== nextValue) {
-                slider.value = nextValue;
-            }
+                const rawValue = morphInfo.index >= 0
+                    ? this.mmdManager.getMorphWeightByIndex(morphInfo.index)
+                    : this.mmdManager.getMorphWeight(morphInfo.name);
+                const normalized = Number.isFinite(rawValue) ? rawValue : 0;
+                const nextValue = normalized.toFixed(2);
+                if (slider.value !== nextValue) {
+                    slider.value = nextValue;
+                }
 
-            const valueDisplay = slider.parentElement?.querySelector(".morph-value") as HTMLElement | null;
-            if (valueDisplay) {
-                valueDisplay.textContent = nextValue;
+                const valueDisplay = slider.parentElement?.querySelector(".morph-value") as HTMLElement | null;
+                if (valueDisplay) {
+                    valueDisplay.textContent = nextValue;
+                }
             }
         }
     }
 
     clearSelectedBone(forceRender = false): boolean {
-        const selectionChanged = this.currentBoneName !== null || this.boneSelect.selectedIndex !== -1;
+        const selectionChanged = this.currentBoneName !== null;
         this.currentBoneName = null;
-        this.boneSelect.selectedIndex = -1;
+        this.updateBoneSelectionSummary();
         if (forceRender || selectionChanged) {
             this.renderSelectedBone();
         }
@@ -267,20 +234,11 @@ export class BottomPanel {
         if (!boneName) {
             return this.clearSelectedBone(forceRender);
         }
-        if (this.boneSelect.disabled) return false;
+        if (!this.boneNames.has(boneName)) return false;
 
-        let exists = false;
-        for (let i = 0; i < this.boneSelect.options.length; i += 1) {
-            if (this.boneSelect.options[i].value === boneName) {
-                exists = true;
-                break;
-            }
-        }
-        if (!exists) return false;
-
-        const selectionChanged = this.currentBoneName !== boneName || this.boneSelect.value !== boneName;
+        const selectionChanged = this.currentBoneName !== boneName;
         this.currentBoneName = boneName;
-        this.boneSelect.value = boneName;
+        this.updateBoneSelectionSummary();
         if (forceRender || selectionChanged) {
             this.renderSelectedBone();
         }
@@ -409,6 +367,12 @@ export class BottomPanel {
         this.onRangeInputsRendered?.(this.boneContainer);
     }
 
+    private updateBoneSelectionSummary(): void {
+        if (!this.boneSelectionSummary) return;
+        this.boneSelectionSummary.textContent = this.currentBoneName ?? "-";
+        this.boneSelectionSummary.title = this.currentBoneName ?? "";
+    }
+
     syncSelectedBoneSlidersFromRuntime(force = false): void {
         if (!this.mmdManager || !this.currentBoneName) return;
         if (this.boneSliders.size === 0) return;
@@ -528,70 +492,141 @@ export class BottomPanel {
         return Number.isFinite(value) ? value : 0;
     }
 
-    private renderMorphFrame(frameIndex: number): void {
+    private renderMorphGroups(): void {
         this.morphContainer.innerHTML = "";
         this.morphSliders.clear();
+        this.morphContainer.classList.remove("morph-category-grid");
 
-        const frame = this.morphFrames[frameIndex];
-        if (!frame) {
-            this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noFrame")}</div>`;
-            return;
-        }
-
-        if (frame.morphs.length === 0) {
+        const groups = this.buildMorphGroups();
+        const hasMorphs = groups.some((group) => group.morphs.length > 0);
+        if (!hasMorphs) {
             this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noMorphs")}</div>`;
             return;
         }
 
-        for (const morphInfo of frame.morphs) {
-            const morphName = morphInfo.name;
-            const morphIndex = morphInfo.index;
-            const row = document.createElement("div");
-            row.className = "morph-slider-row";
+        this.morphContainer.classList.add("morph-category-grid");
+        for (const group of groups) {
+            const card = document.createElement("div");
+            card.className = "morph-category-card";
 
-            const label = document.createElement("label");
-            label.textContent = morphName;
-            label.title = morphName;
+            const header = document.createElement("div");
+            header.className = "morph-category-header";
+            header.textContent = group.label;
+            card.appendChild(header);
 
-            const slider = document.createElement("input");
-            slider.type = "range";
-            slider.min = "0";
-            slider.max = "1";
-            slider.step = "0.01";
-            slider.className = "morph-slider";
-            slider.value = this.mmdManager
-                ? (morphIndex >= 0
-                    ? this.mmdManager.getMorphWeightByIndex(morphIndex).toFixed(2)
-                    : this.mmdManager.getMorphWeight(morphName).toFixed(2))
-                : "0";
+            const body = document.createElement("div");
+            body.className = "morph-category-body";
+            if (group.morphs.length === 0) {
+                const empty = document.createElement("div");
+                empty.className = "morph-category-empty";
+                empty.textContent = "-";
+                body.appendChild(empty);
+            }
 
-            const valueDisplay = document.createElement("span");
-            valueDisplay.className = "morph-value";
-            valueDisplay.textContent = Number(slider.value).toFixed(2);
+            for (const morphInfo of group.morphs) {
+                body.appendChild(this.createMorphSliderRow(morphInfo));
+            }
 
-            slider.addEventListener("input", () => {
-                const val = Number.parseFloat(slider.value);
-                valueDisplay.textContent = val.toFixed(2);
-                if (!this.mmdManager) return;
-                if (morphIndex >= 0) {
-                    this.mmdManager.setMorphWeightByIndex(morphIndex, val);
-                } else {
-                    this.mmdManager.setMorphWeight(morphName, val);
-                }
-                this.onMorphValueEdited?.(this.currentMorphFrameIndex);
-            });
-
-            this.morphSliders.set(`${morphIndex}:${morphName}`, slider);
-
-            row.appendChild(label);
-            row.appendChild(slider);
-            row.appendChild(valueDisplay);
-            this.morphContainer.appendChild(row);
+            card.appendChild(body);
+            this.morphContainer.appendChild(card);
         }
 
         this.onRangeInputsRendered?.(this.morphContainer);
     }
 
+    private buildMorphGroups(): Array<{
+        key: "eye" | "lip" | "brow" | "other";
+        label: string;
+        morphs: Array<{ frameIndex: number; index: number; name: string }>;
+    }> {
+        const groups: Array<{
+            key: "eye" | "lip" | "brow" | "other";
+            label: string;
+            morphs: Array<{ frameIndex: number; index: number; name: string }>;
+        }> = [
+            { key: "eye", label: t("morph.category.eye"), morphs: [] },
+            { key: "lip", label: t("morph.category.lip"), morphs: [] },
+            { key: "brow", label: t("morph.category.brow"), morphs: [] },
+            { key: "other", label: t("morph.category.other"), morphs: [] },
+        ];
+
+        this.morphFrames.forEach((frame, frameIndex) => {
+            for (const morph of frame.morphs) {
+                const key = this.classifyMorphFrame(morph.name);
+                const group = groups.find((candidate) => candidate.key === key) ?? groups[3];
+                group.morphs.push({ frameIndex, index: morph.index, name: morph.name });
+            }
+        });
+        return groups;
+    }
+
+    private classifyMorphFrame(name: string): "eye" | "lip" | "brow" | "other" {
+        const normalized = name.toLowerCase();
+        if (/[\u76ee\u773c\u77b3]|\u307e\u3070\u305f\u304d|\u30a6\u30a3\u30f3\u30af|\u7b11\u3044/.test(name)
+            || normalized.includes("eye")
+            || normalized.includes("wink")) {
+            return "eye";
+        }
+        if (/[\u7709]|\u56f0\u308b|\u6012\u308a|\u306b\u3053\u308a/.test(name)
+            || normalized.includes("brow")
+            || normalized.includes("eyebrow")) {
+            return "brow";
+        }
+        if (/[\u53e3\u5507]|\u30ea\u30c3\u30d7|^[\u3042\u3044\u3046\u3048\u304a]$/.test(name)
+            || normalized.includes("lip")
+            || normalized.includes("mouth")) {
+            return "lip";
+        }
+        return "other";
+    }
+
+    private createMorphSliderRow(morphInfo: { frameIndex: number; index: number; name: string }): HTMLElement {
+        const morphName = morphInfo.name;
+        const morphIndex = morphInfo.index;
+        const row = document.createElement("div");
+        row.className = "morph-slider-row";
+
+        const label = document.createElement("label");
+        label.textContent = morphName;
+        label.title = morphName;
+
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = "0";
+        slider.max = "1";
+        slider.step = "0.01";
+        slider.className = "morph-slider";
+        slider.value = this.mmdManager
+            ? (morphIndex >= 0
+                ? this.mmdManager.getMorphWeightByIndex(morphIndex).toFixed(2)
+                : this.mmdManager.getMorphWeight(morphName).toFixed(2))
+            : "0";
+
+        const valueDisplay = document.createElement("span");
+        valueDisplay.className = "morph-value";
+        valueDisplay.textContent = Number(slider.value).toFixed(2);
+
+        slider.addEventListener("input", () => {
+            const val = Number.parseFloat(slider.value);
+            valueDisplay.textContent = val.toFixed(2);
+            if (!this.mmdManager) return;
+            if (morphIndex >= 0) {
+                this.mmdManager.setMorphWeightByIndex(morphIndex, val);
+            } else {
+                this.mmdManager.setMorphWeight(morphName, val);
+            }
+            this.currentMorphFrameIndex = morphInfo.frameIndex;
+            this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
+            this.onMorphValueEdited?.(this.currentMorphFrameIndex);
+        });
+
+        this.morphSliders.set(`${morphIndex}:${morphName}`, slider);
+
+        row.appendChild(label);
+        row.appendChild(slider);
+        row.appendChild(valueDisplay);
+        return row;
+    }
     private isSliderEditing(slider: HTMLInputElement): boolean {
         const activeElement = document.activeElement;
         return this.activeSliderInteractions.has(slider)

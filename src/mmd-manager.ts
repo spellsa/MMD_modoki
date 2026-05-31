@@ -1440,7 +1440,7 @@ ${beforeFogAppendBlock}
     private lightColorScaleValue = new Color3(1, 1, 1);
     private lightFlatStrengthValue = 0;
     private lightFlatColorInfluenceValue = 0.35;
-    private shadowGroundColorValue = new Color3(0.15, 0.15, 0.2);
+    private shadowGroundColorValue = new Color3(0.5, 0.5, 0.5);
     private postEffectContrastValue = 1;
     private postEffectGammaValue = 1;
     private postEffectExposureValue = 1;

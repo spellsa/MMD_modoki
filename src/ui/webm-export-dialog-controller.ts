@@ -1,63 +1,26 @@
 import { t } from "../i18n";
 import type { EditorAction } from "../actions/types";
+import type { WebmCaptureMode } from "../types";
+import {
+    OUTPUT_ASPECT_OPTIONS,
+    OUTPUT_FPS_OPTIONS,
+    OUTPUT_SIZE_PRESET_OPTIONS,
+    WEBM_CAPTURE_MODE_OPTIONS,
+    type WebmExportSettingsAdapter,
+} from "./export-ui-controller";
 import type { PopupContentController } from "./popup-dialog-controller";
 import { createPopupFormButton, createPopupFormField, createPopupFormInline } from "./popup-form-helpers";
 
 type WebmExportDialogDeps = {
     dispatchAction: (action: EditorAction) => boolean;
     close: () => void;
+    output: WebmExportSettingsAdapter;
 };
-
-type OutputDomElements = {
-    aspect: HTMLSelectElement | null;
-    sizePreset: HTMLSelectElement | null;
-    width: HTMLInputElement | null;
-    height: HTMLInputElement | null;
-    fps: HTMLSelectElement | null;
-    includeAudio: HTMLInputElement | null;
-    usePlaybackRange: HTMLInputElement | null;
-    startFrame: HTMLInputElement | null;
-    endFrame: HTMLInputElement | null;
-    captureMode: HTMLSelectElement | null;
-};
-
-function resolveOutputDomElements(): OutputDomElements {
-    return {
-        aspect: document.getElementById("output-aspect") as HTMLSelectElement | null,
-        sizePreset: document.getElementById("output-size-preset") as HTMLSelectElement | null,
-        width: document.getElementById("output-width") as HTMLInputElement | null,
-        height: document.getElementById("output-height") as HTMLInputElement | null,
-        fps: document.getElementById("output-fps") as HTMLSelectElement | null,
-        includeAudio: document.getElementById("output-include-audio") as HTMLInputElement | null,
-        usePlaybackRange: document.getElementById("output-use-playback-range") as HTMLInputElement | null,
-        startFrame: document.getElementById("output-start-frame") as HTMLInputElement | null,
-        endFrame: document.getElementById("output-end-frame") as HTMLInputElement | null,
-        captureMode: document.getElementById("output-webm-capture-mode") as HTMLSelectElement | null,
-    };
-}
-
-function appendSelectOptions(target: HTMLSelectElement, source: HTMLSelectElement | null): void {
-    if (!source) return;
-    Array.from(source.options).forEach((sourceOption) => {
-        const option = document.createElement("option");
-        option.value = sourceOption.value;
-        option.textContent = sourceOption.textContent;
-        target.appendChild(option);
-    });
-}
-
-function dispatchChange(element: HTMLElement | null): void {
-    element?.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function dispatchInput(element: HTMLElement | null): void {
-    element?.dispatchEvent(new Event("input", { bubbles: true }));
-}
 
 export class WebmExportDialogController implements PopupContentController {
     private readonly dispatchAction: (action: EditorAction) => boolean;
     private readonly close: () => void;
-    private readonly outputElements: OutputDomElements;
+    private readonly output: WebmExportSettingsAdapter;
     private container: HTMLElement | null = null;
     private aspectSelect: HTMLSelectElement | null = null;
     private sizePresetSelect: HTMLSelectElement | null = null;
@@ -73,26 +36,39 @@ export class WebmExportDialogController implements PopupContentController {
     constructor(deps: WebmExportDialogDeps) {
         this.dispatchAction = deps.dispatchAction;
         this.close = deps.close;
-        this.outputElements = resolveOutputDomElements();
+        this.output = deps.output;
     }
 
     public mount(container: HTMLElement): void {
         this.container = container;
         container.classList.add("popup-form");
 
+        const state = this.output.getState();
         const form = document.createElement("div");
         form.className = "popup-form-grid";
 
-        this.aspectSelect = this.createSelect("webm-output-aspect", this.outputElements.aspect);
-        this.sizePresetSelect = this.createSelect("webm-output-size-preset", this.outputElements.sizePreset);
-        this.widthInput = this.createNumberInput("webm-output-width", this.outputElements.width, 320, 8192);
-        this.heightInput = this.createNumberInput("webm-output-height", this.outputElements.height, 180, 8192);
-        this.fpsSelect = this.createSelect("webm-output-fps", this.outputElements.fps);
-        this.includeAudioInput = this.createCheckbox("webm-output-include-audio", this.outputElements.includeAudio);
-        this.usePlaybackRangeInput = this.createCheckbox("webm-output-use-playback-range", this.outputElements.usePlaybackRange);
-        this.startFrameInput = this.createNumberInput("webm-output-start-frame", this.outputElements.startFrame, 0, 999999);
-        this.endFrameInput = this.createNumberInput("webm-output-end-frame", this.outputElements.endFrame, 0, 999999);
-        this.captureModeSelect = this.createCaptureModeSelect();
+        this.aspectSelect = this.createSelect(
+            "webm-output-aspect",
+            OUTPUT_ASPECT_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) })),
+            state.aspectPreset,
+        );
+        this.sizePresetSelect = this.createSelect(
+            "webm-output-size-preset",
+            OUTPUT_SIZE_PRESET_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) })),
+            state.sizePreset,
+        );
+        this.widthInput = this.createNumberInput("webm-output-width", state.width, 320, 8192);
+        this.heightInput = this.createNumberInput("webm-output-height", state.height, 180, 8192);
+        this.fpsSelect = this.createSelect("webm-output-fps", OUTPUT_FPS_OPTIONS, String(state.fps));
+        this.includeAudioInput = this.createCheckbox("webm-output-include-audio", state.includeAudio);
+        this.usePlaybackRangeInput = this.createCheckbox("webm-output-use-playback-range", state.usePlaybackRange);
+        this.startFrameInput = this.createNumberInput("webm-output-start-frame", state.startFrame, 0, 999999);
+        this.endFrameInput = this.createNumberInput("webm-output-end-frame", state.endFrame, 0, 999999);
+        this.captureModeSelect = this.createSelect(
+            "webm-output-capture-mode",
+            WEBM_CAPTURE_MODE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) })),
+            state.captureMode,
+        );
 
         form.appendChild(createPopupFormField(t("dialog.webmExport.aspect"), this.aspectSelect));
         form.appendChild(createPopupFormField(t("dialog.webmExport.longSide"), this.sizePresetSelect));
@@ -111,7 +87,7 @@ export class WebmExportDialogController implements PopupContentController {
 
         const exportButton = createPopupFormButton(t("dialog.webmExport.export"), "primary");
         exportButton.addEventListener("click", () => {
-            this.syncAllToOutputDom();
+            this.syncAllToOutputState();
             this.dispatchAction({ type: "project.exportWebm", source: "menu" });
             this.close();
         });
@@ -128,103 +104,67 @@ export class WebmExportDialogController implements PopupContentController {
 
     private setupEvents(): void {
         this.aspectSelect?.addEventListener("change", () => {
-            if (this.outputElements.aspect && this.aspectSelect) {
-                this.outputElements.aspect.value = this.aspectSelect.value;
-            }
+            this.output.setAspectPreset(this.aspectSelect?.value ?? "16:9");
             if (!this.dispatchAction({ type: "output.applyPreset", source: "menu" })) {
-                dispatchChange(this.outputElements.aspect);
+                this.output.getState();
             }
-            this.syncDimensionsFromOutputDom();
+            this.syncDimensionsFromOutputState();
         });
 
         this.sizePresetSelect?.addEventListener("change", () => {
-            if (this.outputElements.sizePreset && this.sizePresetSelect) {
-                this.outputElements.sizePreset.value = this.sizePresetSelect.value;
-            }
+            this.output.setSizePreset(this.sizePresetSelect?.value ?? "1920");
             if (!this.dispatchAction({ type: "output.applyPreset", source: "menu" })) {
-                dispatchChange(this.outputElements.sizePreset);
+                this.output.getState();
             }
-            this.syncDimensionsFromOutputDom();
+            this.syncDimensionsFromOutputState();
         });
 
         this.widthInput?.addEventListener("input", () => {
-            if (this.outputElements.width && this.widthInput) {
-                this.outputElements.width.value = this.widthInput.value;
-            }
+            this.output.setWidth(this.parseNumberInput(this.widthInput, 1920));
             if (!this.dispatchAction({ type: "output.syncDimension", source: "menu", dimension: "width" })) {
-                dispatchInput(this.outputElements.width);
+                this.output.getState();
             }
-            this.syncDimensionsFromOutputDom();
+            this.syncDimensionsFromOutputState();
         });
 
         this.heightInput?.addEventListener("input", () => {
-            if (this.outputElements.height && this.heightInput) {
-                this.outputElements.height.value = this.heightInput.value;
-            }
+            this.output.setHeight(this.parseNumberInput(this.heightInput, 1080));
             if (!this.dispatchAction({ type: "output.syncDimension", source: "menu", dimension: "height" })) {
-                dispatchInput(this.outputElements.height);
+                this.output.getState();
             }
-            this.syncDimensionsFromOutputDom();
+            this.syncDimensionsFromOutputState();
         });
 
         this.fpsSelect?.addEventListener("change", () => {
-            if (this.outputElements.fps && this.fpsSelect) {
-                this.outputElements.fps.value = this.fpsSelect.value;
-                dispatchChange(this.outputElements.fps);
-            }
+            this.output.setFps(this.parseNumberInput(this.fpsSelect, 30));
         });
         this.includeAudioInput?.addEventListener("change", () => {
-            if (this.outputElements.includeAudio && this.includeAudioInput) {
-                this.outputElements.includeAudio.checked = this.includeAudioInput.checked;
-                dispatchChange(this.outputElements.includeAudio);
-            }
+            this.output.setIncludeAudio(this.includeAudioInput?.checked ?? false);
         });
         this.usePlaybackRangeInput?.addEventListener("change", () => {
-            if (this.outputElements.usePlaybackRange && this.usePlaybackRangeInput) {
-                this.outputElements.usePlaybackRange.checked = this.usePlaybackRangeInput.checked;
-                dispatchChange(this.outputElements.usePlaybackRange);
-            }
+            this.output.setUsePlaybackRange(this.usePlaybackRangeInput?.checked ?? false);
             this.syncFrameRangeEnabledState();
         });
         this.startFrameInput?.addEventListener("input", () => {
-            if (this.outputElements.startFrame && this.startFrameInput) {
-                this.outputElements.startFrame.value = this.startFrameInput.value;
-            }
-            if (!this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" })) {
-                dispatchInput(this.outputElements.startFrame);
-            }
+            this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
+            this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" });
         });
         this.endFrameInput?.addEventListener("input", () => {
-            if (this.outputElements.endFrame && this.endFrameInput) {
-                this.outputElements.endFrame.value = this.endFrameInput.value;
-            }
-            if (!this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" })) {
-                dispatchInput(this.outputElements.endFrame);
-            }
+            this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
+            this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" });
         });
         this.startFrameInput?.addEventListener("change", () => {
-            if (this.outputElements.startFrame && this.startFrameInput) {
-                this.outputElements.startFrame.value = this.startFrameInput.value;
-            }
-            if (!this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "start" })) {
-                dispatchChange(this.outputElements.startFrame);
-            }
-            this.syncFrameRangeFromOutputDom();
+            this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
+            this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "start" });
+            this.syncFrameRangeFromOutputState();
         });
         this.endFrameInput?.addEventListener("change", () => {
-            if (this.outputElements.endFrame && this.endFrameInput) {
-                this.outputElements.endFrame.value = this.endFrameInput.value;
-            }
-            if (!this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" })) {
-                dispatchChange(this.outputElements.endFrame);
-            }
-            this.syncFrameRangeFromOutputDom();
+            this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
+            this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" });
+            this.syncFrameRangeFromOutputState();
         });
         this.captureModeSelect?.addEventListener("change", () => {
-            if (this.outputElements.captureMode && this.captureModeSelect) {
-                this.outputElements.captureMode.value = this.captureModeSelect.value;
-                dispatchChange(this.outputElements.captureMode);
-            }
+            this.output.setCaptureMode(this.normalizeCaptureMode(this.captureModeSelect?.value));
         });
     }
 
@@ -232,7 +172,7 @@ export class WebmExportDialogController implements PopupContentController {
         return createPopupFormField(
             t("dialog.webmExport.size"),
             createPopupFormInline(this.widthInput, "x", this.heightInput),
-            "div"
+            "div",
         );
     }
 
@@ -241,36 +181,29 @@ export class WebmExportDialogController implements PopupContentController {
         return createPopupFormField(
             t("dialog.webmExport.frameRange"),
             createPopupFormInline(this.startFrameInput, "-", this.endFrameInput),
-            "div"
+            "div",
         );
     }
 
-    private createSelect(id: string, source: HTMLSelectElement | null): HTMLSelectElement {
+    private createSelect(
+        id: string,
+        options: ReadonlyArray<{ value: string; label: string }>,
+        selectedValue: string,
+    ): HTMLSelectElement {
         const select = document.createElement("select");
         select.id = id;
         select.className = "popup-form-control";
-        appendSelectOptions(select, source);
-        if (source) select.value = source.value;
+        options.forEach((sourceOption) => {
+            const option = document.createElement("option");
+            option.value = sourceOption.value;
+            option.textContent = sourceOption.label;
+            select.appendChild(option);
+        });
+        select.value = selectedValue;
         return select;
     }
 
-    private createCaptureModeSelect(): HTMLSelectElement {
-        const select = document.createElement("select");
-        select.id = "webm-output-capture-mode";
-        select.className = "popup-form-control";
-
-        const stable = document.createElement("option");
-        stable.value = "readpixels";
-        stable.textContent = t("dialog.webmExport.captureModeStable");
-        const speed = document.createElement("option");
-        speed.value = "webgpu-copy";
-        speed.textContent = t("dialog.webmExport.captureModeSpeed");
-        select.append(stable, speed);
-        if (this.outputElements.captureMode) select.value = this.outputElements.captureMode.value;
-        return select;
-    }
-
-    private createNumberInput(id: string, source: HTMLInputElement | null, min: number, max: number): HTMLInputElement {
+    private createNumberInput(id: string, value: number, min: number, max: number): HTMLInputElement {
         const input = document.createElement("input");
         input.id = id;
         input.className = "popup-form-control popup-form-number";
@@ -278,27 +211,29 @@ export class WebmExportDialogController implements PopupContentController {
         input.min = String(min);
         input.max = String(max);
         input.step = "1";
-        input.value = source?.value ?? "";
+        input.value = String(value);
         return input;
     }
 
-    private createCheckbox(id: string, source: HTMLInputElement | null): HTMLInputElement {
+    private createCheckbox(id: string, checked: boolean): HTMLInputElement {
         const input = document.createElement("input");
         input.id = id;
         input.className = "popup-form-checkbox";
         input.type = "checkbox";
-        input.checked = Boolean(source?.checked);
+        input.checked = checked;
         return input;
     }
 
-    private syncDimensionsFromOutputDom(): void {
-        if (this.widthInput && this.outputElements.width) this.widthInput.value = this.outputElements.width.value;
-        if (this.heightInput && this.outputElements.height) this.heightInput.value = this.outputElements.height.value;
+    private syncDimensionsFromOutputState(): void {
+        const state = this.output.getState();
+        if (this.widthInput) this.widthInput.value = String(state.width);
+        if (this.heightInput) this.heightInput.value = String(state.height);
     }
 
-    private syncFrameRangeFromOutputDom(): void {
-        if (this.startFrameInput && this.outputElements.startFrame) this.startFrameInput.value = this.outputElements.startFrame.value;
-        if (this.endFrameInput && this.outputElements.endFrame) this.endFrameInput.value = this.outputElements.endFrame.value;
+    private syncFrameRangeFromOutputState(): void {
+        const state = this.output.getState();
+        if (this.startFrameInput) this.startFrameInput.value = String(state.startFrame);
+        if (this.endFrameInput) this.endFrameInput.value = String(state.endFrame);
     }
 
     private syncFrameRangeEnabledState(): void {
@@ -307,18 +242,28 @@ export class WebmExportDialogController implements PopupContentController {
         if (this.endFrameInput) this.endFrameInput.disabled = !enabled;
     }
 
-    private syncAllToOutputDom(): void {
-        if (this.outputElements.aspect && this.aspectSelect) this.outputElements.aspect.value = this.aspectSelect.value;
-        if (this.outputElements.sizePreset && this.sizePresetSelect) this.outputElements.sizePreset.value = this.sizePresetSelect.value;
-        if (this.outputElements.width && this.widthInput) this.outputElements.width.value = this.widthInput.value;
-        if (this.outputElements.height && this.heightInput) this.outputElements.height.value = this.heightInput.value;
-        if (this.outputElements.fps && this.fpsSelect) this.outputElements.fps.value = this.fpsSelect.value;
-        if (this.outputElements.includeAudio && this.includeAudioInput) this.outputElements.includeAudio.checked = this.includeAudioInput.checked;
-        if (this.outputElements.usePlaybackRange && this.usePlaybackRangeInput) {
-            this.outputElements.usePlaybackRange.checked = this.usePlaybackRangeInput.checked;
-        }
-        if (this.outputElements.startFrame && this.startFrameInput) this.outputElements.startFrame.value = this.startFrameInput.value;
-        if (this.outputElements.endFrame && this.endFrameInput) this.outputElements.endFrame.value = this.endFrameInput.value;
-        if (this.outputElements.captureMode && this.captureModeSelect) this.outputElements.captureMode.value = this.captureModeSelect.value;
+    private syncAllToOutputState(): void {
+        if (this.aspectSelect) this.output.setAspectPreset(this.aspectSelect.value);
+        if (this.sizePresetSelect) this.output.setSizePreset(this.sizePresetSelect.value);
+        if (this.widthInput) this.output.setWidth(this.parseNumberInput(this.widthInput, 1920));
+        if (this.heightInput) this.output.setHeight(this.parseNumberInput(this.heightInput, 1080));
+        if (this.fpsSelect) this.output.setFps(this.parseNumberInput(this.fpsSelect, 30));
+        if (this.includeAudioInput) this.output.setIncludeAudio(this.includeAudioInput.checked);
+        if (this.usePlaybackRangeInput) this.output.setUsePlaybackRange(this.usePlaybackRangeInput.checked);
+        if (this.startFrameInput) this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
+        if (this.endFrameInput) this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
+        if (this.captureModeSelect) this.output.setCaptureMode(this.normalizeCaptureMode(this.captureModeSelect.value));
+        this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" });
+    }
+
+    private parseNumberInput(input: HTMLInputElement | HTMLSelectElement | null, fallback: number): number {
+        const value = Number.parseInt(input?.value ?? String(fallback), 10);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    private normalizeCaptureMode(value: string | null | undefined): WebmCaptureMode {
+        return value === "readpixels" || value === "webgpu-copy" || value === "canvas"
+            ? value
+            : "webgpu-copy";
     }
 }

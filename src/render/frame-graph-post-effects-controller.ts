@@ -892,7 +892,7 @@ export class FrameGraphPostEffectsController {
             ssaoEnabled: false,
             ssaoStrength: 1,
             ssaoRadius: 2,
-            ssaoShadowColor: { r: 0.15, g: 0.15, b: 0.2 },
+            ssaoShadowColor: { r: 0.5, g: 0.5, b: 0.5 },
             ssaoToonInfluence: 1,
             ssrEnabled: false,
             ssrStrength: 0.3,
