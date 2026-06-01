@@ -277,7 +277,7 @@ export class BottomPanel {
                 rotatable: true,
             };
 
-        const sliderDefs: {
+        const controlDefs: {
             key: BoneSliderKey;
             label: string;
             min: number;
@@ -287,84 +287,115 @@ export class BottomPanel {
         }[] = [];
 
         if (boneControlInfo.movable) {
-            sliderDefs.push(
-                { key: "tx", label: t("slider.posX"), min: -30, max: 30, step: 0.01, value: transform.position.x },
-                { key: "ty", label: t("slider.posY"), min: -30, max: 30, step: 0.01, value: transform.position.y },
-                { key: "tz", label: t("slider.posZ"), min: -30, max: 30, step: 0.01, value: transform.position.z },
+            controlDefs.push(
+                { key: "tx", label: "X", min: -30, max: 30, step: 0.01, value: transform.position.x },
+                { key: "ty", label: "Y", min: -30, max: 30, step: 0.01, value: transform.position.y },
+                { key: "tz", label: "Z", min: -30, max: 30, step: 0.01, value: transform.position.z },
             );
         }
         if (boneControlInfo.rotatable) {
-            sliderDefs.push(
-                { key: "rx", label: t("slider.rotX"), min: -180, max: 180, step: 0.1, value: transform.rotation.x },
-                { key: "ry", label: t("slider.rotY"), min: -180, max: 180, step: 0.1, value: transform.rotation.y },
-                { key: "rz", label: t("slider.rotZ"), min: -180, max: 180, step: 0.1, value: transform.rotation.z },
+            controlDefs.push(
+                { key: "rx", label: "Rx", min: -180, max: 180, step: 0.1, value: transform.rotation.x },
+                { key: "ry", label: "Ry", min: -180, max: 180, step: 0.1, value: transform.rotation.y },
+                { key: "rz", label: "Rz", min: -180, max: 180, step: 0.1, value: transform.rotation.z },
             );
         }
         if (isCameraControl) {
-            sliderDefs.push(
+            controlDefs.push(
                 { key: "camDistance", label: t("slider.distance"), min: 0.1, max: 400, step: 0.1, value: this.mmdManager?.getCameraDistance() ?? 45 },
                 { key: "camFov", label: t("slider.fov"), min: 10, max: 120, step: 0.1, value: this.mmdManager?.getCameraFov() ?? 30 },
             );
         }
 
-        if (sliderDefs.length === 0) {
+        if (controlDefs.length === 0) {
             this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noEditableChannels")}</div>`;
             return;
         }
 
-        for (const def of sliderDefs) {
-            const row = document.createElement("div");
-            row.className = "bone-slider-row";
-
-            const label = document.createElement("label");
-            label.className = "bone-slider-label";
-            label.textContent = def.label;
-
-            const slider = document.createElement("input");
-            slider.type = "range";
-            slider.min = String(def.min);
-            slider.max = String(def.max);
-            slider.step = String(def.step);
-            slider.value = this.clamp(def.value, def.min, def.max).toFixed(def.step < 1 ? 2 : 0);
-            slider.className = "bone-slider";
-
-            const beginSliderInteraction = (): void => {
-                this.activeSliderInteractions.add(slider);
-                this.onBoneTransformEditStarted?.(this.currentBoneName);
-            };
-            const endSliderInteraction = (): void => {
-                this.activeSliderInteractions.delete(slider);
-                this.onBoneTransformEditCommitted?.(this.currentBoneName);
-            };
-            slider.addEventListener("pointerdown", beginSliderInteraction);
-            slider.addEventListener("pointerup", endSliderInteraction);
-            slider.addEventListener("pointercancel", endSliderInteraction);
-            slider.addEventListener("blur", endSliderInteraction);
-
-            const valueDisplay = document.createElement("span");
-            valueDisplay.className = "bone-slider-value";
-            valueDisplay.textContent = this.formatSliderValue(Number(slider.value), def.step);
-
-            slider.addEventListener("input", () => {
-                const value = Number(slider.value);
-                valueDisplay.textContent = this.formatSliderValue(value, def.step);
-                this.applyBoneTransformFromSliders();
-                if (this.currentBoneName) {
-                    this.onBoneTransformEdited?.(this.currentBoneName);
-                }
-            });
-            slider.addEventListener("change", endSliderInteraction);
-
-            this.boneSliders.set(def.key, slider);
-            this.boneSliderValues.set(def.key, valueDisplay);
-
-            row.appendChild(label);
-            row.appendChild(slider);
-            row.appendChild(valueDisplay);
-            this.boneContainer.appendChild(row);
+        const grid = document.createElement("div");
+        grid.className = "bone-number-grid";
+        for (const def of controlDefs) {
+            grid.appendChild(this.createBoneNumberField(def));
         }
+        this.boneContainer.appendChild(grid);
+    }
 
-        this.onRangeInputsRendered?.(this.boneContainer);
+    private createBoneNumberField(def: {
+        key: BoneSliderKey;
+        label: string;
+        min: number;
+        max: number;
+        step: number;
+        value: number;
+    }): HTMLElement {
+        const row = document.createElement("label");
+        row.className = "bone-number-row";
+
+        const label = document.createElement("span");
+        label.className = "bone-number-label";
+        label.textContent = def.label;
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = String(def.min);
+        input.max = String(def.max);
+        input.step = String(def.step);
+        input.value = this.clamp(def.value, def.min, def.max).toFixed(def.step < 1 ? 2 : 0);
+        input.className = "bone-number-input";
+
+        const beginInputInteraction = (): void => {
+            if (this.activeSliderInteractions.has(input)) return;
+            this.activeSliderInteractions.add(input);
+            this.onBoneTransformEditStarted?.(this.currentBoneName);
+        };
+        const endInputInteraction = (): void => {
+            if (!this.activeSliderInteractions.has(input)) return;
+            this.activeSliderInteractions.delete(input);
+            this.onBoneTransformEditCommitted?.(this.currentBoneName);
+        };
+        const applyInputValue = (): void => {
+            const parsed = Number(input.value);
+            if (!Number.isFinite(parsed)) {
+                this.syncSelectedBoneSlidersFromRuntime(true);
+                return;
+            }
+            const clamped = this.clamp(parsed, def.min, def.max);
+            if (clamped !== parsed) {
+                input.value = this.formatSliderValue(clamped, def.step);
+            }
+            this.applyBoneTransformFromSliders();
+            if (this.currentBoneName) {
+                this.onBoneTransformEdited?.(this.currentBoneName);
+            }
+        };
+
+        input.addEventListener("focus", beginInputInteraction);
+        input.addEventListener("pointerdown", beginInputInteraction);
+        input.addEventListener("input", applyInputValue);
+        input.addEventListener("change", () => {
+            applyInputValue();
+            endInputInteraction();
+        });
+        input.addEventListener("blur", endInputInteraction);
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                applyInputValue();
+                input.blur();
+                return;
+            }
+            if (event.key === "Escape") {
+                event.preventDefault();
+                this.syncSelectedBoneSlidersFromRuntime(true);
+                input.blur();
+            }
+        });
+
+        this.boneSliders.set(def.key, input);
+
+        row.appendChild(label);
+        row.appendChild(input);
+        return row;
     }
 
     private updateBoneSelectionSummary(): void {
@@ -426,7 +457,6 @@ export class BottomPanel {
             if (valueEl) {
                 valueEl.textContent = this.formatSliderValue(Number(nextValue), step);
             }
-            this.onRangeSliderSynced?.(slider);
         };
 
         const cameraTranslation = this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME
