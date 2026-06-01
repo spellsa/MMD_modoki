@@ -95,6 +95,8 @@
 - [左パネル UI 案メモ](./left-panel-ui-ideas-2026-04-18.md)
 - [キー登録 UI 配置メモ](./key-registration-ui-note-2026-04-18.md)
 - [viewport 直下 現在値操作バー メモ](./viewport-current-value-bar-note-2026-04-22.md)
+- [ビューポート下バー実装メモ 2026-06-01](./viewport-bottom-bar-implementation-note-2026-06-01.md)
+- [ビューポート下バー 現状メモ 2026-06-01](./viewport-bottom-bar-current-status-2026-06-01.md)
 - [設定画面メモ](./settings-screen-note-2026-04-18.md)
 
 ## WGSL

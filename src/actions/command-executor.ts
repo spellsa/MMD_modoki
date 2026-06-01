@@ -1,6 +1,7 @@
 import type {
     BoneTransformCommandSnapshot,
     BuiltCommand,
+    CameraTransformCommandSnapshot,
     CommandDirection,
     CommandTrackRef,
     EditCommandDiff,
@@ -12,6 +13,7 @@ export type CommandExecutionContext = {
     removeTimelineKeyframe(track: CommandTrackRef, frame: number): boolean;
     moveTimelineKeyframe(track: CommandTrackRef, fromFrame: number, toFrame: number): boolean;
     applyBoneTransform?(boneName: string, snapshot: BoneTransformCommandSnapshot): boolean;
+    applyCameraTransform?(snapshot: CameraTransformCommandSnapshot): boolean;
     setSelectedFrame(frame: number | null): void;
     seekToBoundary(frame: number): void;
     refreshAfterKeyframeEdit(): void;
@@ -31,6 +33,8 @@ export function executeCommand(
             return executeKeyframeMove(command.diff, direction, context);
         case "edit.boneTransform":
             return executeBoneTransform(command.diff, direction, context);
+        case "edit.cameraTransform":
+            return executeCameraTransform(command.diff, direction, context);
     }
 }
 
@@ -58,6 +62,16 @@ function executeBoneTransform(
     if (!context.applyBoneTransform) return false;
     const snapshot = direction === "apply" ? diff.after : diff.before;
     return context.applyBoneTransform(diff.boneName, snapshot);
+}
+
+function executeCameraTransform(
+    diff: Extract<EditCommandDiff, { type: "edit.cameraTransform" }>,
+    direction: CommandDirection,
+    context: CommandExecutionContext,
+): boolean {
+    if (!context.applyCameraTransform) return false;
+    const snapshot = direction === "apply" ? diff.after : diff.before;
+    return context.applyCameraTransform(snapshot);
 }
 
 function executeKeyframeDelete(

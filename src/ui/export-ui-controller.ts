@@ -376,6 +376,7 @@ export class ExportUiController {
 
         let savedPath: string | null = null;
         try {
+            document.body.classList.add("png-capture-mode");
             this.mmdManager.setCaptureEditorOverlaysSuppressed(true);
             await this.waitForNextPaint();
             savedPath = await window.electronAPI.saveCanvasSnapshotPngFile(
@@ -391,6 +392,7 @@ export class ExportUiController {
             return;
         } finally {
             this.mmdManager.setCaptureEditorOverlaysSuppressed(false);
+            document.body.classList.remove("png-capture-mode");
         }
         if (!savedPath) {
             this.setStatus("Ready", false);

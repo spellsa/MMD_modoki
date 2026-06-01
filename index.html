@@ -193,10 +193,6 @@
         </div>
       </div>
       <div class="toolbar-right">
-        <div class="toolbar-mode-switch" role="group" aria-label="編集対象" data-i18n-aria-label="toolbar.mode.ariaLabel">
-          <button id="btn-toolbar-model-mode" class="toolbar-mode-btn" type="button" aria-pressed="true" data-i18n="toolbar.mode.model">モデル</button>
-          <button id="btn-toolbar-camera-mode" class="toolbar-mode-btn" type="button" aria-pressed="false" data-i18n="toolbar.mode.camera">カメラ</button>
-        </div>
         <button id="btn-toggle-shader-panel" class="toolbar-btn toolbar-btn--compact" title="エフェクト欄の表示/非表示" data-i18n-title="toolbar.fx.title.off" aria-pressed="false">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
             <rect x="2.2" y="3" width="11.6" height="10" rx="1.2" />
@@ -397,6 +393,90 @@
             </svg>
             <p data-i18n="viewport.empty.title">PMXモデルを読み込んでください</p>
             <span class="hint-text" data-i18n="viewport.empty.hint">ツールバーの「ファイル読込」ボタンか、Ctrl+Oで開く</span>
+          </div>
+        </div>
+        <div id="viewport-bottom-bar" class="viewport-bottom-bar" data-mode="camera">
+          <button id="viewport-bottom-mode-toggle" class="viewport-bottom-mode-btn" type="button" aria-pressed="true" data-i18n="viewportBottomBar.cameraEdit">カメラ編</button>
+          <div id="viewport-bottom-model-values" class="viewport-bottom-values" hidden>
+            <span class="viewport-bottom-label" data-i18n="viewportBottomBar.bonePosition">ボーン位置</span>
+            <span class="viewport-bottom-axis">X</span>
+            <input id="viewport-bottom-model-pos-x" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
+            <input id="viewport-bottom-model-pos-y" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
+            <input id="viewport-bottom-model-pos-z" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
+            <span class="viewport-bottom-label viewport-bottom-label--angle" data-i18n="viewportBottomBar.angle">角度</span>
+            <span class="viewport-bottom-axis">X</span>
+            <input id="viewport-bottom-model-rot-x" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
+            <input id="viewport-bottom-model-rot-y" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
+            <input id="viewport-bottom-model-rot-z" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+          </div>
+          <div id="viewport-bottom-camera-values" class="viewport-bottom-values">
+            <span class="viewport-bottom-label" data-i18n="viewportBottomBar.cameraCenter">カメラ中心</span>
+            <span class="viewport-bottom-axis">X</span>
+            <input id="viewport-bottom-camera-target-x" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
+            <input id="viewport-bottom-camera-target-y" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
+            <input id="viewport-bottom-camera-target-z" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
+            <span class="viewport-bottom-label viewport-bottom-label--angle" data-i18n="viewportBottomBar.angle">角度</span>
+            <span class="viewport-bottom-axis">X</span>
+            <input id="viewport-bottom-camera-rot-x" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
+            <input id="viewport-bottom-camera-rot-y" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
+            <input id="viewport-bottom-camera-rot-z" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+            <span class="viewport-bottom-label viewport-bottom-label--distance" data-i18n="viewportBottomBar.distance">距離</span>
+            <input id="viewport-bottom-camera-distance" class="viewport-bottom-value viewport-bottom-value--distance" type="number" min="0.1" max="400" step="1">
+            <span class="viewport-bottom-label viewport-bottom-label--fov" data-i18n="viewportBottomBar.fov">視野角</span>
+            <input id="viewport-bottom-camera-fov" class="viewport-bottom-value viewport-bottom-value--fov" type="number" min="10" max="120" step="1">
+          </div>
+          <div id="viewport-axis-handle" class="viewport-axis-handle">
+            <div class="viewport-axis-handle-row viewport-axis-handle-row--space">
+              <button id="viewport-axis-space-toggle" class="viewport-axis-space-toggle" type="button" data-i18n="viewportBottomBar.local">local</button>
+            </div>
+            <div class="viewport-axis-handle-row">
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--x" data-handle-kind="move" data-handle-axis="x">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
+                </svg>
+                <span>X</span>
+              </span>
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--y" data-handle-kind="move" data-handle-axis="y">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
+                </svg>
+                <span>Y</span>
+              </span>
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--z" data-handle-kind="move" data-handle-axis="z">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
+                </svg>
+                <span>Z</span>
+              </span>
+            </div>
+            <div class="viewport-axis-handle-row">
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--rotate viewport-axis-handle-axis--x" data-handle-kind="rotate" data-handle-axis="x">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M12.8 6.4A4.8 4.8 0 1 0 10 12.1M12.8 6.4V3.2M12.8 6.4H9.6" />
+                </svg>
+                <span>X</span>
+              </span>
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--rotate viewport-axis-handle-axis--y" data-handle-kind="rotate" data-handle-axis="y">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M12.8 6.4A4.8 4.8 0 1 0 10 12.1M12.8 6.4V3.2M12.8 6.4H9.6" />
+                </svg>
+                <span>Y</span>
+              </span>
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--rotate viewport-axis-handle-axis--z" data-handle-kind="rotate" data-handle-axis="z">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M12.8 6.4A4.8 4.8 0 1 0 10 12.1M12.8 6.4V3.2M12.8 6.4H9.6" />
+                </svg>
+                <span>Z</span>
+              </span>
+            </div>
           </div>
         </div>
       </main>

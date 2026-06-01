@@ -35,6 +35,7 @@ import { ModelEdgeController } from "./ui/model-edge-controller";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
+import { ViewportBottomBarController } from "./ui/viewport-bottom-bar-controller";
 import { ActionDispatcher } from "./actions/action-dispatcher";
 import type { ActionSource } from "./actions/types";
 import { executeCommand, type CommandExecutionContext } from "./actions/command-executor";
@@ -45,7 +46,8 @@ import {
     type KeyframeCommandSnapshot,
 } from "./actions/keyframe-command-builder";
 import { buildBoneTransformCommand } from "./actions/bone-transform-command-builder";
-import type { BoneTransformCommandSnapshot } from "./actions/command-types";
+import { buildCameraTransformCommand } from "./actions/camera-transform-command-builder";
+import type { BoneTransformCommandSnapshot, CameraTransformCommandSnapshot } from "./actions/command-types";
 import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     normalizePostEffectBackend,
@@ -185,6 +187,7 @@ export class UIController {
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
     private bottomPanelLayoutController: BottomPanelLayoutController | null = null;
+    private viewportBottomBarController: ViewportBottomBarController | null = null;
 
     // Button elements
     private btnLoadFile: HTMLElement;
@@ -195,8 +198,6 @@ export class UIController {
     private btnExportWebm: HTMLElement | null = null;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
     private toolbarRuntimeModeSelect: HTMLSelectElement | null = null;
-    private toolbarModelModeButton: HTMLButtonElement | null = null;
-    private toolbarCameraModeButton: HTMLButtonElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
     private btnStop: HTMLElement | null;
@@ -279,6 +280,7 @@ export class UIController {
     private currentProjectFilePath: string | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
+        this.viewportBottomBarController?.refreshLocale();
         this.dofPanelController?.refreshFocusTargetControls();
         this.refreshShaderPanel();
     };
@@ -308,8 +310,6 @@ export class UIController {
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
         this.toolbarRuntimeModeSelect = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
-        this.toolbarModelModeButton = document.getElementById("btn-toolbar-model-mode") as HTMLButtonElement | null;
-        this.toolbarCameraModeButton = document.getElementById("btn-toolbar-camera-mode") as HTMLButtonElement | null;
         this.btnPlay = document.getElementById("btn-play")!;
         this.btnPause = document.getElementById("btn-pause")!;
         this.btnStop = document.getElementById("btn-stop");
@@ -451,6 +451,45 @@ export class UIController {
         this.setupCallbacks();
         this.setupKeyboard();
         this.setupFileDrop();
+        this.viewportBottomBarController = new ViewportBottomBarController({
+            onSwitchToModel: () => this.switchViewportBottomBarToModel(),
+            onSwitchToCamera: () => {
+                this.actionDispatcher.dispatch({
+                    type: "model.selectTimelineTarget",
+                    source: "button",
+                    value: MODEL_INFO_CAMERA_SELECT_VALUE,
+                    showToast: true,
+                });
+            },
+            onPreviewBoneTransform: (value) => this.previewBottomBarBoneTransform(
+                this.bottomPanel.getSelectedBone(),
+                value.position,
+                value.rotation,
+            ),
+            onPreviewCameraTransform: (value) => this.previewBottomBarCameraTransform(
+                value.target,
+                value.rotation,
+                value.distance,
+                value.fov,
+            ),
+            onCommitBoneTransform: (value, before) => this.actionDispatcher.dispatch({
+                type: "edit.setBoneTransformFromBottomBar",
+                source: "bottomBar",
+                boneName: this.bottomPanel.getSelectedBone(),
+                position: value.position,
+                rotation: value.rotation,
+                before,
+            }),
+            onCommitCameraTransform: (value, before) => this.actionDispatcher.dispatch({
+                type: "edit.setCameraTransformFromBottomBar",
+                source: "bottomBar",
+                target: value.target,
+                rotation: value.rotation,
+                distance: value.distance,
+                fov: value.fov,
+                before,
+            }),
+        });
         this.bottomPanelLayoutController = new BottomPanelLayoutController();
         this.bottomPanelLayoutController.applyMode(this.mmdManager.getTimelineTarget() === "model" ? "model" : "camera");
         this.layoutUiController = new LayoutUiController({
@@ -534,6 +573,7 @@ export class UIController {
         this.timeline.setWaveformPeaks(null);
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
         this.applyLocalizedUiState();
+        this.refreshViewportBottomBar();
         document.addEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
 
         window.addEventListener("beforeunload", (event) => {
@@ -608,28 +648,6 @@ export class UIController {
                 window.location.reload();
             }, 120);
         });
-        this.toolbarModelModeButton?.addEventListener("click", () => {
-            const models = this.mmdManager.getLoadedModels();
-            const target = models.find((model) => model.active) ?? models[0] ?? null;
-            if (!target) {
-                this.refreshToolbarTimelineTargetSwitch();
-                return;
-            }
-            this.actionDispatcher.dispatch({
-                type: "model.selectTimelineTarget",
-                source: "button",
-                value: String(target.index),
-                showToast: true,
-            });
-        });
-        this.toolbarCameraModeButton?.addEventListener("click", () => {
-            this.actionDispatcher.dispatch({
-                type: "model.selectTimelineTarget",
-                source: "button",
-                value: MODEL_INFO_CAMERA_SELECT_VALUE,
-                showToast: true,
-            });
-        });
         // Playback
         this.btnPlay.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "playback.play", source: "button" });
@@ -701,6 +719,7 @@ export class UIController {
         };
         this.bottomPanel.onBoneSelectionChanged = (boneName) => {
             this.actionDispatcher.dispatch({ type: "selection.setBone", source: "panel", boneName });
+            this.refreshViewportBottomBar();
         };
         this.bottomPanel.onMorphFrameSelectionChanged = () => {
             this.actionDispatcher.dispatch({ type: "selection.setMorphFrame", source: "panel" });
@@ -710,6 +729,7 @@ export class UIController {
         };
         this.bottomPanel.onBoneTransformEdited = (boneName) => {
             this.actionDispatcher.dispatch({ type: "edit.boneTransformChanged", source: "panel", boneName });
+            this.refreshViewportBottomBar();
         };
         this.bottomPanel.onBoneTransformEditCommitted = (boneName) => {
             this.commitBoneTransformCommand(boneName);
@@ -719,12 +739,14 @@ export class UIController {
         };
         this.mmdManager.onBoneTransformEdited = (boneName) => {
             this.actionDispatcher.dispatch({ type: "edit.boneTransformChanged", source: "viewport", boneName });
+            this.refreshViewportBottomBar();
         };
         this.mmdManager.onBoneTransformEditCommitted = (boneName) => {
             this.commitBoneTransformCommand(boneName);
         };
         this.mmdManager.onCameraTransformEdited = () => {
             this.actionDispatcher.dispatch({ type: "edit.cameraTransformChanged", source: "viewport" });
+            this.refreshViewportBottomBar();
         };
         this.bottomPanel.onMorphValueEdited = (frameIndex) => {
             this.actionDispatcher.dispatch({ type: "edit.morphValueChanged", source: "panel", frameIndex });
@@ -1200,6 +1222,9 @@ export class UIController {
             this.dofPanelController?.refreshAutoFocusReadout();
             this.lensEffectController?.refreshAutoReadout();
             this.exportUiController?.syncFrameRangeFromTimeline();
+            if (this.mmdManager.getTimelineTarget() === "camera") {
+                this.refreshViewportBottomBar();
+            }
 
             const { endFrame } = this.getPlaybackFrameRange();
             if (this.mmdManager.isPlaying && this.isPlaybackFrameStopEnabled() && frame >= endFrame) {
@@ -1916,6 +1941,12 @@ export class UIController {
         });
         this.actionDispatcher.register("edit.boneTransformChanged", (action) => {
             this.handleBoneTransformChanged(action.boneName, action.source);
+        });
+        this.actionDispatcher.register("edit.setBoneTransformFromBottomBar", (action) => {
+            this.applyBottomBarBoneTransform(action.boneName, action.position, action.rotation, action.before);
+        });
+        this.actionDispatcher.register("edit.setCameraTransformFromBottomBar", (action) => {
+            this.applyBottomBarCameraTransform(action.target, action.rotation, action.distance, action.fov, action.before);
         });
         this.actionDispatcher.register("edit.cameraTransformChanged", (action) => {
             this.handleCameraTransformChanged(action.source);
@@ -2885,6 +2916,7 @@ export class UIController {
         this.mmdManager.setBoneVisualizerSelectedBone(null);
         this.updateInfoActionButtons();
         this.bottomPanelLayoutController?.applyMode("camera");
+        this.refreshViewportBottomBar();
     }
 
     private applyActiveModelSelectionUI(): void {
@@ -2899,6 +2931,7 @@ export class UIController {
         this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
         this.updateInfoActionButtons();
         this.bottomPanelLayoutController?.applyMode("model");
+        this.refreshViewportBottomBar();
     }
 
     private updateInfoActionButtons(): void {
@@ -2912,19 +2945,49 @@ export class UIController {
         this.updateInfoActionButtons();
         this.runtimeFeatureUiController?.refreshRigidBodies();
         this.accessoryPanelController?.refresh();
-        this.refreshToolbarTimelineTargetSwitch();
+        this.refreshViewportBottomBar();
     }
 
-    private refreshToolbarTimelineTargetSwitch(): void {
+    private refreshViewportBottomBar(): void {
         const hasLoadedModels = this.mmdManager.getLoadedModels().length > 0;
         const target = hasLoadedModels ? this.mmdManager.getTimelineTarget() : "camera";
-        this.toolbarModelModeButton?.classList.toggle("is-active", target === "model");
-        this.toolbarCameraModeButton?.classList.toggle("is-active", target === "camera");
-        this.toolbarModelModeButton?.setAttribute("aria-pressed", target === "model" ? "true" : "false");
-        this.toolbarCameraModeButton?.setAttribute("aria-pressed", target === "camera" ? "true" : "false");
-        if (this.toolbarModelModeButton) {
-            this.toolbarModelModeButton.disabled = !hasLoadedModels;
+        this.viewportBottomBarController?.applyMode(target === "model" ? "model" : "camera", hasLoadedModels);
+
+        if (target === "model") {
+            const boneName = this.bottomPanel.getSelectedBone();
+            const transform = boneName && boneName !== "Camera"
+                ? this.mmdManager.getBoneTransform(boneName)
+                : null;
+            this.viewportBottomBarController?.updateModelTransform(transform);
+            return;
         }
+
+        this.viewportBottomBarController?.updateCameraTransform({
+            target: this.mmdManager.getCameraTarget(),
+            rotation: this.mmdManager.getCameraRotation(),
+            distance: this.mmdManager.getCameraDistance(),
+            fov: this.mmdManager.getCameraFov(),
+        });
+    }
+
+    private switchViewportBottomBarToModel(): void {
+        const hasLoadedModels = this.mmdManager.getLoadedModels().length > 0;
+        if (!hasLoadedModels) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+        const models = this.mmdManager.getLoadedModels();
+        const target = models.find((model) => model.active) ?? models[0] ?? null;
+        if (!target) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+        this.actionDispatcher.dispatch({
+            type: "model.selectTimelineTarget",
+            source: "button",
+            value: String(target.index),
+            showToast: true,
+        });
     }
 
     private getInfoModelSelectState(): ModelInfoSelectState {
@@ -4166,6 +4229,7 @@ export class UIController {
         this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
         this.syncBottomPanelBoneFromEditedPose(boneName);
         this.refreshCameraUiFromRuntime();
+        this.refreshViewportBottomBar();
         this.updateSectionKeyframeButtons();
     }
 
@@ -4201,12 +4265,116 @@ export class UIController {
         this.commandHistory.push(command);
     }
 
+    private applyBottomBarBoneTransform(
+        boneName: string | null,
+        position: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        beforeOverride?: BoneTransformCommandSnapshot,
+    ): void {
+        if (!boneName || boneName === "Camera") {
+            this.refreshViewportBottomBar();
+            return;
+        }
+
+        const before = beforeOverride ?? this.captureBoneTransformCommandSnapshot(boneName);
+        const after: BoneTransformCommandSnapshot = {
+            position: { ...position },
+            rotation: { ...rotation },
+        };
+        const command = buildBoneTransformCommand({
+            boneName,
+            frame: this.mmdManager.currentFrame,
+            before,
+            after,
+        });
+        if (!command) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+
+        const applied = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!applied) {
+            this.refreshViewportBottomBar();
+            this.showToast(`Bone edit failed: ${boneName}`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+    }
+
+    private previewBottomBarBoneTransform(
+        boneName: string | null,
+        position: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+    ): boolean {
+        if (!boneName || boneName === "Camera") {
+            this.refreshViewportBottomBar();
+            return false;
+        }
+        return this.applyBoneTransformSnapshotFromCommand(boneName, { position, rotation });
+    }
+
+    private applyBottomBarCameraTransform(
+        target: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        distance: number,
+        fov: number,
+        beforeOverride?: CameraTransformCommandSnapshot,
+    ): void {
+        const command = buildCameraTransformCommand({
+            frame: this.mmdManager.currentFrame,
+            before: beforeOverride ?? this.captureCameraTransformCommandSnapshot(),
+            after: {
+                target: { ...target },
+                rotation: { ...rotation },
+                distance,
+                fov,
+            },
+        });
+        if (!command) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+
+        const applied = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!applied) {
+            this.refreshViewportBottomBar();
+            this.showToast("Camera edit failed", "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+    }
+
+    private previewBottomBarCameraTransform(
+        target: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        distance: number,
+        fov: number,
+    ): boolean {
+        return this.applyCameraTransformSnapshotFromCommand({
+            target,
+            rotation,
+            distance,
+            fov,
+        });
+    }
+
     private captureBoneTransformCommandSnapshot(boneName: string): BoneTransformCommandSnapshot | null {
         const snapshot = this.captureCurrentBonePoseSnapshot(boneName);
         if (!snapshot) return null;
         return {
             position: { ...snapshot.position },
             rotation: { ...snapshot.rotation },
+        };
+    }
+
+    private captureCameraTransformCommandSnapshot(): CameraTransformCommandSnapshot {
+        return {
+            target: this.mmdManager.getCameraTarget(),
+            rotation: this.mmdManager.getCameraRotation(),
+            distance: this.mmdManager.getCameraDistance(),
+            fov: this.mmdManager.getCameraFov(),
         };
     }
 
@@ -4235,6 +4403,26 @@ export class UIController {
         this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
         this.syncBottomPanelBoneFromEditedPose(boneName);
         this.refreshSelectedTrackRotationOverlay();
+        this.refreshViewportBottomBar();
+        this.updateSectionKeyframeButtons();
+        return true;
+    }
+
+    private applyCameraTransformSnapshotFromCommand(snapshot: CameraTransformCommandSnapshot): boolean {
+        if (!Number.isFinite(snapshot.distance) || !Number.isFinite(snapshot.fov)) return false;
+
+        this.mmdManager.applyCameraTrackPose(
+            snapshot.target,
+            snapshot.rotation,
+            Math.max(0.1, snapshot.distance),
+            Math.max(10, Math.min(120, snapshot.fov)),
+        );
+        this.rememberEditedBonePoseSnapshot("Camera", this.captureCurrentBonePoseSnapshot("Camera"));
+        this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+        this.syncBottomPanelBoneFromEditedPose("Camera");
+        this.handleCameraControlEdited();
+        this.refreshCameraUiFromRuntime(true);
+        this.refreshViewportBottomBar();
         this.updateSectionKeyframeButtons();
         return true;
     }
@@ -4244,6 +4432,7 @@ export class UIController {
         this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
         this.updateSectionKeyframeButtons();
         this.dofPanelController?.refreshAutoFocusReadout();
+        this.refreshViewportBottomBar();
     }
 
     private handleCameraTransformChanged(source: ActionSource): void {
@@ -4260,6 +4449,7 @@ export class UIController {
             this.syncBottomPanelBoneFromEditedPose("Camera");
         }
         this.refreshCameraUiFromRuntime();
+        this.refreshViewportBottomBar();
         this.updateSectionKeyframeButtons();
     }
 
@@ -4303,6 +4493,7 @@ export class UIController {
                 toFrame,
             ),
             applyBoneTransform: (boneName, snapshot) => this.applyBoneTransformSnapshotFromCommand(boneName, snapshot),
+            applyCameraTransform: (snapshot) => this.applyCameraTransformSnapshotFromCommand(snapshot),
             setSelectedFrame: (frame) => this.timeline.setSelectedFrame(frame),
             seekToBoundary: (frame) => {
                 if (seekToFrame) this.mmdManager.seekToBoundary(frame);
@@ -4347,6 +4538,7 @@ export class UIController {
         } finally {
             this.syncingBoneSelection = false;
         }
+        this.refreshViewportBottomBar();
     }
 
     private syncTimelineBoneSelectionFromBottomPanel(boneName: string | null): void {

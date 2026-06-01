@@ -2,6 +2,7 @@ import type { KeyframeTrack } from "../types";
 
 export type ActionSource =
     | "button"
+    | "bottomBar"
     | "shortcut"
     | "timeline"
     | "viewport"
@@ -120,6 +121,31 @@ export type TimelineAction =
 
 export type EditAction =
     | { type: "edit.boneTransformChanged"; source: ActionSource; boneName: string | null }
+    | {
+        type: "edit.setBoneTransformFromBottomBar";
+        source: ActionSource;
+        boneName: string | null;
+        position: { x: number; y: number; z: number };
+        rotation: { x: number; y: number; z: number };
+        before?: {
+            position: { x: number; y: number; z: number };
+            rotation: { x: number; y: number; z: number };
+        };
+    }
+    | {
+        type: "edit.setCameraTransformFromBottomBar";
+        source: ActionSource;
+        target: { x: number; y: number; z: number };
+        rotation: { x: number; y: number; z: number };
+        distance: number;
+        fov: number;
+        before?: {
+            target: { x: number; y: number; z: number };
+            rotation: { x: number; y: number; z: number };
+            distance: number;
+            fov: number;
+        };
+    }
     | { type: "edit.cameraTransformChanged"; source: ActionSource }
     | { type: "edit.morphValueChanged"; source: ActionSource; frameIndex: number | null };
 

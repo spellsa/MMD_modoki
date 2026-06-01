@@ -43,6 +43,13 @@ export type BoneTransformCommandSnapshot = {
     rotation: { x: number; y: number; z: number };
 };
 
+export type CameraTransformCommandSnapshot = {
+    target: { x: number; y: number; z: number };
+    rotation: { x: number; y: number; z: number };
+    distance: number;
+    fov: number;
+};
+
 export type EditCommandDiff =
     | {
         type: "edit.boneTransform";
@@ -50,6 +57,12 @@ export type EditCommandDiff =
         frame: number;
         before: BoneTransformCommandSnapshot;
         after: BoneTransformCommandSnapshot;
+    }
+    | {
+        type: "edit.cameraTransform";
+        frame: number;
+        before: CameraTransformCommandSnapshot;
+        after: CameraTransformCommandSnapshot;
     };
 
 export type CommandDiff = KeyframeCommandDiff | EditCommandDiff;

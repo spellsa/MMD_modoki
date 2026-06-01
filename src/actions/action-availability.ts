@@ -111,6 +111,8 @@ export function canExecuteEditorAction(
         case "timeline.selectionChanged":
         case "interpolation.finishHandleDrag":
         case "edit.boneTransformChanged":
+        case "edit.setBoneTransformFromBottomBar":
+        case "edit.setCameraTransformFromBottomBar":
         case "edit.cameraTransformChanged":
         case "edit.morphValueChanged":
         case "effect.setModelEdgeWidth":
