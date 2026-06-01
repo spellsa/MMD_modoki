@@ -37,6 +37,7 @@ import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controll
 import { ShaderPanelController } from "./ui/shader-panel-controller";
 import { ViewportSeekBarController } from "./ui/viewport-bottom-bar-controller";
 import { ViewportAxisHandleController } from "./ui/viewport-axis-handle-controller";
+import { ViewportTopBarController, type ViewportTopBarCameraTransform } from "./ui/viewport-top-bar-controller";
 import { ActionDispatcher } from "./actions/action-dispatcher";
 import type { ActionSource } from "./actions/types";
 import { executeCommand, type CommandExecutionContext } from "./actions/command-executor";
@@ -190,6 +191,7 @@ export class UIController {
     private bottomPanelLayoutController: BottomPanelLayoutController | null = null;
     private viewportSeekBarController: ViewportSeekBarController | null = null;
     private viewportAxisHandleController: ViewportAxisHandleController | null = null;
+    private viewportTopBarController: ViewportTopBarController | null = null;
 
     // Button elements
     private btnLoadFile: HTMLElement;
@@ -200,7 +202,6 @@ export class UIController {
     private btnExportWebm: HTMLElement | null = null;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
     private toolbarRuntimeModeSelect: HTMLSelectElement | null = null;
-    private toolbarModeToggleButton: HTMLButtonElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
     private btnStop: HTMLElement | null;
@@ -285,6 +286,7 @@ export class UIController {
         this.applyLocalizedUiState();
         this.viewportSeekBarController?.refreshLocale();
         this.viewportAxisHandleController?.refreshLocale();
+        this.viewportTopBarController?.refreshLocale();
         this.dofPanelController?.refreshFocusTargetControls();
         this.refreshShaderPanel();
     };
@@ -314,7 +316,6 @@ export class UIController {
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
         this.toolbarRuntimeModeSelect = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
-        this.toolbarModeToggleButton = document.getElementById("btn-toolbar-mode-toggle") as HTMLButtonElement | null;
         this.btnPlay = document.getElementById("btn-play")!;
         this.btnPause = document.getElementById("btn-pause")!;
         this.btnStop = document.getElementById("btn-stop");
@@ -527,6 +528,41 @@ export class UIController {
                 before,
             }),
         });
+        this.viewportTopBarController = new ViewportTopBarController({
+            getCameraTransform: () => this.captureCameraTransformCommandSnapshot(),
+            onToggleMode: () => {
+                if (this.mmdManager.getTimelineTarget() === "model") {
+                    this.switchToCameraMode();
+                    return;
+                }
+                this.switchViewportBottomBarToModel();
+            },
+            onPreviewCameraTransform: (value) => this.previewBottomBarCameraTransform(
+                value.target,
+                value.rotation,
+                value.distance,
+                value.fov,
+            ),
+            onPreviewCameraPan: (before, deltaX, deltaY) => this.previewTopBarCameraPan(before, deltaX, deltaY),
+            onCommitCameraTransform: (value, before) => this.actionDispatcher.dispatch({
+                type: "edit.setCameraTransformFromBottomBar",
+                source: "viewport",
+                target: value.target,
+                rotation: value.rotation,
+                distance: value.distance,
+                fov: value.fov,
+                before,
+            }),
+            onTogglePerspective: (enabled) => {
+                this.mmdManager.setPerspectiveEnabled(enabled);
+                this.refreshViewportBottomBar();
+            },
+            onViewPreset: (view) => this.actionDispatcher.dispatch({
+                type: "camera.setViewPreset",
+                source: "viewport",
+                view,
+            }),
+        });
         this.bottomPanelLayoutController = new BottomPanelLayoutController();
         this.bottomPanelLayoutController.applyMode(this.mmdManager.getTimelineTarget() === "model" ? "model" : "camera");
         this.layoutUiController = new LayoutUiController({
@@ -684,14 +720,6 @@ export class UIController {
             window.setTimeout(() => {
                 window.location.reload();
             }, 120);
-        });
-        this.toolbarModeToggleButton?.addEventListener("click", () => {
-            if (this.toolbarModeToggleButton?.disabled) return;
-            if (this.mmdManager.getTimelineTarget() === "model") {
-                this.switchToCameraMode();
-                return;
-            }
-            this.switchViewportBottomBarToModel();
         });
         // Playback
         this.btnPlay.addEventListener("click", () => {
@@ -3027,17 +3055,11 @@ export class UIController {
     }
 
     private refreshToolbarTimelineTargetSwitch(mode: "model" | "camera", canSwitchToModel: boolean): void {
-        if (!this.toolbarModeToggleButton) return;
-        const label = mode === "model" ? t("viewportBottomBar.modelEdit") : t("viewportBottomBar.cameraEdit");
-        this.toolbarModeToggleButton.textContent = label;
-        this.toolbarModeToggleButton.setAttribute("aria-label", label);
-        this.toolbarModeToggleButton.setAttribute("aria-pressed", "true");
-        this.toolbarModeToggleButton.classList.toggle("is-active", true);
-        if (mode === "camera") {
-            this.toolbarModeToggleButton.disabled = !canSwitchToModel;
-            return;
-        }
-        this.toolbarModeToggleButton.disabled = false;
+        this.viewportTopBarController?.refresh({
+            mode,
+            canSwitchToModel,
+            perspectiveEnabled: this.mmdManager.getPerspectiveEnabled(),
+        });
     }
 
     private switchViewportBottomBarToModel(): void {
@@ -4437,6 +4459,18 @@ export class UIController {
             distance,
             fov,
         });
+    }
+
+    private previewTopBarCameraPan(
+        before: ViewportTopBarCameraTransform,
+        deltaX: number,
+        deltaY: number,
+    ): ViewportTopBarCameraTransform | null {
+        if (!this.applyCameraTransformSnapshotFromCommand(before)) {
+            return null;
+        }
+        this.mmdManager.panCameraByViewportDelta(deltaX, deltaY);
+        return this.captureCameraTransformCommandSnapshot();
     }
 
     private captureBoneTransformCommandSnapshot(boneName: string): BoneTransformCommandSnapshot | null {

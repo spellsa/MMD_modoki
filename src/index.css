@@ -1521,6 +1521,18 @@ body.shader-resizing #shader-resizer::before {
   outline: none;
 }
 
+.viewport-tool-btn.is-dragging,
+.viewport-tool-btn[aria-expanded="true"] {
+  border-color: var(--accent-blue);
+  background: rgba(31, 74, 124, 0.68);
+  color: var(--text-primary);
+}
+
+.viewport-tool-btn.is-off {
+  color: var(--text-muted);
+  background: #141414;
+}
+
 .viewport-tool-btn:disabled {
   opacity: 0.55;
   cursor: default;
@@ -1536,6 +1548,104 @@ body.shader-resizing #shader-resizer::before {
   flex: 0 0 auto;
   width: 6px;
   height: 1px;
+}
+
+.viewport-viewcube-menu {
+  position: fixed;
+  z-index: 1200;
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: rgba(22, 22, 22, 0.98);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.viewport-viewcube-menu--cube {
+  grid-template-columns: repeat(3, 56px);
+  grid-template-areas:
+    ". top ."
+    "left front right"
+    ". bottom back";
+}
+
+.viewport-viewcube-menu-item {
+  min-height: 52px;
+  padding: 4px 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.viewport-viewcube-menu-item--front {
+  grid-area: front;
+}
+
+.viewport-viewcube-menu-item--back {
+  grid-area: back;
+}
+
+.viewport-viewcube-menu-item--left {
+  grid-area: left;
+}
+
+.viewport-viewcube-menu-item--right {
+  grid-area: right;
+}
+
+.viewport-viewcube-menu-item--top {
+  grid-area: top;
+}
+
+.viewport-viewcube-menu-item--bottom {
+  grid-area: bottom;
+}
+
+.viewport-viewcube-menu-item:hover,
+.viewport-viewcube-menu-item:focus-visible {
+  border-color: var(--border-accent);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.viewport-viewcube-face-icon {
+  width: 25px;
+  height: 25px;
+  overflow: visible;
+}
+
+.viewport-viewcube-face-icon polygon {
+  fill: rgba(14, 165, 233, 0.68);
+  stroke: none;
+}
+
+.viewport-viewcube-face-icon path {
+  fill: none;
+  stroke: #6b7280;
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: fill var(--transition-fast), stroke var(--transition-fast);
+}
+
+.viewport-viewcube-menu-item:hover .viewport-viewcube-face-icon path,
+.viewport-viewcube-menu-item:focus-visible .viewport-viewcube-face-icon path {
+  stroke: #cbd5e1;
+}
+
+.viewport-viewcube-menu-label {
+  line-height: 1;
 }
 
 body.file-drag-active #viewport-container {

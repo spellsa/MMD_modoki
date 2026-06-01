@@ -2,6 +2,7 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { WebGPUTintWASM } from "@babylonjs/core/Engines/WebGPU/webgpuTintWASM";
 import { Scene } from "@babylonjs/core/scene";
+import { Camera } from "@babylonjs/core/Cameras/camera";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -1748,6 +1749,7 @@ ${beforeFogAppendBlock}
 
         this.syncCameraRotationFromCurrentView();
         this.syncMmdCameraFromViewportCamera();
+        this.updateOrthographicCameraBounds();
         this.onCameraTransformEdited?.();
     }
 
@@ -7451,19 +7453,36 @@ ${beforeFogAppendBlock}
         return Math.max(this.camera.minZ, Vector3.Distance(this.camera.position, this.camera.target));
     }
 
+    getPerspectiveEnabled(): boolean {
+        return this.camera.mode !== Camera.ORTHOGRAPHIC_CAMERA;
+    }
+
+    setPerspectiveEnabled(enabled: boolean): void {
+        const nextMode = enabled ? Camera.PERSPECTIVE_CAMERA : Camera.ORTHOGRAPHIC_CAMERA;
+        if (this.camera.mode === nextMode) return;
+        this.camera.mode = nextMode;
+        this.updateOrthographicCameraBounds();
+    }
+
     setCameraDistance(distance: number): void {
         const min = Math.max(0.1, this.camera.lowerRadiusLimit ?? this.camera.minZ);
         const max = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
         this.camera.radius = Math.max(min, Math.min(max, distance));
         this.syncCameraRotationFromCurrentView();
         this.syncMmdCameraFromViewportCamera();
-            this.updateEditorDofFocusAndFStop();
+        this.updateOrthographicCameraBounds();
+        this.updateEditorDofFocusAndFStop();
     }
 
     setCameraFov(degrees: number): void {
         this.camera.fov = (degrees * Math.PI) / 180;
         this.syncMmdCameraFromViewportCamera();
-            this.updateEditorDofFocusAndFStop();
+        this.updateOrthographicCameraBounds();
+        this.updateEditorDofFocusAndFStop();
+    }
+
+    panCameraByViewportDelta(deltaX: number, deltaY: number): void {
+        this.applyCameraMouseDrag("pan", deltaX, deltaY);
     }
 
     applyCameraTrackPose(
@@ -7483,6 +7502,7 @@ ${beforeFogAppendBlock}
             this.mmdCamera.fov = (fovDeg * Math.PI) / 180;
         }
         this.syncViewportCameraFromMmdCamera();
+        this.updateOrthographicCameraBounds();
     }
 
     applyCameraAnimation(animation: MmdAnimation, sourcePath: string | null): void {
@@ -7531,6 +7551,22 @@ ${beforeFogAppendBlock}
         this.applyCameraTrackPose({ x: 0, y: 10, z: 0 }, rotationDeg, distance, fovDeg);
     }
 
+    private updateOrthographicCameraBounds(): void {
+        if (!this.camera || this.camera.mode !== Camera.ORTHOGRAPHIC_CAMERA) return;
+
+        const width = Math.max(1, this.renderingCanvas.clientWidth || this.engine.getRenderWidth(true) || 1);
+        const height = Math.max(1, this.renderingCanvas.clientHeight || this.engine.getRenderHeight(true) || 1);
+        const aspect = width / height;
+        const distance = Math.max(0.1, this.getCameraDistance());
+        const verticalSize = Math.max(0.1, 2 * distance * Math.tan(Math.max(0.01, this.camera.fov) * 0.5));
+        const horizontalSize = verticalSize * aspect;
+
+        this.camera.orthoLeft = -horizontalSize * 0.5;
+        this.camera.orthoRight = horizontalSize * 0.5;
+        this.camera.orthoTop = verticalSize * 0.5;
+        this.camera.orthoBottom = -verticalSize * 0.5;
+    }
+
     private syncMmdCameraFromViewportCamera(force = false): void {
         if (!force && !this.shouldSyncViewportCameraToMmdCamera()) {
             return;
@@ -7562,6 +7598,7 @@ ${beforeFogAppendBlock}
         );
         this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
+        this.updateOrthographicCameraBounds();
     }
 
     private recordViewportCameraSyncState(): void {
@@ -8242,6 +8279,7 @@ ${beforeFogAppendBlock}
             }
             this.refreshFrameGraphPostEffectsBackendAfterResize();
         }
+        this.updateOrthographicCameraBounds();
     }
 
     private resizeGlobalIllumination(): void {
