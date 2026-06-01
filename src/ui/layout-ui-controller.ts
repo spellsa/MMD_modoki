@@ -14,6 +14,7 @@ type LayoutUiElements = {
     fullscreenUiToggleText: HTMLElement | null;
     viewportContainer: HTMLElement | null;
     renderCanvas: HTMLCanvasElement | null;
+    viewportTopBar: HTMLElement | null;
     viewportBottomBar: HTMLElement | null;
     timelinePanel: HTMLElement | null;
     timelineResizer: HTMLElement | null;
@@ -46,6 +47,7 @@ function resolveLayoutUiElements(): LayoutUiElements {
         fullscreenUiToggleText: document.getElementById("fullscreen-ui-toggle-text"),
         viewportContainer: document.getElementById("viewport-container"),
         renderCanvas: document.getElementById("render-canvas") as HTMLCanvasElement | null,
+        viewportTopBar: document.getElementById("viewport-top-bar"),
         viewportBottomBar: document.getElementById("viewport-bottom-bar"),
         timelinePanel: document.getElementById("timeline-panel"),
         timelineResizer: document.getElementById("timeline-resizer"),
@@ -131,24 +133,26 @@ export class LayoutUiController {
     public applyViewportAspectPresentation(): void {
         if (!this.elements.renderCanvas || !this.elements.viewportContainer) return;
 
-        const selectedAspect = this.exportUiController.getSelectedAspectPreset();
-        if (selectedAspect === "viewport") {
-            this.elements.renderCanvas.style.width = "100%";
-            this.elements.renderCanvas.style.height = "100%";
-            this.mmdManager.resize();
-            return;
-        }
-
-        const ratio = this.exportUiController.resolveSelectedOutputAspectRatio();
         const containerWidth = Math.max(1, Math.floor(this.elements.viewportContainer.clientWidth));
+        const topBarHeight = this.elements.viewportTopBar && this.isElementVisible(this.elements.viewportTopBar)
+            ? this.elements.viewportTopBar.getBoundingClientRect().height
+            : 0;
         const bottomBarHeight = this.elements.viewportBottomBar && this.isElementVisible(this.elements.viewportBottomBar)
             ? this.elements.viewportBottomBar.getBoundingClientRect().height
             : 0;
         const containerHeight = Math.max(
             1,
-            Math.floor(this.elements.viewportContainer.clientHeight - bottomBarHeight),
+            Math.floor(this.elements.viewportContainer.clientHeight - topBarHeight - bottomBarHeight),
         );
+        const selectedAspect = this.exportUiController.getSelectedAspectPreset();
+        if (selectedAspect === "viewport") {
+            this.elements.renderCanvas.style.width = "100%";
+            this.elements.renderCanvas.style.height = `${containerHeight}px`;
+            this.mmdManager.resize();
+            return;
+        }
 
+        const ratio = this.exportUiController.resolveSelectedOutputAspectRatio();
         let renderWidth = containerWidth;
         let renderHeight = Math.max(1, Math.round(renderWidth / Math.max(0.1, ratio)));
         if (renderHeight > containerHeight) {
