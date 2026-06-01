@@ -252,7 +252,7 @@
 
     <!-- Main Content Area -->
     <div id="main-content" class="shader-panel-collapsed">
-      <!-- Left Panel: Playback + Timeline -->
+      <!-- Left Panel: Timeline -->
       <aside id="timeline-panel">
         <section id="playback-section" class="left-panel-section">
           <div class="section-header">
@@ -396,45 +396,38 @@
             <span class="hint-text" data-i18n="viewport.empty.hint">ツールバーの「ファイル読込」ボタンか、Ctrl+Oで開く</span>
           </div>
         </div>
-        <div id="viewport-bottom-bar" class="viewport-bottom-bar" data-mode="camera">
-          <button id="viewport-bottom-mode-toggle" class="viewport-bottom-mode-btn" type="button" aria-pressed="true" data-i18n="viewportBottomBar.cameraEdit">カメラ編</button>
-          <div id="viewport-bottom-model-values" class="viewport-bottom-values" hidden>
-            <span class="viewport-bottom-label" data-i18n="viewportBottomBar.bonePosition">ボーン位置</span>
-            <span class="viewport-bottom-axis">X</span>
-            <input id="viewport-bottom-model-pos-x" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
-            <input id="viewport-bottom-model-pos-y" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
-            <input id="viewport-bottom-model-pos-z" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
-            <span class="viewport-bottom-label viewport-bottom-label--angle" data-i18n="viewportBottomBar.angle">角度</span>
-            <span class="viewport-bottom-axis">X</span>
-            <input id="viewport-bottom-model-rot-x" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
-            <input id="viewport-bottom-model-rot-y" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
-            <input id="viewport-bottom-model-rot-z" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
+        <div id="viewport-bottom-bar" class="viewport-bottom-bar">
+          <div class="viewport-seek-transport" role="group" aria-label="Viewport playback controls">
+            <button id="viewport-seek-play-toggle" class="viewport-seek-play-btn" type="button" data-i18n-title="viewportSeekBar.play" aria-label="再生">▶</button>
           </div>
-          <div id="viewport-bottom-camera-values" class="viewport-bottom-values">
-            <span class="viewport-bottom-label" data-i18n="viewportBottomBar.cameraCenter">カメラ中心</span>
-            <span class="viewport-bottom-axis">X</span>
-            <input id="viewport-bottom-camera-target-x" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
-            <input id="viewport-bottom-camera-target-y" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
-            <input id="viewport-bottom-camera-target-z" class="viewport-bottom-value" type="number" min="-30" max="30" step="1">
-            <span class="viewport-bottom-label viewport-bottom-label--angle" data-i18n="viewportBottomBar.angle">角度</span>
-            <span class="viewport-bottom-axis">X</span>
-            <input id="viewport-bottom-camera-rot-x" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--y">Y</span>
-            <input id="viewport-bottom-camera-rot-y" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
-            <span class="viewport-bottom-axis viewport-bottom-axis--z">Z</span>
-            <input id="viewport-bottom-camera-rot-z" class="viewport-bottom-value" type="number" min="-180" max="180" step="1">
-            <span class="viewport-bottom-label viewport-bottom-label--distance" data-i18n="viewportBottomBar.distance">距離</span>
-            <input id="viewport-bottom-camera-distance" class="viewport-bottom-value viewport-bottom-value--distance" type="number" min="0.1" max="400" step="1">
-            <span class="viewport-bottom-label viewport-bottom-label--fov" data-i18n="viewportBottomBar.fov">視野角</span>
-            <input id="viewport-bottom-camera-fov" class="viewport-bottom-value viewport-bottom-value--fov" type="number" min="10" max="120" step="1">
+          <div class="viewport-seek-frame-readout">
+            <input id="viewport-seek-current-frame" class="viewport-seek-frame-input" type="number" min="0" step="1" value="0" inputmode="numeric" aria-label="Current frame">
+            <span class="viewport-seek-frame-sep">/</span>
+            <span id="viewport-seek-total-frame" class="viewport-seek-total-frame">0</span>
           </div>
-          <div id="viewport-axis-handle" class="viewport-axis-handle">
+          <div class="viewport-seek-actions" role="group" aria-label="Viewport quick actions">
+            <button id="viewport-seek-export-png" class="viewport-seek-action-btn" type="button" data-i18n-title="menu.file.exportPng" aria-label="PNG出力">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                <path d="M2.5 3.5h11v9h-11z" />
+                <circle cx="5.4" cy="6" r="1" fill="currentColor" stroke="none" />
+                <path d="M3.8 11l2.6-2.8 1.8 1.9 2.7-3 1.5 1.7" />
+              </svg>
+            </button>
+            <button id="viewport-seek-toggle-ui" class="viewport-seek-action-btn" type="button" data-i18n-title="toolbar.ui.title.off" aria-label="UI">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
+              </svg>
+            </button>
+          </div>
+          <div id="viewport-seek-track" class="viewport-seek-track" role="slider" aria-label="Seek frame">
+            <div id="viewport-seek-range-fill" class="viewport-seek-range-fill"></div>
+            <div id="viewport-seek-track-fill" class="viewport-seek-track-fill"></div>
+            <div id="viewport-seek-track-thumb" class="viewport-seek-track-thumb"></div>
+            <button id="viewport-seek-range-start-handle" class="viewport-seek-range-handle viewport-seek-range-handle--start" type="button" data-i18n-title="viewportSeekBar.rangeStart" aria-label="Range start"></button>
+            <button id="viewport-seek-range-end-handle" class="viewport-seek-range-handle viewport-seek-range-handle--end" type="button" data-i18n-title="viewportSeekBar.rangeEnd" aria-label="Range end"></button>
+          </div>
+        </div>
+        <div id="viewport-axis-handle" class="viewport-axis-handle">
             <div class="viewport-axis-handle-row viewport-axis-handle-row--space">
               <button id="viewport-axis-space-toggle" class="viewport-axis-space-toggle" type="button" data-i18n="viewportBottomBar.local">local</button>
             </div>
@@ -478,7 +471,6 @@
                 <span>Z</span>
               </span>
             </div>
-          </div>
         </div>
       </main>
 
@@ -702,41 +694,6 @@
               <button id="btn-cam-top" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.top">上面</button>
               <button id="btn-cam-back" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.back">背面</button>
               <button id="btn-cam-bottom" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.bottom">下面</button>
-            </div>
-            <div class="camera-playback-range">
-              <div class="playback-frame-range">
-                <input
-                  id="output-start-frame"
-                  class="output-number playback-range-input"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value="0"
-                  data-i18n-placeholder="output.range.start"
-                  placeholder="スタート"
-                >
-                <span class="playback-range-sep">～</span>
-                <input
-                  id="output-end-frame"
-                  class="output-number playback-range-input"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value="0"
-                  data-i18n-placeholder="output.range.end"
-                  placeholder="ストップ"
-                >
-              </div>
-              <div class="playback-toggle-row camera-playback-toggle-row">
-                <label class="playback-toggle-label" title="再生を指定スタートフレームから始める" data-i18n-title="playback.frameStart.title">
-                  <input id="playback-frame-start-toggle" type="checkbox">
-                  <span data-i18n="playback.frameStart.label">フレ・スタート</span>
-                </label>
-                <label class="playback-toggle-label playback-toggle-label--right" title="停止時に現在フレームへ留まる" data-i18n-title="playback.frameStop.title">
-                  <input id="playback-frame-stop-toggle" type="checkbox">
-                  <span data-i18n="playback.frameStop.label">フレ・ストップ</span>
-                </label>
-              </div>
             </div>
           </div>
         </section>

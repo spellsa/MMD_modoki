@@ -35,7 +35,8 @@ import { ModelEdgeController } from "./ui/model-edge-controller";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
-import { ViewportBottomBarController } from "./ui/viewport-bottom-bar-controller";
+import { ViewportSeekBarController } from "./ui/viewport-bottom-bar-controller";
+import { ViewportAxisHandleController } from "./ui/viewport-axis-handle-controller";
 import { ActionDispatcher } from "./actions/action-dispatcher";
 import type { ActionSource } from "./actions/types";
 import { executeCommand, type CommandExecutionContext } from "./actions/command-executor";
@@ -187,7 +188,8 @@ export class UIController {
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
     private bottomPanelLayoutController: BottomPanelLayoutController | null = null;
-    private viewportBottomBarController: ViewportBottomBarController | null = null;
+    private viewportSeekBarController: ViewportSeekBarController | null = null;
+    private viewportAxisHandleController: ViewportAxisHandleController | null = null;
 
     // Button elements
     private btnLoadFile: HTMLElement;
@@ -281,7 +283,8 @@ export class UIController {
     private currentProjectFilePath: string | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
-        this.viewportBottomBarController?.refreshLocale();
+        this.viewportSeekBarController?.refreshLocale();
+        this.viewportAxisHandleController?.refreshLocale();
         this.dofPanelController?.refreshFocusTargetControls();
         this.refreshShaderPanel();
     };
@@ -453,16 +456,48 @@ export class UIController {
         this.setupCallbacks();
         this.setupKeyboard();
         this.setupFileDrop();
-        this.viewportBottomBarController = new ViewportBottomBarController({
-            onSwitchToModel: () => this.switchViewportBottomBarToModel(),
-            onSwitchToCamera: () => {
-                this.actionDispatcher.dispatch({
-                    type: "model.selectTimelineTarget",
-                    source: "button",
-                    value: MODEL_INFO_CAMERA_SELECT_VALUE,
-                    showToast: true,
-                });
+        this.viewportSeekBarController = new ViewportSeekBarController({
+            onSeekFrame: (frame, phase) => this.actionDispatcher.dispatch({
+                type: "timeline.seekFrame",
+                source: "bottomBar",
+                frame,
+                phase,
+            }),
+            onCommitCurrentFrame: (frame) => this.actionDispatcher.dispatch({
+                type: "playback.seekFrame",
+                source: "bottomBar",
+                frame,
+            }),
+            onTogglePlayback: () => this.actionDispatcher.dispatch({ type: "playback.toggle", source: "bottomBar" }),
+            onStepFrame: (deltaFrames) => this.actionDispatcher.dispatch({
+                type: "playback.stepFrame",
+                source: "bottomBar",
+                deltaFrames,
+            }),
+            onSeekBoundary: (boundary) => this.actionDispatcher.dispatch({
+                type: boundary === "start" ? "playback.seekStart" : "playback.seekEnd",
+                source: "bottomBar",
+            }),
+            onSeekAdjacentKeyframe: (direction) => this.actionDispatcher.dispatch({
+                type: "playback.seekAdjacentKeyframe",
+                source: "bottomBar",
+                direction,
+            }),
+            onRangeFrameChange: (boundary, frame, phase) => {
+                this.exportUiController?.setPlaybackFrameRangeBoundary(boundary, frame);
+                if (phase === "commit") {
+                    this.exportUiController?.sanitizeOutputFrameRange(boundary);
+                }
+                this.refreshViewportBottomBar();
             },
+            onRangeToggle: (kind, enabled) => {
+                this.exportUiController?.setPlaybackFrameToggle(kind, enabled);
+                this.refreshViewportBottomBar();
+            },
+            onExportPng: () => this.actionDispatcher.dispatch({ type: "project.exportPng", source: "bottomBar" }),
+            onToggleUi: () => this.actionDispatcher.dispatch({ type: "layout.fullscreen.toggle", source: "bottomBar" }),
+        });
+        this.viewportAxisHandleController = new ViewportAxisHandleController({
             onPreviewBoneTransform: (value) => this.previewBottomBarBoneTransform(
                 this.bottomPanel.getSelectedBone(),
                 value.position,
@@ -1232,9 +1267,7 @@ export class UIController {
             this.dofPanelController?.refreshAutoFocusReadout();
             this.lensEffectController?.refreshAutoReadout();
             this.exportUiController?.syncFrameRangeFromTimeline();
-            if (this.mmdManager.getTimelineTarget() === "camera") {
-                this.refreshViewportBottomBar();
-            }
+            this.refreshViewportBottomBar();
 
             const { endFrame } = this.getPlaybackFrameRange();
             if (this.mmdManager.isPlaying && this.isPlaybackFrameStopEnabled() && frame >= endFrame) {
@@ -1934,9 +1967,11 @@ export class UIController {
         });
         this.actionDispatcher.register("output.markFrameRangeCustomized", () => {
             this.exportUiController?.markOutputFrameRangeCustomized();
+            this.refreshViewportBottomBar();
         });
         this.actionDispatcher.register("output.sanitizeFrameRange", (action) => {
             this.exportUiController?.sanitizeOutputFrameRange(action.boundary);
+            this.refreshViewportBottomBar();
         });
         this.actionDispatcher.register("timeline.selectionChanged", (action) => {
             this.syncBoneVisualizerSelection(action.track);
@@ -2962,18 +2997,28 @@ export class UIController {
         const hasLoadedModels = this.mmdManager.getLoadedModels().length > 0;
         const target = hasLoadedModels ? this.mmdManager.getTimelineTarget() : "camera";
         this.refreshToolbarTimelineTargetSwitch(target === "model" ? "model" : "camera", hasLoadedModels);
-        this.viewportBottomBarController?.applyMode(target === "model" ? "model" : "camera", hasLoadedModels);
+        this.viewportSeekBarController?.refresh({
+            currentFrame: this.mmdManager.currentFrame,
+            totalFrames: this.mmdManager.totalFrames,
+            isPlaying: this.mmdManager.isPlaying,
+            playbackRange: {
+                ...this.getPlaybackFrameRange(),
+                frameStartEnabled: this.isPlaybackFrameStartEnabled(),
+                frameStopEnabled: this.isPlaybackFrameStopEnabled(),
+            },
+        });
+        this.viewportAxisHandleController?.applyMode(target === "model" ? "model" : "camera");
 
         if (target === "model") {
             const boneName = this.bottomPanel.getSelectedBone();
             const transform = boneName && boneName !== "Camera"
                 ? this.mmdManager.getBoneTransform(boneName)
                 : null;
-            this.viewportBottomBarController?.updateModelTransform(transform);
+            this.viewportAxisHandleController?.updateModelTransform(transform);
             return;
         }
 
-        this.viewportBottomBarController?.updateCameraTransform({
+        this.viewportAxisHandleController?.updateCameraTransform({
             target: this.mmdManager.getCameraTarget(),
             rotation: this.mmdManager.getCameraRotation(),
             distance: this.mmdManager.getCameraDistance(),
@@ -7052,6 +7097,7 @@ export class UIController {
         this.btnPlay.style.display = "none";
         this.btnPause.style.display = "flex";
         if (updateStatus) this.setStatus("Playing", false);
+        this.refreshViewportBottomBar();
     }
 
     private pause(updateStatus = true): void {
@@ -7059,6 +7105,7 @@ export class UIController {
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         if (updateStatus) this.setStatus("Paused", false);
+        this.refreshViewportBottomBar();
     }
 
     private stop(): void {
@@ -7069,6 +7116,7 @@ export class UIController {
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
+        this.refreshViewportBottomBar();
     }
 
     private stopAtPlaybackEnd(endFrame: number): void {
@@ -7077,6 +7125,7 @@ export class UIController {
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
+        this.refreshViewportBottomBar();
     }
 
     private setStatus(text: string, loading: boolean): void {

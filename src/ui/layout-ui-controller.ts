@@ -14,6 +14,7 @@ type LayoutUiElements = {
     fullscreenUiToggleText: HTMLElement | null;
     viewportContainer: HTMLElement | null;
     renderCanvas: HTMLCanvasElement | null;
+    viewportBottomBar: HTMLElement | null;
     timelinePanel: HTMLElement | null;
     timelineResizer: HTMLElement | null;
     shaderResizer: HTMLElement | null;
@@ -45,6 +46,7 @@ function resolveLayoutUiElements(): LayoutUiElements {
         fullscreenUiToggleText: document.getElementById("fullscreen-ui-toggle-text"),
         viewportContainer: document.getElementById("viewport-container"),
         renderCanvas: document.getElementById("render-canvas") as HTMLCanvasElement | null,
+        viewportBottomBar: document.getElementById("viewport-bottom-bar"),
         timelinePanel: document.getElementById("timeline-panel"),
         timelineResizer: document.getElementById("timeline-resizer"),
         shaderResizer: document.getElementById("shader-resizer"),
@@ -139,7 +141,13 @@ export class LayoutUiController {
 
         const ratio = this.exportUiController.resolveSelectedOutputAspectRatio();
         const containerWidth = Math.max(1, Math.floor(this.elements.viewportContainer.clientWidth));
-        const containerHeight = Math.max(1, Math.floor(this.elements.viewportContainer.clientHeight));
+        const bottomBarHeight = this.elements.viewportBottomBar && this.isElementVisible(this.elements.viewportBottomBar)
+            ? this.elements.viewportBottomBar.getBoundingClientRect().height
+            : 0;
+        const containerHeight = Math.max(
+            1,
+            Math.floor(this.elements.viewportContainer.clientHeight - bottomBarHeight),
+        );
 
         let renderWidth = containerWidth;
         let renderHeight = Math.max(1, Math.round(renderWidth / Math.max(0.1, ratio)));
@@ -163,6 +171,10 @@ export class LayoutUiController {
         if (Math.abs(ratio - 16 / 9) > 0.001) return;
 
         void window.electronAPI.snapMainWindowContentAspect(ratio);
+    }
+
+    private isElementVisible(element: HTMLElement): boolean {
+        return element.getClientRects().length > 0 && getComputedStyle(element).display !== "none";
     }
 
     private setupEventListeners(): void {

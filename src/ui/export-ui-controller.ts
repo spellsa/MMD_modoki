@@ -663,6 +663,23 @@ export class ExportUiController {
         return Boolean(this.elements.playbackFrameStopToggleInput?.checked);
     }
 
+    public setPlaybackFrameRangeBoundary(boundary: "start" | "end", frame: number): void {
+        const current = this.getPlaybackFrameRange();
+        const startFrame = boundary === "start" ? frame : current.startFrame;
+        const endFrame = boundary === "end" ? frame : current.endFrame;
+        this.setOutputFrameRangeValues(startFrame, endFrame);
+        this.markOutputFrameRangeCustomized();
+    }
+
+    public setPlaybackFrameToggle(kind: "start" | "stop", enabled: boolean): void {
+        const input = kind === "start"
+            ? this.elements.playbackFrameStartToggleInput
+            : this.elements.playbackFrameStopToggleInput;
+        if (input) {
+            input.checked = enabled;
+        }
+    }
+
     public getOutputFormState(): OutputFormState {
         this.getPlaybackFrameRange();
         return { ...this.outputState };
