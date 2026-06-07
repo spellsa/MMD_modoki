@@ -6,33 +6,25 @@ type BottomPanelSectionId =
     | "boneOperation"
     | "bone"
     | "morph"
-    | "camera"
     | "lighting"
     | "shadow"
     | "accessory";
 
 const MODE_SECTIONS: Record<BottomPanelMode, BottomPanelSectionId[]> = {
-    model: ["info", "interpolation", "boneOperation", "bone", "morph", "camera"],
-    camera: ["info", "interpolation", "bone", "lighting", "shadow", "accessory", "camera"],
+    model: ["info", "interpolation", "boneOperation", "bone", "morph"],
+    camera: ["info", "interpolation", "bone", "lighting", "shadow", "accessory"],
 };
 
 const MODE_GRID_TEMPLATES: Record<BottomPanelMode, string> = {
     model: [
-        "minmax(0, 1.05fr)",
         "minmax(0, 1fr)",
-        "minmax(0, 1.12fr)",
-        "minmax(0, 1.28fr)",
+        "minmax(0, 1fr)",
+        "minmax(0, 1fr)",
+        "minmax(0, 1fr)",
         "minmax(0, 2fr)",
-        "minmax(0, 0.92fr)",
     ].join(" "),
     camera: [
-        "minmax(0, 0.9fr)",
-        "minmax(0, 0.9fr)",
-        "minmax(0, 1.3fr)",
-        "minmax(0, 1.2fr)",
-        "minmax(0, 1.2fr)",
-        "minmax(0, 1.25fr)",
-        "minmax(0, 0.78fr)",
+        "repeat(6, minmax(0, 1fr))",
     ].join(" "),
 };
 
@@ -49,7 +41,6 @@ export class BottomPanelLayoutController {
             boneOperation: document.getElementById("bone-operation-section"),
             bone: document.getElementById("bone-section"),
             morph: document.getElementById("morph-section"),
-            camera: document.getElementById("camera-section"),
             lighting: document.getElementById("lighting-section"),
             shadow: document.getElementById("shadow-section"),
             accessory: document.getElementById("accessory-section"),

@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
 import type { EditorAction } from "../actions/types";
+import { createPanelNumberGrid } from "./panel-control-helpers";
 
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type ToastType = "success" | "error" | "info";
@@ -11,6 +12,7 @@ type AccessoryPanelElements = {
     parentBoneSelect: HTMLSelectElement | null;
     btnVisibility: HTMLButtonElement | null;
     btnDelete: HTMLButtonElement | null;
+    transformGrid: HTMLElement | null;
     emptyState: HTMLElement | null;
 };
 
@@ -29,6 +31,7 @@ function resolveAccessoryPanelElements(): AccessoryPanelElements {
         parentBoneSelect: document.getElementById("accessory-parent-bone") as HTMLSelectElement | null,
         btnVisibility: document.getElementById("btn-accessory-visibility") as HTMLButtonElement | null,
         btnDelete: document.getElementById("btn-accessory-delete") as HTMLButtonElement | null,
+        transformGrid: document.getElementById("accessory-transform-grid"),
         emptyState: document.getElementById("accessory-empty-state"),
     };
 }
@@ -168,6 +171,7 @@ export class AccessoryPanelController {
         const btnVisibility = this.elements.btnVisibility;
         const btnDelete = this.elements.btnDelete;
 
+        this.renderTransformInputs();
         this.registerTransformInput("px", "accessory-pos-x");
         this.registerTransformInput("py", "accessory-pos-y");
         this.registerTransformInput("pz", "accessory-pos-z");
@@ -206,6 +210,25 @@ export class AccessoryPanelController {
         this.setParentControlsEnabled(false);
         this.updateActionButtons();
         this.onSelectionChanged();
+    }
+
+    private renderTransformInputs(): void {
+        const container = this.elements.transformGrid;
+        if (!container) return;
+
+        const grid = createPanelNumberGrid([
+            { key: "px", id: "accessory-pos-x", label: "X", min: -100, max: 100, step: 0.1, value: "0.0" },
+            { key: "py", id: "accessory-pos-y", label: "Y", min: -100, max: 100, step: 0.1, value: "0.0" },
+            { key: "pz", id: "accessory-pos-z", label: "Z", min: -100, max: 100, step: 0.1, value: "0.0" },
+            { key: "rx", id: "accessory-rot-x", label: "Rx", min: -180, max: 180, step: 0.1, value: "0.0" },
+            { key: "ry", id: "accessory-rot-y", label: "Ry", min: -180, max: 180, step: 0.1, value: "0.0" },
+            { key: "rz", id: "accessory-rot-z", label: "Rz", min: -180, max: 180, step: 0.1, value: "0.0" },
+            { key: "s", id: "accessory-scale", label: "Si", min: 1, max: 5000, step: 1, value: "100" },
+            { key: "tr", id: "accessory-tr", label: "Tr", min: 0, max: 1, step: 0.01, value: "0.00", disabled: true },
+        ], "accessory-transform");
+
+        container.className = grid.element.className;
+        container.replaceChildren(...Array.from(grid.element.children));
     }
 
     private registerTransformInput(

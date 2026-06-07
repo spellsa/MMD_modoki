@@ -3082,16 +3082,17 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .range-number-input {
-  width: 64px;
+  width: 72px;
   min-width: 0;
-  height: 22px;
+  height: 24px;
   padding: 0 6px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-card);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   color-scheme: dark;
-  font-size: 10px;
+  font-size: 12px;
+  font-weight: 700;
   font-family: var(--font-mono);
   text-align: right;
   outline: none;
@@ -3108,7 +3109,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .control-row.range-has-number .range-number-input {
-  flex: 0 0 64px;
+  flex: 0 0 72px;
 }
 
 .control-row.range-has-number .value-display {
@@ -5429,11 +5430,11 @@ body.bottom-panel-resizing {
   .range-number-input,
   .light-select {
     height: 24px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .range-number-input {
-    width: 72px;
+    width: 76px;
   }
 
   .light-row,
@@ -5442,7 +5443,7 @@ body.bottom-panel-resizing {
   }
 
   .light-row.range-has-number {
-    grid-template-columns: 60px minmax(0, 1fr) 72px;
+    grid-template-columns: 60px minmax(0, 1fr) 76px;
   }
 
   .light-row-select {
@@ -5714,14 +5715,14 @@ body.bottom-panel-resizing {
   }
 
   .range-number-input {
-    width: 44px;
-    height: 18px;
-    padding: 0 3px;
-    font-size: 8px;
+    width: 58px;
+    height: 22px;
+    padding: 0 4px;
+    font-size: 10px;
   }
 
   .control-row.range-has-number .range-number-input {
-    flex-basis: 44px;
+    flex-basis: 58px;
   }
 
   .output-row {

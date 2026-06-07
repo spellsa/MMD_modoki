@@ -1,6 +1,14 @@
 import { t } from "./i18n";
 import type { MmdManager } from "./mmd-manager";
 import type { BoneControlInfo, ModelInfo, MorphDisplayFrameInfo } from "./types";
+import {
+    applyPanelMorphCategoryGridClasses,
+    createPanelCategoryEmpty,
+    createPanelMorphCategory,
+    createPanelNumberGrid,
+    createPanelSliderValueRow,
+    setPanelEmptyState,
+} from "./ui/panel-control-helpers";
 
 type BoneSliderKey = "tx" | "ty" | "tz" | "rx" | "ry" | "rz" | "camDistance" | "camFov";
 type BonePoseSnapshot = {
@@ -59,7 +67,7 @@ export class BottomPanel {
         if (info.boneNames.length === 0) {
             this.currentBoneName = null;
             this.updateBoneSelectionSummary();
-            this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noBones")}</div>`;
+            setPanelEmptyState(this.boneContainer, t("empty.noBones"));
             return;
         }
 
@@ -81,8 +89,8 @@ export class BottomPanel {
                 : [];
 
         if (this.morphFrames.length === 0) {
-            this.morphContainer.classList.remove("morph-category-grid");
-            this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noMorphs")}</div>`;
+            this.morphContainer.className = "morph-controls";
+            setPanelEmptyState(this.morphContainer, t("empty.noMorphs"));
             return;
         }
 
@@ -111,15 +119,15 @@ export class BottomPanel {
         this.boneControlMap.clear();
         this.boneNames.clear();
         this.updateBoneSelectionSummary();
-        this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
+        setPanelEmptyState(this.boneContainer, t("empty.noModel"));
     }
 
     clearMorphControls(): void {
         this.morphFrames = [];
         this.morphSliders.clear();
         this.currentMorphFrameIndex = null;
-        this.morphContainer.classList.remove("morph-category-grid");
-        this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noModel")}</div>`;
+        this.morphContainer.className = "morph-controls";
+        setPanelEmptyState(this.morphContainer, t("empty.noModel"));
     }
 
     getSelectedBone(): string | null {
@@ -251,7 +259,7 @@ export class BottomPanel {
         this.boneSliderValues.clear();
 
         if (!this.currentBoneName) {
-            this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noBoneSelected")}</div>`;
+            setPanelEmptyState(this.boneContainer, t("empty.noBoneSelected"));
             return;
         }
 
@@ -308,41 +316,34 @@ export class BottomPanel {
         }
 
         if (controlDefs.length === 0) {
-            this.boneContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noEditableChannels")}</div>`;
+            setPanelEmptyState(this.boneContainer, t("empty.noEditableChannels"));
             return;
         }
 
-        const grid = document.createElement("div");
-        grid.className = "bone-number-grid";
+        const grid = createPanelNumberGrid(controlDefs.map((def) => ({
+            key: def.key,
+            label: def.label,
+            min: def.min,
+            max: def.max,
+            step: def.step,
+            value: this.formatPanelNumberValue(this.clamp(def.value, def.min, def.max), def.step),
+        })));
         for (const def of controlDefs) {
-            grid.appendChild(this.createBoneNumberField(def));
+            const input = grid.inputs.get(def.key);
+            if (!input) continue;
+            this.configureBoneNumberInput(input, def);
         }
-        this.boneContainer.appendChild(grid);
+        this.boneContainer.appendChild(grid.element);
     }
 
-    private createBoneNumberField(def: {
+    private configureBoneNumberInput(input: HTMLInputElement, def: {
         key: BoneSliderKey;
         label: string;
         min: number;
         max: number;
         step: number;
         value: number;
-    }): HTMLElement {
-        const row = document.createElement("label");
-        row.className = "bone-number-row";
-
-        const label = document.createElement("span");
-        label.className = "bone-number-label";
-        label.textContent = def.label;
-
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = String(def.min);
-        input.max = String(def.max);
-        input.step = String(def.step);
-        input.value = this.clamp(def.value, def.min, def.max).toFixed(def.step < 1 ? 2 : 0);
-        input.className = "bone-number-input";
-
+    }): void {
         const beginInputInteraction = (): void => {
             if (this.activeSliderInteractions.has(input)) return;
             this.activeSliderInteractions.add(input);
@@ -392,10 +393,6 @@ export class BottomPanel {
         });
 
         this.boneSliders.set(def.key, input);
-
-        row.appendChild(label);
-        row.appendChild(input);
-        return row;
     }
 
     private updateBoneSelectionSummary(): void {
@@ -447,8 +444,7 @@ export class BottomPanel {
                 Number.isFinite(min) ? min : rawValue,
                 Number.isFinite(max) ? max : rawValue,
             );
-            const digits = step < 1 ? 2 : 0;
-            const nextValue = safeValue.toFixed(digits);
+            const nextValue = this.formatPanelNumberValue(safeValue, step);
             if (slider.value !== nextValue) {
                 slider.value = nextValue;
             }
@@ -525,39 +521,30 @@ export class BottomPanel {
     private renderMorphGroups(): void {
         this.morphContainer.innerHTML = "";
         this.morphSliders.clear();
-        this.morphContainer.classList.remove("morph-category-grid");
+        this.morphContainer.className = "morph-controls";
 
         const groups = this.buildMorphGroups();
         const hasMorphs = groups.some((group) => group.morphs.length > 0);
         if (!hasMorphs) {
-            this.morphContainer.innerHTML = `<div class="panel-empty-state">${t("empty.noMorphs")}</div>`;
+            setPanelEmptyState(this.morphContainer, t("empty.noMorphs"));
             return;
         }
 
-        this.morphContainer.classList.add("morph-category-grid");
+        applyPanelMorphCategoryGridClasses(this.morphContainer, "morph-controls", "morph-category-grid");
         for (const group of groups) {
-            const card = document.createElement("div");
-            card.className = "morph-category-card";
-
-            const header = document.createElement("div");
-            header.className = "morph-category-header";
-            header.textContent = group.label;
-            card.appendChild(header);
-
-            const body = document.createElement("div");
-            body.className = "morph-category-body";
+            const { card, body } = createPanelMorphCategory(group.label, {
+                card: "morph-category-card",
+                header: "morph-category-header",
+                body: "morph-category-body",
+            });
             if (group.morphs.length === 0) {
-                const empty = document.createElement("div");
-                empty.className = "morph-category-empty";
-                empty.textContent = "-";
-                body.appendChild(empty);
+                body.appendChild(createPanelCategoryEmpty());
             }
 
             for (const morphInfo of group.morphs) {
                 body.appendChild(this.createMorphSliderRow(morphInfo));
             }
 
-            card.appendChild(body);
             this.morphContainer.appendChild(card);
         }
 
@@ -613,32 +600,29 @@ export class BottomPanel {
     private createMorphSliderRow(morphInfo: { frameIndex: number; index: number; name: string }): HTMLElement {
         const morphName = morphInfo.name;
         const morphIndex = morphInfo.index;
-        const row = document.createElement("div");
-        row.className = "morph-slider-row";
-
-        const label = document.createElement("label");
-        label.textContent = morphName;
-        label.title = morphName;
-
         const slider = document.createElement("input");
         slider.type = "range";
         slider.min = "0";
         slider.max = "1";
         slider.step = "0.01";
-        slider.className = "morph-slider";
         slider.value = this.mmdManager
             ? (morphIndex >= 0
                 ? this.mmdManager.getMorphWeightByIndex(morphIndex).toFixed(2)
                 : this.mmdManager.getMorphWeight(morphName).toFixed(2))
             : "0";
 
-        const valueDisplay = document.createElement("span");
-        valueDisplay.className = "morph-value";
-        valueDisplay.textContent = Number(slider.value).toFixed(2);
+        const rendered = createPanelSliderValueRow({
+            label: morphName,
+            slider,
+            valueText: Number(slider.value).toFixed(2),
+            legacyRowClass: "morph-slider-row",
+            legacySliderClass: "morph-slider",
+            legacyValueClass: "morph-value",
+        });
 
         slider.addEventListener("input", () => {
             const val = Number.parseFloat(slider.value);
-            valueDisplay.textContent = val.toFixed(2);
+            rendered.value.textContent = val.toFixed(2);
             if (!this.mmdManager) return;
             if (morphIndex >= 0) {
                 this.mmdManager.setMorphWeightByIndex(morphIndex, val);
@@ -652,10 +636,7 @@ export class BottomPanel {
 
         this.morphSliders.set(`${morphIndex}:${morphName}`, slider);
 
-        row.appendChild(label);
-        row.appendChild(slider);
-        row.appendChild(valueDisplay);
-        return row;
+        return rendered.row;
     }
     private isSliderEditing(slider: HTMLInputElement): boolean {
         const activeElement = document.activeElement;
@@ -674,6 +655,12 @@ export class BottomPanel {
     }
 
     private formatSliderValue(value: number, step: number): string {
+        if (step >= 1) return String(Math.round(value));
+        if (step >= 0.1) return value.toFixed(1);
+        return value.toFixed(2);
+    }
+
+    private formatPanelNumberValue(value: number, step: number): string {
         if (step >= 1) return String(Math.round(value));
         if (step >= 0.1) return value.toFixed(1);
         return value.toFixed(2);

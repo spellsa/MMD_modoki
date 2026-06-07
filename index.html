@@ -714,26 +714,6 @@
           </div>
         </section>
 
-        <!-- 5: Display Controls -->
-        <section id="camera-section" class="bottom-section">
-          <div class="section-header">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-              <path d="M2 3h7v8H2V3zm8 1l3-2v10l-3-2V4z" />
-            </svg>
-            <span data-i18n="section.camera">表示欄</span>
-          </div>
-          <div id="camera-controls" class="camera-controls">
-            <div class="camera-view-buttons" role="group" aria-label="カメラ視点" data-i18n-aria-label="label.cameraView">
-              <button id="btn-cam-left" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.left">左面</button>
-              <button id="btn-cam-front" class="camera-view-btn camera-view-btn--active" type="button" aria-pressed="true" data-i18n="camera.view.front">正面</button>
-              <button id="btn-cam-right" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.right">右面</button>
-              <button id="btn-cam-top" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.top">上面</button>
-              <button id="btn-cam-back" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.back">背面</button>
-              <button id="btn-cam-bottom" class="camera-view-btn" type="button" aria-pressed="false" data-i18n="camera.view.bottom">下面</button>
-            </div>
-          </div>
-        </section>
-
         <!-- 7: Lighting Controls -->
         <section id="lighting-section" class="bottom-section">
           <div class="section-header">
@@ -855,7 +835,7 @@
               <input type="range" id="light-ibl-shadow-range" class="light-slider" min="50" max="1200" value="400" step="10" disabled>
               <span id="light-ibl-shadow-range-val" class="light-value">4.0</span>
             </div>
-            <div class="light-row light-row--shadow">
+            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.characterContactShadow">キャラ接地影</span>
               <input type="range" id="light-character-contact-shadow" class="light-slider" min="0" max="1" value="0" step="1">
               <span id="light-character-contact-shadow-val" class="light-value">Off</span>
@@ -900,7 +880,7 @@
               <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="0" step="1">
               <span id="light-shadow-val" class="light-value">0.00</span>
             </div>
-            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
+            <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowFrustumSize">影範囲</span>
               <input type="range" id="light-shadow-frustum-size" class="light-slider" min="120" max="6000" value="220" step="20">
               <span id="light-shadow-frustum-size-val" class="light-value">220</span>
@@ -925,40 +905,7 @@
                 <option value="">-</option>
               </select>
             </div>
-            <div class="accessory-transform">
-              <div class="accessory-row">
-                <span class="accessory-label">X</span>
-                <input type="number" id="accessory-pos-x" class="accessory-number" min="-100" max="100" value="0" step="0.1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Y</span>
-                <input type="number" id="accessory-pos-y" class="accessory-number" min="-100" max="100" value="0" step="0.1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Z</span>
-                <input type="number" id="accessory-pos-z" class="accessory-number" min="-100" max="100" value="0" step="0.1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Rx</span>
-                <input type="number" id="accessory-rot-x" class="accessory-number" min="-180" max="180" value="0" step="0.1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Ry</span>
-                <input type="number" id="accessory-rot-y" class="accessory-number" min="-180" max="180" value="0" step="0.1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Rz</span>
-                <input type="number" id="accessory-rot-z" class="accessory-number" min="-180" max="180" value="0" step="0.1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Si</span>
-                <input type="number" id="accessory-scale" class="accessory-number" min="1" max="5000" value="100" step="1">
-              </div>
-              <div class="accessory-row">
-                <span class="accessory-label">Tr</span>
-                <input type="number" id="accessory-tr" class="accessory-number" min="0" max="1" value="0" step="0.01" disabled>
-              </div>
-            </div>
+            <div id="accessory-transform-grid" class="accessory-transform"></div>
             <div class="info-actions accessory-actions">
               <button id="btn-accessory-visibility" class="info-action-btn" type="button" disabled data-i18n="button.hide">非表示</button>
               <button id="btn-accessory-delete" class="info-action-btn info-action-btn--danger" type="button" disabled data-i18n="button.delete">削除</button>

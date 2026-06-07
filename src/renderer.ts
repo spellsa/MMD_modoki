@@ -11,6 +11,7 @@ import "./mmd-manager-x-extension";
 import { Timeline } from "./timeline";
 import { BottomPanel } from "./bottom-panel";
 import { UIController } from "./ui-controller";
+import { enhanceBottomPanelControls } from "./ui/panel-control-helpers";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
@@ -131,6 +132,7 @@ async function initializeApp(): Promise<void> {
     await initializeWebmExporter(searchParams);
     return;
   }
+  enhanceBottomPanelControls(document);
 
   const canvas = document.getElementById("render-canvas") as HTMLCanvasElement;
   if (!canvas) {
