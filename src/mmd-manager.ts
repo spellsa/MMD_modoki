@@ -216,44 +216,21 @@ import {
     applyShadowFrustumSize as applyShadowFrustumSizeImpl,
     applyToonShadowInfluenceToAllModels as applyToonShadowInfluenceToAllModelsImpl,
     applyToonShadowInfluenceToMeshes as applyToonShadowInfluenceToMeshesImpl,
-    getAmbientIntensity as getAmbientIntensityImpl,
     getLightColor as getLightColorImpl,
-    getLightColorTemperature as getLightColorTemperatureImpl,
     getLightDirection as getLightDirectionImpl,
     getSerializedLightDirection as getSerializedLightDirectionImpl,
-    getLightFlatColorInfluence as getLightFlatColorInfluenceImpl,
-    getLightFlatStrength as getLightFlatStrengthImpl,
-    getLightIntensity as getLightIntensityImpl,
-    getOcclusionShadowEdgeSoftness as getOcclusionShadowEdgeSoftnessImpl,
-    getSelfShadowEdgeSoftness as getSelfShadowEdgeSoftnessImpl,
     getShadowColor as getShadowColorImpl,
-    getShadowDarkness as getShadowDarknessImpl,
-    getShadowEdgeSoftness as getShadowEdgeSoftnessImpl,
     getShadowEnabled as getShadowEnabledImpl,
     getShadowBias as getShadowBiasImpl,
-    getShadowFrustumSize as getShadowFrustumSizeImpl,
     getShadowMaxZ as getShadowMaxZImpl,
     getShadowNormalBias as getShadowNormalBiasImpl,
-    getToonShadowInfluence as getToonShadowInfluenceImpl,
-    initializeLightShadowSystem as initializeLightShadowSystemImpl,
-    setAmbientIntensity as setAmbientIntensityImpl,
     setLightColor as setLightColorImpl,
-    setLightColorTemperature as setLightColorTemperatureImpl,
-    setLightFlatColorInfluence as setLightFlatColorInfluenceImpl,
-    setLightFlatStrength as setLightFlatStrengthImpl,
-    setLightIntensity as setLightIntensityImpl,
     setLightDirection as setLightDirectionImpl,
-    setOcclusionShadowEdgeSoftness as setOcclusionShadowEdgeSoftnessImpl,
-    setSelfShadowEdgeSoftness as setSelfShadowEdgeSoftnessImpl,
     setShadowColor as setShadowColorImpl,
-    setShadowDarkness as setShadowDarknessImpl,
-    setShadowEdgeSoftness as setShadowEdgeSoftnessImpl,
     setShadowEnabled as setShadowEnabledImpl,
     setShadowBias as setShadowBiasImpl,
-    setShadowFrustumSize as setShadowFrustumSizeImpl,
     setShadowMaxZ as setShadowMaxZImpl,
     setShadowNormalBias as setShadowNormalBiasImpl,
-    setToonShadowInfluence as setToonShadowInfluenceImpl,
 } from "./scene/light-shadow-controller";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
 import {
@@ -621,8 +598,31 @@ export interface WgslModelShaderInfo {
 type SceneModelMaterialEntry = {
     key: string;
     name: string;
-    material: any;
+    material: MmdManagerMaterialLike;
 };
+
+type MmdManagerMaterialLike = object & {
+    name?: unknown;
+    alpha?: unknown;
+    diffuseTexture?: { hasAlpha?: unknown } | null;
+    albedoTexture?: { hasAlpha?: unknown } | null;
+    opacityTexture?: unknown;
+    useAlphaFromDiffuseTexture?: unknown;
+    useAlphaFromAlbedoTexture?: unknown;
+    transparencyMode?: unknown;
+    zOffset?: number;
+    zOffsetUnits?: number;
+    useLogarithmicDepth?: boolean;
+    subMaterials?: Array<MmdManagerMaterialLike | null | undefined>;
+    renderOutline?: boolean;
+    outlineWidth?: number;
+    outlineAlpha?: number;
+    outlineColor?: { r?: unknown; g?: unknown; b?: unknown; set?: (r: number, g: number, b: number) => void };
+    toonTexture?: Texture | null;
+    ignoreDiffuseWhenToonTextureIsNull?: boolean;
+    markAsDirty?: (flag?: number) => void;
+    _markAllSubMeshesAsTexturesDirty?: () => void;
+} & Record<string, unknown>;
 
 type SceneModelRigidBodyEntry = {
     name: string;
@@ -1378,7 +1378,7 @@ ${beforeFogAppendBlock}
     private rigidBodyVisualizerTargets: {
         sceneModel: SceneModelEntry;
         backend: "ammo" | "bullet";
-        physicsModel: any;
+        physicsModel: unknown;
         rigidBodies: SceneModelRigidBodyEntry[];
         meshes: Mesh[];
     }[] = [];
@@ -1853,7 +1853,7 @@ ${beforeFogAppendBlock}
         return getWgslModelShaderStatesImpl(this);
     }
 
-    public isMaterialVisible(material: any): boolean {
+    public isMaterialVisible(material: MmdManagerMaterialLike | null | undefined): boolean {
         if (!material || typeof material !== "object") return true;
         return this.materialHiddenByMaterial.get(material as object) !== true;
     }
@@ -1909,7 +1909,7 @@ ${beforeFogAppendBlock}
         return entry.materials.filter((materialEntry) => materialEntry.key === materialKey);
     }
 
-    private getMaterialBaseAlpha(material: any): number {
+    private getMaterialBaseAlpha(material: MmdManagerMaterialLike | null | undefined): number {
         if (!material || typeof material !== "object") {
             return 1;
         }
@@ -1926,7 +1926,7 @@ ${beforeFogAppendBlock}
         return resolved;
     }
 
-    private setMaterialHiddenState(material: any, hidden: boolean): void {
+    private setMaterialHiddenState(material: MmdManagerMaterialLike | null | undefined, hidden: boolean): void {
         if (!material || typeof material !== "object") {
             return;
         }
@@ -1971,7 +1971,7 @@ ${beforeFogAppendBlock}
         return syncLuminousGlowLayerImpl(this);
     }
 
-    private markMaterialShaderDirty(material: any): void {
+    private markMaterialShaderDirty(material: MmdManagerMaterialLike | null | undefined): void {
         if (!material || typeof material !== "object") return;
 
         if (typeof material.markAsDirty === "function") {
@@ -3087,7 +3087,7 @@ ${beforeFogAppendBlock}
     }
 
     private getBoneWorldPositionToRef(bone: Skeleton["bones"][number], mesh: Mesh, result: Vector3): void {
-        return getBoneWorldPositionToRefImpl(this, bone, mesh, result);
+        return getBoneWorldPositionToRefImpl(bone, mesh, result);
     }
 
     private syncBoneVisualizerVisibility(): void {
@@ -3792,7 +3792,6 @@ ${beforeFogAppendBlock}
         this.scene.imageProcessingConfiguration.isEnabled = true;
         this.scene.imageProcessingConfiguration.applyByPostProcess = false;
         this.scene.imageProcessingConfiguration.contrast = 1;
-        this.initializeBoneGizmoSystem();
 
         // SDEF support
         SdefInjector.OverrideEngineCreateEffect(this.engine);
@@ -3814,6 +3813,8 @@ ${beforeFogAppendBlock}
         this.camera.wheelDeltaPercentage = 0.01;
         this.camera.attachControl(canvas, true);
         this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
+        this.scene.activeCamera = this.camera;
+        this.initializeBoneGizmoSystem();
         canvas.addEventListener("pointerdown", this.onCanvasPointerDown);
         canvas.addEventListener("pointermove", this.onCanvasPointerMove);
         canvas.addEventListener("pointerup", this.onCanvasPointerUp);
@@ -4049,6 +4050,7 @@ ${beforeFogAppendBlock}
             sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.scene.render();
             this.executePostEffectBackend();
+            this.renderBoneGizmoUtilityLayerAfterPostEffects();
             const afterRenderMs = performance.now();
             if (this.framePerformanceLogEnabled) {
                 this.recordFramePerformanceSection("sceneRender", afterRenderMs - sectionStartMs);
@@ -4309,7 +4311,7 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private applyMmdMaterialCompatibilityFixes(material: any): boolean {
+    private applyMmdMaterialCompatibilityFixes(material: MmdManagerMaterialLike | null | undefined): boolean {
         if (!material || typeof material !== "object") {
             return false;
         }
@@ -4584,7 +4586,7 @@ ${beforeFogAppendBlock}
         const materialMap = new Map<object, SceneModelMaterialEntry>();
         let materialIndex = 0;
 
-        const registerMaterial = (material: any, fallbackName: string): void => {
+        const registerMaterial = (material: MmdManagerMaterialLike | null | undefined, fallbackName: string): void => {
             if (!material || typeof material !== "object") return;
             if (materialMap.has(material as object)) return;
 
@@ -4610,7 +4612,7 @@ ${beforeFogAppendBlock}
         };
 
         for (const mesh of meshes) {
-            const material = mesh.material as any;
+            const material = mesh.material as MmdManagerMaterialLike | null;
             if (!material) continue;
 
             if (Array.isArray(material.subMaterials)) {
@@ -4632,10 +4634,10 @@ ${beforeFogAppendBlock}
 
     private applyModelEdgeToMeshes(meshes: Mesh[]): void {
         const scale = this.modelEdgeWidthValue;
-        const materials = new Set<any>();
+        const materials = new Set<MmdManagerMaterialLike>();
 
         for (const mesh of meshes) {
-            const material = mesh.material as any;
+            const material = mesh.material as MmdManagerMaterialLike | null;
             if (!material) continue;
             if (Array.isArray(material.subMaterials)) {
                 for (const sub of material.subMaterials) {
@@ -4687,10 +4689,10 @@ ${beforeFogAppendBlock}
         return applyToonShadowInfluenceToMeshesImpl(this, meshes);
     }
     private applyCelShadingToMeshes(meshes: Mesh[]): void {
-        const materials = new Set<any>();
+        const materials = new Set<MmdManagerMaterialLike>();
 
         for (const mesh of meshes) {
-            const material = mesh.material as any;
+            const material = mesh.material as MmdManagerMaterialLike | null;
             if (!material) continue;
             if (Array.isArray(material.subMaterials)) {
                 for (const sub of material.subMaterials) {
@@ -4742,7 +4744,7 @@ ${beforeFogAppendBlock}
         ] as const;
 
         for (const mesh of meshes) {
-            const material = mesh.material as any;
+            const material = mesh.material as MmdManagerMaterialLike | null;
             if (!material) continue;
 
             const materials = Array.isArray(material.subMaterials) ? material.subMaterials : [material];
@@ -5181,7 +5183,7 @@ ${beforeFogAppendBlock}
     }
 
     public async importProjectState(
-        data: any,
+        data: unknown,
         options: { forExport?: boolean } = {},
     ): Promise<{ loadedModels: number; warnings: string[] }> {
         return importProjectStateImpl(this, data, options);
@@ -5284,9 +5286,25 @@ ${beforeFogAppendBlock}
             return;
         }
 
+        type TextureLoaderOptions = { noMipmap?: boolean };
         const textureLoader = ((sharedBuilder as unknown as { [key: string]: unknown })._textureLoader as {
-            loadTextureAsync?: (...args: any[]) => any;
-            loadTextureFromBufferAsync?: (...args: any[]) => any;
+            loadTextureAsync?: (
+                uniqueId: unknown,
+                rootUrl: string,
+                relativeTexturePathOrIndex: string | number,
+                scene: unknown,
+                assetContainer: unknown,
+                options: TextureLoaderOptions,
+            ) => Promise<unknown>;
+            loadTextureFromBufferAsync?: (
+                uniqueId: unknown,
+                textureName: string,
+                arrayBufferOrBlob: ArrayBuffer | Blob,
+                scene: unknown,
+                assetContainer: unknown,
+                options: TextureLoaderOptions,
+                applyPathNormalization?: boolean,
+            ) => Promise<unknown>;
         } | undefined);
         if (!textureLoader) {
             return;
@@ -5344,7 +5362,7 @@ ${beforeFogAppendBlock}
         }
 
         const engine = this.engine as WebGPUEngine & {
-            _uploadDataToTextureDirectly?: (...args: any[]) => any;
+            _uploadDataToTextureDirectly?: (...args: unknown[]) => unknown;
         };
         const originalUploadDataToTextureDirectly = engine._uploadDataToTextureDirectly?.bind(engine);
         if (!originalUploadDataToTextureDirectly) {
@@ -5570,6 +5588,14 @@ ${beforeFogAppendBlock}
         this.frameGraphPostEffectsController?.execute();
     }
 
+    private renderBoneGizmoUtilityLayerAfterPostEffects(): void {
+        if (this.postEffectBackend !== "frameGraph") {
+            return;
+        }
+        const utilityLayer = this.boneGizmoManager?.utilityLayer as { render?: () => void } | undefined;
+        utilityLayer?.render?.();
+    }
+
     private disposeFrameGraphPostEffectsController(): void {
         if (!this.frameGraphPostEffectsController) {
             return;
@@ -5717,11 +5743,13 @@ ${beforeFogAppendBlock}
                 ? { precision: precisionOrOptions }
                 : (precisionOrOptions ?? {});
             const clampedPrecision = Math.max(0.25, Math.min(4, options.precision ?? 1));
-            const width = Number.isFinite(options.width)
-                ? Math.max(320, Math.min(8192, Math.floor(options.width!)))
+            const requestedWidth = options.width;
+            const requestedHeight = options.height;
+            const width = typeof requestedWidth === "number" && Number.isFinite(requestedWidth)
+                ? Math.max(320, Math.min(8192, Math.floor(requestedWidth)))
                 : Math.max(320, Math.min(8192, Math.floor(this.engine.getRenderWidth(true) * clampedPrecision)));
-            const height = Number.isFinite(options.height)
-                ? Math.max(180, Math.min(8192, Math.floor(options.height!)))
+            const height = typeof requestedHeight === "number" && Number.isFinite(requestedHeight)
+                ? Math.max(180, Math.min(8192, Math.floor(requestedHeight)))
                 : Math.max(180, Math.min(8192, Math.floor(this.engine.getRenderHeight(true) * clampedPrecision)));
 
             return await this.captureCurrentFramebufferPngRgbaData(width, height);
@@ -5752,11 +5780,13 @@ ${beforeFogAppendBlock}
                 ? { precision: precisionOrOptions }
                 : (precisionOrOptions ?? {});
             const clampedPrecision = Math.max(0.25, Math.min(4, options.precision ?? 1));
-            const width = Number.isFinite(options.width)
-                ? Math.max(320, Math.min(8192, Math.floor(options.width!)))
+            const requestedWidth = options.width;
+            const requestedHeight = options.height;
+            const width = typeof requestedWidth === "number" && Number.isFinite(requestedWidth)
+                ? Math.max(320, Math.min(8192, Math.floor(requestedWidth)))
                 : null;
-            const height = Number.isFinite(options.height)
-                ? Math.max(180, Math.min(8192, Math.floor(options.height!)))
+            const height = typeof requestedHeight === "number" && Number.isFinite(requestedHeight)
+                ? Math.max(180, Math.min(8192, Math.floor(requestedHeight)))
                 : null;
             const screenshotSize = width !== null && height !== null
                 ? { width, height }
@@ -7943,7 +7973,7 @@ ${beforeFogAppendBlock}
 
         return mergedTrack;
     }
-    private buildModelTrackFrameMapFromAnimation(animation: any, frameOffset = 0): Map<string, Uint32Array> {
+    private buildModelTrackFrameMapFromAnimation(animation: MmdAnimation, frameOffset = 0): Map<string, Uint32Array> {
         return buildModelTrackFrameMapFromAnimationImpl(this, animation, frameOffset);
     }
 

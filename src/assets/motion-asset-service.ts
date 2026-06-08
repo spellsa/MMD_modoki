@@ -2,6 +2,66 @@ import type { MotionInfo } from "../types";
 import { logError, logInfo, logWarn, toLogErrorData } from "../app-logger";
 import { StreamAudioPlayer } from "babylon-mmd/esm/Runtime/Audio/streamAudioPlayer";
 
+type MotionAssetAnimation = object;
+
+type CameraMotionAnimation = MotionAssetAnimation & {
+    cameraTrack: {
+        frameNumbers: ArrayLike<number>;
+    };
+};
+
+type MotionAssetRuntimeModel = {
+    setRuntimeAnimation(animationHandle: unknown): void;
+};
+
+type MotionAssetHost = {
+    currentModel: MotionAssetRuntimeModel | null;
+    _currentFrame: number;
+    _totalFrames: number;
+    onError?: (message: string) => void;
+    onMotionLoaded?: (motionInfo: MotionInfo) => void;
+    onCameraMotionLoaded?: (motionInfo: MotionInfo) => void;
+    onAudioLoaded?: (audioName: string) => void;
+    vmdLoader: {
+        loadAsync(name: string, url: string): Promise<MotionAssetAnimation>;
+    };
+    vpdLoader: {
+        loadFromBuffer(name: string, buffer: ArrayBuffer): MotionAssetAnimation;
+    };
+    modelSourceAnimationsByModel: WeakMap<MotionAssetRuntimeModel, MotionAssetAnimation>;
+    modelKeyframeTracksByModel: WeakMap<MotionAssetRuntimeModel, Map<string, Uint32Array>>;
+    mergeModelAnimations(baseAnimation: MotionAssetAnimation, animation: MotionAssetAnimation): MotionAssetAnimation;
+    createOffsetModelAnimation(animation: MotionAssetAnimation, frameOffset: number): MotionAssetAnimation;
+    appendModelMotionImport(
+        model: MotionAssetRuntimeModel,
+        motionImport: { type: "vmd" | "vpd"; path: string; frame?: number },
+    ): void;
+    createModelRuntimeAnimation(model: MotionAssetRuntimeModel, animation: MotionAssetAnimation): unknown;
+    buildModelTrackFrameMapFromAnimation(animation: MotionAssetAnimation): Map<string, Uint32Array>;
+    emitMergedKeyframeTracks(): void;
+    mmdRuntime: {
+        animationFrameTimeDuration: number;
+        setAudioPlayer(audioPlayer: StreamAudioPlayer | null): Promise<void>;
+    };
+    seekTo(frame: number): void;
+    syncMmdCameraFromViewportCamera(force: boolean): void;
+    cameraAnimationHandle: unknown | null;
+    mmdCamera: {
+        createRuntimeAnimation(animation: MotionAssetAnimation): unknown;
+        setRuntimeAnimation(animationHandle: unknown): void;
+        destroyRuntimeAnimation(animationHandle: unknown): void;
+    };
+    hasCameraMotion: boolean;
+    cameraMotionPath: string | null;
+    cameraSourceAnimation: MotionAssetAnimation | null;
+    cameraKeyframeFrames: Uint32Array;
+    audioPlayer: StreamAudioPlayer | null;
+    audioBlobUrl: string | null;
+    scene: ConstructorParameters<typeof StreamAudioPlayer>[0];
+    audioSourcePath: string | null;
+    refreshTotalFramesFromContent?: () => void;
+};
+
 function getAudioMimeType(fileName: string): string {
     const ext = fileName.split(".").pop()?.toLowerCase();
     switch (ext) {
@@ -16,7 +76,7 @@ function getAudioMimeType(fileName: string): string {
     }
 }
 
-export async function loadVMD(host: any, filePath: string): Promise<MotionInfo | null> {
+export async function loadVMD(host: MotionAssetHost, filePath: string): Promise<MotionInfo | null> {
     const pathParts = filePath.replace(/\\/g, "/");
     const lastSlash = pathParts.lastIndexOf("/");
     const fileName = pathParts.substring(lastSlash + 1);
@@ -44,7 +104,7 @@ export async function loadVMD(host: any, filePath: string): Promise<MotionInfo |
         const uint8 = new Uint8Array(buffer as unknown as ArrayBuffer);
         const blob = new Blob([uint8]);
         const blobUrl = URL.createObjectURL(blob);
-        let animation: any;
+        let animation: MotionAssetAnimation;
         try {
             animation = await host.vmdLoader.loadAsync("modelMotion", blobUrl);
         } finally {
@@ -90,7 +150,7 @@ export async function loadVMD(host: any, filePath: string): Promise<MotionInfo |
     }
 }
 
-export async function loadVPD(host: any, filePath: string): Promise<MotionInfo | null> {
+export async function loadVPD(host: MotionAssetHost, filePath: string): Promise<MotionInfo | null> {
     try {
         const targetModel = host.currentModel;
         if (!targetModel) {
@@ -156,7 +216,7 @@ export async function loadVPD(host: any, filePath: string): Promise<MotionInfo |
     }
 }
 
-export async function loadCameraVMD(host: any, filePath: string): Promise<MotionInfo | null> {
+export async function loadCameraVMD(host: MotionAssetHost, filePath: string): Promise<MotionInfo | null> {
     try {
         const pathParts = filePath.replace(/\\/g, "/");
         const lastSlash = pathParts.lastIndexOf("/");
@@ -177,7 +237,7 @@ export async function loadCameraVMD(host: any, filePath: string): Promise<Motion
         const animationPromise = host.vmdLoader.loadAsync("cameraMotion", blobUrl);
         let animation: Awaited<typeof animationPromise>;
         try {
-            animation = await animationPromise;
+            animation = await animationPromise as CameraMotionAnimation;
         } finally {
             URL.revokeObjectURL(blobUrl);
         }
@@ -235,7 +295,7 @@ export async function loadCameraVMD(host: any, filePath: string): Promise<Motion
     }
 }
 
-export async function loadMP3(host: any, filePath: string): Promise<boolean> {
+export async function loadMP3(host: MotionAssetHost, filePath: string): Promise<boolean> {
     try {
         const pathParts = filePath.replace(/\\/g, "/");
         const lastSlash = pathParts.lastIndexOf("/");

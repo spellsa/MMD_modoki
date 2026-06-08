@@ -1,12 +1,46 @@
 import { GizmoManager } from "@babylonjs/core/Gizmos/gizmoManager";
-import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import type { Scene } from "@babylonjs/core/scene";
+import type { BoneControlInfo } from "../types";
+import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
 
-function getActiveBoneControlInfo(host: any, boneName: string) {
-    return host.activeModelInfo?.boneControlInfos?.find((info: any) => info.name === boneName);
+type BoneGizmoHost = {
+    scene: Scene;
+    activeModelInfo: { boneControlInfos?: BoneControlInfo[] } | null;
+    currentMesh: Mesh | null;
+    boneVisualizerTarget: { runtimeUseMeshWorldMatrix: boolean } | null;
+    boneGizmoManager: GizmoManager | null;
+    boneGizmoProxyNode: TransformNode | null;
+    boneGizmoRuntimeBone: IMmdRuntimeBone | null;
+    boneGizmoTempMatrix: Matrix;
+    boneGizmoTempMatrix2: Matrix;
+    boneGizmoTempScale: Vector3;
+    boneGizmoTempScale2: Vector3;
+    boneGizmoTempRotation: Quaternion;
+    boneGizmoTempRotation2: Quaternion;
+    boneGizmoTempPosition: Vector3;
+    boneGizmoTempPosition2: Vector3;
+    boneGizmoTempPosition3: Vector3;
+    timelineTarget: "model" | "camera";
+    _isPlaying: boolean;
+    physicsEnabledBeforeBoneGizmoDrag: boolean | null;
+    getActiveModelVisibility: () => boolean;
+    getRuntimeBoneByName: (boneName: string) => IMmdRuntimeBone | null;
+    invalidateBoneVisualizerPose: (runtimeBone: IMmdRuntimeBone, updateTransform?: boolean) => void;
+    getPhysicsEnabled: () => boolean;
+    setPhysicsEnabled: (enabled: boolean) => void;
+    onBoneTransformEditStarted?: (boneName: string) => void;
+    onBoneTransformEditCommitted?: (boneName: string) => void;
+    boneVisualizerSelectedBoneName: string | null;
+};
+
+function getActiveBoneControlInfo(host: BoneGizmoHost, boneName: string): BoneControlInfo | undefined {
+    return host.activeModelInfo?.boneControlInfos?.find((info) => info.name === boneName);
 }
 
-function disableBoneGizmo(host: any): void {
+function disableBoneGizmo(host: BoneGizmoHost): void {
     const gizmoManager = host.boneGizmoManager;
     if (gizmoManager) {
         gizmoManager.attachToNode(null);
@@ -18,11 +52,11 @@ function disableBoneGizmo(host: any): void {
     host.boneGizmoProxyNode?.setEnabled(false);
 }
 
-export function resetBoneGizmoInteraction(host: any): void {
+export function resetBoneGizmoInteraction(host: BoneGizmoHost): void {
     disableBoneGizmo(host);
 }
 
-function syncBoneGizmoProxyToRuntimeBone(host: any, runtimeBone: any): void {
+function syncBoneGizmoProxyToRuntimeBone(host: BoneGizmoHost, runtimeBone: IMmdRuntimeBone): void {
     const proxyNode = host.boneGizmoProxyNode;
     if (!proxyNode) return;
 
@@ -57,7 +91,7 @@ function syncBoneGizmoProxyToRuntimeBone(host: any, runtimeBone: any): void {
     proxyNode.rotationQuaternion.copyFrom(host.boneGizmoTempRotation);
 }
 
-function applyBoneGizmoProxyToRuntimeBone(host: any, runtimeBone: any): void {
+function applyBoneGizmoProxyToRuntimeBone(host: BoneGizmoHost, runtimeBone: IMmdRuntimeBone): void {
     const proxyNode = host.boneGizmoProxyNode;
     if (!proxyNode) return;
 
@@ -134,7 +168,7 @@ function applyBoneGizmoProxyToRuntimeBone(host: any, runtimeBone: any): void {
     }
 }
 
-export function initializeBoneGizmoSystem(host: any): void {
+export function initializeBoneGizmoSystem(host: BoneGizmoHost): void {
     host.boneGizmoManager = new GizmoManager(host.scene, 1.8);
     host.boneGizmoManager.usePointerToAttachGizmos = false;
     host.boneGizmoManager.clearGizmoOnEmptyPointerEvent = false;
@@ -147,7 +181,7 @@ export function initializeBoneGizmoSystem(host: any): void {
     host.boneGizmoProxyNode.setEnabled(false);
 }
 
-export function updateBoneGizmoTarget(host: any): void {
+export function updateBoneGizmoTarget(host: BoneGizmoHost): void {
     const gizmoManager = host.boneGizmoManager;
     const proxyNode = host.boneGizmoProxyNode;
     if (!gizmoManager || !proxyNode) return;
@@ -191,7 +225,7 @@ export function updateBoneGizmoTarget(host: any): void {
     host.invalidateBoneVisualizerPose(runtimeBone, false);
 }
 
-export function handleBoneGizmoBeforeRender(host: any): void {
+export function handleBoneGizmoBeforeRender(host: BoneGizmoHost): void {
     const boneRuntime = host.boneGizmoRuntimeBone;
     const boneGizmoDragging = host.boneGizmoManager?.isDragging === true && boneRuntime !== null;
     if (boneGizmoDragging && boneRuntime) {
@@ -225,7 +259,7 @@ export function handleBoneGizmoBeforeRender(host: any): void {
     }
 }
 
-export function disposeBoneGizmoSystem(host: any): void {
+export function disposeBoneGizmoSystem(host: BoneGizmoHost): void {
     if (host.boneGizmoManager) {
         host.boneGizmoManager.dispose();
         host.boneGizmoManager = null;

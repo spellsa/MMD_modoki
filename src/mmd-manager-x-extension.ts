@@ -798,7 +798,11 @@ function createAccessoryEntryFromImport(
     prepareManagedAccessoryMeshes(host, managedMeshes, kind !== "glb");
     if (kind === "x") {
         const accessoryMaterials = collectAccessoryMaterials(managedMeshes);
-        applyWgslShaderPresetToMaterials(host as any, accessoryMaterials, "wgsl-accessory-toon");
+        applyWgslShaderPresetToMaterials(
+            host as Parameters<typeof applyWgslShaderPresetToMaterials>[0],
+            accessoryMaterials,
+            "wgsl-accessory-toon",
+        );
     }
     if (kind === "glb") {
         excludeGlbAccessoryMeshesFromDepthAndShadow(host, managedMeshes);

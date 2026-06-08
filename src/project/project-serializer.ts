@@ -1,4 +1,11 @@
-import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectKeyframeBundle, ProjectSerializedAccessoryTransformTrack } from "../types";
+import type {
+    MmdModokiProjectFileV1,
+    ProjectAccessoryState,
+    ProjectKeyframeBundle,
+    ProjectModelMaterialShaderState,
+    ProjectMotionImport,
+    ProjectSerializedAccessoryTransformTrack,
+} from "../types";
 import { serializeCameraTrack, serializeModelAnimation } from "./project-codec";
 
 type ProjectExportAccessory = {
@@ -7,7 +14,146 @@ type ProjectExportAccessory = {
     visible: boolean;
 };
 
-export function exportProjectState(host: any): MmdModokiProjectFileV1 {
+type ProjectExportSceneModel = {
+    info: { path: string };
+    mesh: object;
+    model: object;
+};
+
+type ProjectExportHost = {
+    sceneModels: ProjectExportSceneModel[];
+    activeModelInfo: { path: string } | null;
+    timelineTarget: "model" | "camera";
+    _currentFrame: number;
+    _playbackSpeed: number;
+    cameraMotionPath: string | null;
+    audioSourcePath: string | null;
+    camera: {
+        position: { x: number; y: number; z: number };
+        target: { x: number; y: number; z: number };
+    };
+    cameraRotationEulerDeg: { x: number; y: number; z: number };
+    modelMotionImportsByModel: WeakMap<object, ProjectMotionImport[]>;
+    modelSourceAnimationsByModel: WeakMap<object, unknown>;
+    cameraSourceAnimation: { cameraTrack?: unknown } | null;
+    lightIntensity: number;
+    ambientIntensity: number;
+    lightColorTemperature: number;
+    lightFlatStrength: number;
+    lightFlatColorInfluence: number;
+    toonShadowInfluence: number;
+    shadowEnabled: boolean;
+    shadowDarkness: number;
+    shadowFrustumSize: number;
+    shadowMaxZ: number;
+    shadowBias: number;
+    shadowNormalBias: number;
+    shadowFilteringQuality: number;
+    softTransparentShadowEnabled: boolean;
+    iblShadowsEnabled: boolean;
+    iblShadowOpacity: number;
+    iblShadowDistanceScale: number;
+    characterContactShadowEnabled: boolean;
+    characterContactShadowOpacity: number;
+    characterContactShadowScale: number;
+    shadowEdgeSoftness: number;
+    selfShadowEdgeSoftness: number;
+    occlusionShadowEdgeSoftness: number;
+    antialiasEnabled: boolean;
+    mirroringFloorEnabled: boolean;
+    mirroringFloorReflectance: number;
+    mirroringFloorSize: number;
+    mirroringFloorHeight: number;
+    mirroringFloorResolution: number;
+    dofEnabled: boolean;
+    dofFocusDistanceMm: number;
+    dofAutoFocusNearOffsetMm: number;
+    dofBlurLevel: number;
+    dofFStop: number;
+    dofNearSuppressionScale: number;
+    dofLensSize: number;
+    dofFocalLength: number;
+    dofFocalLengthDistanceInverted: boolean;
+    dofLensBlurStrength: number;
+    dofLensEdgeBlur: number;
+    dofLensDistortion: number;
+    dofLensDistortionInfluence: number;
+    modelEdgeWidth: number;
+    postEffectContrast: number;
+    postEffectGamma: number;
+    postEffectExposure: number;
+    postEffectToneMappingEnabled: boolean;
+    postEffectToneMappingType: number;
+    postEffectDitheringEnabled: boolean;
+    postEffectDitheringIntensity: number;
+    postEffectVignetteEnabled: boolean;
+    postEffectVignetteWeight: number;
+    postEffectBloomEnabled: boolean;
+    postEffectBloomWeight: number;
+    postEffectBloomThreshold: number;
+    postEffectBloomKernel: number;
+    postEffectChromaticAberration: number;
+    postEffectGrainIntensity: number;
+    postEffectSharpenEdge: number;
+    postEffectSsaoEnabled: boolean;
+    postEffectSsaoStrength: number;
+    postEffectSsaoRadius: number;
+    postEffectSsaoFadeEnd: number;
+    postEffectSsaoDebugView: boolean;
+    postEffectColorCurvesEnabled: boolean;
+    postEffectColorCurvesHue: number;
+    postEffectColorCurvesDensity: number;
+    postEffectColorCurvesSaturation: number;
+    postEffectColorCurvesExposure: number;
+    postEffectGlowEnabled: boolean;
+    postEffectGlowIntensity: number;
+    postEffectGlowKernel: number;
+    postEffectLutEnabled: boolean;
+    postEffectLutIntensity: number;
+    postEffectLutPreset: string;
+    postEffectLutSourceMode: "builtin" | "external-absolute" | "project-relative";
+    postEffectLutExternalPath: string | null;
+    postEffectMotionBlurEnabled: boolean;
+    postEffectMotionBlurStrength: number;
+    postEffectMotionBlurSamples: number;
+    postEffectSsrEnabled: boolean;
+    postEffectSsrStrength: number;
+    postEffectSsrStep: number;
+    postEffectVlsEnabled: boolean;
+    postEffectVlsExposure: number;
+    postEffectVlsDecay: number;
+    postEffectVlsWeight: number;
+    postEffectVlsDensity: number;
+    postEffectFogEnabled: boolean;
+    postEffectFogMode: number;
+    postEffectFogStart: number;
+    postEffectFogEnd: number;
+    postEffectFogDensity: number;
+    postEffectFogOpacity: number;
+    getModelVisibility: (mesh: object) => boolean;
+    getModelCastsShadow: (entry: ProjectExportSceneModel) => boolean;
+    getSerializedMaterialShaderStates: (entry: ProjectExportSceneModel) => ProjectModelMaterialShaderState[];
+    getSerializedLightDirection?: () => { x?: unknown; y?: unknown; z?: unknown } | null;
+    getLightDirection: () => { x?: unknown; y?: unknown; z?: unknown };
+    getLightColor: () => { r: number; g: number; b: number };
+    getShadowColor: () => { r: number; g: number; b: number };
+    getCameraFov: () => number;
+    getCameraDistance: () => number;
+    getPhysicsEnabled: () => boolean;
+    getPhysicsSimulationRateHz: () => number;
+    getPhysicsGravityAcceleration: () => number;
+    getPhysicsGravityDirection: () => { x: number; y: number; z: number };
+    getDofFocusTargetModelPath?: () => string | null;
+    getDofFocusTargetBoneName?: () => string | null;
+    getBackgroundImagePath: () => string | null;
+    getBackgroundVideoPath: () => string | null;
+    getExternalWgslToonShaderPath: () => string | null;
+    getPostEffectFogColor: () => { r: number; g: number; b: number };
+    isGroundVisible: () => boolean;
+    isSkydomeVisible: () => boolean;
+};
+
+export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFileV1 {
     const accessoryExtension = host as {
         getLoadedAccessories?: () => ProjectExportAccessory[];
         getAccessoryTransform?: (index: number) => {
@@ -19,11 +165,11 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
         getAccessoryTransformKeyframes?: (index: number) => ProjectSerializedAccessoryTransformTrack | null;
     };
 
-    const models = host.sceneModels.map((entry: any) => ({
+    const models = host.sceneModels.map((entry) => ({
         path: entry.info.path,
         visible: host.getModelVisibility(entry.mesh),
         castsShadow: host.getModelCastsShadow(entry),
-        motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item: any) => ({ ...item })),
+        motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item) => ({ ...item })),
         materialShaders: host.getSerializedMaterialShaderStates(entry),
     }));
 
@@ -44,7 +190,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
     });
 
     const keyframes: ProjectKeyframeBundle = {
-        modelAnimations: host.sceneModels.map((entry: any) => ({
+        modelAnimations: host.sceneModels.map((entry) => ({
             modelPath: entry.info.path,
             animation: serializeModelAnimation(host.modelSourceAnimationsByModel.get(entry.model)),
         })),

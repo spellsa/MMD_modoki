@@ -1,6 +1,184 @@
-import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectSerializedAccessoryTransformTrack, ProjectSerializedModelAnimation } from "../types";
+import type {
+    MmdModokiProjectFileV1,
+    ProjectAccessoryState,
+    ProjectModelMaterialShaderState,
+    ProjectMotionImport,
+    ProjectSerializedAccessoryTransformTrack,
+    ProjectSerializedModelAnimation,
+} from "../types";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { createCameraAnimationFromTrack, deserializeCameraTrack, deserializeModelAnimation } from "./project-codec";
+
+type ProjectImportRuntimeModel = {
+    createRuntimeAnimation(animation: object): unknown;
+    setRuntimeAnimation(animationHandle: unknown): void;
+};
+
+type ProjectImportSceneModel = {
+    info: { path: string };
+    mesh: object;
+    model: ProjectImportRuntimeModel;
+};
+
+type ProjectImportHost = {
+    sceneModels: ProjectImportSceneModel[];
+    modelSourceAnimationsByModel: WeakMap<ProjectImportRuntimeModel, object>;
+    modelKeyframeTracksByModel: WeakMap<ProjectImportRuntimeModel, Map<string, Uint32Array>>;
+    clearProjectForImport(): void;
+    loadPMX(path: string): Promise<{ name: string } | null>;
+    loadVMD(path: string): Promise<unknown>;
+    loadVPD(path: string): Promise<unknown>;
+    loadCameraVMD(path: string): Promise<boolean>;
+    loadMP3(path: string): Promise<boolean>;
+    applyImportedMaterialShaderStates(
+        modelIndex: number,
+        states: ProjectModelMaterialShaderState[] | undefined,
+        warnings: string[],
+        modelPath: string,
+    ): void;
+    setLightDirection(x: number, y: number, z: number): void;
+    setDofFocusTargetByPath?: (modelPath: string | null, boneName: string | null) => void;
+    updateEditorDofFocusAndFStop?: () => void;
+    applyEditorDofSettings?: () => void;
+    applyDofLensBlurSettings?: () => void;
+    applyLightColorTemperature?: () => void;
+    applyToonShadowInfluenceToAllModels?: () => void;
+    syncLuminousGlowLayer?: () => void;
+    engine?: { releaseEffects?: () => void };
+    setActiveModelByIndex(index: number): void;
+    setActiveModelVisibility(visible: boolean): void;
+    applySceneMeshVisibility(mesh: object, visible: boolean): void;
+    setModelCastsShadowByIndex?: (modelIndex: number, castsShadow: boolean) => void;
+    setModelMotionImports(model: ProjectImportRuntimeModel, imports: ProjectMotionImport[]): void;
+    buildModelTrackFrameMapFromAnimation(animation: object): Map<string, Uint32Array>;
+    emitMergedKeyframeTracks(): void;
+    applyCameraAnimation(animation: object, path: string | null): void;
+    getCameraDistance(): number;
+    getCameraFov(): number;
+    applyCameraTrackPose(
+        target: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        distance: number,
+        fov: number,
+    ): void;
+    setGroundVisible(visible: boolean): void;
+    setSkydomeVisible(visible: boolean): void;
+    antialiasEnabled: boolean;
+    mirroringFloorReflectance: number;
+    mirroringFloorSize: number;
+    mirroringFloorHeight: number;
+    mirroringFloorResolution: number;
+    mirroringFloorEnabled: boolean;
+    setBackgroundVideoFromPath(path: string): Promise<void>;
+    setBackgroundImageFromPath(path: string): Promise<void>;
+    clearBackgroundMedia(): void;
+    lightIntensity: number;
+    ambientIntensity: number;
+    lightColorTemperature: number;
+    setLightColor(r: number, g: number, b: number): void;
+    lightFlatStrength: number;
+    lightFlatColorInfluence: number;
+    setShadowColor(r: number, g: number, b: number): void;
+    toonShadowInfluence: number;
+    shadowDarkness: number;
+    shadowFrustumSize: number;
+    shadowFrustumSizeValue: number;
+    shadowMaxZ: number;
+    shadowMaxZValue: number;
+    shadowBias: number;
+    shadowBiasValue: number;
+    shadowNormalBias: number;
+    shadowNormalBiasValue: number;
+    shadowFilteringQuality: number;
+    softTransparentShadowEnabled: boolean;
+    iblShadowOpacity: number;
+    iblShadowDistanceScale: number;
+    iblShadowsEnabled: boolean;
+    characterContactShadowOpacity: number;
+    characterContactShadowScale: number;
+    characterContactShadowEnabled: boolean;
+    selfShadowEdgeSoftness: number;
+    occlusionShadowEdgeSoftness: number;
+    setShadowEnabled(enabled: boolean): void;
+    setPhysicsSimulationRateHz(value: number): void;
+    setPhysicsGravityAcceleration(value: number): void;
+    setPhysicsGravityDirection(x: number, y: number, z: number): void;
+    isPhysicsAvailable(): boolean;
+    setPhysicsEnabled(enabled: boolean): void;
+    dofEnabled: boolean;
+    dofFocusDistanceMm: number;
+    dofAutoFocusNearOffsetMm: number;
+    dofBlurLevel: number;
+    dofFStop: number;
+    dofNearSuppressionScale: number;
+    dofLensSize: number;
+    dofFocalLengthDistanceInverted: boolean;
+    dofFocalLength: number;
+    dofLensBlurStrength: number;
+    dofLensEdgeBlur: number;
+    dofLensDistortion: number;
+    dofLensDistortionInfluence: number;
+    modelEdgeWidth: number;
+    postEffectContrast: number;
+    postEffectGamma: number;
+    postEffectExposure: number;
+    postEffectToneMappingEnabled: boolean;
+    postEffectToneMappingType: number;
+    postEffectDitheringEnabled: boolean;
+    postEffectDitheringIntensity: number;
+    postEffectVignetteEnabled: boolean;
+    postEffectVignetteWeight: number;
+    postEffectBloomEnabled: boolean;
+    postEffectBloomWeight: number;
+    postEffectBloomThreshold: number;
+    postEffectBloomKernel: number;
+    postEffectChromaticAberration: number;
+    postEffectGrainIntensity: number;
+    postEffectSharpenEdge: number;
+    postEffectSsaoStrength: number;
+    postEffectSsaoRadius: number;
+    postEffectSsaoFadeEnd: number;
+    postEffectSsaoDebugView: boolean;
+    postEffectSsaoEnabled: boolean;
+    postEffectColorCurvesEnabled: boolean;
+    postEffectColorCurvesHue: number;
+    postEffectColorCurvesDensity: number;
+    postEffectColorCurvesSaturation: number;
+    postEffectColorCurvesExposure: number;
+    postEffectGlowEnabled: boolean;
+    postEffectGlowIntensity: number;
+    postEffectGlowKernel: number;
+    postEffectLutPreset: string;
+    postEffectLutSourceMode: string;
+    setPostEffectExternalLut(path: string | null, label: string | null, content: string | null): void;
+    postEffectLutIntensity: number;
+    postEffectLutEnabled: boolean;
+    setExternalWgslToonShader(path: string | null, content: string | null): void;
+    postEffectMotionBlurEnabled: boolean;
+    postEffectMotionBlurStrength: number;
+    postEffectMotionBlurSamples: number;
+    postEffectSsrEnabled: boolean;
+    postEffectSsrStrength: number;
+    postEffectSsrStep: number;
+    postEffectVlsEnabled: boolean;
+    postEffectVlsExposure: number;
+    postEffectVlsDecay: number;
+    postEffectVlsWeight: number;
+    postEffectVlsDensity: number;
+    postEffectFogEnabled: boolean;
+    postEffectFogMode: number;
+    postEffectFogStart: number;
+    postEffectFogEnd: number;
+    postEffectFogDensity: number;
+    postEffectFogOpacity: number;
+    setPostEffectFogColor(r: number, g: number, b: number): void;
+    refreshTotalFramesFromContent(): void;
+    setRenderFpsLimit(value: number): void;
+    renderFpsLimit: number;
+    seekTo(frame: number): void;
+    setPlaybackSpeed(speed: number): void;
+    setTimelineTarget(target: "model" | "camera"): void;
+};
 
 function normalizePathForCompare(value: string): string {
     return value.replace(/\\/g, "/").toLowerCase();
@@ -36,7 +214,7 @@ function isProjectFileV1(value: unknown): value is MmdModokiProjectFileV1 {
 }
 
 function finalizeImportedRenderState(
-    host: any,
+    host: ProjectImportHost,
     data: MmdModokiProjectFileV1,
     warnings: string[],
 ): void {
@@ -74,7 +252,7 @@ function finalizeImportedRenderState(
 }
 
 export async function importProjectState(
-    host: any,
+    host: ProjectImportHost,
     data: unknown,
     options: { forExport?: boolean } = {},
 ): Promise<{ loadedModels: number; warnings: string[] }> {
@@ -140,7 +318,7 @@ export async function importProjectState(
             const embeddedAnimation = deserializeModelAnimation(embeddedAnimationData, `${modelInfo.name}@project`);
             if (embeddedAnimation) {
                 host.modelSourceAnimationsByModel.set(targetModel, embeddedAnimation);
-                host.setModelMotionImports(targetModel, (modelState.motionImports ?? []).map((item: any) => ({ ...item })));
+                host.setModelMotionImports(targetModel, (modelState.motionImports ?? []).map((item) => ({ ...item })));
                 const animHandle = targetModel.createRuntimeAnimation(embeddedAnimation);
                 targetModel.setRuntimeAnimation(animHandle);
                 host.modelKeyframeTracksByModel.set(
@@ -254,7 +432,7 @@ export async function importProjectState(
     if (!isExportImport && data.scene.activeModelPath) {
         const targetPath = normalizePathForCompare(data.scene.activeModelPath);
         const targetIndex = host.sceneModels.findIndex(
-            (entry: any) => normalizePathForCompare(entry.info.path) === targetPath,
+            (entry) => normalizePathForCompare(entry.info.path) === targetPath,
         );
         if (targetIndex >= 0) {
             host.setActiveModelByIndex(targetIndex);
@@ -334,7 +512,7 @@ export async function importProjectState(
                 if (typeof accessoryState.parentModelPath === "string" && accessoryState.parentModelPath.trim().length > 0) {
                     const normalizedParentPath = normalizePathForCompare(accessoryState.parentModelPath);
                     parentModelIndex = host.sceneModels.findIndex(
-                        (entry: any) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
+                        (entry) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
                     );
                     if (parentModelIndex < 0) {
                         warnings.push(

@@ -1,20 +1,75 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Quaternion } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCapsule } from "@babylonjs/core/Meshes/Builders/capsuleBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { Scene } from "@babylonjs/core/scene";
 import { PmxObject } from "babylon-mmd/esm/Loader/Parser/pmxObject";
 
 type RigidBodyVisualizerBackend = "ammo" | "bullet";
 
-function shouldShowRigidBodyVisualizer(host: any, target: any): boolean {
+type RigidBodyVisualizerRigidBody = {
+    name?: string;
+    shapeType?: number;
+    shapeSize?: readonly number[];
+    physicsMode?: number;
+};
+
+type RigidBodyVisualizerSceneModel = {
+    mesh: Mesh;
+    model?: { _physicsModel?: unknown };
+    rigidBodies?: readonly RigidBodyVisualizerRigidBody[];
+};
+
+type BulletRigidBodyBundle = {
+    count: number;
+    getTransformMatrixToRef: (index: number, target: Matrix) => void;
+};
+
+type BulletPhysicsModel = {
+    _bundle?: BulletRigidBodyBundle;
+};
+
+type AmmoPhysicsNode = {
+    computeWorldMatrix?: (force?: boolean) => Matrix;
+    getWorldMatrix?: () => Matrix;
+};
+
+type AmmoPhysicsModel = {
+    _nodes?: AmmoPhysicsNode[];
+};
+
+type RigidBodyVisualizerPhysicsModel = BulletPhysicsModel & AmmoPhysicsModel;
+
+type RigidBodyVisualizerTarget = {
+    sceneModel: RigidBodyVisualizerSceneModel;
+    backend: RigidBodyVisualizerBackend;
+    physicsModel: RigidBodyVisualizerPhysicsModel;
+    rigidBodies: readonly RigidBodyVisualizerRigidBody[];
+    meshes: Mesh[];
+};
+
+type RigidBodyVisualizerHost = {
+    scene: Scene;
+    sceneModels: RigidBodyVisualizerSceneModel[];
+    rigidBodyVisualizerEnabled: boolean;
+    rigidBodyVisualizerTargets: RigidBodyVisualizerTarget[];
+    rigidBodyVisualizerMaterials: Map<number, StandardMaterial>;
+    rigidBodyVisualizerTempMatrix: Matrix;
+    rigidBodyVisualizerTempPosition: Vector3;
+    rigidBodyVisualizerTempScaling: Vector3;
+    rigidBodyVisualizerTempRotation: Quaternion;
+    getModelVisibility?: (mesh: Mesh) => boolean;
+};
+
+function shouldShowRigidBodyVisualizer(host: RigidBodyVisualizerHost, target: RigidBodyVisualizerTarget): boolean {
     return Boolean(host.rigidBodyVisualizerEnabled && host.getModelVisibility?.(target.sceneModel?.mesh));
 }
 
-function disposeRigidBodyVisualizerMeshes(host: any): void {
-    const targets = Array.isArray(host.rigidBodyVisualizerTargets) ? host.rigidBodyVisualizerTargets : [];
+function disposeRigidBodyVisualizerMeshes(host: RigidBodyVisualizerHost): void {
+    const targets = host.rigidBodyVisualizerTargets;
     if (targets.length === 0) {
         host.rigidBodyVisualizerTargets = [];
         return;
@@ -28,7 +83,11 @@ function disposeRigidBodyVisualizerMeshes(host: any): void {
     host.rigidBodyVisualizerTargets = [];
 }
 
-function resolveRigidBodyVisualizerBackend(physicsModel: any): RigidBodyVisualizerBackend | null {
+function asRigidBodyVisualizerPhysicsModel(value: unknown): RigidBodyVisualizerPhysicsModel | null {
+    return value && typeof value === "object" ? value as RigidBodyVisualizerPhysicsModel : null;
+}
+
+function resolveRigidBodyVisualizerBackend(physicsModel: RigidBodyVisualizerPhysicsModel | null): RigidBodyVisualizerBackend | null {
     if (Array.isArray(physicsModel?._nodes)) {
         return "ammo";
     }
@@ -50,8 +109,8 @@ function resolveRigidBodyColor(physicsMode: number): Color3 {
     }
 }
 
-function getRigidBodyVisualizerMaterial(host: any, physicsMode: number): StandardMaterial {
-    const existing = host.rigidBodyVisualizerMaterials.get(physicsMode) as StandardMaterial | undefined;
+function getRigidBodyVisualizerMaterial(host: RigidBodyVisualizerHost, physicsMode: number): StandardMaterial {
+    const existing = host.rigidBodyVisualizerMaterials.get(physicsMode);
     if (existing) {
         return existing;
     }
@@ -67,7 +126,7 @@ function getRigidBodyVisualizerMaterial(host: any, physicsMode: number): Standar
     return material;
 }
 
-function createRigidBodyDebugMesh(host: any, rigidBody: any, index: number): Mesh {
+function createRigidBodyDebugMesh(host: RigidBodyVisualizerHost, rigidBody: RigidBodyVisualizerRigidBody, index: number): Mesh {
     const shapeSize = Array.isArray(rigidBody?.shapeSize) ? rigidBody.shapeSize : [0.5, 0.5, 0.5];
     const safeX = Math.max(0.01, Number(shapeSize[0] ?? 0.5));
     const safeY = Math.max(0.01, Number(shapeSize[1] ?? safeX));
@@ -127,7 +186,7 @@ function setRigidBodyMeshVisible(mesh: Mesh, visible: boolean): void {
     mesh.isVisible = visible;
 }
 
-function applyTransformToDebugMesh(host: any, mesh: Mesh, matrix: any): boolean {
+function applyTransformToDebugMesh(host: RigidBodyVisualizerHost, mesh: Mesh, matrix: Matrix | null | undefined): boolean {
     if (!matrix) return false;
 
     matrix.decompose(
@@ -154,18 +213,18 @@ function applyTransformToDebugMesh(host: any, mesh: Mesh, matrix: any): boolean 
     return true;
 }
 
-export function refreshRigidBodyVisualizerTarget(host: any): void {
+export function refreshRigidBodyVisualizerTarget(host: RigidBodyVisualizerHost): void {
     disposeRigidBodyVisualizerMeshes(host);
-    const sceneModels = Array.isArray(host.sceneModels) ? host.sceneModels : [];
-    host.rigidBodyVisualizerTargets = sceneModels.flatMap((sceneModel: any) => {
+    const sceneModels = host.sceneModels;
+    host.rigidBodyVisualizerTargets = sceneModels.flatMap((sceneModel) => {
         const rigidBodies = Array.isArray(sceneModel?.rigidBodies) ? sceneModel.rigidBodies : [];
-        const physicsModel = sceneModel?.model?._physicsModel ?? null;
+        const physicsModel = asRigidBodyVisualizerPhysicsModel(sceneModel?.model?._physicsModel ?? null);
         const backend = resolveRigidBodyVisualizerBackend(physicsModel);
         if (rigidBodies.length === 0 || !physicsModel || !backend) {
             return [];
         }
 
-        const meshes = rigidBodies.map((rigidBody: any, index: number) => createRigidBodyDebugMesh(host, rigidBody, index));
+        const meshes = rigidBodies.map((rigidBody, index) => createRigidBodyDebugMesh(host, rigidBody, index));
         return [{
             sceneModel,
             backend,
@@ -178,8 +237,8 @@ export function refreshRigidBodyVisualizerTarget(host: any): void {
     updateRigidBodyVisualizer(host);
 }
 
-export function syncRigidBodyVisualizerVisibility(host: any): void {
-    const targets = Array.isArray(host.rigidBodyVisualizerTargets) ? host.rigidBodyVisualizerTargets : [];
+export function syncRigidBodyVisualizerVisibility(host: RigidBodyVisualizerHost): void {
+    const targets = host.rigidBodyVisualizerTargets;
     for (const target of targets) {
         const visible = shouldShowRigidBodyVisualizer(host, target);
         for (const mesh of target.meshes) {
@@ -188,13 +247,8 @@ export function syncRigidBodyVisualizerVisibility(host: any): void {
     }
 }
 
-export function updateRigidBodyVisualizer(host: any): void {
-    const targets = Array.isArray(host.rigidBodyVisualizerTargets) ? host.rigidBodyVisualizerTargets as {
-        sceneModel: any;
-        backend: RigidBodyVisualizerBackend;
-        physicsModel: any;
-        meshes: Mesh[];
-    }[] : [];
+export function updateRigidBodyVisualizer(host: RigidBodyVisualizerHost): void {
+    const targets = host.rigidBodyVisualizerTargets;
     if (targets.length === 0) return;
 
     for (const target of targets) {
@@ -233,7 +287,7 @@ export function updateRigidBodyVisualizer(host: any): void {
     }
 }
 
-export function disposeRigidBodyVisualizer(host: any): void {
+export function disposeRigidBodyVisualizer(host: RigidBodyVisualizerHost): void {
     disposeRigidBodyVisualizerMeshes(host);
     for (const material of host.rigidBodyVisualizerMaterials.values() as Iterable<StandardMaterial>) {
         material.dispose();

@@ -101,6 +101,14 @@ function resolveCssVarColor(name: string, fallback: string): string {
     return resolved || fallback;
 }
 
+function getCanvasRenderingContext2D(canvas: HTMLCanvasElement, label: string): CanvasRenderingContext2D {
+    const context = canvas.getContext("2d");
+    if (!context) {
+        throw new Error(`Canvas 2D context is not available: ${label}`);
+    }
+    return context;
+}
+
 export class Timeline {
     // DOM
     private staticCanvas: HTMLCanvasElement;
@@ -156,9 +164,9 @@ export class Timeline {
         this.waveformCanvas = document.getElementById("timeline-waveform-canvas") as HTMLCanvasElement | null;
         this.labelsEl = document.getElementById(labelsElId) as HTMLElement;
 
-        this.staticCtx = this.staticCanvas.getContext("2d")!;
-        this.overlayCtx = this.overlayCanvas.getContext("2d")!;
-        this.labelCtx = this.labelCanvas.getContext("2d")!;
+        this.staticCtx = getCanvasRenderingContext2D(this.staticCanvas, staticCanvasId);
+        this.overlayCtx = getCanvasRenderingContext2D(this.overlayCanvas, "timeline-overlay-canvas");
+        this.labelCtx = getCanvasRenderingContext2D(this.labelCanvas, labelCanvasId);
         this.waveformCtx = this.waveformCanvas?.getContext("2d") ?? null;
 
         this.setupEvents();

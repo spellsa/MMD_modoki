@@ -1,9 +1,11 @@
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Space } from "@babylonjs/core/Maths/math.axis";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
 import type { BoneControlInfo } from "../types";
 import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
+import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import type { Scene } from "@babylonjs/core/scene";
 
 type BoneVisualizerTarget = {
     mesh: Mesh;
@@ -15,7 +17,39 @@ type BoneVisualizerTarget = {
     boneControlInfoByName: ReadonlyMap<string, BoneControlInfo>;
 } | null;
 
-export function refreshBoneVisualizerTarget(host: any): void {
+type BoneVisualizerPickPoint = {
+    boneName: string;
+    x: number;
+    y: number;
+};
+
+type BoneVisualizerHost = {
+    currentMesh: Mesh | null;
+    currentModel: { runtimeBones?: readonly IMmdRuntimeBone[] } | null;
+    activeModelInfo: { boneNames: string[]; boneControlInfos?: BoneControlInfo[] } | null;
+    boneVisualizerTarget: BoneVisualizerTarget;
+    boneOverlayCanvas: HTMLCanvasElement | null;
+    boneOverlayCtx: CanvasRenderingContext2D | null;
+    boneOverlayDpr: number;
+    boneOverlayIdentity: Matrix;
+    boneOverlayChildWorld: Vector3;
+    boneOverlayParentWorld: Vector3;
+    boneOverlayChildScreen: Vector3;
+    boneOverlayParentScreen: Vector3;
+    boneVisualizerPickPoints: BoneVisualizerPickPoint[];
+    boneVisualizerSelectedBoneName: string | null;
+    renderingCanvas: HTMLCanvasElement;
+    camera: ArcRotateCamera;
+    scene: Scene;
+    timelineTarget: "model" | "camera";
+    _isPlaying: boolean;
+    captureEditorOverlaysSuppressed: boolean;
+    getActiveModelVisibility: () => boolean;
+    setBoneVisualizerSelectedBone: (boneName: string) => void;
+    onBoneVisualizerBonePicked?: (boneName: string) => void;
+};
+
+export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
     disposeBoneVisualizer(host);
 
     const sourceMesh = host.currentMesh;
@@ -155,8 +189,8 @@ export function refreshBoneVisualizerTarget(host: any): void {
     syncBoneVisualizerVisibility(host);
 }
 
-export function updateBoneVisualizer(host: any): void {
-    const target = host.boneVisualizerTarget as BoneVisualizerTarget;
+export function updateBoneVisualizer(host: BoneVisualizerHost): void {
+    const target = host.boneVisualizerTarget;
     if (!target || !host.boneOverlayCanvas || !host.boneOverlayCtx) return;
 
     if (host._isPlaying || host.timelineTarget !== "model" || !host.getActiveModelVisibility()) {
@@ -210,7 +244,7 @@ export function updateBoneVisualizer(host: any): void {
             projectedPositions.set(parentIndex, { x: host.boneOverlayParentScreen.x, y: host.boneOverlayParentScreen.y });
             const parentName = runtimeBones[parentIndex].name;
             const selected = selectedBoneName === parentName;
-            const style = resolveBoneVisualizerStyle(host, boneControlInfoByName.get(parentName), selected);
+            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(parentName), selected);
 
             segmentCommands.push({
                 fromX: host.boneOverlayParentScreen.x,
@@ -225,18 +259,18 @@ export function updateBoneVisualizer(host: any): void {
 
         for (const command of segmentCommands) {
             if (command.selected) continue;
-            drawBoneVisualizerSegment(host, ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
+            drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
         for (const command of segmentCommands) {
             if (!command.selected) continue;
-            drawBoneVisualizerSegment(host, ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
+            drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
 
         const markerCommands: Array<{ boneName: string; x: number; y: number; selected: boolean; markerShape: "circle" | "square"; markerColor: string }> = [];
         for (const [boneIndex, projected] of projectedPositions) {
             const boneName = runtimeBones[boneIndex].name;
             const selected = selectedBoneName === boneName;
-            const style = resolveBoneVisualizerStyle(host, boneControlInfoByName.get(boneName), selected);
+            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(boneName), selected);
             markerCommands.push({
                 boneName,
                 x: projected.x,
@@ -249,11 +283,11 @@ export function updateBoneVisualizer(host: any): void {
 
         for (const marker of markerCommands) {
             if (marker.selected) continue;
-            drawBoneVisualizerMarker(host, ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, false);
+            drawBoneVisualizerMarker(ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, false);
         }
         for (const marker of markerCommands) {
             if (!marker.selected) continue;
-            drawBoneVisualizerMarker(host, ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, true);
+            drawBoneVisualizerMarker(ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, true);
         }
         for (const marker of markerCommands) {
             host.boneVisualizerPickPoints.push({ boneName: marker.boneName, x: marker.x, y: marker.y });
@@ -267,8 +301,8 @@ export function updateBoneVisualizer(host: any): void {
         const segmentCommands: Array<{ fromX: number; fromY: number; toX: number; toY: number; selected: boolean; lineColor: string; lineWidth: number }> = [];
 
         for (const [childIndex, parentIndex] of pairs) {
-            getBoneWorldPositionToRef(host, bones[childIndex], positionMesh, host.boneOverlayChildWorld);
-            getBoneWorldPositionToRef(host, bones[parentIndex], positionMesh, host.boneOverlayParentWorld);
+            getBoneWorldPositionToRef(bones[childIndex], positionMesh, host.boneOverlayChildWorld);
+            getBoneWorldPositionToRef(bones[parentIndex], positionMesh, host.boneOverlayParentWorld);
 
             Vector3.ProjectToRef(host.boneOverlayChildWorld, host.boneOverlayIdentity, transformMatrix, viewport, host.boneOverlayChildScreen);
             Vector3.ProjectToRef(host.boneOverlayParentWorld, host.boneOverlayIdentity, transformMatrix, viewport, host.boneOverlayParentScreen);
@@ -280,7 +314,7 @@ export function updateBoneVisualizer(host: any): void {
             projectedPositions.set(parentIndex, { x: host.boneOverlayParentScreen.x, y: host.boneOverlayParentScreen.y });
             const parentName = bones[parentIndex].name;
             const selected = selectedBoneName === parentName;
-            const style = resolveBoneVisualizerStyle(host, boneControlInfoByName.get(parentName), selected);
+            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(parentName), selected);
 
             segmentCommands.push({
                 fromX: host.boneOverlayParentScreen.x,
@@ -295,18 +329,18 @@ export function updateBoneVisualizer(host: any): void {
 
         for (const command of segmentCommands) {
             if (command.selected) continue;
-            drawBoneVisualizerSegment(host, ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
+            drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
         for (const command of segmentCommands) {
             if (!command.selected) continue;
-            drawBoneVisualizerSegment(host, ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
+            drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
 
         const markerCommands: Array<{ boneName: string; x: number; y: number; selected: boolean; markerShape: "circle" | "square"; markerColor: string }> = [];
         for (const [boneIndex, projected] of projectedPositions) {
             const boneName = bones[boneIndex].name;
             const selected = selectedBoneName === boneName;
-            const style = resolveBoneVisualizerStyle(host, boneControlInfoByName.get(boneName), selected);
+            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(boneName), selected);
             markerCommands.push({
                 boneName,
                 x: projected.x,
@@ -319,11 +353,11 @@ export function updateBoneVisualizer(host: any): void {
 
         for (const marker of markerCommands) {
             if (marker.selected) continue;
-            drawBoneVisualizerMarker(host, ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, false);
+            drawBoneVisualizerMarker(ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, false);
         }
         for (const marker of markerCommands) {
             if (!marker.selected) continue;
-            drawBoneVisualizerMarker(host, ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, true);
+            drawBoneVisualizerMarker(ctx, marker.x, marker.y, marker.markerShape, marker.markerColor, true);
         }
         for (const marker of markerCommands) {
             host.boneVisualizerPickPoints.push({ boneName: marker.boneName, x: marker.x, y: marker.y });
@@ -331,7 +365,7 @@ export function updateBoneVisualizer(host: any): void {
     }
 }
 
-export function tryPickBoneVisualizerAtClientPosition(host: any, clientX: number, clientY: number): void {
+export function tryPickBoneVisualizerAtClientPosition(host: BoneVisualizerHost, clientX: number, clientY: number): void {
     if (host._isPlaying || host.timelineTarget !== "model" || !host.getActiveModelVisibility()) return;
     if (host.boneVisualizerTarget === null) return;
     if (host.boneVisualizerPickPoints.length === 0) return;
@@ -364,7 +398,7 @@ export function tryPickBoneVisualizerAtClientPosition(host: any, clientX: number
     host.onBoneVisualizerBonePicked?.(pickedBoneName);
 }
 
-export function syncBoneVisualizerVisibility(host: any): void {
+export function syncBoneVisualizerVisibility(host: BoneVisualizerHost): void {
     if (!host.boneOverlayCanvas) return;
 
     const visible = !host.captureEditorOverlaysSuppressed
@@ -378,7 +412,7 @@ export function syncBoneVisualizerVisibility(host: any): void {
     }
 }
 
-export function clearBoneOverlay(host: any): void {
+export function clearBoneOverlay(host: BoneVisualizerHost): void {
     host.boneVisualizerPickPoints = [];
     if (!host.boneOverlayCanvas || !host.boneOverlayCtx) return;
     const width = host.boneOverlayCanvas.width / host.boneOverlayDpr;
@@ -386,7 +420,7 @@ export function clearBoneOverlay(host: any): void {
     host.boneOverlayCtx.clearRect(0, 0, width, height);
 }
 
-export function ensureBoneOverlayCanvas(host: any): void {
+export function ensureBoneOverlayCanvas(host: BoneVisualizerHost): void {
     if (host.boneOverlayCanvas && host.boneOverlayCtx) return;
 
     const container = host.renderingCanvas.parentElement;
@@ -411,7 +445,7 @@ export function ensureBoneOverlayCanvas(host: any): void {
     resizeBoneOverlayCanvas(host);
 }
 
-export function resizeBoneOverlayCanvas(host: any): void {
+export function resizeBoneOverlayCanvas(host: BoneVisualizerHost): void {
     if (!host.boneOverlayCanvas || !host.boneOverlayCtx) return;
 
     const canvasRect = host.renderingCanvas.getBoundingClientRect();
@@ -439,12 +473,12 @@ export function resizeBoneOverlayCanvas(host: any): void {
     host.boneOverlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-export function disposeBoneVisualizer(host: any): void {
+export function disposeBoneVisualizer(host: BoneVisualizerHost): void {
     host.boneVisualizerTarget = null;
     clearBoneOverlay(host);
 }
 
-export function getBoneWorldPositionToRef(host: any, bone: Skeleton["bones"][number], mesh: Mesh, result: Vector3): void {
+export function getBoneWorldPositionToRef(bone: Skeleton["bones"][number], mesh: Mesh, result: Vector3): void {
     bone.getAbsolutePositionToRef(mesh, result);
     if (!Number.isFinite(result.x) || !Number.isFinite(result.y) || !Number.isFinite(result.z)) {
         bone.getPositionToRef(Space.WORLD, mesh, result);
@@ -456,11 +490,9 @@ export function getBoneWorldPositionToRef(host: any, bone: Skeleton["bones"][num
 }
 
 export function resolveBoneVisualizerStyle(
-    host: any,
     boneInfo: BoneControlInfo | undefined,
     isSelected: boolean
 ): { lineColor: string; markerColor: string; markerShape: "circle" | "square"; lineWidth: number } {
-    void host;
     const normalBlue = "rgba(120, 132, 255, 0.95)";
     const normalOrange = "rgba(255, 182, 74, 0.96)";
     const selectedColor = "rgba(255, 94, 108, 1)";
@@ -488,14 +520,12 @@ export function resolveBoneVisualizerStyle(
 }
 
 export function drawBoneVisualizerSegment(
-    host: any,
     ctx: CanvasRenderingContext2D,
     from: { x: number; y: number },
     to: { x: number; y: number },
     color: string,
     lineWidth: number
 ): void {
-    void host;
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const length = Math.hypot(dx, dy);
@@ -517,7 +547,6 @@ export function drawBoneVisualizerSegment(
 }
 
 export function drawBoneVisualizerMarker(
-    host: any,
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
@@ -525,7 +554,6 @@ export function drawBoneVisualizerMarker(
     color: string,
     selected: boolean
 ): void {
-    void host;
     const size = selected ? 10 : 8;
     const half = size / 2;
     const innerSize = selected ? 4.2 : 3.2;

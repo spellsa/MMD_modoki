@@ -179,6 +179,22 @@ type MmdManagerInternalView = {
     cameraAnimationHandle: unknown | null;
 };
 
+function getRequiredElement<T extends HTMLElement>(id: string): T {
+    const element = document.getElementById(id);
+    if (!element) {
+        throw new Error(`Required element not found: #${id}`);
+    }
+    return element as T;
+}
+
+function queryRequiredElement<T extends HTMLElement>(selector: string): T {
+    const element = document.querySelector(selector);
+    if (!element) {
+        throw new Error(`Required element not found: ${selector}`);
+    }
+    return element as T;
+}
+
 export class UIController {
     private static readonly DEBUG_KEYFRAME_FLOW = false;
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
@@ -308,24 +324,24 @@ export class UIController {
         this.bottomPanel.onRangeSliderSynced = (slider) => this.syncRangeNumberInput(slider);
 
         // Get DOM elements
-        this.btnLoadFile = document.getElementById("btn-load-file")!;
-        this.btnSaveProject = document.getElementById("btn-save-project")!;
-        this.btnLoadProject = document.getElementById("btn-load-project")!;
+        this.btnLoadFile = getRequiredElement("btn-load-file");
+        this.btnSaveProject = getRequiredElement("btn-save-project");
+        this.btnLoadProject = getRequiredElement("btn-load-project");
         this.btnExportPng = document.getElementById("btn-export-png");
         this.btnExportPngSeq = document.getElementById("btn-export-png-seq");
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
         this.toolbarRuntimeModeSelect = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
-        this.btnPlay = document.getElementById("btn-play")!;
-        this.btnPause = document.getElementById("btn-pause")!;
+        this.btnPlay = getRequiredElement("btn-play");
+        this.btnPause = getRequiredElement("btn-pause");
         this.btnStop = document.getElementById("btn-stop");
-        this.btnSkipStart = document.getElementById("btn-skip-start")!;
-        this.btnSkipEnd = document.getElementById("btn-skip-end")!;
+        this.btnSkipStart = getRequiredElement("btn-skip-start");
+        this.btnSkipEnd = getRequiredElement("btn-skip-end");
         this.currentFrameEl = document.getElementById("current-frame") as HTMLInputElement;
-        this.totalFramesEl = document.getElementById("total-frames")!;
-        this.statusText = document.getElementById("status-text")!;
-        this.statusDot = document.querySelector(".status-dot")!;
-        this.viewportOverlay = document.getElementById("viewport-overlay")!;
+        this.totalFramesEl = getRequiredElement("total-frames");
+        this.statusText = getRequiredElement("status-text");
+        this.statusDot = queryRequiredElement(".status-dot");
+        this.viewportOverlay = getRequiredElement("viewport-overlay");
         this.btnKeyframeAdd = document.getElementById("btn-kf-add") as HTMLButtonElement;
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
@@ -335,11 +351,11 @@ export class UIController {
         this.btnFrameRangeStart = document.getElementById("btn-frame-range-start") as HTMLButtonElement;
         this.btnFrameRangeEnd = document.getElementById("btn-frame-range-end") as HTMLButtonElement;
         this.timelineSelectionLabel = document.getElementById("timeline-selection-label");
-        this.interpolationTrackNameLabel = document.getElementById("interp-track-name")!;
-        this.interpolationFrameLabel = document.getElementById("interp-frame")!;
+        this.interpolationTrackNameLabel = getRequiredElement("interp-track-name");
+        this.interpolationFrameLabel = getRequiredElement("interp-frame");
         this.interpolationTypeSelect = document.getElementById("interp-type") as HTMLSelectElement;
-        this.interpolationStatusLabel = document.getElementById("interp-status")!;
-        this.interpolationCurveList = document.getElementById("interp-curve-list")!;
+        this.interpolationStatusLabel = getRequiredElement("interp-status");
+        this.interpolationCurveList = getRequiredElement("interp-curve-list");
         this.btnInterpolationCopy = document.getElementById("btn-interp-copy") as HTMLButtonElement | null;
         this.btnInterpolationPaste = document.getElementById("btn-interp-paste") as HTMLButtonElement | null;
         this.btnInterpolationLinear = document.getElementById("btn-interp-linear") as HTMLButtonElement | null;
@@ -885,35 +901,35 @@ export class UIController {
         const elSelfShadowSoftness = document.getElementById("light-self-shadow-softness") as HTMLInputElement;
         const elOcclusionShadowSoftness = document.getElementById("light-occlusion-shadow-softness") as HTMLInputElement;
         const elLightMode = document.getElementById("light-mode-select") as HTMLSelectElement | null;
-        const valLightDirectionX = document.getElementById("light-direction-x-val")!;
-        const valLightDirectionY = document.getElementById("light-direction-y-val")!;
-        const valLightDirectionZ = document.getElementById("light-direction-z-val")!;
-        const valInt = document.getElementById("light-intensity-val")!;
-        const valAmb = document.getElementById("light-ambient-val")!;
-        const valLightColorR = document.getElementById("light-color-r-val")!;
-        const valLightColorG = document.getElementById("light-color-g-val")!;
-        const valLightColorB = document.getElementById("light-color-b-val")!;
-        const valLightFlatStrength = document.getElementById("light-flat-strength-val")!;
-        const valLightFlatColorInfluence = document.getElementById("light-flat-color-influence-val")!;
-        const valSh = document.getElementById("light-shadow-val")!;
-        const valShadowFrustumSize = document.getElementById("light-shadow-frustum-size-val")!;
-        const valShadowMaxZ = document.getElementById("light-shadow-max-z-val")!;
-        const valShadowFilteringQuality = document.getElementById("light-shadow-filter-quality-val")!;
-        const valSoftTransparentShadow = document.getElementById("light-soft-transparent-shadow-val")!;
-        const valIblShadows = document.getElementById("light-ibl-shadows-val")!;
-        const valIblShadowOpacity = document.getElementById("light-ibl-shadow-opacity-val")!;
-        const valIblShadowRange = document.getElementById("light-ibl-shadow-range-val")!;
-        const valCharacterContactShadow = document.getElementById("light-character-contact-shadow-val")!;
-        const valCharacterContactShadowOpacity = document.getElementById("light-character-contact-shadow-opacity-val")!;
-        const valCharacterContactShadowScale = document.getElementById("light-character-contact-shadow-scale-val")!;
-        const valShadowBias = document.getElementById("light-shadow-bias-val")!;
-        const valShadowNormalBias = document.getElementById("light-shadow-normal-bias-val")!;
-        const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
-        const valShadowColorG = document.getElementById("light-shadow-color-g-val")!;
-        const valShadowColorB = document.getElementById("light-shadow-color-b-val")!;
-        const valToonShadowInfluence = document.getElementById("light-toon-shadow-influence-val")!;
-        const valSelfShSoftness = document.getElementById("light-self-shadow-softness-val")!;
-        const valOcclusionShSoftness = document.getElementById("light-occlusion-shadow-softness-val")!;
+        const valLightDirectionX = getRequiredElement("light-direction-x-val");
+        const valLightDirectionY = getRequiredElement("light-direction-y-val");
+        const valLightDirectionZ = getRequiredElement("light-direction-z-val");
+        const valInt = getRequiredElement("light-intensity-val");
+        const valAmb = getRequiredElement("light-ambient-val");
+        const valLightColorR = getRequiredElement("light-color-r-val");
+        const valLightColorG = getRequiredElement("light-color-g-val");
+        const valLightColorB = getRequiredElement("light-color-b-val");
+        const valLightFlatStrength = getRequiredElement("light-flat-strength-val");
+        const valLightFlatColorInfluence = getRequiredElement("light-flat-color-influence-val");
+        const valSh = getRequiredElement("light-shadow-val");
+        const valShadowFrustumSize = getRequiredElement("light-shadow-frustum-size-val");
+        const valShadowMaxZ = getRequiredElement("light-shadow-max-z-val");
+        const valShadowFilteringQuality = getRequiredElement("light-shadow-filter-quality-val");
+        const valSoftTransparentShadow = getRequiredElement("light-soft-transparent-shadow-val");
+        const valIblShadows = getRequiredElement("light-ibl-shadows-val");
+        const valIblShadowOpacity = getRequiredElement("light-ibl-shadow-opacity-val");
+        const valIblShadowRange = getRequiredElement("light-ibl-shadow-range-val");
+        const valCharacterContactShadow = getRequiredElement("light-character-contact-shadow-val");
+        const valCharacterContactShadowOpacity = getRequiredElement("light-character-contact-shadow-opacity-val");
+        const valCharacterContactShadowScale = getRequiredElement("light-character-contact-shadow-scale-val");
+        const valShadowBias = getRequiredElement("light-shadow-bias-val");
+        const valShadowNormalBias = getRequiredElement("light-shadow-normal-bias-val");
+        const valShadowColorR = getRequiredElement("light-shadow-color-r-val");
+        const valShadowColorG = getRequiredElement("light-shadow-color-g-val");
+        const valShadowColorB = getRequiredElement("light-shadow-color-b-val");
+        const valToonShadowInfluence = getRequiredElement("light-toon-shadow-influence-val");
+        const valSelfShSoftness = getRequiredElement("light-self-shadow-softness-val");
+        const valOcclusionShSoftness = getRequiredElement("light-occlusion-shadow-softness-val");
         const lightRows = Array.from(document.querySelectorAll(".light-row--light"));
         const shadowRows = Array.from(document.querySelectorAll(".light-row--shadow"));
         const elEffectColorTemp = document.getElementById("effect-color-temp") as HTMLInputElement | null;
@@ -2370,10 +2386,10 @@ export class UIController {
     }
 
     private setupPerfDisplay(): void {
-        const fpsEl = document.getElementById("fps-value")!;
-        const engineEl = document.getElementById("engine-type-badge")!;
-        const shaderEl = document.getElementById("shader-type-badge")!;
-        const physicsEl = document.getElementById("physics-type-badge")!;
+        const fpsEl = getRequiredElement("fps-value");
+        const engineEl = getRequiredElement("engine-type-badge");
+        const shaderEl = getRequiredElement("shader-type-badge");
+        const physicsEl = getRequiredElement("physics-type-badge");
 
         const updatePerfBadges = (): void => {
             const engineType = this.mmdManager.getEngineType();
@@ -2459,10 +2475,10 @@ export class UIController {
 
         // Volume fader
         const slider = document.getElementById("volume-slider") as HTMLInputElement;
-        const volLabel = document.getElementById("volume-value")!;
-        const muteBtn = document.getElementById("btn-mute")!;
-        const iconOn = document.getElementById("icon-volume-on")!;
-        const iconOff = document.getElementById("icon-volume-off")!;
+        const volLabel = getRequiredElement("volume-value");
+        const muteBtn = getRequiredElement("btn-mute");
+        const iconOn = getRequiredElement("icon-volume-on");
+        const iconOff = getRequiredElement("icon-volume-off");
 
         const updateVolumeUI = (isMuted: boolean) => {
             const pct = Number(slider.value);

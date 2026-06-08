@@ -1,6 +1,6 @@
 import { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import { MmdBoneAnimationTrack, MmdCameraAnimationTrack, MmdMorphAnimationTrack, MmdMovableBoneAnimationTrack, MmdPropertyAnimationTrack } from "babylon-mmd/esm/Loader/Animation/mmdAnimationTrack";
-import type { KeyframeTrack, TrackCategory } from "../types";
+import type { KeyframeTrack, ModelInfo, TrackCategory } from "../types";
 import { addFrameNumber, classifyBone, createTrackKey, hasFrameNumber, mergeFrameNumbers, moveFrameNumber, parseTrackKey, removeFrameNumber } from "../shared/timeline-helpers";
 
 const EMPTY_KEYFRAME_FRAMES = new Uint32Array(0);
@@ -20,7 +20,39 @@ type RuntimePropertyTrackMutable = {
     getIkState: (index: number) => Uint8Array;
 };
 
-export function getOrCreateModelTrackFrameMap(host: any, model: any): Map<string, Uint32Array> {
+type TimelineEditRuntimeModel = {
+    name?: string;
+};
+
+type TimelineEditSceneModel = {
+    model: TimelineEditRuntimeModel;
+};
+
+type TimelineEditHost = {
+    currentModel: TimelineEditRuntimeModel | null;
+    activeModelInfo: ModelInfo | null;
+    sceneModels: TimelineEditSceneModel[];
+    modelKeyframeTracksByModel: WeakMap<TimelineEditRuntimeModel, Map<string, Uint32Array>>;
+    modelSourceAnimationsByModel: WeakMap<TimelineEditRuntimeModel, MmdAnimation>;
+    cameraKeyframeFrames: Uint32Array;
+    cameraSourceAnimation: MmdAnimation | null;
+    cameraMotionPath: string | null;
+    timelineTarget: "model" | "camera";
+    mmdRuntime: {
+        animationFrameTimeDuration: number;
+        seekAnimation(frame: number, forceEvaluate: boolean): void;
+    };
+    audioPlayer: unknown | null;
+    _totalFrames: number;
+    _currentFrame: number;
+    manualPlaybackWithoutAudio: boolean;
+    manualPlaybackFrameCursor: number;
+    onFrameUpdate?: (currentFrame: number, totalFrames: number) => void;
+    onKeyframesLoaded?: (tracks: KeyframeTrack[]) => void;
+    getActiveModelVisibility?: () => boolean;
+};
+
+export function getOrCreateModelTrackFrameMap(host: TimelineEditHost, model: TimelineEditRuntimeModel): Map<string, Uint32Array> {
     let frameMap = host.modelKeyframeTracksByModel.get(model);
     if (!frameMap) {
         frameMap = new Map<string, Uint32Array>();
@@ -29,7 +61,7 @@ export function getOrCreateModelTrackFrameMap(host: any, model: any): Map<string
     return frameMap;
 }
 
-function getCurrentModelAnimation(host: any): MmdAnimation | null {
+function getCurrentModelAnimation(host: TimelineEditHost): MmdAnimation | null {
     if (!host.currentModel) return null;
     return host.modelSourceAnimationsByModel.get(host.currentModel) ?? null;
 }
@@ -77,7 +109,7 @@ function copyUint8FrameBlock(
     destination.set(source.subarray(sourceOffset, sourceOffset + stride), destinationOffset);
 }
 
-export function getRegisteredKeyframeStats(host: any): { hasAnyKeyframe: boolean; maxFrame: number } {
+export function getRegisteredKeyframeStats(host: TimelineEditHost): { hasAnyKeyframe: boolean; maxFrame: number } {
     let hasAnyKeyframe = false;
     let maxFrame = 0;
 
@@ -113,7 +145,7 @@ export function getRegisteredKeyframeStats(host: any): { hasAnyKeyframe: boolean
     return { hasAnyKeyframe, maxFrame };
 }
 
-export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
+export function getActiveModelTimelineTracks(host: TimelineEditHost): KeyframeTrack[] {
     if (!host.currentModel || !host.activeModelInfo) return [];
 
     const visibleBoneNameSet = new Set(host.activeModelInfo.boneNames);
@@ -189,7 +221,7 @@ export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
     return ordered;
 }
 
-export function getCameraTimelineTracks(host: any): KeyframeTrack[] {
+export function getCameraTimelineTracks(host: TimelineEditHost): KeyframeTrack[] {
     return [
         {
             name: "Camera",
@@ -199,7 +231,7 @@ export function getCameraTimelineTracks(host: any): KeyframeTrack[] {
     ];
 }
 
-export function refreshTotalFramesFromContent(host: any): void {
+export function refreshTotalFramesFromContent(host: TimelineEditHost): void {
     const runtimeDurationFrame = Math.max(0, Math.floor(host.mmdRuntime.animationFrameTimeDuration));
     const { hasAnyKeyframe, maxFrame } = getRegisteredKeyframeStats(host);
     const hasAudio = host.audioPlayer !== null;
@@ -219,7 +251,7 @@ export function refreshTotalFramesFromContent(host: any): void {
     host.onFrameUpdate?.(host._currentFrame, host._totalFrames);
 }
 
-export function emitMergedKeyframeTracks(host: any): void {
+export function emitMergedKeyframeTracks(host: TimelineEditHost): void {
     refreshTotalFramesFromContent(host);
     if (!host.onKeyframesLoaded) return;
 
@@ -231,7 +263,7 @@ export function emitMergedKeyframeTracks(host: any): void {
     host.onKeyframesLoaded(getActiveModelTimelineTracks(host));
 }
 
-export function hasTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+export function hasTimelineKeyframe(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
@@ -245,14 +277,14 @@ export function hasTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name"
     return hasFrameNumber(frames, normalized);
 }
 
-export function hasInfoKeyframe(host: any, frame: number): boolean {
+export function hasInfoKeyframe(host: TimelineEditHost, frame: number): boolean {
     const animation = getCurrentModelAnimation(host);
     if (!animation) return false;
     const normalized = Math.max(0, Math.floor(frame));
     return hasFrameNumber(animation.propertyTrack.frameNumbers, normalized);
 }
 
-export function addTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+export function addTimelineKeyframe(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
@@ -350,7 +382,7 @@ function readUint8Block(
     return block;
 }
 
-export function addInfoKeyframe(host: any, frame: number): boolean {
+export function addInfoKeyframe(host: TimelineEditHost, frame: number): boolean {
     const animation = getCurrentModelAnimation(host);
     if (!animation) return false;
 
@@ -391,7 +423,7 @@ export function addInfoKeyframe(host: any, frame: number): boolean {
     return true;
 }
 
-export function ensureCameraAnimationForEditing(host: any): boolean {
+export function ensureCameraAnimationForEditing(host: TimelineEditHost): boolean {
     if (host.cameraSourceAnimation) return true;
 
     const cameraTrack = new MmdCameraAnimationTrack(0);
@@ -401,7 +433,7 @@ export function ensureCameraAnimationForEditing(host: any): boolean {
     return true;
 }
 
-export function ensureModelAnimationForEditing(host: any, track: Pick<KeyframeTrack, "name" | "category">): boolean {
+export function ensureModelAnimationForEditing(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">): boolean {
     if (!host.currentModel) return false;
 
     let animation = getCurrentModelAnimation(host);
@@ -435,7 +467,7 @@ export function ensureModelAnimationForEditing(host: any, track: Pick<KeyframeTr
     return true;
 }
 
-export function removeTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+export function removeTimelineKeyframe(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
@@ -458,7 +490,7 @@ export function removeTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "na
 }
 
 export function moveTimelineKeyframe(
-    host: any,
+    host: TimelineEditHost,
     track: Pick<KeyframeTrack, "name" | "category">,
     fromFrame: number,
     toFrame: number,
@@ -485,7 +517,7 @@ export function moveTimelineKeyframe(
     return true;
 }
 
-export function buildModelTrackFrameMapFromAnimation(host: any, animation: any, frameOffset = 0): Map<string, Uint32Array> {
+export function buildModelTrackFrameMapFromAnimation(_host: unknown, animation: MmdAnimation, frameOffset = 0): Map<string, Uint32Array> {
     const frameMap = new Map<string, Uint32Array>();
     const normalizedOffset = Math.max(0, Math.floor(frameOffset));
 
@@ -521,7 +553,7 @@ export function buildModelTrackFrameMapFromAnimation(host: any, animation: any, 
     return frameMap;
 }
 
-export function getTimelineKeyframeStats(host: any): { hasAnyKeyframe: boolean; maxFrame: number } {
+export function getTimelineKeyframeStats(host: TimelineEditHost): { hasAnyKeyframe: boolean; maxFrame: number } {
     return getRegisteredKeyframeStats(host);
 }
 

@@ -28,6 +28,7 @@ import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { GetExponentOfTwo } from "@babylonjs/core/Misc/tools.functions";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import type { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import type { ProjectModelMaterialShaderState } from "../types";
 
 export type WgslMaterialShaderPresetId =
@@ -67,9 +68,69 @@ type MaterialShaderDefaults = {
     forceDepthWrite: boolean | null;
     useAlphaFromDiffuseTexture: boolean | null;
     useAlphaFromAlbedoTexture: boolean | null;
-    toonTexture: any;
+    toonTexture: unknown;
     ignoreDiffuseWhenToonTextureIsNull: boolean | null;
 };
+
+type MaterialShaderMaterial = Record<string, unknown>;
+type MaterialShaderModel = Record<string, unknown>;
+type MaterialShaderMesh = Record<string, unknown>;
+
+type MaterialShaderSceneModel = {
+    info: { name: string; path: string };
+    model: MaterialShaderModel;
+    mesh: MaterialShaderMesh;
+    materials: Array<{
+        key: string;
+        name: string;
+        material: MaterialShaderMaterial;
+    }>;
+};
+
+type MaterialShaderHostStatics = {
+    WGSL_MATERIAL_SHADER_PRESETS?: readonly { id: WgslMaterialShaderPresetId; label: string }[];
+    DEFAULT_WGSL_MATERIAL_SHADER_PRESET?: WgslMaterialShaderPresetId;
+    externalWgslToonFragmentByMaterial: WeakMap<object, string>;
+    presetWgslToonFragmentByMaterial: WeakMap<object, string>;
+};
+
+type MaterialShaderHost = Record<string, unknown> & {
+    constructor: MaterialShaderHostStatics;
+    sceneModels: MaterialShaderSceneModel[];
+    currentModel: MaterialShaderModel | null;
+    materialShaderDefaultsByMaterial: WeakMap<object, MaterialShaderDefaults>;
+    materialShaderPresetByMaterial: WeakMap<object, WgslMaterialShaderPresetId>;
+    externalWgslToonShaderPathByMaterial: WeakMap<object, string>;
+    externalWgslToonShaderPathValue: string | null;
+    luminousGlowMorphScaleByModel?: WeakMap<object, { timelineKey: number; revision: number; scale: number }>;
+    luminousGlowModelByMesh?: WeakMap<object, object>;
+    defaultRenderingPipeline?: { glowLayerEnabled: boolean; bloomEnabled: boolean; bloomWeight: number; bloomThreshold: number; bloomKernel: number } | null;
+    postEffectGlowEnabledValue?: boolean;
+    postEffectGlowIntensityValue?: number;
+    postEffectGlowKernelValue?: number;
+    postEffectBackend?: string;
+    postEffectBloomEnabledValue?: boolean;
+    postEffectBloomWeightValue?: number;
+    postEffectBloomThresholdValue?: number;
+    postEffectBloomKernelValue?: number;
+    depthRenderer?: { getDepthMap?: () => Texture | null } | null;
+    scene?: {
+        glowLayers?: GlowLayer[];
+        getEngine?: () => unknown;
+    };
+    engine: { releaseEffects?: () => void };
+    isWebGpuEngine?: () => boolean;
+    isMaterialVisible?: (material: MaterialShaderMaterial) => boolean;
+    onMaterialShaderStateChanged?: () => void;
+};
+
+type MaterialShaderEffectLike = {
+    setTexture(name: string, texture: unknown): void;
+    setFloat(name: string, value: number): void;
+    setFloat2(name: string, x: number, y: number): void;
+};
+
+type LuminousGlowLayerInternal = LuminousGlowLayer & Record<string, unknown>;
 
 type LuminousGlowLayerAlphaCutOverrideState = {
     hasTransparencyMode: boolean;
@@ -318,12 +379,17 @@ function ensureLuminousGlowDepthMergeShader(): void {
 
 class LuminousGlowLayer extends GlowLayer {
     public readonly mmdLuminousGlowLayer = true;
-    private readonly mmdGlowHost: any;
+    private readonly mmdGlowHost: MaterialShaderHost;
     private readonly mmdDepthEdgeStrength: number;
-    private static constructingHost: any = null;
+    private static constructingHost: MaterialShaderHost | null = null;
     private static constructingDepthEdgeStrength = 0;
 
-    public constructor(host: any, name: string, scene: any, options?: any) {
+    public constructor(
+        host: MaterialShaderHost,
+        name: string,
+        scene: ConstructorParameters<typeof GlowLayer>[1],
+        options?: ConstructorParameters<typeof GlowLayer>[2] & { mmdDepthEdgeStrength?: unknown },
+    ) {
         LuminousGlowLayer.constructingHost = host;
         LuminousGlowLayer.constructingDepthEdgeStrength = Number(options?.mmdDepthEdgeStrength ?? 0);
         super(name, scene, options);
@@ -333,9 +399,9 @@ class LuminousGlowLayer extends GlowLayer {
         LuminousGlowLayer.constructingDepthEdgeStrength = 0;
     }
 
-    protected override _createMergeEffect(): any {
+    protected override _createMergeEffect(): unknown {
         ensureLuminousGlowDepthMergeShader();
-        const self = this as any;
+        const self = this as LuminousGlowLayerInternal;
         let defines = "#define EMISSIVE\n";
         if (self._options?.ldrMerge) {
             defines += "#define LDR\n";
@@ -354,13 +420,13 @@ class LuminousGlowLayer extends GlowLayer {
         );
     }
 
-    protected override _canRenderMesh(_mesh: any, _material: any): boolean {
+    protected override _canRenderMesh(): boolean {
         // Let alpha-blended meshes participate so they can occlude hidden luminous parts.
         return true;
     }
 
-    protected override _renderSubMesh(subMesh: any, enableAlphaMode = false): void {
-        const material = subMesh?.getMaterial?.();
+    protected override _renderSubMesh(subMesh: SubMesh, enableAlphaMode = false): void {
+        const material = subMesh.getMaterial();
         const restoreAlphaCutOverride = beginLuminousGlowLayerAlphaCutOverride(this.mmdGlowHost, material);
         try {
             super._renderSubMesh(subMesh, enableAlphaMode);
@@ -373,7 +439,7 @@ class LuminousGlowLayer extends GlowLayer {
         ensureLuminousGlowDepthBlurShader();
         ensureLuminousGlowDepthMergeShader();
 
-        const self = this as any;
+        const self = this as LuminousGlowLayerInternal;
         const host = this.mmdGlowHost ?? LuminousGlowLayer.constructingHost;
         self._thinEffectLayer._renderPassId = self._mainTexture.renderPassId;
 
@@ -406,7 +472,7 @@ class LuminousGlowLayer extends GlowLayer {
         self._blurTexture2.ignoreCameraViewport = true;
 
         self._textures = [self._blurTexture1, self._blurTexture2];
-        self._thinEffectLayer.bindTexturesForCompose = (effect: any) => {
+        self._thinEffectLayer.bindTexturesForCompose = (effect: MaterialShaderEffectLike) => {
             const depthMap = host?.depthRenderer?.getDepthMap?.();
             effect.setTexture("textureSampler", self._blurTexture1);
             effect.setTexture("textureSampler2", self._blurTexture2);
@@ -434,7 +500,7 @@ class LuminousGlowLayer extends GlowLayer {
                 },
             );
             postProcess.autoClear = false;
-            postProcess.onApplyObservable.add((effect: any) => {
+            postProcess.onApplyObservable.add((effect: MaterialShaderEffectLike) => {
                 const depthMap = host?.depthRenderer?.getDepthMap?.();
                 effect.setTexture("depthSampler", depthMap ?? self._mainTexture);
                 effect.setFloat2("screenSize", width, height);
@@ -450,11 +516,11 @@ class LuminousGlowLayer extends GlowLayer {
         self._horizontalBlurPostprocess2 = createDepthAwareBlur("GlowLayerDepthBlurH2", blurTextureWidth2, blurTextureHeight2, 1, 0);
         self._verticalBlurPostprocess2 = createDepthAwareBlur("GlowLayerDepthBlurV2", blurTextureWidth2, blurTextureHeight2, 0, 1);
         self._horizontalBlurPostprocess1.externalTextureSamplerBinding = true;
-        self._horizontalBlurPostprocess1.onApplyObservable.add((effect: any) => {
+        self._horizontalBlurPostprocess1.onApplyObservable.add((effect: MaterialShaderEffectLike) => {
             effect.setTexture("textureSampler", self._mainTexture);
         });
         self._horizontalBlurPostprocess2.externalTextureSamplerBinding = true;
-        self._horizontalBlurPostprocess2.onApplyObservable.add((effect: any) => {
+        self._horizontalBlurPostprocess2.onApplyObservable.add((effect: MaterialShaderEffectLike) => {
             effect.setTexture("textureSampler", self._blurTexture1);
         });
         self._postProcesses = [
@@ -486,19 +552,19 @@ class LuminousGlowLayer extends GlowLayer {
     }
 }
 
-function getPresetCatalog(host: any): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
+function getPresetCatalog(host: MaterialShaderHost): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
     return host.constructor.WGSL_MATERIAL_SHADER_PRESETS ?? [];
 }
 
-function getDefaultPreset(host: any): WgslMaterialShaderPresetId {
+function getDefaultPreset(host: MaterialShaderHost): WgslMaterialShaderPresetId {
     return host.constructor.DEFAULT_WGSL_MATERIAL_SHADER_PRESET ?? DEFAULT_WGSL_MATERIAL_SHADER_PRESET;
 }
 
-function getMaterialKey(material: any): object | null {
+function getMaterialKey(material: MaterialShaderMaterial): object | null {
     return material && typeof material === "object" ? (material as object) : null;
 }
 
-function cloneColor3OrNull(value: any): Color3 | null {
+function cloneColor3OrNull(value: unknown): Color3 | null {
     if (!value || typeof value !== "object") return null;
     const r = Number(value.r);
     const g = Number(value.g);
@@ -507,7 +573,7 @@ function cloneColor3OrNull(value: any): Color3 | null {
     return new Color3(r, g, b);
 }
 
-function readMaterialColor(material: any, propertyNames: readonly string[]): Color3 | null {
+function readMaterialColor(material: MaterialShaderMaterial, propertyNames: readonly string[]): Color3 | null {
     if (!material || typeof material !== "object") return null;
     for (const propertyName of propertyNames) {
         const color = cloneColor3OrNull(material[propertyName]);
@@ -518,7 +584,7 @@ function readMaterialColor(material: any, propertyNames: readonly string[]): Col
     return null;
 }
 
-function readMaterialTexture(material: any, propertyNames: readonly string[]): Texture | null {
+function readMaterialTexture(material: MaterialShaderMaterial, propertyNames: readonly string[]): Texture | null {
     if (!material || typeof material !== "object") return null;
     for (const propertyName of propertyNames) {
         const texture = material[propertyName];
@@ -584,7 +650,7 @@ function createLuminousGlowOccluderState(texture: Texture | null): {
     };
 }
 
-function getLuminousGlowMorphWeight(model: any, morphName: string): number {
+function getLuminousGlowMorphWeight(model: MaterialShaderModel, morphName: string): number {
     const modelMorph = model?.morph;
     if (!modelMorph || typeof morphName !== "string" || morphName.length === 0) {
         return 0;
@@ -596,7 +662,7 @@ function getLuminousGlowMorphWeight(model: any, morphName: string): number {
     }
 }
 
-function getLuminousGlowMorphTimelineKey(host: any): number {
+function getLuminousGlowMorphTimelineKey(host: MaterialShaderHost): number {
     const runtimeFrame = Number(host?.mmdRuntime?.currentFrameTime);
     if (Number.isFinite(runtimeFrame)) {
         return runtimeFrame;
@@ -608,7 +674,7 @@ function getLuminousGlowMorphTimelineKey(host: any): number {
     return 0;
 }
 
-function getLuminousGlowMorphRevision(host: any): number {
+function getLuminousGlowMorphRevision(host: MaterialShaderHost): number {
     const revision = Number(host?.luminousGlowMorphRevision);
     if (!Number.isFinite(revision)) {
         return 0;
@@ -616,7 +682,7 @@ function getLuminousGlowMorphRevision(host: any): number {
     return revision;
 }
 
-function getLuminousGlowMorphScaleForModel(host: any, model: any): number {
+function getLuminousGlowMorphScaleForModel(host: MaterialShaderHost, model: MaterialShaderModel): number {
     if (!model || typeof model !== "object") {
         return 1;
     }
@@ -674,7 +740,7 @@ function getLuminousGlowMorphScaleForModel(host: any, model: any): number {
     return scale;
 }
 
-function getLuminousGlowMorphScaleForMesh(host: any, mesh: any): number {
+function getLuminousGlowMorphScaleForMesh(host: MaterialShaderHost, mesh: MaterialShaderMesh): number {
     if (!mesh || typeof mesh !== "object") {
         return 1;
     }
@@ -706,14 +772,14 @@ function getLuminousGlowMorphScaleForMesh(host: any, mesh: any): number {
     return 1;
 }
 
-function isLuminousGlowPresetMaterial(host: any, material: any): boolean {
+function isLuminousGlowPresetMaterial(host: MaterialShaderHost, material: MaterialShaderMaterial): boolean {
     if (!material || typeof material !== "object") {
         return false;
     }
     return getWgslMaterialShaderPresetForMaterial(host, material) === "wgsl-autoluminous";
 }
 
-function getLuminousGlowMaterialState(host: any, material: any): {
+function getLuminousGlowMaterialState(host: MaterialShaderHost, material: MaterialShaderMaterial): {
     coreColor: Color3;
     haloColor: Color3;
     alpha: number;
@@ -790,7 +856,7 @@ function getLuminousGlowMaterialState(host: any, material: any): {
     };
 }
 
-function disposeManagedLuminousGlowLayer(host: any): void {
+function disposeManagedLuminousGlowLayer(host: MaterialShaderHost): void {
     if (host.luminousGlowLayer) {
         host.luminousGlowLayer.dispose();
         host.luminousGlowLayer = null;
@@ -822,12 +888,12 @@ function getManagedLuminousGlowDepthEdgeStrength(kind: "core" | "halo"): number 
     return LUMINOUS_GLOW_HALO_DEPTH_EDGE_STRENGTH;
 }
 
-function ensureManagedLuminousGlowLayer(host: any, kind: "core" | "halo"): GlowLayer | null {
+function ensureManagedLuminousGlowLayer(host: MaterialShaderHost, kind: "core" | "halo"): GlowLayer | null {
     const propertyName = kind === "core" ? "luminousGlowCoreLayer" : "luminousGlowLayer";
     const layerName = kind === "core" ? "luminousGlowCore" : "luminousGlow";
     const existingLayer = host[propertyName];
     if (existingLayer) {
-        if ((existingLayer as any).mmdLuminousGlowLayer === true) {
+        if ((existingLayer as LuminousGlowLayer | GlowLayer).mmdLuminousGlowLayer === true) {
             return existingLayer as GlowLayer;
         }
         existingLayer.dispose();
@@ -853,7 +919,7 @@ function ensureManagedLuminousGlowLayer(host: any, kind: "core" | "halo"): GlowL
     return glowLayer;
 }
 
-function setMaterialColorProperty(material: any, propertyName: string, color: Color3): void {
+function setMaterialColorProperty(material: MaterialShaderMaterial, propertyName: string, color: Color3): void {
     if (!material || typeof material !== "object") return;
 
     const current = material[propertyName];
@@ -865,7 +931,7 @@ function setMaterialColorProperty(material: any, propertyName: string, color: Co
     material[propertyName] = new Color3(color.r, color.g, color.b);
 }
 
-function applyAlphaCutoutPreset(material: any, alphaCutOff: number): void {
+function applyAlphaCutoutPreset(material: MaterialShaderMaterial, alphaCutOff: number): void {
     const hasAlphaTexture = hasActualAlphaTextureSource(material);
     if (!hasAlphaTexture) {
         return;
@@ -881,7 +947,7 @@ function applyAlphaCutoutPreset(material: any, alphaCutOff: number): void {
     }
 }
 
-function applyAlphaBlendCutoutPreset(material: any): void {
+function applyAlphaBlendCutoutPreset(material: MaterialShaderMaterial): void {
     const hasAlphaTexture = hasActualAlphaTextureSource(material);
     if (!hasAlphaTexture) {
         const materialName = typeof material?.name === "string" ? material.name : "material";
@@ -903,7 +969,7 @@ function applyAlphaBlendCutoutPreset(material: any): void {
     }
 }
 
-function enableAlphaTextureFlags(material: any): void {
+function enableAlphaTextureFlags(material: MaterialShaderMaterial): void {
     const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
     if ("useAlphaFromDiffuseTexture" in material && diffuseTextureHasAlpha) {
         material.useAlphaFromDiffuseTexture = true;
@@ -915,13 +981,13 @@ function enableAlphaTextureFlags(material: any): void {
     }
 }
 
-function hasActualAlphaTextureSource(material: any): boolean {
+function hasActualAlphaTextureSource(material: MaterialShaderMaterial): boolean {
     return Boolean(material?.diffuseTexture?.hasAlpha)
         || Boolean(material?.albedoTexture?.hasAlpha)
         || Boolean(material?.opacityTexture);
 }
 
-function beginLuminousGlowLayerAlphaCutOverride(host: any, material: any): (() => void) | null {
+function beginLuminousGlowLayerAlphaCutOverride(host: MaterialShaderHost, material: MaterialShaderMaterial): (() => void) | null {
     if (!material || typeof material !== "object") {
         return null;
     }
@@ -988,7 +1054,7 @@ function beginLuminousGlowLayerAlphaCutOverride(host: any, material: any): (() =
     };
 }
 
-function markMaterialShaderDirty(material: any): void {
+function markMaterialShaderDirty(material: MaterialShaderMaterial): void {
     if (!material || typeof material !== "object") return;
 
     if (typeof material.markAsDirty === "function") {
@@ -1010,7 +1076,7 @@ function markMaterialShaderDirty(material: any): void {
     }
 }
 
-function setPresetWgslToonFragmentForMaterial(host: any, material: any, source: string | null): void {
+function setPresetWgslToonFragmentForMaterial(host: MaterialShaderHost, material: MaterialShaderMaterial, source: string | null): void {
     const key = getMaterialKey(material);
     if (!key) return;
 
@@ -1022,7 +1088,7 @@ function setPresetWgslToonFragmentForMaterial(host: any, material: any, source: 
     host.constructor.presetWgslToonFragmentByMaterial.delete(key);
 }
 
-function getPresetFallbackShadowToonTexture(host: any): Texture | null {
+function getPresetFallbackShadowToonTexture(host: MaterialShaderHost): Texture | null {
     const scene = host?.scene;
     if (!scene || typeof scene !== "object") return null;
 
@@ -1038,7 +1104,7 @@ function getPresetFallbackShadowToonTexture(host: any): Texture | null {
     return texture;
 }
 
-function getPresetFallbackAccessoryToonTexture(host: any): Texture | null {
+function getPresetFallbackAccessoryToonTexture(host: MaterialShaderHost): Texture | null {
     const scene = host?.scene;
     if (!scene || typeof scene !== "object") return null;
 
@@ -1054,7 +1120,7 @@ function getPresetFallbackAccessoryToonTexture(host: any): Texture | null {
     return texture;
 }
 
-function setPresetFallbackToonTexture(host: any, material: any, kind: "shadow" | "accessory"): void {
+function setPresetFallbackToonTexture(host: MaterialShaderHost, material: MaterialShaderMaterial, kind: "shadow" | "accessory"): void {
     if (!material || typeof material !== "object") return;
     if (!("toonTexture" in material)) return;
 
@@ -1069,7 +1135,7 @@ function setPresetFallbackToonTexture(host: any, material: any, kind: "shadow" |
     }
 }
 
-function ensurePresetFallbackToonTexture(host: any, material: any, kind: "shadow" | "accessory" = "shadow"): void {
+function ensurePresetFallbackToonTexture(host: MaterialShaderHost, material: MaterialShaderMaterial, kind: "shadow" | "accessory" = "shadow"): void {
     if (!material || typeof material !== "object") return;
     if (!("toonTexture" in material)) return;
     if (material.toonTexture) return;
@@ -1077,7 +1143,7 @@ function ensurePresetFallbackToonTexture(host: any, material: any, kind: "shadow
     setPresetFallbackToonTexture(host, material, kind);
 }
 
-function ensureAccessoryPresetToonTexture(host: any, material: any): void {
+function ensureAccessoryPresetToonTexture(host: MaterialShaderHost, material: MaterialShaderMaterial): void {
     if (!material || typeof material !== "object") return;
     if (!("toonTexture" in material)) return;
 
@@ -1091,7 +1157,7 @@ function ensureAccessoryPresetToonTexture(host: any, material: any): void {
     setPresetFallbackToonTexture(host, material, "accessory");
 }
 
-function applyAccessoryAmbientTuning(material: any, defaults: MaterialShaderDefaults): void {
+function applyAccessoryAmbientTuning(material: MaterialShaderMaterial, defaults: MaterialShaderDefaults): void {
     if (!material || typeof material !== "object") return;
     if (!("ambientColor" in material)) return;
 
@@ -1106,7 +1172,7 @@ function applyAccessoryAmbientTuning(material: any, defaults: MaterialShaderDefa
     setMaterialColorProperty(material, "ambientColor", new Color3(0.22, 0.22, 0.22));
 }
 
-function collectLuminousMaterials(host: any): Set<object> {
+function collectLuminousMaterials(host: MaterialShaderHost): Set<object> {
     const luminousMaterials = new Set<object>();
     for (const entry of host.sceneModels ?? []) {
         for (const materialEntry of entry.materials ?? []) {
@@ -1122,7 +1188,7 @@ function collectLuminousMaterials(host: any): Set<object> {
     return luminousMaterials;
 }
 
-export function syncLuminousGlowLayer(host: any): void {
+export function syncLuminousGlowLayer(host: MaterialShaderHost): void {
     const luminousMaterials = collectLuminousMaterials(host);
     const hasLuminousMaterials = luminousMaterials.size > 0;
 
@@ -1149,7 +1215,12 @@ export function syncLuminousGlowLayer(host: any): void {
             glowLayer.customEmissiveTextureSelector = null;
             glowLayer.intensity = getManagedLuminousGlowIntensity(glowBaseIntensity, kind);
             glowLayer.blurKernelSize = getManagedLuminousGlowKernel(glowBaseKernel, kind);
-            glowLayer.customEmissiveColorSelector = (mesh: any, _subMesh: any, material: any, result: any) => {
+            glowLayer.customEmissiveColorSelector = (
+                mesh: MaterialShaderMesh,
+                _subMesh: unknown,
+                material: MaterialShaderMaterial,
+                result: { set(r: number, g: number, b: number, a: number): void },
+            ) => {
                 const glowState = getLuminousGlowMaterialState(host, material);
                 if (!glowState) {
                     result.set(0, 0, 0, 0);
@@ -1169,7 +1240,11 @@ export function syncLuminousGlowLayer(host: any): void {
                     glowState.alpha,
                 );
             };
-            glowLayer.customEmissiveTextureSelector = (_mesh: any, _subMesh: any, material: any) => {
+            glowLayer.customEmissiveTextureSelector = (
+                _mesh: MaterialShaderMesh,
+                _subMesh: unknown,
+                material: MaterialShaderMaterial,
+            ) => {
                 return getLuminousGlowMaterialState(host, material)?.texture ?? null;
             };
         };
@@ -1195,7 +1270,7 @@ export function syncLuminousGlowLayer(host: any): void {
     }
 }
 
-export function ensureMaterialShaderDefaults(host: any, material: any): MaterialShaderDefaults {
+export function ensureMaterialShaderDefaults(host: MaterialShaderHost, material: MaterialShaderMaterial): MaterialShaderDefaults {
     let defaults = host.materialShaderDefaultsByMaterial.get(material as object);
     if (!defaults) {
         defaults = {
@@ -1230,7 +1305,7 @@ export function ensureMaterialShaderDefaults(host: any, material: any): Material
     return defaults;
 }
 
-function restoreMaterialShaderDefaults(host: any, material: any, defaults: MaterialShaderDefaults): void {
+function restoreMaterialShaderDefaults(host: MaterialShaderHost, material: MaterialShaderMaterial, defaults: MaterialShaderDefaults): void {
     if (!material || typeof material !== "object") return;
 
     if (defaults.disableLighting !== null && "disableLighting" in material) {
@@ -1286,7 +1361,7 @@ function restoreMaterialShaderDefaults(host: any, material: any, defaults: Mater
     }
 }
 
-function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: WgslMaterialShaderPresetId): void {
+function applyWgslShaderPresetToMaterial(host: MaterialShaderHost, material: MaterialShaderMaterial, presetId: WgslMaterialShaderPresetId): void {
     if (!material || typeof material !== "object") return;
 
     const defaults = ensureMaterialShaderDefaults(host, material);
@@ -1622,15 +1697,15 @@ function applyWgslShaderPresetToMaterial(host: any, material: any, presetId: Wgs
     markMaterialShaderDirty(material);
 }
 
-export function isWgslMaterialShaderAssignmentAvailable(host: any): boolean {
+export function isWgslMaterialShaderAssignmentAvailable(host: MaterialShaderHost): boolean {
     return Boolean(host.isWebGpuEngine?.());
 }
 
-export function getWgslMaterialShaderPresets(host: any): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
+export function getWgslMaterialShaderPresets(host: MaterialShaderHost): readonly { id: WgslMaterialShaderPresetId; label: string }[] {
     return getPresetCatalog(host);
 }
 
-export function getExternalWgslToonShaderPath(host: any, modelIndex?: number, materialKey: string | null = null): string | null {
+export function getExternalWgslToonShaderPath(host: MaterialShaderHost, modelIndex?: number, materialKey: string | null = null): string | null {
     if (typeof modelIndex !== "number" || !Number.isFinite(modelIndex)) {
         return host.externalWgslToonShaderPathValue;
     }
@@ -1639,7 +1714,7 @@ export function getExternalWgslToonShaderPath(host: any, modelIndex?: number, ma
     if (!entry) return null;
 
     if (materialKey !== null) {
-        const target = entry.materials.find((material: any) => material.key === materialKey);
+        const target = entry.materials.find((material: MaterialShaderMaterial) => material.key === materialKey);
         return target ? getExternalWgslToonShaderPathForMaterial(host, target.material) : null;
     }
 
@@ -1653,19 +1728,19 @@ export function getExternalWgslToonShaderPath(host: any, modelIndex?: number, ma
     return paths.size === 1 ? Array.from(paths)[0] : null;
 }
 
-export function hasExternalWgslToonShader(host: any, modelIndex?: number, materialKey: string | null = null): boolean {
+export function hasExternalWgslToonShader(host: MaterialShaderHost, modelIndex?: number, materialKey: string | null = null): boolean {
     return getExternalWgslToonShaderPath(host, modelIndex, materialKey) !== null;
 }
 
-export function getExternalWgslToonShaderPathForMaterial(host: any, material: any): string | null {
+export function getExternalWgslToonShaderPathForMaterial(host: MaterialShaderHost, material: MaterialShaderMaterial): string | null {
     const key = getMaterialKey(material);
     if (!key) return null;
     return host.externalWgslToonShaderPathByMaterial.get(key) ?? null;
 }
 
 export function setExternalWgslToonShaderForMaterial(
-    host: any,
-    material: any,
+    host: MaterialShaderHost,
+    material: MaterialShaderMaterial,
     path: string | null,
     source: string | null,
 ): void {
@@ -1681,7 +1756,7 @@ export function setExternalWgslToonShaderForMaterial(
     host.constructor.externalWgslToonFragmentByMaterial.delete(key);
 }
 
-export function setExternalWgslToonShader(host: any, path: string | null, source: string | null): void {
+export function setExternalWgslToonShader(host: MaterialShaderHost, path: string | null, source: string | null): void {
     const normalizedPath = typeof path === "string" && path.trim().length > 0 ? path.trim() : null;
     const normalizedSource = typeof source === "string" && source.trim().length > 0 ? source : null;
 
@@ -1698,7 +1773,7 @@ export function setExternalWgslToonShader(host: any, path: string | null, source
 }
 
 export function setExternalWgslToonShaderForModel(
-    host: any,
+    host: MaterialShaderHost,
     modelIndex: number,
     materialKey: string | null,
     path: string | null,
@@ -1711,7 +1786,7 @@ export function setExternalWgslToonShaderForModel(
 
     const targets = materialKey === null
         ? entry.materials
-        : entry.materials.filter((material: any) => material.key === materialKey);
+        : entry.materials.filter((material: MaterialShaderMaterial) => material.key === materialKey);
     if (targets.length === 0) return false;
 
     const normalizedPath = typeof path === "string" && path.trim().length > 0 ? path.trim() : null;
@@ -1728,7 +1803,7 @@ export function setExternalWgslToonShaderForModel(
     return true;
 }
 
-export function getWgslMaterialShaderPresetForMaterial(host: any, material: any): WgslMaterialShaderPresetId {
+export function getWgslMaterialShaderPresetForMaterial(host: MaterialShaderHost, material: MaterialShaderMaterial): WgslMaterialShaderPresetId {
     const key = getMaterialKey(material);
     if (!key) {
         return getDefaultPreset(host);
@@ -1738,7 +1813,7 @@ export function getWgslMaterialShaderPresetForMaterial(host: any, material: any)
 }
 
 export function setWgslMaterialShaderPreset(
-    host: any,
+    host: MaterialShaderHost,
     modelIndex: number,
     materialKey: string | null,
     presetId: WgslMaterialShaderPresetId,
@@ -1751,7 +1826,7 @@ export function setWgslMaterialShaderPreset(
 
     const targets = materialKey === null
         ? entry.materials
-        : entry.materials.filter((material: any) => material.key === materialKey);
+        : entry.materials.filter((material: MaterialShaderMaterial) => material.key === materialKey);
     if (targets.length === 0) return false;
 
     for (const target of targets) {
@@ -1766,8 +1841,8 @@ export function setWgslMaterialShaderPreset(
 }
 
 export function applyWgslShaderPresetToMaterials(
-    host: any,
-    materials: Iterable<any>,
+    host: MaterialShaderHost,
+    materials: Iterable<MaterialShaderMaterial>,
     presetId: WgslMaterialShaderPresetId,
 ): boolean {
     if (!isWgslMaterialShaderAssignmentAvailable(host)) return false;
@@ -1793,7 +1868,7 @@ export function applyWgslShaderPresetToMaterials(
     return true;
 }
 
-export function getWgslModelShaderStates(host: any): Array<{
+export function getWgslModelShaderStates(host: MaterialShaderHost): Array<{
     modelIndex: number;
     modelName: string;
     modelPath: string;
@@ -1806,12 +1881,12 @@ export function getWgslModelShaderStates(host: any): Array<{
         visible: boolean;
     }>;
 }> {
-    return host.sceneModels.map((entry: any, modelIndex: number) => ({
+    return host.sceneModels.map((entry: MaterialShaderSceneModel, modelIndex: number) => ({
         modelIndex,
         modelName: entry.info.name,
         modelPath: entry.info.path,
         active: entry.model === host.currentModel,
-        materials: entry.materials.map((material: any) => ({
+        materials: entry.materials.map((material: MaterialShaderMaterial) => ({
             key: material.key,
             name: material.name,
             presetId: getWgslMaterialShaderPresetForMaterial(host, material.material),
@@ -1821,7 +1896,7 @@ export function getWgslModelShaderStates(host: any): Array<{
     }));
 }
 
-export function getSerializedMaterialShaderStates(host: any, entry: any): ProjectModelMaterialShaderState[] {
+export function getSerializedMaterialShaderStates(host: MaterialShaderHost, entry: MaterialShaderSceneModel): ProjectModelMaterialShaderState[] {
     const states: ProjectModelMaterialShaderState[] = [];
     for (const material of entry.materials) {
         const presetId = getWgslMaterialShaderPresetForMaterial(host, material.material);
@@ -1835,7 +1910,7 @@ export function getSerializedMaterialShaderStates(host: any, entry: any): Projec
 }
 
 export function applyImportedMaterialShaderStates(
-    host: any,
+    host: MaterialShaderHost,
     modelIndex: number,
     states: ProjectModelMaterialShaderState[] | undefined,
     warnings: string[],
