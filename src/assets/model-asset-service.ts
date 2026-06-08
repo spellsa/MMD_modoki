@@ -7,6 +7,7 @@ import type { BoneControlInfo, ModelInfo } from "../types";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
 import { MmdStandardMaterialProxy } from "babylon-mmd/esm/Runtime/mmdStandardMaterialProxy";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
+import { logDebugIfEnabled, logError, logInfo, logWarn, toLogErrorData } from "../app-logger";
 import { ensureMaterialShaderDefaults } from "../scene/material-shader-service";
 
 const PMX_BONE_FLAG_VISIBLE = 0x0008;
@@ -159,14 +160,16 @@ function collectSceneModelMaterials(host: ModelAssetHost, meshes: Mesh[]): Scene
 }
 
 export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<ModelInfo | null> {
+    let renderingSuspended = false;
     try {
         await host.physicsInitializationPromise;
 
         const { dir, fileName } = splitFilePath(filePath);
         const fileUrl = `file:///${dir}`;
 
-        console.log("[PMX] Loading:", fileName, "from:", fileUrl);
+        logInfo("asset", "model load started", { filePath, fileName });
         host.suspendSceneRendering();
+        renderingSuspended = true;
 
         const result = await ImportMeshAsync(fileName, host.scene, {
             rootUrl: fileUrl,
@@ -182,13 +185,28 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             },
         });
 
-        console.log("[PMX] ImportMeshAsync result:", {
+        logDebugIfEnabled("modelLoad", "asset", "model import result", {
+            filePath,
+            fileName,
             meshCount: result.meshes.length,
             skeletonCount: result.skeletons.length,
             meshNames: result.meshes.map((m) => m.name),
         });
 
+        if (result.meshes.length === 0) {
+            logWarn("asset", "model import returned no meshes", { filePath, fileName });
+            throw new Error("No mesh data found in PMX/PMD file");
+        }
+
         const mmdMesh = result.meshes[0] as MmdMesh;
+        if (!mmdMesh) {
+            logWarn("asset", "model import first mesh is unavailable", {
+                filePath,
+                fileName,
+                meshCount: result.meshes.length,
+            });
+            throw new Error("Imported PMX/PMD mesh is unavailable");
+        }
 
         const skeletonPool: Skeleton[] = [];
         if (mmdMesh.skeleton) skeletonPool.push(mmdMesh.skeleton);
@@ -276,7 +294,11 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.modelSourceAnimationsByModel.delete(mmdModel);
         host.setModelMotionImports(mmdModel, []);
 
-        console.log("[PMX] MmdModel created, morph:", !!mmdModel.morph);
+        logDebugIfEnabled("modelLoad", "asset", "runtime model created", {
+            filePath,
+            fileName,
+            hasMorph: !!mmdModel.morph,
+        });
 
         const morphNames: string[] = [];
         const morphEntries: { index: number; name: string; category: number }[] = [];
@@ -422,7 +444,10 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             morphDisplayFrames,
         };
 
-        console.log("[PMX] Model info:", modelInfo);
+        logDebugIfEnabled("modelLoad", "asset", "model info resolved", {
+            filePath,
+            modelInfo,
+        });
 
         host.sceneModels.push({
             mesh: mmdMesh,
@@ -452,12 +477,29 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         }
 
         host.onSceneModelLoaded?.(modelInfo, host.sceneModels.length, activateAsCurrent);
+        logInfo("asset", "model load completed", {
+            filePath,
+            fileName,
+            modelName: modelInfo.name,
+            vertexCount,
+            boneCount,
+            morphCount: morphEntries.length,
+            meshCount: result.meshes.length,
+            sceneModelCount: host.sceneModels.length,
+            activateAsCurrent,
+        });
         host.resumeSceneRendering();
+        renderingSuspended = false;
         return modelInfo;
     } catch (err: unknown) {
-        host.resumeSceneRendering();
+        if (renderingSuspended) {
+            host.resumeSceneRendering();
+        }
         const message = err instanceof Error ? err.message : String(err);
-        console.error("Failed to load PMX/PMD:", message);
+        logError("asset", "model load failed", {
+            filePath,
+            ...toLogErrorData(err),
+        });
         host.onError?.(`PMX/PMD load error: ${message}`);
         return null;
     }

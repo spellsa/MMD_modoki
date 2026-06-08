@@ -69,7 +69,7 @@ import {
     loadVMD as loadVMDImpl,
     loadVPD as loadVPDImpl,
 } from "./assets/motion-asset-service";
-import { logInfo, logWarn, toLogErrorData } from "./app-logger";
+import { isDebugLogEnabled, logDebugIfEnabled, logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
@@ -4156,6 +4156,8 @@ ${beforeFogAppendBlock}
     }
 
     private logPhysicsPerformanceSample(nowMs: number): void {
+        if (!this.framePerformanceLogEnabled && !isDebugLogEnabled("performance")) return;
+
         this.physicsController.logPerformanceSample(nowMs, {
             runtimeMode: this.runtimeMode,
             engine: this.getEngineType(),
@@ -5421,7 +5423,6 @@ ${beforeFogAppendBlock}
         }
 
         this.frameGraphPostEffectsController = new FrameGraphPostEffectsController((warning) => {
-            console.warn(warning.message);
             logWarn("render", "frame graph post effect backend requested but not active", {
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
                 fallback: "classic",
@@ -5431,8 +5432,7 @@ ${beforeFogAppendBlock}
             this.disposeFrameGraphPostEffectsSceneColorTarget();
             this.postEffectBackend = "classic";
         }, (info) => {
-            console.info(info.message);
-            logInfo("render", "frame graph post effect backend", {
+            logDebugIfEnabled("postfx", "render", "frame graph post effect backend", {
                 event: info.event,
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
             });

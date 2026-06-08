@@ -88,8 +88,13 @@ export async function loadVMD(host: MotionAssetHost, filePath: string): Promise<
     }
 
     try {
+        logInfo("asset", "motion load started", { filePath, type: "vmd" });
         const targetModel = host.currentModel;
         if (!targetModel) {
+            logWarn("asset", "motion load skipped because no model is active", {
+                filePath,
+                type: "vmd",
+            });
             host.onError?.("Load a PMX model first");
             return null;
         }
@@ -97,6 +102,10 @@ export async function loadVMD(host: MotionAssetHost, filePath: string): Promise<
         const previousTotalFrames = host._totalFrames;
         const buffer = await window.electronAPI.readBinaryFile(filePath);
         if (!buffer) {
+            logError("asset", "motion file read failed", {
+                filePath,
+                type: "vmd",
+            });
             host.onError?.("Failed to read VMD file");
             return null;
         }
@@ -141,10 +150,20 @@ export async function loadVMD(host: MotionAssetHost, filePath: string): Promise<
         };
 
         host.onMotionLoaded?.(motionInfo);
+        logInfo("asset", "motion load completed", {
+            filePath,
+            fileName,
+            type: "vmd",
+            frameCount: motionInfo.frameCount,
+        });
         return motionInfo;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error("Failed to load VMD:", message);
+        logError("asset", "motion load failed", {
+            filePath,
+            type: "vmd",
+            ...toLogErrorData(err),
+        });
         host.onError?.(`VMD load error: ${message}`);
         return null;
     }
@@ -152,8 +171,13 @@ export async function loadVMD(host: MotionAssetHost, filePath: string): Promise<
 
 export async function loadVPD(host: MotionAssetHost, filePath: string): Promise<MotionInfo | null> {
     try {
+        logInfo("asset", "motion load started", { filePath, type: "vpd" });
         const targetModel = host.currentModel;
         if (!targetModel) {
+            logWarn("asset", "motion load skipped because no model is active", {
+                filePath,
+                type: "vpd",
+            });
             host.onError?.("Load a PMX model first");
             return null;
         }
@@ -165,6 +189,10 @@ export async function loadVPD(host: MotionAssetHost, filePath: string): Promise<
 
         const buffer = await window.electronAPI.readBinaryFile(filePath);
         if (!buffer) {
+            logError("asset", "motion file read failed", {
+                filePath,
+                type: "vpd",
+            });
             host.onError?.("Failed to read pose file");
             return null;
         }
@@ -207,10 +235,21 @@ export async function loadVPD(host: MotionAssetHost, filePath: string): Promise<
         };
 
         host.onMotionLoaded?.(motionInfo);
+        logInfo("asset", "motion load completed", {
+            filePath,
+            fileName,
+            type: "vpd",
+            frameCount: motionInfo.frameCount,
+            loadFrame,
+        });
         return motionInfo;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error("Failed to load pose:", message);
+        logError("asset", "motion load failed", {
+            filePath,
+            type: "vpd",
+            ...toLogErrorData(err),
+        });
         host.onError?.(`Pose load error: ${message}`);
         return null;
     }
@@ -289,7 +328,6 @@ export async function loadCameraVMD(host: MotionAssetHost, filePath: string): Pr
             filePath,
             ...toLogErrorData(err),
         });
-        console.error("Failed to load camera VMD:", message);
         host.onError?.(`Camera VMD load error: ${message}`);
         return null;
     }
@@ -297,12 +335,14 @@ export async function loadCameraVMD(host: MotionAssetHost, filePath: string): Pr
 
 export async function loadMP3(host: MotionAssetHost, filePath: string): Promise<boolean> {
     try {
+        logInfo("asset", "audio load started", { filePath });
         const pathParts = filePath.replace(/\\/g, "/");
         const lastSlash = pathParts.lastIndexOf("/");
         const fileName = pathParts.substring(lastSlash + 1);
 
         const buffer = await window.electronAPI.readBinaryFile(filePath);
         if (!buffer) {
+            logError("asset", "audio file read failed", { filePath });
             host.onError?.("Audio file read failed");
             return false;
         }
@@ -331,10 +371,14 @@ export async function loadMP3(host: MotionAssetHost, filePath: string): Promise<
         host.refreshTotalFramesFromContent?.();
 
         host.onAudioLoaded?.(fileName.replace(/\.(mp3|wav|wave|ogg)$/i, ""));
+        logInfo("asset", "audio load completed", { filePath, fileName });
         return true;
     } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error("Failed to load audio:", message);
+        logError("asset", "audio load failed", {
+            filePath,
+            ...toLogErrorData(err),
+        });
         host.onError?.(`Audio load error: ${message}`);
         return false;
     }

@@ -6,6 +6,7 @@ import type { BoneControlInfo } from "../types";
 import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import type { Scene } from "@babylonjs/core/scene";
+import { logDebugIfEnabled } from "../app-logger";
 
 type BoneVisualizerTarget = {
     mesh: Mesh;
@@ -90,7 +91,7 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
             const transformedDistance = Vector3.DistanceSquared(sampleWorld, meshWorld);
             const runtimeUseMeshWorldMatrix = transformedDistance <= rawDistance;
 
-            console.log("[BoneViz] Overlay target:", {
+            logDebugIfEnabled("overlay", "render", "bone visualizer target refreshed", {
                 mode: "runtime",
                 mesh: sourceMesh.name,
                 bones: runtimeBones.length,
@@ -165,7 +166,7 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
         }
     }
 
-    console.log("[BoneViz] Overlay target:", {
+    logDebugIfEnabled("overlay", "render", "bone visualizer target refreshed", {
         mode: "skeleton",
         mesh: skeletonHost.name,
         bones: bones.length,

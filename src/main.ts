@@ -36,6 +36,7 @@ if (isDev) {
 }
 
 const APP_LOG_NAME = 'MMD_modoki';
+const ENABLE_ELECTRON_LOG_CONSOLE = process.env.MMD_MODOKI_CONSOLE_LOG === '1';
 const appLogSessionId = `${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}-${randomUUID().slice(0, 4)}`;
 
 const createLogErrorData = (err: unknown): AppLogData => {
@@ -108,7 +109,7 @@ const configureAppLogging = (): void => {
     const logDir = isDev ? path.join(baseLogDir, 'dev') : baseLogDir;
     return path.join(logDir, log.transports.file.fileName);
   };
-  log.transports.console.level = isDev ? 'debug' : 'info';
+  log.transports.console.level = ENABLE_ELECTRON_LOG_CONSOLE ? (isDev ? 'debug' : 'info') : false;
   log.scope.defaultLabel = 'main';
 };
 
@@ -511,7 +512,10 @@ const configureSessionSecurity = (): void => {
         return;
       }
     } catch (err) {
-      console.error('Failed to resolve file request:', err);
+      writeAppLog('warn', 'ipc', 'failed to resolve file request', {
+        requestUrl: details.url,
+        ...createLogErrorData(err),
+      });
     }
     callback({});
   });
@@ -857,7 +861,6 @@ ipcMain.handle('dialog:saveWebm', async (_event, defaultFileName?: string) => {
       : `${result.filePath}.webm`;
   } catch (err) {
     writeAppLog('error', 'webm', 'failed to choose WebM save path', createLogErrorData(err));
-    console.error('Failed to choose WebM save path:', err);
     return null;
   }
 });
@@ -880,7 +883,10 @@ ipcMain.handle('file:readBinary', async (_event, filePath: string) => {
     const buffer = fs.readFileSync(filePath);
     return buffer;
   } catch (err) {
-    console.error('Failed to read file:', err);
+    writeAppLog('error', 'ipc', 'failed to read binary file', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -895,7 +901,10 @@ ipcMain.handle('file:getInfo', async (_event, filePath: string) => {
       extension: path.extname(filePath).toLowerCase(),
     };
   } catch (err) {
-    console.error('Failed to get file info:', err);
+    writeAppLog('error', 'ipc', 'failed to get file info', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -988,7 +997,11 @@ ipcMain.handle('file:findNearby', async (_event, baseDirectoryPath: string, targ
   try {
     return findNearbyFileSync(baseDirectoryPath, targetPath);
   } catch (err) {
-    console.error('Failed to find nearby file:', err);
+    writeAppLog('error', 'ipc', 'failed to find nearby file', {
+      baseDirectoryPath,
+      targetPath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -997,7 +1010,10 @@ ipcMain.handle('file:readText', async (_event, filePath: string) => {
   try {
     return fs.readFileSync(filePath, 'utf-8');
   } catch (err) {
-    console.error('Failed to read text file:', err);
+    writeAppLog('error', 'ipc', 'failed to read text file', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1038,7 +1054,7 @@ ipcMain.handle('file:listBundledWgslFiles', async (): Promise<{ name: string; pa
 
     return Array.from(uniqueByPath.values()).sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
-    console.error('Failed to list bundled WGSL files:', err);
+    writeAppLog('error', 'ipc', 'failed to list bundled WGSL files', createLogErrorData(err));
     return [];
   }
 });
@@ -1071,7 +1087,7 @@ ipcMain.handle(
       fs.writeFileSync(result.filePath, content, 'utf-8');
       return result.filePath;
     } catch (err) {
-      console.error('Failed to save text file:', err);
+      writeAppLog('error', 'ipc', 'failed to save text file', createLogErrorData(err));
       return null;
     }
   },
@@ -1085,7 +1101,10 @@ ipcMain.handle('file:writeTextToPath', async (_event, filePath: string, content:
     await fs.promises.writeFile(filePath, content, 'utf-8');
     return true;
   } catch (err) {
-    console.error('Failed to write text file to path:', err);
+    writeAppLog('error', 'ipc', 'failed to write text file to path', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return false;
   }
 });
@@ -1111,7 +1130,10 @@ ipcMain.handle('file:savePng', async (_event, dataUrl: string, defaultFileName?:
     fs.writeFileSync(result.filePath, base64, 'base64');
     return result.filePath;
   } catch (err) {
-    console.error('Failed to save PNG:', err);
+    writeAppLog('error', 'ipc', 'failed to save PNG', {
+      defaultFileName,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1168,7 +1190,12 @@ ipcMain.handle(
       await fs.promises.writeFile(result.filePath, pngBytes);
       return result.filePath;
     } catch (err) {
-      console.error('Failed to save RGBA PNG:', err);
+      writeAppLog('error', 'ipc', 'failed to save RGBA PNG', {
+        defaultFileName,
+        width,
+        height,
+        ...createLogErrorData(err),
+      });
       return null;
     }
   },
@@ -1218,7 +1245,12 @@ ipcMain.handle(
       await fs.promises.writeFile(result.filePath, pngBytes);
       return result.filePath;
     } catch (err) {
-      console.error('Failed to save canvas snapshot PNG:', err);
+      writeAppLog('error', 'ipc', 'failed to save canvas snapshot PNG', {
+        defaultFileName,
+        outputWidth,
+        outputHeight,
+        ...createLogErrorData(err),
+      });
       return null;
     }
   },
@@ -1238,7 +1270,11 @@ ipcMain.handle('file:savePngToPath', async (_event, dataUrl: string, directoryPa
     await fs.promises.writeFile(filePath, base64, 'base64');
     return filePath;
   } catch (err) {
-    console.error('Failed to save PNG to path:', err);
+    writeAppLog('error', 'ipc', 'failed to save PNG to path', {
+      directoryPath,
+      fileName,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1265,7 +1301,13 @@ ipcMain.handle(
       await fs.promises.writeFile(filePath, pngBytes);
       return filePath;
     } catch (err) {
-      console.error('Failed to save RGBA PNG to path:', err);
+      writeAppLog('error', 'ipc', 'failed to save RGBA PNG to path', {
+        directoryPath,
+        fileName,
+        width,
+        height,
+        ...createLogErrorData(err),
+      });
       return null;
     }
   },
@@ -1280,7 +1322,10 @@ ipcMain.handle('file:saveWebmToPath', async (_event, bytes: Uint8Array, filePath
     await fs.promises.writeFile(safeFilePath, Buffer.from(bytes));
     return safeFilePath;
   } catch (err) {
-    console.error('Failed to save WebM to path:', err);
+    writeAppLog('error', 'webm', 'failed to save WebM to path', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1295,7 +1340,10 @@ ipcMain.handle('file:beginWebmStreamSave', async (_event, filePath: string) => {
     webmSaveSessionMap.set(saveId, { filePath: safeFilePath, handle });
     return { saveId, filePath: safeFilePath };
   } catch (err) {
-    console.error('Failed to begin streamed WebM save:', err);
+    writeAppLog('error', 'webm', 'failed to begin streamed WebM save', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1312,7 +1360,12 @@ ipcMain.handle('file:writeWebmStreamChunk', async (_event, saveId: string, bytes
     }
     return true;
   } catch (err) {
-    console.error('Failed to write streamed WebM chunk:', err);
+    writeAppLog('error', 'webm', 'failed to write streamed WebM chunk', {
+      saveId,
+      position,
+      byteLength: bytes?.byteLength ?? null,
+      ...createLogErrorData(err),
+    });
     return false;
   }
 });
@@ -1326,7 +1379,10 @@ ipcMain.handle('file:finishWebmStreamSave', async (_event, saveId: string) => {
     await session.handle.close();
     return session.filePath;
   } catch (err) {
-    console.error('Failed to finish streamed WebM save:', err);
+    writeAppLog('error', 'webm', 'failed to finish streamed WebM save', {
+      saveId,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1341,7 +1397,10 @@ ipcMain.handle('file:cancelWebmStreamSave', async (_event, saveId: string) => {
     await fs.promises.unlink(session.filePath).catch(() => undefined);
     return true;
   } catch (err) {
-    console.error('Failed to cancel streamed WebM save:', err);
+    writeAppLog('error', 'webm', 'failed to cancel streamed WebM save', {
+      saveId,
+      ...createLogErrorData(err),
+    });
     return false;
   }
 });
@@ -1423,7 +1482,7 @@ ipcMain.handle(
       if (exportWindow && !exportWindow.isDestroyed()) {
         exportWindow.close();
       }
-      console.error('Failed to start PNG sequence export window:', err);
+      writeAppLog('error', 'ipc', 'failed to start PNG sequence export window', createLogErrorData(err));
       return null;
     }
   },
@@ -1530,7 +1589,6 @@ ipcMain.handle(
         exportWindow.close();
       }
       writeAppLog('error', 'webm', 'failed to start WebM export window', createLogErrorData(err));
-      console.error('Failed to start WebM export window:', err);
       return null;
     }
   },

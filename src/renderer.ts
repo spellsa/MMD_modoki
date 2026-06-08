@@ -15,7 +15,7 @@ import { enhanceBottomPanelControls } from "./ui/panel-control-helpers";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
-import { logError, logInfo, toLogErrorData } from "./app-logger";
+import { isDebugLogEnabled, logDebug, logError, logInfo, toLogErrorData } from "./app-logger";
 import type { AppLogData, SmokeRendererReadyPayload } from "./types";
 
 let shaderRequestTraceInstalled = false;
@@ -51,7 +51,7 @@ function installShaderRequestTrace(): void {
 
   WebRequest.prototype.open = function(method: string, url: string): void {
     if (isLikelyShaderRequestUrl(url)) {
-      console.log("[ShaderTrace] request", { method, url });
+      logDebug("shader", "shader request started", { method, url });
     }
     originalOpen.call(this, method, url);
   };
@@ -66,7 +66,7 @@ function installShaderRequestTrace(): void {
         const preview = responseText.slice(0, 120);
         const looksLikeHtml = preview.startsWith("<!doctype html") || preview.startsWith("<html");
         if (this.status >= 400 || looksLikeHtml || /text\/html/i.test(contentType)) {
-          console.error("[ShaderTrace] suspicious response", {
+          logError("shader", "suspicious shader response", {
             url: this.requestURL,
             status: this.status,
             statusText: this.statusText,
@@ -74,7 +74,7 @@ function installShaderRequestTrace(): void {
             preview,
           });
         } else {
-          console.log("[ShaderTrace] response", {
+          logDebug("shader", "shader response received", {
             url: this.requestURL,
             status: this.status,
             contentType,
@@ -82,7 +82,7 @@ function installShaderRequestTrace(): void {
         }
       });
       this.addEventListener("error", () => {
-        console.error("[ShaderTrace] network error", {
+        logError("shader", "shader request network error", {
           url: this.requestURL,
           status: this.status,
           statusText: this.statusText,
@@ -94,7 +94,9 @@ function installShaderRequestTrace(): void {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  installShaderRequestTrace();
+  if (isDebugLogEnabled("shaderTrace")) {
+    installShaderRequestTrace();
+  }
   initializeI18n(document);
   window.addEventListener("error", (event) => {
     logError("renderer", "uncaught renderer error", {
@@ -136,7 +138,7 @@ async function initializeApp(): Promise<void> {
 
   const canvas = document.getElementById("render-canvas") as HTMLCanvasElement;
   if (!canvas) {
-    console.error("Canvas not found");
+    logError("renderer", "render canvas is missing");
     reportSmokeRendererFailure("Canvas not found");
     return;
   }
@@ -170,7 +172,6 @@ async function initializeApp(): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     logError("renderer", "failed to initialize MMD_modoki", toLogErrorData(err));
     reportSmokeRendererFailure(message, toLogErrorData(err));
-    console.error("Failed to initialize MMD modoki:", message);
 
     const statusText = document.getElementById("status-text");
     if (statusText) {
@@ -210,7 +211,7 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
   };
 
   if (!canvas) {
-    console.error("Canvas not found");
+    logError("render", "PNG sequence exporter canvas is missing");
     setStatus("Canvas not found");
     closeExporterWindowSoon();
     return;
@@ -266,7 +267,10 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
     closeExporterWindowSoon();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("PNG sequence export failed:", message);
+    logError("render", "PNG sequence export failed", {
+      jobId,
+      ...toLogErrorData(err),
+    });
     setStatus(`Export failed: ${message}`);
     closeExporterWindowSoon();
   }
@@ -294,7 +298,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
   };
 
   if (!canvas) {
-    console.error("Canvas not found");
+    logError("webm", "exporter canvas is missing");
     setStatus("Canvas not found");
     closeExporterWindowSoon();
     return;
@@ -408,7 +412,6 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       jobId,
       ...toLogErrorData(err),
     });
-    console.error("WebM export failed:", message);
     setStatus(`Export failed: ${message}`);
     window.electronAPI.reportWebmExportProgress({
       jobId,

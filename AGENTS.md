@@ -157,6 +157,9 @@ button / shortcut / timeline
 - `console.log` / `console.table` / per-frame trace は一時調査または debug flag ON の用途に限定し、通常操作で常時出るログを増やさない。
 - `catch {}` の silent ignore は cleanup や browser API の benign failure に限定し、理由コメントを残す。
 - IPC / file IO では、cancel / invalid input / not found / actual failure をできるだけ区別する。新規 IPC では typed result も検討する。
+- 不具合調査では、まず `npm.cmd run log:errors` で warning/error を確認し、流れを見る必要があれば `npm.cmd run log:tail` を使う。
+- scope を絞る場合は `node scripts/show-app-log.mjs --scope asset --lines 200` のように直接実行してよい。
+- Windows の開発ターミナルでは electron-log の console transport が日本語 file name を文字化けさせることがあるため、通常は console transport を使わず log file を読む。必要な場合だけ `MMD_MODOKI_CONSOLE_LOG=1` で有効化する。
 
 TDD 的に進められる範囲では、t-wada 氏の TDD の考え方を参考にしてよいです。ただし、実験機能や描画調査では無理に完全な Red-Green-Refactor を押し切らず、次のように軽量に適用してください。
 

@@ -79,6 +79,7 @@ export type AppLogScope =
     | "timeline"
     | "webm"
     | "physics"
+    | "performance"
     | "render"
     | "shader"
     | "project"
