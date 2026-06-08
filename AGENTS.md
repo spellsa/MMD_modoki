@@ -124,6 +124,40 @@ button / shortcut / timeline
   -> same undo / redo behavior
 ```
 
+## Lint warning 再発防止メモ
+
+今回の warning 解消で多かった原因は、service / controller 切り出し時の `host: any`、Babylon / MMD runtime まわりの `any`、DOM / canvas の non-null assertion、コメントアウト済み debug 関数の未使用化だった。
+
+今後の方針:
+
+- 新規または切り出し service / controller では、`host: any` を原則使わず、同じファイル先頭に最低限の `XxxHost` 型を置く。
+- Babylon / babylon-mmd の実体を完全に型付けしづらい場合は、広い `any` ではなく、小さい `Like` 型、`unknown`、`Record<string, unknown>`、または局所的な internal 型に隔離する。
+- `effect: any`、`material: any`、`model: any`、`mesh: any` が出たら、必要なプロパティだけを持つ局所型へ寄せる。
+- `!` による non-null assertion は増やさず、必要なら `getRequiredElement()` や canvas context helper のような小さい取得関数に寄せる。
+- 調査用 debug 関数は、残すなら feature flag や明示的な呼び出し導線を置く。コメントアウト呼び出しだけになった debug 関数は削除候補にする。
+- debug log / debug flag は、残す場合でも設定、feature flag、明示的な debug mode に寄せる。常時 `true` の調査フラグや大量の `console.log` / `console.table` は、削除または隔離候補として扱う。
+- コメントは処理の逐語説明より、制約、外部ライブラリ都合、描画順、副作用、過去に壊れた理由を書く。
+- 文字化けはコメントだけでなく UI 文言、docs、ログ文言も確認対象にする。意味を復元できないものは、挙動影響を確認して削除または置換する。
+- Frame Graph / PostFX と editor overlay / gizmo / utility layer を触る場合は、最終出力後に overlay が上書きされないか、描画順と実機表示を確認する。
+- lint warning は 20 件程度を超えたら小掃除回を入れ、数百件まで溜めない。
+- warning 対応後は `npm.cmd run lint` を必ず実行し、pure helper / project state / action まわりに触った場合は `npm.cmd run test:unit` も実行する。
+
+特に守る短いルール:
+
+```text
+新規/切り出し service では any host 禁止。
+最低限の XxxHost 型を同じファイル先頭に置く。
+```
+
+## ログ / エラーハンドリング運用
+
+- 新しい `console.*` や `catch` を追加するときは、ユーザー通知、app log、runtime diagnostic、debug trace、silent ignore のどれに分類するか決める。
+- ユーザーに見せる失敗は短い通知にし、原因調査に必要な file path / backend / stack などは `app-logger` / `writeAppLog` の structured data に残す。
+- recoverable fallback や機能 disable は、原則 `logWarn` と runtime diagnostic に残し、即時 toast は作業を止めるものに限定する。
+- `console.log` / `console.table` / per-frame trace は一時調査または debug flag ON の用途に限定し、通常操作で常時出るログを増やさない。
+- `catch {}` の silent ignore は cleanup や browser API の benign failure に限定し、理由コメントを残す。
+- IPC / file IO では、cancel / invalid input / not found / actual failure をできるだけ区別する。新規 IPC では typed result も検討する。
+
 TDD 的に進められる範囲では、t-wada 氏の TDD の考え方を参考にしてよいです。ただし、実験機能や描画調査では無理に完全な Red-Green-Refactor を押し切らず、次のように軽量に適用してください。
 
 - まずテストリストを短く書く。
