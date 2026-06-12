@@ -26,6 +26,7 @@ import { ColorPostFxController } from "./ui/color-postfx-controller";
 import { DofPanelController } from "./ui/dof-panel-controller";
 import { ExperimentalPostFxController } from "./ui/experimental-postfx-controller";
 import { ExportUiController } from "./ui/export-ui-controller";
+import { EffectPanelShellController } from "./ui/effect-panel-shell-controller";
 import { FogPanelController } from "./ui/fog-panel-controller";
 import { LayoutUiController } from "./ui/layout-ui-controller";
 import { LensEffectController } from "./ui/lens-effect-controller";
@@ -171,6 +172,114 @@ type InterpolationCurveClipboard = {
     sourceChannelCount: number;
 };
 
+type FrameGraphPostAddEffectId =
+    | "bloom"
+    | "dof"
+    | "lut"
+    | "ssao"
+    | "ssr"
+    | "vignette"
+    | "grain"
+    | "sharpen"
+    | "chromatic"
+    | "edgeBlur"
+    | "distortion";
+
+type FrameGraphPostAddEffect = {
+    id: FrameGraphPostAddEffectId;
+    label: string;
+    isActive: (manager: MmdManager) => boolean;
+    setActive: (manager: MmdManager, active: boolean) => void;
+};
+
+const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
+    {
+        id: "ssr",
+        label: "SSR",
+        isActive: (manager) => manager.postEffectSsrEnabled,
+        setActive: (manager, active) => { manager.postEffectSsrEnabled = active; },
+    },
+    {
+        id: "ssao",
+        label: "SSAO",
+        isActive: (manager) => manager.postEffectSsaoEnabled,
+        setActive: (manager, active) => { manager.postEffectSsaoEnabled = active; },
+    },
+    {
+        id: "dof",
+        label: "DoF",
+        isActive: (manager) => manager.dofEnabled,
+        setActive: (manager, active) => { manager.dofEnabled = active; },
+    },
+    {
+        id: "bloom",
+        label: "Bloom",
+        isActive: (manager) => manager.postEffectBloomEnabled,
+        setActive: (manager, active) => { manager.postEffectBloomEnabled = active; },
+    },
+    {
+        id: "lut",
+        label: "LUT",
+        isActive: (manager) => manager.postEffectLutEnabled,
+        setActive: (manager, active) => { manager.postEffectLutEnabled = active; },
+    },
+    {
+        id: "sharpen",
+        label: "Sharpen",
+        isActive: (manager) => manager.postEffectSharpenEdge > 0.000001,
+        setActive: (manager, active) => {
+            manager.postEffectSharpenEdge = active ? Math.max(manager.postEffectSharpenEdge, 0.35) : 0;
+        },
+    },
+    {
+        id: "grain",
+        label: "Grain",
+        isActive: (manager) => manager.postEffectGrainIntensity > 0.000001,
+        setActive: (manager, active) => {
+            manager.postEffectGrainIntensity = active ? Math.max(manager.postEffectGrainIntensity, 12) : 0;
+        },
+    },
+    {
+        id: "chromatic",
+        label: "Chroma",
+        isActive: (manager) => manager.postEffectChromaticAberration > 0.000001,
+        setActive: (manager, active) => {
+            manager.postEffectChromaticAberration = active ? Math.max(manager.postEffectChromaticAberration, 24) : 0;
+        },
+    },
+    {
+        id: "vignette",
+        label: "Vignette",
+        isActive: (manager) => manager.postEffectVignetteEnabled,
+        setActive: (manager, active) => { manager.postEffectVignetteEnabled = active; },
+    },
+    {
+        id: "edgeBlur",
+        label: "EdgeBlur",
+        isActive: (manager) => manager.dofLensEdgeBlur > 0.000001,
+        setActive: (manager, active) => {
+            manager.dofLensEdgeBlur = active ? Math.max(manager.dofLensEdgeBlur, 0.2) : 0;
+        },
+    },
+    {
+        id: "distortion",
+        label: "Distort",
+        isActive: (manager) => manager.dofLensDistortionInfluence > 0.000001,
+        setActive: (manager, active) => {
+            manager.dofLensDistortionInfluence = active ? Math.max(manager.dofLensDistortionInfluence, 0.18) : 0;
+        },
+    },
+];
+
+const FRAME_GRAPH_STACK_LUT_PRESETS = [
+    { id: "anime-soft", label: "Anime Soft" },
+    { id: "anime-cool", label: "Anime Cool" },
+    { id: "anime-dramatic", label: "Anime Dramatic" },
+    { id: "monotone", label: "Monotone" },
+    { id: "sepia", label: "Sepia" },
+    { id: "teal-orange", label: "Teal Orange" },
+] as const;
+
 type MmdManagerInternalView = {
     currentModel: (object & RuntimeAnimatableLike) | null;
     modelSourceAnimationsByModel: WeakMap<object, RuntimeModelAnimationLike>;
@@ -252,6 +361,13 @@ export class UIController {
     private shaderResetButton: HTMLButtonElement | null = null;
     private shaderPanelNote: HTMLElement | null = null;
     private shaderMaterialList: HTMLElement | null = null;
+    private postEffectPanelHost: HTMLElement | null = null;
+    private postEffectStackList: HTMLElement | null = null;
+    private postEffectAddPanel: HTMLElement | null = null;
+    private postEffectAddButton: HTMLButtonElement | null = null;
+    private postEffectEnableFrameGraphButton: HTMLButtonElement | null = null;
+    private expandedFrameGraphPostEffectId: FrameGraphPostAddEffectId | null = null;
+    private readonly frameGraphPostStackEffectIds = new Set<FrameGraphPostAddEffectId>();
     private btnInfoKeyframe: HTMLButtonElement | null = null;
     private btnInterpolationKeyframe: HTMLButtonElement | null = null;
     private btnBoneKeyframe: HTMLButtonElement | null = null;
@@ -281,6 +397,7 @@ export class UIController {
     private cameraPanelController: CameraPanelController | null = null;
     private colorPostFxController: ColorPostFxController | null = null;
     private dofPanelController: DofPanelController | null = null;
+    private effectPanelShellController: EffectPanelShellController | null = null;
     private experimentalPostFxController: ExperimentalPostFxController | null = null;
     private exportUiController: ExportUiController | null = null;
     private fogPanelController: FogPanelController | null = null;
@@ -366,6 +483,11 @@ export class UIController {
         this.shaderResetButton = document.getElementById("btn-shader-reset") as HTMLButtonElement | null;
         this.shaderPanelNote = document.getElementById("shader-panel-note");
         this.shaderMaterialList = document.getElementById("shader-material-list");
+        this.postEffectPanelHost = document.getElementById("effect-post-host");
+        this.postEffectStackList = document.getElementById("effect-post-stack-list");
+        this.postEffectAddPanel = document.getElementById("effect-post-add-panel");
+        this.postEffectAddButton = document.getElementById("btn-effect-add-post") as HTMLButtonElement | null;
+        this.postEffectEnableFrameGraphButton = document.getElementById("btn-effect-enable-framegraph") as HTMLButtonElement | null;
 
         this.modelEdgeController = new ModelEdgeController({
             mmdManager: this.mmdManager,
@@ -626,6 +748,9 @@ export class UIController {
             isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
+        this.effectPanelShellController = new EffectPanelShellController();
+        this.effectPanelShellController.setActiveTab("post");
+        this.setupPostEffectAddControls();
         this.lutPanelController = new LutPanelController({
             mmdManager: this.mmdManager,
             getBaseNameForRenderer: (filePath) => this.getBaseNameForRenderer(filePath),
@@ -3005,6 +3130,7 @@ export class UIController {
         this.mmdManager.setBoneVisualizerSelectedBone(null);
         this.updateInfoActionButtons();
         this.bottomPanelLayoutController?.applyMode("camera");
+        this.effectPanelShellController?.setActiveTab("post");
         this.refreshViewportBottomBar();
     }
 
@@ -3336,7 +3462,7 @@ export class UIController {
             !this.shaderApplyAllButton ||
             !this.shaderResetButton ||
             !this.shaderPanelNote ||
-            !this.shaderMaterialList
+            !this.postEffectPanelHost
         ) {
             return;
         }
@@ -3354,7 +3480,7 @@ export class UIController {
         this.shaderPanelNote.textContent = t("shader.camera.note");
         const lutPresetOptionsHtml = this.lutPanelController?.buildPresetOptionsHtml() ?? "";
 
-        this.shaderMaterialList.innerHTML = `
+        this.postEffectPanelHost.innerHTML = `
             <div class="shader-postfx-controls">
                 <div class="effect-row">
                     <span class="effect-label">Backend</span>
@@ -3675,9 +3801,9 @@ export class UIController {
                 </div>
             </div>
         `;
-        applyI18nToDom(this.shaderMaterialList);
+        applyI18nToDom(this.postEffectPanelHost);
 
-        const postFxControls = this.shaderMaterialList.querySelector<HTMLElement>(".shader-postfx-controls");
+        const postFxControls = this.postEffectPanelHost.querySelector<HTMLElement>(".shader-postfx-controls");
         if (
             !postFxControls ||
             !this.colorPostFxController?.connect(postFxControls) ||
@@ -3696,6 +3822,7 @@ export class UIController {
         this.installFrameGraphSsaoControls(postFxControls);
         this.installFrameGraphDofControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
+        this.refreshFrameGraphPostAddUi();
     }
 
     private applyLocalizedUiState(): void {
@@ -3772,16 +3899,681 @@ export class UIController {
 
     private syncPostEffectBackendSelect(): void {
         const select = this.getPostEffectBackendSelectElement();
-        if (!select) return;
         const backend = this.getConfiguredPostEffectBackend();
-        if (select.value !== backend) {
+        if (select && select.value !== backend) {
             select.value = backend;
         }
-        this.applyPostEffectBackendPanelState(select.closest(".shader-postfx-controls") as HTMLElement | null, backend);
+        this.applyPostEffectBackendPanelState(
+            select?.closest(".shader-postfx-controls") as HTMLElement | null,
+            backend,
+        );
+        this.refreshFrameGraphPostAddUi();
     }
 
     private getPostEffectBackendSelectElement(): HTMLSelectElement | null {
-        return this.shaderMaterialList?.querySelector<HTMLSelectElement>('select[data-postfx-select="backend"]') ?? null;
+        return this.postEffectPanelHost?.querySelector<HTMLSelectElement>('select[data-postfx-select="backend"]') ?? null;
+    }
+
+    private setupPostEffectAddControls(): void {
+        this.postEffectAddButton?.addEventListener("click", () => {
+            if (!this.postEffectAddPanel) return;
+            this.postEffectAddPanel.hidden = !this.postEffectAddPanel.hidden;
+            this.refreshFrameGraphPostAddUi();
+        });
+
+        this.postEffectEnableFrameGraphButton?.addEventListener("click", () => {
+            this.switchPostEffectBackendToFrameGraph();
+        });
+
+        this.postEffectAddPanel?.querySelectorAll<HTMLButtonElement>("[data-effect-add-post]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const effectId = button.dataset.effectAddPost ?? "";
+                if (!this.isFrameGraphPostAddEffectId(effectId)) return;
+                this.addFrameGraphPostEffect(effectId);
+            });
+        });
+
+        this.postEffectStackList?.addEventListener("change", (event) => {
+            const input = event.target instanceof HTMLInputElement ? event.target : null;
+            const effectId = input?.dataset.effectStackToggle ?? "";
+            if (!input || !this.isFrameGraphPostAddEffectId(effectId)) return;
+            this.setFrameGraphPostEffectEnabled(effectId, input.checked);
+        });
+
+        this.postEffectStackList?.addEventListener("input", (event) => {
+            const control = event.target instanceof HTMLInputElement ? event.target : null;
+            if (!control?.dataset.effectStackControl) return;
+            this.applyFrameGraphPostStackControl(control, false);
+        });
+
+        this.postEffectStackList?.addEventListener("change", (event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const control = target?.closest<HTMLInputElement | HTMLSelectElement>("[data-effect-stack-control]") ?? null;
+            if (!control) return;
+            this.applyFrameGraphPostStackControl(control, true);
+        });
+
+        this.postEffectStackList?.addEventListener("click", (event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const detailTarget = target?.closest<HTMLButtonElement>("[data-effect-stack-item]") ?? null;
+            if (detailTarget) {
+                const effectId = detailTarget.dataset.effectStackItem ?? "";
+                if (!this.isFrameGraphPostAddEffectId(effectId)) return;
+                this.expandedFrameGraphPostEffectId = this.expandedFrameGraphPostEffectId === effectId ? null : effectId;
+                this.refreshFrameGraphPostAddUi();
+                return;
+            }
+
+            const actionButton = target?.closest<HTMLButtonElement>("[data-effect-stack-action]") ?? null;
+            if (actionButton) {
+                const action = actionButton.dataset.effectStackAction ?? "";
+                void this.applyFrameGraphPostStackAction(action);
+            }
+        });
+
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private isFrameGraphPostAddEffectId(value: string): value is FrameGraphPostAddEffectId {
+        return FRAME_GRAPH_POST_ADD_EFFECTS.some((effect) => effect.id === value);
+    }
+
+    private switchPostEffectBackendToFrameGraph(): void {
+        if (this.getConfiguredPostEffectBackend() === "frameGraph") {
+            this.refreshFrameGraphPostAddUi();
+            return;
+        }
+
+        try {
+            localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, "frameGraph");
+        } catch {
+            this.showToast("FrameGraph backend setting could not be saved", "error");
+            return;
+        }
+
+        this.setStatus("PostFX: Frame Graph / reloading...", true);
+        window.setTimeout(() => {
+            window.location.reload();
+        }, 120);
+    }
+
+    private addFrameGraphPostEffect(effectId: FrameGraphPostAddEffectId): void {
+        if (this.getConfiguredPostEffectBackend() !== "frameGraph") {
+            this.showToast("FrameGraph backend is required", "info");
+            this.refreshFrameGraphPostAddUi();
+            return;
+        }
+
+        this.frameGraphPostStackEffectIds.add(effectId);
+        switch (effectId) {
+            case "bloom":
+                this.mmdManager.postEffectBloomEnabled = true;
+                this.mmdManager.postEffectBloomWeight = Math.max(this.mmdManager.postEffectBloomWeight, 1);
+                break;
+            case "dof":
+                this.mmdManager.dofEnabled = true;
+                break;
+            case "lut":
+                this.mmdManager.postEffectLutEnabled = true;
+                this.mmdManager.postEffectLutIntensity = Math.max(this.mmdManager.postEffectLutIntensity, 1);
+                break;
+            case "ssao":
+                this.mmdManager.postEffectSsaoEnabled = true;
+                this.mmdManager.postEffectSsaoStrength = Math.max(this.mmdManager.postEffectSsaoStrength, 1);
+                this.mmdManager.postEffectSsaoRadius = Math.max(0.01, Math.min(this.mmdManager.postEffectSsaoRadius, 1));
+                this.mmdManager.postEffectSsaoDebugView = false;
+                break;
+            case "ssr":
+                this.mmdManager.postEffectSsrEnabled = true;
+                this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 0.3);
+                break;
+            case "vignette":
+                this.mmdManager.postEffectVignetteEnabled = true;
+                this.mmdManager.postEffectVignetteWeight = Math.max(this.mmdManager.postEffectVignetteWeight, 0.3);
+                break;
+            case "grain":
+                this.mmdManager.postEffectGrainIntensity = Math.max(this.mmdManager.postEffectGrainIntensity, 12);
+                break;
+            case "sharpen":
+                this.mmdManager.postEffectSharpenEdge = Math.max(this.mmdManager.postEffectSharpenEdge, 0.35);
+                break;
+            case "chromatic":
+                this.mmdManager.postEffectChromaticAberration = Math.max(this.mmdManager.postEffectChromaticAberration, 24);
+                break;
+            case "edgeBlur":
+                this.mmdManager.dofLensEdgeBlur = Math.max(this.mmdManager.dofLensEdgeBlur, 0.2);
+                break;
+            case "distortion":
+                this.mmdManager.dofLensDistortionInfluence = Math.max(this.mmdManager.dofLensDistortionInfluence, 0.18);
+                break;
+        }
+
+        this.expandedFrameGraphPostEffectId = effectId;
+        this.refreshFrameGraphPostAddUi();
+        this.showToast(`FrameGraph effect added: ${this.getFrameGraphPostEffectLabel(effectId)}`, "success");
+    }
+
+    private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
+        const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
+        if (!effect) return;
+        this.frameGraphPostStackEffectIds.add(effectId);
+        effect.setActive(this.mmdManager, enabled);
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private getFrameGraphPostEffectLabel(effectId: FrameGraphPostAddEffectId): string {
+        return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.label ?? effectId;
+    }
+
+    private refreshFrameGraphPostAddUi(): void {
+        const backend = this.getConfiguredPostEffectBackend();
+        const frameGraphReady = backend === "frameGraph";
+
+        this.postEffectEnableFrameGraphButton?.toggleAttribute("hidden", frameGraphReady);
+        this.postEffectAddPanel?.querySelectorAll<HTMLButtonElement>("[data-effect-add-post]").forEach((button) => {
+            const effectId = button.dataset.effectAddPost ?? "";
+            const known = this.isFrameGraphPostAddEffectId(effectId);
+            button.disabled = !frameGraphReady || (known && this.isFrameGraphPostEffectInStack(effectId));
+        });
+
+        this.renderFrameGraphPostStack(frameGraphReady);
+    }
+
+    private isFrameGraphPostEffectActive(effectId: FrameGraphPostAddEffectId): boolean {
+        return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.isActive(this.mmdManager) ?? false;
+    }
+
+    private isFrameGraphPostEffectInStack(effectId: FrameGraphPostAddEffectId): boolean {
+        return this.frameGraphPostStackEffectIds.has(effectId) || this.isFrameGraphPostEffectActive(effectId);
+    }
+
+    private escapeEffectStackHtml(value: string): string {
+        return value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    private getFrameGraphPostStackLutSourceLabel(): string {
+        switch (this.mmdManager.postEffectLutSourceMode) {
+            case "external-absolute":
+                return "External";
+            case "project-relative":
+                return "Project";
+            default:
+                return "Builtin";
+        }
+    }
+
+    private buildFrameGraphPostStackLutPresetOptionsHtml(): string {
+        const currentValue = this.mmdManager.postEffectLutSourceMode === "builtin"
+            ? this.mmdManager.postEffectLutPreset
+            : (this.mmdManager.postEffectLutExternalPath ?? this.mmdManager.postEffectLutPreset);
+        const optionsHtml = this.lutPanelController?.buildPresetOptionsHtml()
+            ?? FRAME_GRAPH_STACK_LUT_PRESETS
+                .map((preset) => `<option value="${preset.id}">${preset.label}</option>`)
+                .join("");
+
+        return optionsHtml.replace(
+            `value="${this.escapeEffectStackHtml(currentValue)}"`,
+            `value="${this.escapeEffectStackHtml(currentValue)}" selected`,
+        );
+    }
+
+    private getFrameGraphPostStackLutPresetLabel(): string {
+        if (this.mmdManager.postEffectLutSourceMode !== "builtin" && this.mmdManager.postEffectLutExternalPath) {
+            return this.getBaseNameForRenderer(this.mmdManager.postEffectLutExternalPath);
+        }
+        return this.mmdManager.postEffectLutPreset;
+    }
+
+    private getFrameGraphPostStackDofResolvedModel(): { index: number; name: string; path: string } | null {
+        const targetPath = this.mmdManager.getDofFocusTargetModelPath();
+        if (!targetPath) return null;
+        return this.mmdManager.getLoadedModels().find((model) => model.path === targetPath) ?? null;
+    }
+
+    private buildFrameGraphPostStackDofTargetModelOptionsHtml(): string {
+        const resolvedModel = this.getFrameGraphPostStackDofResolvedModel();
+        const cameraSelected = resolvedModel === null ? " selected" : "";
+        const modelOptions = this.mmdManager.getLoadedModels()
+            .map((model) => {
+                const selected = resolvedModel?.index === model.index ? " selected" : "";
+                return `<option value="${model.index}"${selected}>${this.escapeEffectStackHtml(model.name)}</option>`;
+            })
+            .join("");
+        return `<option value=""${cameraSelected}>Camera</option>${modelOptions}`;
+    }
+
+    private buildFrameGraphPostStackDofTargetBoneOptionsHtml(): string {
+        const resolvedModel = this.getFrameGraphPostStackDofResolvedModel();
+        if (!resolvedModel) {
+            return `<option value="" selected>${this.escapeEffectStackHtml(t("option.none"))}</option>`;
+        }
+
+        const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
+        const boneNames = this.mmdManager.getModelBoneNames(resolvedModel.index);
+        if (boneNames.length === 0) {
+            return `<option value="" selected>${this.escapeEffectStackHtml(t("option.none"))}</option>`;
+        }
+        const selectedBoneName = targetBoneName && boneNames.includes(targetBoneName)
+            ? targetBoneName
+            : this.mmdManager.getPreferredDofFocusBoneName(resolvedModel.index);
+
+        return boneNames.map((boneName) => {
+            const selected = boneName === selectedBoneName ? " selected" : "";
+            return `<option value="${this.escapeEffectStackHtml(boneName)}"${selected}>${this.escapeEffectStackHtml(boneName)}</option>`;
+        }).join("");
+    }
+
+    private getFrameGraphPostStackDofTargetModelLabel(): string {
+        return this.getFrameGraphPostStackDofResolvedModel()?.name ?? "Camera";
+    }
+
+    private getFrameGraphPostStackDofTargetBoneLabel(): string {
+        return this.mmdManager.getDofFocusTargetBoneName() ?? "-";
+    }
+
+    private async applyFrameGraphPostStackAction(action: string): Promise<void> {
+        if (action !== "lutFile") return;
+        await this.lutPanelController?.chooseExternalLut();
+        this.frameGraphPostStackEffectIds.add("lut");
+        this.expandedFrameGraphPostEffectId = "lut";
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private renderFrameGraphPostEffectDetails(effect: FrameGraphPostAddEffect): string {
+        const rows: string[] = [];
+        const controlsDisabled = !effect.isActive(this.mmdManager);
+        const disabledAttr = controlsDisabled ? " disabled" : "";
+        const range = (
+            field: string,
+            label: string,
+            min: number,
+            max: number,
+            value: number,
+            displayValue: string,
+            step = 1,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <input class="effect-layer-control-slider" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-effect-stack-control="${field}"${disabledAttr}>
+                <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
+            </div>
+        `;
+        const select = (
+            field: string,
+            label: string,
+            optionsHtml: string,
+            displayValue: string,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <select class="effect-layer-control-select" data-effect-stack-control="${field}"${disabledAttr}>
+                    ${optionsHtml}
+                </select>
+                <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
+            </div>
+        `;
+        const button = (
+            action: string,
+            label: string,
+            buttonLabel: string,
+            displayValue: string,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <button class="effect-layer-control-button" type="button" data-effect-stack-action="${action}"${disabledAttr}>${buttonLabel}</button>
+                <span class="effect-layer-control-value" data-effect-stack-value="${action}">${displayValue}</span>
+            </div>
+        `;
+
+        switch (effect.id) {
+            case "bloom":
+                rows.push(
+                    range("bloomWeight", "Weight", 0, 200, Math.round(this.mmdManager.postEffectBloomWeight * 100), this.mmdManager.postEffectBloomWeight.toFixed(2)),
+                    range("bloomThreshold", "Threshold", 0, 200, Math.round(this.mmdManager.postEffectBloomThreshold * 100), this.mmdManager.postEffectBloomThreshold.toFixed(2)),
+                    range("bloomKernel", "Kernel", 1, 256, Math.round(this.mmdManager.postEffectBloomKernel), String(Math.round(this.mmdManager.postEffectBloomKernel))),
+                );
+                break;
+            case "dof":
+                rows.push(
+                    select(
+                        "dofTargetModel",
+                        "Target",
+                        this.buildFrameGraphPostStackDofTargetModelOptionsHtml(),
+                        this.getFrameGraphPostStackDofTargetModelLabel(),
+                    ),
+                    select(
+                        "dofTargetBone",
+                        "Bone",
+                        this.buildFrameGraphPostStackDofTargetBoneOptionsHtml(),
+                        this.getFrameGraphPostStackDofTargetBoneLabel(),
+                    ),
+                    range("dofFocus", "Focus", 100, 300000, Math.round(this.mmdManager.dofFocusDistanceMm), `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`, 100),
+                    range("dofFocusOffset", "Offset", -20000, 20000, Math.round(this.mmdManager.dofAutoFocusNearOffsetMm), `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`, 100),
+                    range("dofFStop", "F-Stop", 0, 400, Math.round(this.mmdManager.dofFStop * 100), this.mmdManager.dofFStop.toFixed(2)),
+                    range("dofLensSize", "Lens", 1, 4096, Math.round(this.mmdManager.dofLensSize), String(Math.round(this.mmdManager.dofLensSize))),
+                    range("dofFocalLength", "Focal", 1, 300, Math.round(this.mmdManager.dofFocalLength), String(Math.round(this.mmdManager.dofFocalLength))),
+                );
+                break;
+            case "lut":
+                rows.push(select(
+                    "lutSource",
+                    "Source",
+                    `
+                        <option value="builtin"${this.mmdManager.postEffectLutSourceMode === "builtin" ? " selected" : ""}>Builtin</option>
+                        <option value="external-absolute"${this.mmdManager.postEffectLutSourceMode === "external-absolute" ? " selected" : ""}>External</option>
+                        <option value="project-relative"${this.mmdManager.postEffectLutSourceMode === "project-relative" ? " selected" : ""}>Project</option>
+                    `,
+                    this.getFrameGraphPostStackLutSourceLabel(),
+                ));
+                rows.push(button(
+                    "lutFile",
+                    "File",
+                    "Load",
+                    this.mmdManager.postEffectLutExternalPath
+                        ? this.getBaseNameForRenderer(this.mmdManager.postEffectLutExternalPath)
+                        : t("option.none"),
+                ));
+                rows.push(`
+                    <div class="effect-layer-control-row">
+                        <span class="effect-layer-control-label">Preset</span>
+                        <select class="effect-layer-control-select" data-effect-stack-control="lutPreset"${disabledAttr}>
+                            ${this.buildFrameGraphPostStackLutPresetOptionsHtml()}
+                        </select>
+                        <span class="effect-layer-control-value" data-effect-stack-value="lutPreset">${this.getFrameGraphPostStackLutPresetLabel()}</span>
+                    </div>
+                `);
+                rows.push(range("lutIntensity", "Intensity", 0, 100, Math.round(this.mmdManager.postEffectLutIntensity * 100), this.mmdManager.postEffectLutIntensity.toFixed(2)));
+                break;
+            case "ssao":
+                rows.push(
+                    range("ssaoStrength", "Strength", 0, 100, Math.round(this.mmdManager.postEffectSsaoStrength * 100), this.mmdManager.postEffectSsaoStrength.toFixed(2)),
+                    range("ssaoRadius", "Radius", 1, 100, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
+                    range("ssaoFadeEnd", "FadeEnd", 4, 200, Math.round(this.mmdManager.postEffectSsaoFadeEnd), `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`),
+                );
+                break;
+            case "ssr":
+                rows.push(
+                    range("ssrStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectSsrStrength * 100), this.mmdManager.postEffectSsrStrength.toFixed(2)),
+                    range("ssrStep", "Step", 1, 8, Math.round(this.mmdManager.postEffectSsrStep), String(Math.round(this.mmdManager.postEffectSsrStep))),
+                );
+                break;
+            case "vignette":
+                rows.push(range("vignetteWeight", "Weight", 0, 400, Math.round(this.mmdManager.postEffectVignetteWeight * 100), this.mmdManager.postEffectVignetteWeight.toFixed(2)));
+                break;
+            case "grain":
+                rows.push(range("grainIntensity", "Intensity", 0, 100, Math.round(this.mmdManager.postEffectGrainIntensity), `${Math.round(this.mmdManager.postEffectGrainIntensity)}%`));
+                break;
+            case "sharpen":
+                rows.push(range("sharpenEdge", "Edge", 0, 400, Math.round(this.mmdManager.postEffectSharpenEdge * 100), this.mmdManager.postEffectSharpenEdge.toFixed(2)));
+                break;
+            case "chromatic":
+                rows.push(range("chromaticAberration", "Offset", 0, 200, Math.round(this.mmdManager.postEffectChromaticAberration), `${Math.round(this.mmdManager.postEffectChromaticAberration)}px`));
+                break;
+            case "edgeBlur":
+                rows.push(range("edgeBlur", "Strength", 0, 100, Math.round(this.mmdManager.dofLensEdgeBlur * 100), `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`));
+                break;
+            case "distortion":
+                rows.push(range("distortion", "Influence", 0, 100, Math.round(this.mmdManager.dofLensDistortionInfluence * 100), `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`));
+                break;
+        }
+
+        return `
+            <div class="effect-layer-detail-controls">
+                ${rows.join("")}
+            </div>
+        `;
+    }
+
+    private applyFrameGraphPostStackControl(control: HTMLInputElement | HTMLSelectElement, commit: boolean): void {
+        const field = control.dataset.effectStackControl ?? "";
+        const rawValue = control instanceof HTMLInputElement ? Number(control.value) : control.value;
+
+        switch (field) {
+            case "bloomWeight":
+                this.mmdManager.postEffectBloomWeight = Number(rawValue) / 100;
+                break;
+            case "bloomThreshold":
+                this.mmdManager.postEffectBloomThreshold = Number(rawValue) / 100;
+                break;
+            case "bloomKernel":
+                this.mmdManager.postEffectBloomKernel = Number(rawValue);
+                break;
+            case "dofFocus":
+                if (!this.mmdManager.dofAutoFocusEnabled) {
+                    this.mmdManager.dofFocusDistanceMm = Number(rawValue);
+                }
+                break;
+            case "dofTargetModel": {
+                const modelIndex = Number.parseInt(String(rawValue), 10);
+                if (Number.isNaN(modelIndex)) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                } else {
+                    this.mmdManager.setDofFocusTargetByIndex(
+                        modelIndex,
+                        this.mmdManager.getPreferredDofFocusBoneName(modelIndex),
+                    );
+                }
+                break;
+            }
+            case "dofTargetBone": {
+                const resolvedModel = this.getFrameGraphPostStackDofResolvedModel();
+                if (!resolvedModel) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                } else {
+                    this.mmdManager.setDofFocusTargetByIndex(resolvedModel.index, String(rawValue) || null);
+                }
+                break;
+            }
+            case "dofFocusOffset":
+                this.mmdManager.dofAutoFocusNearOffsetMm = Number(rawValue);
+                break;
+            case "dofFStop":
+                this.mmdManager.dofFStop = Number(rawValue) / 100;
+                break;
+            case "dofLensSize":
+                this.mmdManager.dofLensSize = Number(rawValue);
+                break;
+            case "dofFocalLength":
+                this.mmdManager.dofFocalLength = Number(rawValue);
+                break;
+            case "lutPreset":
+                if (this.mmdManager.postEffectLutSourceMode === "builtin") {
+                    this.mmdManager.postEffectLutPreset = String(rawValue);
+                }
+                break;
+            case "lutSource":
+                if (rawValue === "builtin" || rawValue === "external-absolute" || rawValue === "project-relative") {
+                    this.mmdManager.postEffectLutSourceMode = rawValue;
+                }
+                if (rawValue === "builtin") {
+                    this.mmdManager.setPostEffectExternalLut(null, null, null);
+                }
+                break;
+            case "lutIntensity":
+                this.mmdManager.postEffectLutIntensity = Number(rawValue) / 100;
+                break;
+            case "ssaoStrength":
+                this.mmdManager.postEffectSsaoStrength = Number(rawValue) / 100;
+                this.mmdManager.postEffectSsaoDebugView = false;
+                break;
+            case "ssaoRadius":
+                this.mmdManager.postEffectSsaoRadius = Number(rawValue) / 100;
+                break;
+            case "ssaoFadeEnd":
+                this.mmdManager.postEffectSsaoFadeEnd = Number(rawValue);
+                break;
+            case "ssrStrength":
+                this.mmdManager.postEffectSsrStrength = Number(rawValue) / 100;
+                break;
+            case "ssrStep":
+                this.mmdManager.postEffectSsrStep = Number(rawValue);
+                break;
+            case "vignetteWeight":
+                this.mmdManager.postEffectVignetteWeight = Number(rawValue) / 100;
+                this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.0001;
+                break;
+            case "grainIntensity":
+                this.mmdManager.postEffectGrainIntensity = Number(rawValue);
+                break;
+            case "sharpenEdge":
+                this.mmdManager.postEffectSharpenEdge = Number(rawValue) / 100;
+                break;
+            case "chromaticAberration":
+                this.mmdManager.postEffectChromaticAberration = Number(rawValue);
+                break;
+            case "edgeBlur":
+                this.mmdManager.dofLensEdgeBlur = Number(rawValue) / 100;
+                break;
+            case "distortion":
+                this.mmdManager.dofLensDistortionInfluence = Number(rawValue) / 100;
+                break;
+            default:
+                return;
+        }
+
+        this.updateFrameGraphPostStackControlValue(control);
+        if (commit) {
+            this.refreshFrameGraphPostAddUi();
+        }
+    }
+
+    private updateFrameGraphPostStackControlValue(control: HTMLInputElement | HTMLSelectElement): void {
+        const field = control.dataset.effectStackControl ?? "";
+        const root = control.closest<HTMLElement>(".effect-layer-details");
+        const valueElement = root?.querySelector<HTMLElement>(`[data-effect-stack-value="${field}"]`) ?? null;
+        if (!valueElement) return;
+
+        switch (field) {
+            case "bloomWeight":
+                valueElement.textContent = this.mmdManager.postEffectBloomWeight.toFixed(2);
+                break;
+            case "bloomThreshold":
+                valueElement.textContent = this.mmdManager.postEffectBloomThreshold.toFixed(2);
+                break;
+            case "bloomKernel":
+                valueElement.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
+                break;
+            case "dofFocus":
+                valueElement.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
+                break;
+            case "dofTargetModel":
+                valueElement.textContent = this.getFrameGraphPostStackDofTargetModelLabel();
+                break;
+            case "dofTargetBone":
+                valueElement.textContent = this.getFrameGraphPostStackDofTargetBoneLabel();
+                break;
+            case "dofFocusOffset":
+                valueElement.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
+                break;
+            case "dofFStop":
+                valueElement.textContent = this.mmdManager.dofFStop.toFixed(2);
+                break;
+            case "dofLensSize":
+                valueElement.textContent = String(Math.round(this.mmdManager.dofLensSize));
+                break;
+            case "dofFocalLength":
+                valueElement.textContent = String(Math.round(this.mmdManager.dofFocalLength));
+                break;
+            case "lutPreset":
+                valueElement.textContent = this.getFrameGraphPostStackLutPresetLabel();
+                break;
+            case "lutSource":
+                valueElement.textContent = this.getFrameGraphPostStackLutSourceLabel();
+                break;
+            case "lutIntensity":
+                valueElement.textContent = this.mmdManager.postEffectLutIntensity.toFixed(2);
+                break;
+            case "ssaoStrength":
+                valueElement.textContent = this.mmdManager.postEffectSsaoStrength.toFixed(2);
+                break;
+            case "ssaoRadius":
+                valueElement.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
+                break;
+            case "ssaoFadeEnd":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`;
+                break;
+            case "ssrStrength":
+                valueElement.textContent = this.mmdManager.postEffectSsrStrength.toFixed(2);
+                break;
+            case "ssrStep":
+                valueElement.textContent = String(Math.round(this.mmdManager.postEffectSsrStep));
+                break;
+            case "vignetteWeight":
+                valueElement.textContent = this.mmdManager.postEffectVignetteWeight.toFixed(2);
+                break;
+            case "grainIntensity":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGrainIntensity)}%`;
+                break;
+            case "sharpenEdge":
+                valueElement.textContent = this.mmdManager.postEffectSharpenEdge.toFixed(2);
+                break;
+            case "chromaticAberration":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectChromaticAberration)}px`;
+                break;
+            case "edgeBlur":
+                valueElement.textContent = `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`;
+                break;
+            case "distortion":
+                valueElement.textContent = `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`;
+                break;
+        }
+    }
+
+    private renderFrameGraphPostStack(frameGraphReady: boolean): void {
+        if (!this.postEffectStackList) return;
+        const stackEffects = FRAME_GRAPH_POST_ADD_EFFECTS
+            .filter((effect) => effect.isActive(this.mmdManager) || this.frameGraphPostStackEffectIds.has(effect.id))
+            .slice()
+            .reverse();
+
+        if (!frameGraphReady) {
+            this.expandedFrameGraphPostEffectId = null;
+            this.postEffectStackList.innerHTML = `
+                <div class="effect-layer-placeholder">
+                    <span class="effect-layer-name">FrameGraph backend</span>
+                    <span class="effect-status-badge effect-status-badge--experimental">classic</span>
+                </div>
+            `;
+            return;
+        }
+
+        if (stackEffects.length === 0) {
+            this.expandedFrameGraphPostEffectId = null;
+            this.postEffectStackList.innerHTML = `<div class="panel-empty-state">No post stack</div>`;
+            return;
+        }
+
+        if (!stackEffects.some((effect) => effect.id === this.expandedFrameGraphPostEffectId)) {
+            this.expandedFrameGraphPostEffectId = null;
+        }
+
+        this.postEffectStackList.innerHTML = stackEffects.map((effect) => {
+            const expanded = effect.id === this.expandedFrameGraphPostEffectId;
+            const enabled = effect.isActive(this.mmdManager);
+            return `
+                <div class="effect-layer-placeholder effect-layer-placeholder--active effect-layer-placeholder--check${enabled ? "" : " effect-layer-placeholder--off"}">
+                    <div class="effect-layer-header">
+                        <label class="effect-layer-check-wrap" title="表示 / 非表示">
+                            <input class="effect-layer-check" type="checkbox" data-effect-stack-toggle="${effect.id}"${enabled ? " checked" : ""}>
+                        </label>
+                        <button class="effect-layer-main" type="button" data-effect-stack-item="${effect.id}" aria-expanded="${expanded ? "true" : "false"}">
+                            <span class="effect-layer-name">${effect.label}</span>
+                            <span class="effect-status-badge${enabled ? "" : " effect-status-badge--off"}">${enabled ? "on" : "off"}</span>
+                        </button>
+                    </div>
+                    ${expanded ? `
+                        <div class="effect-layer-details">
+                            ${this.renderFrameGraphPostEffectDetails(effect)}
+                        </div>
+                    ` : ""}
+                </div>
+            `;
+        }).join("");
     }
 
     private installPostEffectBackendControls(root: HTMLElement): void {

@@ -6,9 +6,48 @@
 
 FrameGraph、PostFX、材質シェーダー、外部 WGSL、PBR / OpenPBR、AutoLuminous、Emissive Light Assist、パーティクル、追加ライトなどの検討メモが増えてきたため、Effect 欄の大枠と優先度をここに集約する。
 
+## 現在の実装状態
+
+2026-06-12 時点で、Effect 欄は次の 4 タブ Shell まで実装済み。
+
+```text
+Effect
+
+[効果] [材質] [粒子] [光源]
+```
+
+現在の中身:
+
+- `Post`
+  - compact stack / details UI を主UIとして表示
+  - 既存 Camera PostFX UI は画面表示から外し、互換用 hidden host に退避
+  - `+` から FrameGraph 追加候補パレットを開ける
+  - FrameGraph 追加候補パレットは 3 列表示
+  - FrameGraph backend 有効時、候補選択で既存 PostFX / FrameGraph 設定を ON にする
+  - 追加済みまたは有効な項目を compact stack として表示する
+  - compact stack の先頭 checkbox で ON / OFF できる
+  - checkbox を OFF にしても行は消さず、off 状態で残す
+  - compact stack の effect name 領域で詳細を展開できる
+  - 展開詳細内で主要パラメータを slider / select で直接編集できる
+  - stack / add palette は無彩色 dark gray ベース
+  - 既存 PostFX UI を完全に compact details 化する作業は未完了
+- `Materials`
+  - 既存 shader / material UI を維持
+  - model / material selector、shader preset、material list は既存経路のまま
+- `Particles`
+  - placeholder のみ
+  - runtime 未実装
+- `Lighting`
+  - placeholder のみ
+  - additional light runtime 未実装
+
+関連する実装メモ:
+
+- [Effect Panel UI 実装計画メモ](./effect-panel-ui-implementation-plan-2026-06-12.md)
+
 ## 基本分類
 
-Effect 欄は、まず次の 4 分類で考える。
+Effect 欄は、次の 4 分類で考える。
 
 ```text
 Post
@@ -37,27 +76,32 @@ Lighting
 
 ## UI の大枠
 
+現在の実装では、4 分類をタブとして表示する。
+
 ```text
 Effects
-
-Post
-  FrameGraph Stack
-  [ + Add Post Effect ]
-
-Particles
-  Particle Emitters
-  [ + Add Particle ]
-
-Materials
-  Material / Shader Effects
-  [ + Add Material Effect ]
-
-Lighting
-  Additional Lights
-  [ + Add Light ]
+[効果] [材質] [粒子] [光源]
 ```
 
-最初からすべてを同じ密度で表示しない。各分類には `+` ボタンを置き、追加画面から選ばせる。
+各タブの方針:
+
+```text
+Post
+  FrameGraph / PostFX stack
+  縦積みリスト + 詳細展開
+
+Particles
+  Particle emitter / layer list
+  縦積みリスト + 詳細展開
+
+Materials
+  Target + material inspector
+  既存 shader / material UI を維持
+
+Lighting
+  Additional light list
+  縦積みリスト + 詳細展開
+```
 
 右パネルは横幅が限られるため、横方向に情報を広げる UI は避ける。
 
@@ -65,71 +109,21 @@ Lighting
 
 ```text
 Effects
-[Post] [Particles] [Materials] [Lighting]
+[効果] [材質] [粒子] [光源]
 
-Post
+効果
   Bloom              on  >
   Depth of Field     on  >
   LUT                on  >
   + Add
 ```
 
-- 4 分類はタブで切り替える
 - タブ内は縦長のリストにする
 - 各行は 1 行要約を基本にする
 - 詳細は行の展開、popover、drawer、または別画面で開く
 - 右パネル内に横 2 カラムの詳細 UI を詰め込まない
 - 常時表示する値は、名前、ON/OFF、状態、軽い警告に絞る
 - スライダーや詳細項目は、選択中の項目だけ展開する
-
-Post / Particles / Lighting は、イラストソフトのレイヤーに近い縦積み UI として扱う。
-
-Materials / Shaders は、レイヤーというより対象モデル / アクセサリ / 材質の inspector として扱う。
-
-```text
-Post
-  stack / order based
-
-Particles
-  emitter layer list
-
-Lighting
-  additional light list
-
-Materials
-  target + material inspector
-```
-
-## 追加画面の考え方
-
-`+` ボタンで開く追加画面では、表示順とカテゴリでおすすめ度を表す。
-
-```text
-Recommended
-  通常のMMD動画で使いやすい
-
-Creative
-  映像映えするが調整前提
-
-Technical
-  depth / normal / reflectivity / shader などの前提がある
-
-Experimental
-  壊れる可能性がある、公式機能ほぼ素のまま、研究用
-```
-
-項目には、軽さ、必要リソース、想定用途、危険度を短く表示する。
-
-```text
-Bloom
-  Ready / light / MMD video friendly
-
-SSR
-  Needs normal + depth + reflectivity / heavy / stage
-
-External WGSL
-  Experimental / developer feature
-```
 
 ## Post
 
@@ -160,58 +154,41 @@ Post は、最終的な画面全体にかける効果を扱う。
 - scene color / depth / normal / reflectivity の共有方針を先に整理する
 - Babylon.js 公式 FrameGraph task は、まず Lab / Experimental として追加候補にする
 
-### UI 案
+### 現在
 
-```text
-Post
+現在は compact stack / details を `Post` タブの主UIとしている。
+既存 Camera PostFX UI は表示せず、互換用 hidden host に退避している。
 
-FrameGraph Stack
-  Bloom             on  >
-  Depth of Field    on  >
-  LUT               on  >
-  SSAO              off >
-  [ + ]
-```
+また、`+` から FrameGraph 追加候補を選べる。
 
-1 行に詰める情報:
+現在の候補:
 
-- effect name
-- enabled state
-- ready / missing resource / warning
-- drag handle or menu
+- Bloom
+- DoF
+- LUT
+- SSAO
+- SSR
+- Vignette
+- Grain
+- Sharpen
+- Chroma
+- EdgeBlur
+- Distort
 
-詳細設定は選択中の 1 項目だけ開く。
+compact stack では、先頭 checkbox で ON / OFF を切り替える。
+OFF にした項目も stack からは消さず、off バッジ付きで残す。
 
-```text
-Bloom             on  v
-  intensity
-  threshold
-  radius
-```
+各行の effect name 領域を開くと、主要パラメータの slider / select / button を表示する。
+LUT の source / file load、DoF の target model / bone / focus offset、SSAO fade end なども、いったん詳細内へ移している。
+表示順は、下の項目が先にかかり、上の項目が後から重なるレイヤー型の見え方に寄せる。
 
-追加画面:
+ただし、現時点の順序は固定であり、ユーザーによる入れ替えは未実装。
 
-```text
-Recommended
-  Bloom
-  Depth of Field
-  LUT
+次の整理対象:
 
-Creative
-  Grain
-  Chromatic Aberration
-  Vignette
-  Lens Distortion
-
-Technical
-  SSAO
-  SSR
-  Geometry Buffer Debug
-
-Experimental
-  Official FrameGraph Task
-  Custom PostProcess
-```
+- 詳細内に詰め込んだ項目から、使用頻度の低いものを整理・削減する
+- 既存 PostFX UI を最終的に折りたたむ / Lab 側へ逃がすか検討する
+- 順序入れ替えを task chain / 保存値込みで設計する
 
 ## Particles
 
@@ -236,33 +213,11 @@ Particles は、シーン内に粒子演出を追加する。
 - 外部 Node Particle 読み込みより、組み込みプリセットを先に作る
 - depth / normal / reflectivity への参加は初期目標にしない
 
-### UI 案
+### 現在
 
-```text
-Particles
+`Particles` タブは placeholder のみ。
 
-Particle Emitters
-  Sparkle 01        on  >
-  Dust Background   on  >
-  [ + ]
-```
-
-追加画面:
-
-```text
-Recommended
-  Sparkle
-  Dust
-
-Creative
-  Snow
-  Petal
-  Smoke Light
-  Magic Glow
-
-Experimental
-  Node Particle Asset
-```
+runtime、保存形式、Node Particle 読み込みは未実装。
 
 ## Materials / Shaders
 
@@ -288,60 +243,18 @@ Materials / Shaders は、モデル、アクセサリ、ステージ、床など
 - Shader / Material と PostFX を混ぜない
 - 材質ごとの適用状態を project に保存する
 
-### UI 案
+### 現在
 
-```text
-Materials
+`Materials` タブに既存 shader / material UI を収容している。
 
-Selected Model Materials
-  material list
-  shader preset
-  AutoLuminous
-  PBR / OpenPBR override
-  External WGSL
-```
+現時点では大きく作り直さず、既存の model / material inspector 型 UI を維持する。
 
-Materials は右パネル内で横に広げず、対象選択と inspector を縦に積む。
+今後の候補:
 
-```text
-Materials
-
-Target
-  Model: Miku
-
-Material
-  hair
-  ribbon
-  face
-
-Selected
-  Shader Preset
-  AutoLuminous
-  PBR / OpenPBR
-  External WGSL
-```
-
-追加画面:
-
-```text
-Recommended
-  MMD Standard
-  AutoLuminous
-  Toon Preset
-
-Creative
-  PBR Floor
-  Gloss Highlight
-  Rim Light
-
-Technical
-  OpenPBR Material
-  External WGSL Snippet
-
-Experimental
-  Custom Shader Package
-  Glass / Refraction Research
-```
+- model / accessory 対象統合
+- PBR / OpenPBR override UI
+- AutoLuminous 関連表示の整理
+- 外部 WGSL UI の整理
 
 ## Lighting
 
@@ -368,41 +281,34 @@ Lighting は、シーンの光を増やす、補助する、影を調整する�
 - 面光源は最初から正確な物理 area light を狙わず、演出プリセットとして近似する
 - clustered lighting は多数ライトが必要になってから検証する
 
-### UI 案
+### 現在
 
-```text
-Lighting
+`Lighting` タブは placeholder のみ。
 
-MMD Standard Light
-  direction
-  color
-  intensity
+MMD standard light の詳細 UI は、既存の lighting / shadow UI 側に残っている。
 
-Additional Lights
-  Point Light 01    on   >
-  Emissive Assist   auto >
-  [ + ]
-```
+manual point light、Emissive Light Assist、Clustered Lighting は未実装。
 
-追加画面:
+## 追加画面
+
+`+` ボタンで開く追加画面では、表示順とカテゴリでおすすめ度を表す。
+
+現時点では `+` ボタンは disabled。
+
+将来の分類:
 
 ```text
 Recommended
-  Point Light
-  Soft Point Light
+  通常のMMD動画で使いやすい
 
 Creative
-  Spot Light
-  Window Glow Assist
-  Neon Strip Assist
+  映像映えするが調整前提
 
 Technical
-  Emissive Light Assist
-  Clustered Lighting
+  depth / normal / reflectivity / shader などの前提がある
 
 Experimental
-  Area Light Approximation
-  Textured Area Light Research
+  壊れる可能性がある、公式機能ほぼ素のまま、研究用
 ```
 
 ## 優先順位
@@ -469,6 +375,7 @@ Diagnostics は通常の編集 UI に常時混ぜず、drawer または Lab 画�
 
 ## 関連メモ
 
+- [Effect Panel UI 実装計画メモ](./effect-panel-ui-implementation-plan-2026-06-12.md)
 - [FrameGraph Resource Registry 検討メモ](./frame-graph-resource-registry-note-2026-05-30.md)
 - [Frame Graph Post Effects Plan](./frame-graph-post-effects-plan-2026-04-28.md)
 - [Frame Graph Post Effects Progress](./frame-graph-post-effects-progress-2026-04-28.md)
@@ -487,6 +394,6 @@ Diagnostics は通常の編集 UI に常時混ぜず、drawer または Lab 画�
 
 ## 一言まとめ
 
-Effect 欄は、`Post / Particles / Materials / Lighting` の 4 分類で整理する。
+Effect 欄は、`Post / Materials / Particles / Lighting` の 4 タブ Shell まで実装済み。
 
-v0.2 では Post / FrameGraph の整理を優先し、その上に particle、shader、lighting を段階的に載せる。追加画面では Recommended / Creative / Technical / Experimental の順に並べ、実用機能と実験機能を混ぜすぎないようにする。
+次は `Post` タブ内の既存 PostFX UI を、Bloom / LUT などから compact list + details へ段階的に置き換える。

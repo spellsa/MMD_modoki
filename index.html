@@ -521,28 +521,107 @@
           </svg>
           <span data-i18n="section.effect">エフェクト</span>
         </div>
-        <div class="shader-panel-body">
-          <div class="shader-panel-row">
-            <span class="info-label" data-i18n="label.target">対象</span>
-            <select id="shader-model-select" class="panel-select" disabled>
-              <option value="">-</option>
-            </select>
+        <div class="shader-panel-body effect-panel-root">
+          <div class="effect-panel-tabs" role="tablist" aria-label="Effect categories">
+            <button class="effect-panel-tab effect-panel-tab--active" type="button" role="tab" data-effect-tab="post" aria-selected="true" title="Post Effects">効果</button>
+            <button class="effect-panel-tab" type="button" role="tab" data-effect-tab="materials" aria-selected="false" title="Materials / Shaders">材質</button>
+            <button class="effect-panel-tab" type="button" role="tab" data-effect-tab="particles" aria-selected="false" title="Particles">粒子</button>
+            <button class="effect-panel-tab" type="button" role="tab" data-effect-tab="lighting" aria-selected="false" title="Lighting">光源</button>
           </div>
-          <div class="shader-panel-row">
-            <span class="info-label" data-i18n="label.type">種類</span>
-            <select id="shader-preset-select" class="panel-select" disabled>
-              <option value="">-</option>
-            </select>
-          </div>
-          <div class="shader-panel-actions">
-            <button id="btn-shader-apply-all" class="info-action-btn" type="button" disabled data-i18n="shader.apply.all">全材質へ割り当て</button>
-            <button id="btn-shader-apply-selected" class="info-action-btn" type="button" disabled data-i18n="shader.apply.selected">選択へ割り当て</button>
-            <button id="btn-shader-reset" class="info-action-btn info-action-btn--span-all" type="button" disabled data-i18n="shader.reset.all" hidden>全材質を標準化</button>
-          </div>
-          <div id="shader-panel-note" class="shader-panel-note" data-i18n="empty.loadModel">モデルを読み込んでください</div>
-          <div id="shader-material-list" class="shader-material-list">
-            <div class="panel-empty-state" data-i18n="empty.noModel">No model</div>
-          </div>
+
+          <section class="effect-panel-view" data-effect-tab-view="post">
+            <div class="effect-panel-section-head">
+              <div>
+                <div class="effect-panel-section-title">FrameGraph / Post</div>
+              </div>
+              <button id="btn-effect-add-post" class="effect-panel-add-button" type="button">+</button>
+            </div>
+            <div id="effect-post-add-panel" class="effect-add-panel" hidden>
+              <div class="effect-add-panel-head">
+                <span>FrameGraph</span>
+                <button id="btn-effect-enable-framegraph" class="effect-button" type="button">Enable</button>
+              </div>
+              <div class="effect-add-grid">
+                <button type="button" data-effect-add-post="bloom">Bloom</button>
+                <button type="button" data-effect-add-post="dof">DoF</button>
+                <button type="button" data-effect-add-post="lut">LUT</button>
+                <button type="button" data-effect-add-post="ssao">SSAO</button>
+                <button type="button" data-effect-add-post="ssr">SSR</button>
+                <button type="button" data-effect-add-post="vignette">Vignette</button>
+                <button type="button" data-effect-add-post="grain">Grain</button>
+                <button type="button" data-effect-add-post="sharpen">Sharpen</button>
+                <button type="button" data-effect-add-post="chromatic">Chroma</button>
+                <button type="button" data-effect-add-post="edgeBlur">EdgeBlur</button>
+                <button type="button" data-effect-add-post="distortion">Distort</button>
+              </div>
+            </div>
+            <div id="effect-post-stack-list" class="effect-layer-list effect-layer-list--compact">
+              <div class="panel-empty-state">No post stack</div>
+            </div>
+            <div id="effect-post-host" class="effect-panel-host effect-panel-host--legacy" hidden></div>
+          </section>
+
+          <section class="effect-panel-view" data-effect-tab-view="materials" hidden>
+            <div class="shader-panel-row">
+              <span class="info-label" data-i18n="label.target">対象</span>
+              <select id="shader-model-select" class="panel-select" disabled>
+                <option value="">-</option>
+              </select>
+            </div>
+            <div class="shader-panel-row">
+              <span class="info-label" data-i18n="label.type">種類</span>
+              <select id="shader-preset-select" class="panel-select" disabled>
+                <option value="">-</option>
+              </select>
+            </div>
+            <div class="shader-panel-actions">
+              <button id="btn-shader-apply-all" class="info-action-btn" type="button" disabled data-i18n="shader.apply.all">全材質へ割り当て</button>
+              <button id="btn-shader-apply-selected" class="info-action-btn" type="button" disabled data-i18n="shader.apply.selected">選択へ割り当て</button>
+              <button id="btn-shader-reset" class="info-action-btn info-action-btn--span-all" type="button" disabled data-i18n="shader.reset.all" hidden>全材質を標準化</button>
+            </div>
+            <div id="shader-panel-note" class="shader-panel-note" data-i18n="empty.loadModel">モデルを読み込んでください</div>
+            <div id="shader-material-list" class="shader-material-list">
+              <div class="panel-empty-state" data-i18n="empty.noModel">No model</div>
+            </div>
+          </section>
+
+          <section class="effect-panel-view" data-effect-tab-view="particles" hidden>
+            <div class="effect-panel-section-head">
+              <div>
+                <div class="effect-panel-section-title">Particle Layers</div>
+              </div>
+              <button class="effect-panel-add-button" type="button" disabled>+</button>
+            </div>
+            <div class="effect-layer-list">
+              <div class="effect-layer-placeholder">
+                <span class="effect-layer-name">Sparkle Preset</span>
+                <span class="effect-status-badge effect-status-badge--experimental">planned</span>
+              </div>
+              <div class="effect-layer-placeholder">
+                <span class="effect-layer-name">Node Particle Asset</span>
+                <span class="effect-status-badge effect-status-badge--experimental">lab</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="effect-panel-view" data-effect-tab-view="lighting" hidden>
+            <div class="effect-panel-section-head">
+              <div>
+                <div class="effect-panel-section-title">Lighting Effects</div>
+              </div>
+              <button class="effect-panel-add-button" type="button" disabled>+</button>
+            </div>
+            <div class="effect-layer-list">
+              <div class="effect-layer-placeholder">
+                <span class="effect-layer-name">MMD Standard Light</span>
+                <span class="effect-status-badge">current</span>
+              </div>
+              <div class="effect-layer-placeholder">
+                <span class="effect-layer-name">Emissive Light Assist</span>
+                <span class="effect-status-badge effect-status-badge--experimental">planned</span>
+              </div>
+            </div>
+          </section>
         </div>
       </aside>
 

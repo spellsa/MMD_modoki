@@ -2,84 +2,106 @@
 
 ## 概要
 
-このメモは、MMD_modoki の右側 Effect 欄を、v0.2 世代の UI 方針に合わせて整理し直すための実装計画である。
+このメモは、MMD_modoki の右側 Effect 欄を `Post / Materials / Particles / Lighting` の 4 タブ構成へ整理するための実装計画と、2026-06-12 時点の実装状況をまとめる。
 
-まず UI の箱と操作導線を先に作り、各 effect の中身は後から段階的に移植する。
+方針は「UI の箱を先に作り、既存機能を壊さず収容し、その後で各タブの中身を段階的に実装する」である。
 
-## 前提
+## 現在の実装状態
 
-- Tailwind CSS は導入済み
-- 右パネルは横幅が限られる
-- 既存の shader / post effect / FrameGraph UI は動いている部分があるため、一度に壊さない
-- `index.html` の右パネルは現在 `shader-panel` として作られている
-- Camera target 時の PostFX UI は `UIController.renderShaderCameraPostEffectsPanel()` が大きな HTML 文字列を生成している
-- shader / material 側は `src/ui/shader-panel-controller.ts` が既に持っている
-- DoF / LUT / Bloom / Color / Lens / Fog などは個別 controller へ一部切り出されている
+2026-06-12 時点で、Effect 欄の Shell 実装は入っている。
 
-## 目的
+実装済み:
 
-- Effect 欄を `Post / Particles / Materials / Lighting` の 4 タブに整理する
-- Post / Particles / Lighting は縦積みレイヤー型 UI にする
-- Materials は既存の model / accessory / material inspector 型を維持する
-- まず見た目と構造を作り、runtime 実装は後追いできるようにする
-- 既存 PostFX / Shader の操作経路を壊さず、段階的に置き換える
-- 将来の FrameGraph stack、Particle layer、Additional light list を同じ UI 文法で扱えるようにする
+- 右パネルに 4 タブを追加
+  - `Post`
+  - `Materials`
+  - `Particles`
+  - `Lighting`
+- `Materials` タブに既存の shader / material UI を収容
+- `Post` タブに compact stack / details UI を追加
+- 既存 Camera PostFX UI は画面表示から外し、互換用 hidden host に退避
+- `Post` タブの `+` から FrameGraph 追加候補パレットを開ける
+- FrameGraph 追加候補パレットは 3 列表示
+- FrameGraph backend が Classic の場合は、追加前に FrameGraph へ切り替える導線を出す
+- FrameGraph backend が有効な場合、候補を選ぶと既存の runtime 設定を ON にする
+- 追加済みまたは有効な FrameGraph / PostFX 項目を compact stack として表示する
+- stack 行の先頭に checkbox を置き、ON / OFF を切り替えられる
+- checkbox を OFF にしても行は消さず、off 状態で残す
+- stack 行の effect name 領域から詳細を展開できる
+- 展開詳細内で主要パラメータを slider / select で直接編集できる
+- 効果タブの stack / add palette は無彩色の dark gray ベースに寄せる
+- `Particles` タブに placeholder を追加
+- `Lighting` タブに placeholder を追加
+- 起動時の初期タブは `Post`
+- タブ切り替え用 controller を追加
+- 右パネル幅向けの compact UI CSS を追加
 
-## 完成イメージ
+追加 / 更新ファイル:
+
+- `index.html`
+- `src/index.css`
+- `src/ui-controller.ts`
+- `src/ui/effect-panel-shell-controller.ts`
+
+確認済み:
+
+```powershell
+npm.cmd run lint
+npm.cmd run smoke:launch
+```
+
+`smoke:launch` では `engine=WebGPU`、`physics=Bullet MPR` まで到達した。
+
+## 現在の UI 構造
 
 ```text
 Effect
 
-[Post] [Particles] [Materials] [Lighting]
+[効果] [材質] [粒子] [光源]
 
-Post
-  FrameGraph Stack
-  Bloom              on   >
-  Depth of Field     on   >
-  LUT                on   >
-  SSAO               off  !
-  + Add
+効果
+  FrameGraph / Post
+  + button
+  FrameGraph add palette
+  Active stack list with checkbox
+  Legacy Camera PostFX controls
 
-Particles
-  Sparkle 01         on   >
-  Dust Background    off  >
-  + Add
-
-Materials
+材質
   Target
-  Material List
-  Selected Material Settings
+  Shader preset
+  Apply buttons
+  Material list
 
-Lighting
-  MMD Standard Light on   >
-  Point Light 01     off  >
-  Emissive Assist    auto >
-  + Add
+粒子
+  Particle Layers
+  Sparkle Preset     planned
+  Node Particle      lab
+  + button disabled
+
+光源
+  Lighting Effects
+  MMD Standard Light current
+  Emissive Assist    planned
+  + button disabled
 ```
+
+`Post / Particles / Lighting` は、将来的にイラストソフトのレイヤーに近い縦積み UI として育てる。
+
+`Materials` は、現時点では既存の model / material inspector 型 UI を維持する。
 
 ## 実装方針
 
-### 1. Shell first
+### Shell first
 
 最初に Effect panel の外枠を作る。
 
-この段階では、すべての実機能を移植しない。
+この段階では、すべての effect runtime を移植しない。既存 UI を一度 Shell の中へ入れ、見た目と導線を整理する。
 
-作るもの:
+現在この段階は実装済み。
 
-- 4 タブ
-- タブ切り替え状態
-- 縦リスト UI
-- compact item
-- selected / expanded item
-- `+ Add` button
-- empty / coming soon state
-- Materials タブ内に既存 shader UI を置く領域
-- Post タブ内に既存 PostFX UI を置く領域
+### Existing UI bridge
 
-### 2. Existing UI bridge
-
-既存 UI を一度に消さず、新しい Shell の中に差し込む。
+既存 UI を消さず、新しい Shell の中に差し込む。
 
 ```text
 EffectPanelShell
@@ -96,18 +118,18 @@ EffectPanelShell
     Placeholder
 ```
 
-これにより、見た目の整理と機能移植を分離する。
+現在この段階は実装済み。
 
-### 3. Progressive replacement
+### Progressive replacement
 
-Post タブから順に、既存の大きな HTML 文字列を compact list + details へ分解する。
+次の段階では、`Post` タブから順に既存 PostFX UI を compact list + details へ分解する。
 
-最初の対象:
+最初の候補:
 
 - Backend
 - Bloom
-- DoF
 - LUT
+- DoF
 - SSAO
 - SSR
 
@@ -122,79 +144,27 @@ Post タブから順に、既存の大きな HTML 文字列を compact list + de
 - Fog
 - hidden / experimental rows
 
-## コンポーネント案
+## 実装済み詳細
 
-React は使わず、既存の DOM controller 方針に合わせる。
+### `src/ui/effect-panel-shell-controller.ts`
 
-ただし、UI 生成単位は小さく分ける。
-
-```text
-src/ui/effect-panel-shell-controller.ts
-src/ui/effect-panel-ui.ts
-src/ui/effect-panel-types.ts
-```
-
-### `effect-panel-types.ts`
-
-```ts
-export type EffectPanelTabId = "post" | "particles" | "materials" | "lighting";
-
-export type EffectItemStatus = "ready" | "warning" | "missing" | "experimental" | "disabled";
-
-export type EffectCompactItem = {
-    id: string;
-    label: string;
-    enabled?: boolean;
-    status?: EffectItemStatus;
-    summary?: string;
-    expanded?: boolean;
-};
-```
-
-この型は UI 表示用に限定する。Babylon object や MMD model 実体は入れない。
-
-### `effect-panel-ui.ts`
-
-DOM 生成 helper を置く。
-
-候補:
-
-- `createEffectTabs()`
-- `createEffectCompactItem()`
-- `createEffectListSection()`
-- `createEffectEmptyState()`
-- `createEffectAddButton()`
-- `setEffectTabActive()`
-
-### `effect-panel-shell-controller.ts`
-
-タブ状態、host の差し替え、placeholder 表示を担当する。
+タブ状態だけを持つ小さな controller。
 
 責務:
 
-- 初期化
-- タブ切り替え
-- active tab の保存候補
-- legacy host の配置
-- placeholder の表示
-- later: add dialog を開く
+- `data-effect-tab` の click を受ける
+- active tab の CSS class / `aria-selected` を同期する
+- `data-effect-tab-view` の `hidden` を切り替える
 
-## HTML 方針
+この controller は Babylon object、MMD model 実体、project state を持たない。
 
-`index.html` の右パネルは、まず shell 用の host を置く。
+### `index.html`
 
-```html
-<aside id="shader-panel">
-  <div class="panel-header">...</div>
-  <div id="effect-panel-root" class="effect-panel-root">
-    ...
-  </div>
-</aside>
-```
+既存の `#shader-panel` を維持したまま、内部を 4 タブ構成へ変更した。
 
-既存の `shader-model-select` などは、最初は削除せず、Materials tab の legacy host に移す。
+既存 shader UI が依存する DOM id は維持している。
 
-最初の安全策として、既存 DOM id は維持する。
+維持した id:
 
 ```text
 shader-model-select
@@ -206,117 +176,95 @@ shader-panel-note
 shader-material-list
 ```
 
-既存 controller が `document.getElementById()` で取っているため、id を変える場合は controller 側の修正が必要になる。初回は id 維持を優先する。
-
-## CSS / Tailwind 方針
-
-Tailwind utilities を使いつつ、既存 CSS と衝突しないよう、最初は `effect-panel-*` の薄いクラスを作る。
-
-方針:
-
-- 右パネル内は compact density
-- row height は小さめ
-- タブは横スクロールしない範囲に収める
-- 1 行要約を基本にする
-- details は選択項目だけ表示する
-- card の入れ子にしない
-- 見た目の主張を強くしすぎない
-
-候補 class:
+新規追加:
 
 ```text
-effect-panel-root
+effect-post-host
+effect-post-stack-list
+effect-post-add-panel
+data-effect-tab
+data-effect-tab-view
+```
+
+### `src/ui-controller.ts`
+
+`EffectPanelShellController` を初期化し、起動時は `Post` タブを開く。
+
+```text
+initial -> Post
+```
+
+また、`renderShaderCameraPostEffectsPanel()` の描画先を `shader-material-list` から `effect-post-host` へ移した。
+
+その後、stack details 側で主要パラメータを直接編集できるようになったため、`effect-post-host` は hidden な互換ホストとして扱う。
+これにより、Camera PostFX UI が Materials の material list を上書きせず、Post タブ内も旧UIで狭くならない構成になった。
+
+`FRAME_GRAPH_POST_ADD_EFFECTS` に、追加候補、ON / OFF 判定、既定の ON / OFF 切り替えを集約している。
+
+compact stack の詳細表示には、各 effect の主要パラメータを直接操作する slider / select を表示する。
+入力中は stack 詳細内の値表示だけを更新し、change 時に stack details を再描画して同期する。
+
+現時点で詳細内から直接編集できる項目:
+
+- Bloom: weight / threshold / kernel
+- DoF: target model / target bone / focus / focus offset / f-stop / lens size / focal length
+- LUT: source / file load / preset / intensity
+- SSAO: strength / radius / fade end
+- SSR: strength / step
+- Vignette: weight
+- Grain: intensity
+- Sharpen: edge
+- Chroma: offset
+- EdgeBlur: strength
+- Distort: influence
+
+### `src/index.css`
+
+右パネル向けの compact UI を追加した。
+
+主な class:
+
+```text
 effect-panel-tabs
 effect-panel-tab
 effect-panel-tab--active
 effect-panel-view
+effect-panel-section-head
+effect-panel-host
 effect-layer-list
-effect-layer-item
-effect-layer-item--expanded
-effect-layer-summary
-effect-layer-details
-effect-add-row
+effect-layer-placeholder
 effect-status-badge
 ```
 
-既存 `.effect-row` は PostFX 内部で使われているため、急に消さない。
+既存 `.effect-row` は PostFX 内部で使われているため、削除していない。
 
-## タブごとの初期状態
+## まだ実装していないこと
 
-### Post
+### Add 画面
 
-最初は既存 PostFX UI を入れる。
+`Post` タブの `+` ボタンは実装済み。
 
-Phase 2 以降で FrameGraph Stack 表示へ置き換える。
+現在追加できる候補:
 
-初期表示:
+- Bloom
+- DoF
+- LUT
+- SSAO
+- SSR
+- Vignette
+- Grain
+- Sharpen
+- Chroma
+- EdgeBlur
+- Distort
 
-```text
-Post
-  Backend
-  Legacy PostFX controls
-```
+FrameGraph backend が Classic の場合は、追加ボタンを disabled にし、FrameGraph へ切り替えるボタンを表示する。
 
-将来:
+Particles / Lighting の `+` ボタンはまだ disabled。
 
-```text
-FrameGraph Stack
-  Bloom
-  DoF
-  LUT
-  SSAO
-  SSR
-```
+後続で分類ごとの追加画面を作る。
 
-### Particles
-
-最初は空の placeholder。
-
-```text
-Particle Effects
-  Coming later
-  + Add Particle
-```
-
-`+ Add Particle` は disabled または Experimental badge 表示にする。
-
-### Materials
-
-既存 shader / material UI をここに置く。
-
-大きく作り直さない。
-
-初期表示:
-
-```text
-Target
-Shader preset
-Apply buttons
-Material list
-```
-
-後で model / accessory 統合 selector を検討する。
-
-### Lighting
-
-最初は空の placeholder と MMD Standard Light への導線だけ置く。
-
-```text
-Lighting
-  MMD Standard Light
-  Additional Lights
-  + Add Light
-```
-
-`+ Add Light` は disabled または Experimental badge 表示にする。
-
-## Add 画面
-
-初回実装では Add 画面は作らない。
-
-まず `+ Add` ボタンの位置と disabled / coming soon 表示だけ作る。
-
-後続で、分類ごとに追加画面を作る。
+分類案:
 
 ```text
 Recommended
@@ -325,106 +273,105 @@ Technical
 Experimental
 ```
 
-## 実装ステップ
+### Post compact list
 
-### Step 0: 現状固定
+現時点の `Post` タブは、既存 Camera PostFX UI を表示せず、compact stack / details を主UIとしている。
 
-- `index.html` の Effect panel DOM を確認
-- `UIController.renderShaderCameraPostEffectsPanel()` の出力範囲を確認
-- `ShaderPanelController` が依存する DOM id を確認
-- 既存の `effect-row` / `shader-panel-*` CSS を触る範囲を決める
+次は、Bloom / LUT などから compact item 化する。
 
-### Step 1: docs / design lock
+### FrameGraph Stack
 
-- [Effect Panel 整理構想メモ](./effect-panel-organization-concept-2026-06-12.md) を実装方針の基準にする
-- このメモを作業計画として扱う
+FrameGraph / PostFX の有効状態を stack として見せる UI は実装済み。
 
-### Step 2: Shell controller 追加
+現在は固定の FrameGraph 順をもとに、下が先にかかり、上が後から重なる見た目で表示する。
 
-- `src/ui/effect-panel-types.ts`
-- `src/ui/effect-panel-ui.ts`
-- `src/ui/effect-panel-shell-controller.ts`
+```text
+later / upper
+  Distort
+  EdgeBlur
+  Vignette
+  Chroma
+  Grain
+  Sharpen
+  LUT
+  Bloom
+  DoF
+  SSAO
+  SSR
+earlier / lower
+```
 
-この段階では runtime setter に触らない。
+実際の順序入れ替えは未実装。
 
-### Step 3: HTML host 追加
+理由:
 
-- `index.html` の右パネルに tab shell 用 root を追加
-- 既存 shader DOM id は維持する
-- Materials tab に既存 shader UI を置く
+- 現在の `FrameGraphPostEffectsController` は固定順で task chain を組んでいる
+- UI だけ順序変更できると、見た目と実行順がずれる
+- 順序入れ替えを入れる場合は、保存値、task chain 再構築、出力確認をセットで扱う必要がある
 
-### Step 4: CSS 追加
+### Particles runtime
 
-- compact tab
-- compact list
-- item row
-- details area
-- empty state
+`Particles` タブは placeholder のみ。
 
-Tailwind utilities と既存 CSS の混在で作る。
+実 runtime、project 保存、Node Particle 読み込みは未実装。
 
-### Step 5: UIController へ接続
+### Lighting runtime
 
-- `EffectPanelShellController` を初期化
-- `ShaderPanelController` が参照する DOM が引き続き存在することを確認
-- Camera target / model target 切り替え時に tab が不自然に消えないようにする
+`Lighting` タブは placeholder のみ。
 
-### Step 6: Post tab に legacy host を表示
+追加 point light、Emissive Light Assist、clustered lighting は未実装。
 
-- camera target 時の PostFX UI を Post tab に表示する
-- model target 時でも Post tab を開けるようにするかは別途判断
-- 既存の `renderShaderCameraPostEffectsPanel()` は初回では大きく分解しない
+### Materials の再整理
 
-### Step 7: Materials tab に existing shader UI を表示
+`Materials` タブは既存 UI を維持している。
 
-- model target 時の既存 shader UI を Materials tab に表示
-- camera target 時でも Materials tab の空表示を出す
+今後の候補:
 
-### Step 8: Placeholder tab
+- model / accessory の対象統合
+- PBR / OpenPBR override
+- AutoLuminous 関連表示の整理
+- 外部 WGSL の UI 整理
 
-- Particles tab
-- Lighting tab
+## 今後の推奨ステップ
 
-coming soon / experimental placeholder を表示する。
-
-### Step 9: Post compact list PoC
+### Step 1: Post compact list PoC
 
 既存 PostFX UI のうち、壊しにくいものから compact item 化する。
 
-最初の候補:
+候補:
 
 - Bloom
 - LUT
 
 理由:
 
-- 既存 controller が比較的独立している
 - ON/OFF と主要 slider が分かりやすい
-- 映像上の効果が確認しやすい
+- 既存 controller が比較的独立している
+- 映像上の変化を確認しやすい
 
-### Step 10: FrameGraph Stack 表示
+### Step 2: FrameGraph backend 表示整理
 
-FrameGraph backend 用に stack 表示を作る。
+FrameGraph backend が有効なときの stack / resource 状態を表示する。
 
-初期は順序変更なしでよい。
+まずは表示だけでよい。
 
-```text
-FrameGraph Stack
-  Image
-  SSR
-  SSAO
-  DoF
-  Bloom
-  LUT
-  Color
-  FXAA
-```
+### Step 3: Add 画面 PoC
 
-後続で ON/OFF、順序変更、official task palette を検討する。
+`Post` の `+` から、既存 effect の追加候補を表示する。
 
-## 触らないもの
+初期は実際の追加処理なしでもよい。
 
-初回では以下を触らない。
+### Step 4: Particles / Lighting placeholder の詳細化
+
+実装予定項目を placeholder から compact row 表示へ寄せる。
+
+### Step 5: project save / load
+
+Particles / Lighting / custom effect を実装する段階で、project state の保存形式を追加する。
+
+## 触らない方針
+
+現時点では以下を触らない。
 
 - project save format
 - runtime effect behavior
@@ -435,65 +382,41 @@ FrameGraph Stack
 - PBR / OpenPBR の実装
 - Classic PostProcess の削除
 
-## 確認項目
-
-UI shell 実装時:
-
-- Effect panel を開閉できる
-- panel width resize が壊れていない
-- Post / Particles / Materials / Lighting タブを切り替えられる
-- Materials tab で既存 shader model selector が動く
-- Post tab で既存 PostFX controls が動く
-- model target / camera target 切り替えで表示が破綻しない
-- locale 切り替えで既存文言が崩れない
-- 右パネル幅 244px 付近でもテキストがはみ出さない
-
-可能なら実行:
-
-```powershell
-npm.cmd run lint
-npm.cmd run smoke:launch
-```
-
-DOM に依存しない helper を作った場合:
-
-```powershell
-npm.cmd run test:unit
-```
-
 ## リスク
 
 ### 既存 DOM id 依存
 
-既存 controller は `document.getElementById()` と `querySelector()` に強く依存している。id を変更すると一気に壊れる。
+既存 controller は `document.getElementById()` と `querySelector()` に依存している。
 
-初回は id を維持する。
+初回実装では id を維持した。今後 id を変える場合は、controller 側の依存整理を先に行う。
 
 ### `renderShaderCameraPostEffectsPanel()` の巨大 HTML
 
-この関数は PostFX UI の多くを一括生成している。最初から分割しようとすると、イベント接続と refresh が壊れやすい。
+PostFX UI の多くは、まだ `UIController.renderShaderCameraPostEffectsPanel()` の大きな HTML 文字列で生成されている。
 
-まず legacy host として包む。
+次の整理対象はここ。
 
-### Model / Camera target の混線
+### Model / Camera target と tab selection
 
-現在の Effect 欄は target によって shader UI / camera postfx UI が切り替わる。
+現在は起動時に `Post` タブを開く。
 
-新 UI では target 切り替えと tab 切り替えが別軸になるため、どちらが表示を支配するかを明確にする必要がある。
+```text
+initial -> Post
+```
 
-初期方針:
+手動で別タブを開くことはできる。
 
-- tab selection が表示カテゴリを決める
-- target selection は Materials の対象や DoF focus target など、各 tab 内の入力として扱う
+モデル編集中でも自動で `Materials` へ飛ばさない。
+今後、target に応じた案内が必要になった場合は、タブ自動切り替えではなく軽い通知やバッジで扱う。
 
 ### 右パネル幅
 
-横に広い UI を入れるとすぐ破綻する。
+右パネルは狭いため、横 2 カラムの詳細 UI は避ける。
 
 1 行要約、選択項目だけ展開、詳細は drawer / popup に逃がす方針を守る。
 
 ## 一言まとめ
 
-Effect 欄の整理は、まず UI shell と 4 タブを作り、既存 PostFX / Shader UI をその中に一時収容する。
+Effect 欄は、4 タブ Shell と legacy UI bridge まで実装済み。
 
-その後、Post から compact list / FrameGraph stack へ段階移植し、Particles と Lighting は placeholder から始める。
+次は `Post` タブ内の既存 PostFX UI を、Bloom / LUT などから compact list + details へ段階的に置き換える。
