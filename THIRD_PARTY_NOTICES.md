@@ -3,7 +3,7 @@
 This project includes third-party software.
 Each component remains licensed by its original author under its own license.
 
-Last updated: 2026-05-17
+Last updated: 2026-06-13
 
 ## Runtime dependencies
 
@@ -30,6 +30,7 @@ Last updated: 2026-05-17
 | `@electron-forge/plugin-fuses` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron-forge/plugin-vite` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron/fuses` | `1.8.0` | MIT | https://github.com/electron/fuses |
+| `@tailwindcss/vite` | `4.3.0` | MIT | https://github.com/tailwindlabs/tailwindcss |
 | `@types/electron-squirrel-startup` | `1.0.2` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | `@types/node` | `25.2.3` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | `@typescript-eslint/eslint-plugin` | `5.62.0` | MIT | https://github.com/typescript-eslint/typescript-eslint |
@@ -37,6 +38,7 @@ Last updated: 2026-05-17
 | `electron` | `40.4.1` | MIT | https://github.com/electron/electron |
 | `eslint` | `8.57.1` | MIT | https://github.com/eslint/eslint |
 | `eslint-plugin-import` | `2.32.0` | MIT | https://github.com/import-js/eslint-plugin-import |
+| `tailwindcss` | `4.3.0` | MIT | https://github.com/tailwindlabs/tailwindcss |
 | `typescript` | `5.9.3` | Apache-2.0 | https://github.com/microsoft/TypeScript |
 | `vite` | `7.3.3` | MIT | https://github.com/vitejs/vite |
 | `vitest` | `4.1.6` | MIT | https://github.com/vitest-dev/vitest |
