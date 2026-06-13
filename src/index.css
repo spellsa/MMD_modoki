@@ -2438,9 +2438,8 @@ body.file-drag-active #viewport-container {
 
 .effect-layer-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
   min-width: 0;
   width: 100%;
   min-height: 20px;
@@ -2536,13 +2535,25 @@ body.file-drag-active #viewport-container {
   height: 22px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  background: rgba(0, 0, 0, 0.24);
+  color: #f8fafc;
+  background: #050608;
   font-size: 10px;
+  color-scheme: dark;
 }
 
 .effect-layer-control-select:disabled {
   opacity: 0.5;
+}
+
+.effect-layer-control-select option,
+.effect-layer-control-select optgroup {
+  color: #f8fafc;
+  background: #050608;
+}
+
+.effect-layer-control-select option:disabled {
+  color: #64748b;
+  background: #111318;
 }
 
 .effect-layer-control-button {
@@ -2602,12 +2613,6 @@ body.file-drag-active #viewport-container {
   border-color: rgba(251, 191, 36, 0.25);
   color: #fbbf24;
   background: rgba(245, 158, 11, 0.08);
-}
-
-.effect-status-badge--off {
-  color: var(--text-tertiary);
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.035);
 }
 
 .shader-panel-row {

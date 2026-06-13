@@ -228,7 +228,7 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         label: "Sharpen",
         isActive: (manager) => manager.postEffectSharpenEdge > 0.000001,
         setActive: (manager, active) => {
-            manager.postEffectSharpenEdge = active ? Math.max(manager.postEffectSharpenEdge, 0.35) : 0;
+            if (!active) manager.postEffectSharpenEdge = 0;
         },
     },
     {
@@ -236,7 +236,7 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         label: "Grain",
         isActive: (manager) => manager.postEffectGrainIntensity > 0.000001,
         setActive: (manager, active) => {
-            manager.postEffectGrainIntensity = active ? Math.max(manager.postEffectGrainIntensity, 12) : 0;
+            if (!active) manager.postEffectGrainIntensity = 0;
         },
     },
     {
@@ -244,7 +244,7 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         label: "Chroma",
         isActive: (manager) => manager.postEffectChromaticAberration > 0.000001,
         setActive: (manager, active) => {
-            manager.postEffectChromaticAberration = active ? Math.max(manager.postEffectChromaticAberration, 24) : 0;
+            if (!active) manager.postEffectChromaticAberration = 0;
         },
     },
     {
@@ -258,7 +258,7 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         label: "EdgeBlur",
         isActive: (manager) => manager.dofLensEdgeBlur > 0.000001,
         setActive: (manager, active) => {
-            manager.dofLensEdgeBlur = active ? Math.max(manager.dofLensEdgeBlur, 0.2) : 0;
+            if (!active) manager.dofLensEdgeBlur = 0;
         },
     },
     {
@@ -266,7 +266,7 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         label: "Distort",
         isActive: (manager) => manager.dofLensDistortionInfluence > 0.000001,
         setActive: (manager, active) => {
-            manager.dofLensDistortionInfluence = active ? Math.max(manager.dofLensDistortionInfluence, 0.18) : 0;
+            if (!active) manager.dofLensDistortionInfluence = 0;
         },
     },
 ];
@@ -3997,6 +3997,52 @@ export class UIController {
         }, 120);
     }
 
+    private applyFrameGraphPostEffectDefaultValues(effectId: FrameGraphPostAddEffectId): void {
+        switch (effectId) {
+            case "bloom":
+                this.mmdManager.postEffectBloomWeight = Math.max(this.mmdManager.postEffectBloomWeight, 1);
+                this.mmdManager.postEffectBloomThreshold = Math.max(this.mmdManager.postEffectBloomThreshold, 1);
+                this.mmdManager.postEffectBloomKernel = Math.max(this.mmdManager.postEffectBloomKernel, 128);
+                break;
+            case "dof":
+                this.mmdManager.dofFStop = Math.min(this.mmdManager.dofFStop, 2.8);
+                this.mmdManager.dofLensSize = Math.max(this.mmdManager.dofLensSize, 30);
+                this.mmdManager.dofFocalLength = Math.max(this.mmdManager.dofFocalLength, 50);
+                break;
+            case "lut":
+                this.mmdManager.postEffectLutIntensity = Math.max(this.mmdManager.postEffectLutIntensity, 1);
+                break;
+            case "ssao":
+                this.mmdManager.postEffectSsaoStrength = Math.max(this.mmdManager.postEffectSsaoStrength, 1);
+                this.mmdManager.postEffectSsaoRadius = Math.max(this.mmdManager.postEffectSsaoRadius, 1);
+                this.mmdManager.postEffectSsaoFadeEnd = Math.min(this.mmdManager.postEffectSsaoFadeEnd, 100);
+                this.mmdManager.postEffectSsaoDebugView = false;
+                break;
+            case "ssr":
+                this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 1);
+                this.mmdManager.postEffectSsrStep = Math.max(this.mmdManager.postEffectSsrStep, 4);
+                break;
+            case "vignette":
+                this.mmdManager.postEffectVignetteWeight = Math.max(this.mmdManager.postEffectVignetteWeight, 2);
+                break;
+            case "grain":
+                this.mmdManager.postEffectGrainIntensity = Math.max(this.mmdManager.postEffectGrainIntensity, 50);
+                break;
+            case "sharpen":
+                this.mmdManager.postEffectSharpenEdge = Math.max(this.mmdManager.postEffectSharpenEdge, 2);
+                break;
+            case "chromatic":
+                this.mmdManager.postEffectChromaticAberration = Math.max(this.mmdManager.postEffectChromaticAberration, 100);
+                break;
+            case "edgeBlur":
+                this.mmdManager.dofLensEdgeBlur = Math.max(this.mmdManager.dofLensEdgeBlur, 0.5);
+                break;
+            case "distortion":
+                this.mmdManager.dofLensDistortionInfluence = Math.max(this.mmdManager.dofLensDistortionInfluence, 0.5);
+                break;
+        }
+    }
+
     private addFrameGraphPostEffect(effectId: FrameGraphPostAddEffectId): void {
         if (this.getConfiguredPostEffectBackend() !== "frameGraph") {
             this.showToast("FrameGraph backend is required", "info");
@@ -4005,46 +4051,35 @@ export class UIController {
         }
 
         this.frameGraphPostStackEffectIds.add(effectId);
+        this.applyFrameGraphPostEffectDefaultValues(effectId);
         switch (effectId) {
             case "bloom":
                 this.mmdManager.postEffectBloomEnabled = true;
-                this.mmdManager.postEffectBloomWeight = Math.max(this.mmdManager.postEffectBloomWeight, 1);
                 break;
             case "dof":
                 this.mmdManager.dofEnabled = true;
                 break;
             case "lut":
                 this.mmdManager.postEffectLutEnabled = true;
-                this.mmdManager.postEffectLutIntensity = Math.max(this.mmdManager.postEffectLutIntensity, 1);
                 break;
             case "ssao":
                 this.mmdManager.postEffectSsaoEnabled = true;
-                this.mmdManager.postEffectSsaoStrength = Math.max(this.mmdManager.postEffectSsaoStrength, 1);
-                this.mmdManager.postEffectSsaoRadius = Math.max(0.01, Math.min(this.mmdManager.postEffectSsaoRadius, 1));
-                this.mmdManager.postEffectSsaoDebugView = false;
                 break;
             case "ssr":
                 this.mmdManager.postEffectSsrEnabled = true;
-                this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 0.3);
                 break;
             case "vignette":
                 this.mmdManager.postEffectVignetteEnabled = true;
-                this.mmdManager.postEffectVignetteWeight = Math.max(this.mmdManager.postEffectVignetteWeight, 0.3);
                 break;
             case "grain":
-                this.mmdManager.postEffectGrainIntensity = Math.max(this.mmdManager.postEffectGrainIntensity, 12);
                 break;
             case "sharpen":
-                this.mmdManager.postEffectSharpenEdge = Math.max(this.mmdManager.postEffectSharpenEdge, 0.35);
                 break;
             case "chromatic":
-                this.mmdManager.postEffectChromaticAberration = Math.max(this.mmdManager.postEffectChromaticAberration, 24);
                 break;
             case "edgeBlur":
-                this.mmdManager.dofLensEdgeBlur = Math.max(this.mmdManager.dofLensEdgeBlur, 0.2);
                 break;
             case "distortion":
-                this.mmdManager.dofLensDistortionInfluence = Math.max(this.mmdManager.dofLensDistortionInfluence, 0.18);
                 break;
         }
 
@@ -4057,6 +4092,9 @@ export class UIController {
         const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
         if (!effect) return;
         this.frameGraphPostStackEffectIds.add(effectId);
+        if (enabled) {
+            this.applyFrameGraphPostEffectDefaultValues(effectId);
+        }
         effect.setActive(this.mmdManager, enabled);
         this.refreshFrameGraphPostAddUi();
     }
@@ -4563,7 +4601,6 @@ export class UIController {
                         </label>
                         <button class="effect-layer-main" type="button" data-effect-stack-item="${effect.id}" aria-expanded="${expanded ? "true" : "false"}">
                             <span class="effect-layer-name">${effect.label}</span>
-                            <span class="effect-status-badge${enabled ? "" : " effect-status-badge--off"}">${enabled ? "on" : "off"}</span>
                         </button>
                     </div>
                     ${expanded ? `

@@ -204,6 +204,9 @@ initial -> Post
 compact stack の詳細表示には、各 effect の主要パラメータを直接操作する slider / select を表示する。
 入力中は stack 詳細内の値表示だけを更新し、change 時に stack details を再描画して同期する。
 
+`+` で追加したとき、または checkbox で OFF から ON に戻したときは、効果が分かる程度の初期値を入れる。
+旧UIでは 0 に近い値が初期値になりがちだったが、新UIでは ON にしたのに見た目が変わらない状態を避けるため、概ね 50% 前後の値をデフォルトにする。
+
 現時点で詳細内から直接編集できる項目:
 
 - Bloom: weight / threshold / kernel
