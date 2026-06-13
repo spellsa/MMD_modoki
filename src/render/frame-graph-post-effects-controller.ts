@@ -41,6 +41,7 @@ import {
 export type FrameGraphPostEffectsWarning = {
     message: string;
     reason: "not-connected" | "build-failed";
+    stack?: string;
 };
 
 export type FrameGraphPostEffectsInfo = {
@@ -58,6 +59,10 @@ export type FrameGraphPostEffectsSettings = {
     dofEffectiveFStop: number;
     dofLensSize: number;
     dofFocalLength: number;
+    luminousEnabled: boolean;
+    luminousIntensity: number;
+    luminousThreshold: number;
+    luminousRadius: number;
     bloomEnabled: boolean;
     bloomWeight: number;
     bloomThreshold: number;
@@ -223,6 +228,171 @@ function ensureColorCorrectionShaders(): void {
                 let safeGamma: f32 = max(uniforms.gammaPower, 0.0001);
                 let corrected: vec3f = pow(max(contrasted, vec3f(0.0)), vec3f(safeGamma));
                 fragmentOutputs.color = vec4f(corrected, color.a);
+            }
+        `;
+    }
+}
+
+function ensureLuminousShaders(): void {
+    const shaderKey = "mmdFrameGraphLuminousPixelShader";
+    const blurShaderKey = "mmdFrameGraphLuminousBlurPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform sampler2D glowSampler;
+            uniform float intensity;
+
+            vec3 tonemapSoft(vec3 color) {
+                return color / (vec3(1.0) + color);
+            }
+
+            void main(void) {
+                vec4 base = texture2D(textureSampler, vUV);
+                vec3 glowSource = texture2D(glowSampler, vUV).rgb;
+                vec3 glow = tonemapSoft(glowSource * intensity * 5.4);
+                vec3 screen = vec3(1.0) - (vec3(1.0) - clamp(base.rgb, vec3(0.0), vec3(1.0))) * (vec3(1.0) - glow);
+                vec3 softAdd = min(base.rgb + glow * 0.78, vec3(1.45));
+                vec3 result = mix(screen, softAdd, 0.48);
+                gl_FragColor = vec4(result, base.a);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            var glowSamplerSampler: sampler;
+            var glowSampler: texture_2d<f32>;
+            uniform intensity: f32;
+
+            fn tonemapSoft(color: vec3f) -> vec3f {
+                return color / (vec3f(1.0) + color);
+            }
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let base = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+                let glowSource = textureSample(glowSampler, glowSamplerSampler, input.vUV).rgb;
+                let glow = tonemapSoft(glowSource * uniforms.intensity * 5.4);
+                let screen = vec3f(1.0) - (vec3f(1.0) - clamp(base.rgb, vec3f(0.0), vec3f(1.0))) * (vec3f(1.0) - glow);
+                let softAdd = min(base.rgb + glow * 0.78, vec3f(1.45));
+                let result = mix(screen, softAdd, vec3f(0.48));
+                fragmentOutputs.color = vec4f(result, base.a);
+                return fragmentOutputs;
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStore[blurShaderKey]) {
+        ShaderStore.ShadersStore[blurShaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform vec2 texelStep;
+            uniform float threshold;
+            uniform float extractSource;
+
+            float luminance(vec3 color) {
+                return dot(color, vec3(0.299, 0.587, 0.114));
+            }
+
+            vec3 sampleGlow(vec2 uv) {
+                vec3 color = texture2D(textureSampler, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+                if (extractSource < 0.5) {
+                    return color;
+                }
+                float peak = max(max(color.r, color.g), color.b);
+                float signal = max(luminance(color), peak);
+                float knee = 0.24;
+                float effectiveThreshold = threshold * 0.35;
+                float mask = smoothstep(max(0.0, effectiveThreshold - knee), min(1.5, effectiveThreshold + knee), signal);
+                vec3 saturated = mix(color, color * color * 1.35 + color * 0.35, 0.38);
+                return saturated * mask;
+            }
+
+            vec3 gaussianBlur(vec2 stepRadius) {
+                vec3 glow = sampleGlow(vUV) * 0.0920246;
+                glow += sampleGlow(vUV + stepRadius * 1.0) * 0.0902024;
+                glow += sampleGlow(vUV - stepRadius * 1.0) * 0.0902024;
+                glow += sampleGlow(vUV + stepRadius * 2.0) * 0.0849494;
+                glow += sampleGlow(vUV - stepRadius * 2.0) * 0.0849494;
+                glow += sampleGlow(vUV + stepRadius * 3.0) * 0.0768654;
+                glow += sampleGlow(vUV - stepRadius * 3.0) * 0.0768654;
+                glow += sampleGlow(vUV + stepRadius * 4.0) * 0.0668236;
+                glow += sampleGlow(vUV - stepRadius * 4.0) * 0.0668236;
+                glow += sampleGlow(vUV + stepRadius * 5.0) * 0.0558158;
+                glow += sampleGlow(vUV - stepRadius * 5.0) * 0.0558158;
+                glow += sampleGlow(vUV + stepRadius * 6.0) * 0.0447932;
+                glow += sampleGlow(vUV - stepRadius * 6.0) * 0.0447932;
+                glow += sampleGlow(vUV + stepRadius * 7.0) * 0.0345379;
+                glow += sampleGlow(vUV - stepRadius * 7.0) * 0.0345379;
+                return glow;
+            }
+
+            void main(void) {
+                vec3 core = gaussianBlur(texelStep * 0.24) * 0.82;
+                vec3 halo = gaussianBlur(texelStep) * 0.28;
+                gl_FragColor = vec4(core + halo, 1.0);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[blurShaderKey]) {
+        ShaderStore.ShadersStoreWGSL[blurShaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            uniform texelStep: vec2f;
+            uniform threshold: f32;
+            uniform extractSource: f32;
+
+            fn luminance(color: vec3f) -> f32 {
+                return dot(color, vec3f(0.299, 0.587, 0.114));
+            }
+
+            fn sampleGlow(uv: vec2f) -> vec3f {
+                let safeUv = clamp(uv, vec2f(0.0), vec2f(1.0));
+                let color = textureSample(textureSampler, textureSamplerSampler, safeUv).rgb;
+                if (uniforms.extractSource < 0.5) {
+                    return color;
+                }
+                let peak = max(max(color.r, color.g), color.b);
+                let signal = max(luminance(color), peak);
+                let knee = 0.24;
+                let effectiveThreshold = uniforms.threshold * 0.35;
+                let mask = smoothstep(max(0.0, effectiveThreshold - knee), min(1.5, effectiveThreshold + knee), signal);
+                let saturated = mix(color, color * color * 1.35 + color * 0.35, vec3f(0.38));
+                return saturated * mask;
+            }
+
+            fn gaussianBlur(uv: vec2f, stepRadius: vec2f) -> vec3f {
+                var glow = sampleGlow(uv) * 0.0920246;
+                glow += sampleGlow(uv + stepRadius * 1.0) * 0.0902024;
+                glow += sampleGlow(uv - stepRadius * 1.0) * 0.0902024;
+                glow += sampleGlow(uv + stepRadius * 2.0) * 0.0849494;
+                glow += sampleGlow(uv - stepRadius * 2.0) * 0.0849494;
+                glow += sampleGlow(uv + stepRadius * 3.0) * 0.0768654;
+                glow += sampleGlow(uv - stepRadius * 3.0) * 0.0768654;
+                glow += sampleGlow(uv + stepRadius * 4.0) * 0.0668236;
+                glow += sampleGlow(uv - stepRadius * 4.0) * 0.0668236;
+                glow += sampleGlow(uv + stepRadius * 5.0) * 0.0558158;
+                glow += sampleGlow(uv - stepRadius * 5.0) * 0.0558158;
+                glow += sampleGlow(uv + stepRadius * 6.0) * 0.0447932;
+                glow += sampleGlow(uv - stepRadius * 6.0) * 0.0447932;
+                glow += sampleGlow(uv + stepRadius * 7.0) * 0.0345379;
+                glow += sampleGlow(uv - stepRadius * 7.0) * 0.0345379;
+                return glow;
+            }
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let core = gaussianBlur(input.vUV, uniforms.texelStep * 0.24) * 0.82;
+                let halo = gaussianBlur(input.vUV, uniforms.texelStep) * 0.28;
+                fragmentOutputs.color = vec4f(core + halo, 1.0);
+                return fragmentOutputs;
             }
         `;
     }
@@ -717,6 +887,88 @@ class FrameGraphPostEffectsColorCorrectionTask extends FrameGraphPostProcessTask
     }
 }
 
+class FrameGraphPostEffectsLuminousTask extends FrameGraphPostProcessTask {
+    glowTexture?: FrameGraphTextureHandle;
+
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsLuminousTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        const pass = super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const effect = this.postProcess.effect;
+                effect.setFloat("intensity", settings.luminousEnabled ? Math.max(0, settings.luminousIntensity) : 0);
+                if (this.glowTexture !== undefined) {
+                    context.bindTextureHandle(effect, "glowSampler", this.glowTexture);
+                }
+                additionalBindings?.(context);
+            },
+        );
+        if (this.glowTexture !== undefined) {
+            pass.addDependencies(this.glowTexture);
+        }
+        return pass;
+    }
+}
+
+class FrameGraphPostEffectsLuminousBlurTask extends FrameGraphPostProcessTask {
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+        private readonly direction: "horizontal" | "vertical",
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsLuminousBlurTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        return super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const effect = this.postProcess.effect;
+                const engine = this.postProcess.options.engine;
+                const width = Math.max(1, engine.getRenderWidth());
+                const height = Math.max(1, engine.getRenderHeight());
+                const spread = Math.max(0.5, Math.min(128, settings.luminousRadius)) / 7;
+                const stepX = this.direction === "horizontal" ? spread / width : 0;
+                const stepY = this.direction === "vertical" ? spread / height : 0;
+                effect.setFloat2("texelStep", stepX, stepY);
+                effect.setFloat("threshold", Math.max(0, Math.min(1.5, settings.luminousThreshold)));
+                effect.setFloat("extractSource", this.direction === "horizontal" ? 1 : 0);
+                additionalBindings?.(context);
+            },
+        );
+    }
+}
+
 class FrameGraphPostEffectsSsaoToonCompositeTask extends FrameGraphPostProcessTask {
     originalTexture?: FrameGraphTextureHandle;
 
@@ -850,6 +1102,12 @@ export class FrameGraphPostEffectsController {
     private ssaoToonCompositeTask: FrameGraphPostEffectsSsaoToonCompositeTask | null = null;
     private ssrTask: FrameGraphSSRRenderingPipelineTask | null = null;
     private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
+    private luminousBlurHorizontalEffect: EffectWrapper | null = null;
+    private luminousBlurVerticalEffect: EffectWrapper | null = null;
+    private luminousBlurHorizontalTask: FrameGraphPostEffectsLuminousBlurTask | null = null;
+    private luminousBlurVerticalTask: FrameGraphPostEffectsLuminousBlurTask | null = null;
+    private luminousEffect: EffectWrapper | null = null;
+    private luminousTask: FrameGraphPostEffectsLuminousTask | null = null;
     private bloomTask: FrameGraphBloomTask | null = null;
     private chromaticAberrationEffect: ThinChromaticAberrationPostProcess | null = null;
     private chromaticAberrationTask: FrameGraphChromaticAberrationTask | null = null;
@@ -883,6 +1141,10 @@ export class FrameGraphPostEffectsController {
             dofEffectiveFStop: 2.8,
             dofLensSize: 30,
             dofFocalLength: 50,
+            luminousEnabled: false,
+            luminousIntensity: 0.5,
+            luminousThreshold: 0.5,
+            luminousRadius: 20,
             bloomEnabled: false,
             bloomWeight: 1,
             bloomThreshold: 1,
@@ -916,6 +1178,7 @@ export class FrameGraphPostEffectsController {
         depthTexture?: InternalTexture | null,
         camera?: Camera | null,
         effectOrder: readonly FrameGraphPostEffectId[] = FRAME_GRAPH_POST_EFFECT_IDS,
+        luminousTexture?: InternalTexture | null,
     ): boolean {
         if (this.active) {
             return true;
@@ -929,6 +1192,7 @@ export class FrameGraphPostEffectsController {
         }
 
         ensureColorCorrectionShaders();
+        ensureLuminousShaders();
         ensureLutShaders();
         ensureSsaoToonCompositeShaders();
         ensureVignetteEdgeBlurShaders();
@@ -950,6 +1214,9 @@ export class FrameGraphPostEffectsController {
             "frameGraphPostEffectsSceneColor",
             sourceTexture,
         );
+        const luminousTextureHandle = luminousTexture
+            ? frameGraph.textureManager.importTexture("frameGraphPostEffectsLuminousMask", luminousTexture)
+            : undefined;
         const depthTextureHandle = depthTexture
             ? frameGraph.textureManager.importTexture("frameGraphPostEffectsDepth", depthTexture)
             : undefined;
@@ -980,7 +1247,8 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingTask = imageProcessingTask;
 
         let dofSourceTexture = imageProcessingTask.outputTexture;
-        if (camera) {
+        const geometryRendererNeeded = camera !== null && this.isGeometryRendererNeeded(initialSettings);
+        if (camera && geometryRendererNeeded) {
             const sourceTextureSize = this.getSourceTextureSize(scene, sourceTexture);
             const geometryDepthTexture = frameGraph.textureManager.createRenderTargetTexture(
                 "frameGraphPostEffectsGeometryDepth",
@@ -1038,66 +1306,73 @@ export class FrameGraphPostEffectsController {
                     textureFormat: Constants.TEXTUREFORMAT_RGBA,
                 },
             ];
-            geometryRendererTask.disabled = !this.isGeometryRendererNeeded(initialSettings);
+            geometryRendererTask.disabled = false;
             frameGraph.addTask(geometryRendererTask);
             this.geometryRendererTask = geometryRendererTask;
 
-            const ssrTask = new FrameGraphSSRRenderingPipelineTask(
-                "frameGraphPostEffectsSSR",
-                frameGraph,
-                Constants.TEXTURETYPE_HALF_FLOAT,
-            );
-            ssrTask.sourceTexture = imageProcessingTask.outputTexture;
-            ssrTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
-            ssrTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
-            ssrTask.reflectivityTexture = geometryRendererTask.geometryReflectivityTexture;
-            ssrTask.camera = camera;
-            ssrTask.disabled = !this.isSsrEnabled(initialSettings);
-            this.applySsrSettings(ssrTask, initialSettings);
-            frameGraph.addTask(ssrTask);
-            this.ssrTask = ssrTask;
+            let ssaoSourceTexture = imageProcessingTask.outputTexture;
+            if (this.isSsrEnabled(initialSettings)) {
+                const ssrTask = new FrameGraphSSRRenderingPipelineTask(
+                    "frameGraphPostEffectsSSR",
+                    frameGraph,
+                    Constants.TEXTURETYPE_HALF_FLOAT,
+                );
+                ssrTask.sourceTexture = imageProcessingTask.outputTexture;
+                ssrTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+                ssrTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+                ssrTask.reflectivityTexture = geometryRendererTask.geometryReflectivityTexture;
+                ssrTask.camera = camera;
+                ssrTask.disabled = false;
+                this.applySsrSettings(ssrTask, initialSettings);
+                frameGraph.addTask(ssrTask);
+                this.ssrTask = ssrTask;
+                ssaoSourceTexture = ssrTask.outputTexture;
+                dofSourceTexture = ssrTask.outputTexture;
+            }
 
-            const ssaoTask = new FrameGraphSSAO2RenderingPipelineTask(
-                "frameGraphPostEffectsSSAO2",
-                frameGraph,
-                0.75,
-                0.75,
-            );
-            ssaoTask.sourceTexture = ssrTask.outputTexture;
-            ssaoTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
-            ssaoTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
-            ssaoTask.camera = camera;
-            ssaoTask.disabled = !initialSettings.ssaoEnabled || initialSettings.ssaoStrength <= 0.00001;
-            this.applySsaoSettings(ssaoTask, initialSettings, camera);
-            frameGraph.addTask(ssaoTask);
-            this.ssaoTask = ssaoTask;
+            if (initialSettings.ssaoEnabled && initialSettings.ssaoStrength > 0.00001) {
+                const ssaoTask = new FrameGraphSSAO2RenderingPipelineTask(
+                    "frameGraphPostEffectsSSAO2",
+                    frameGraph,
+                    0.75,
+                    0.75,
+                );
+                ssaoTask.sourceTexture = ssaoSourceTexture;
+                ssaoTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+                ssaoTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+                ssaoTask.camera = camera;
+                ssaoTask.disabled = false;
+                this.applySsaoSettings(ssaoTask, initialSettings, camera);
+                frameGraph.addTask(ssaoTask);
+                this.ssaoTask = ssaoTask;
 
-            this.ssaoToonCompositeEffect = new EffectWrapper({
-                engine: frameGraph.engine,
-                fragmentShader: "mmdFrameGraphSsaoToonComposite",
-                useShaderStore: true,
-                useAsPostProcess: true,
-                uniforms: ["shadowColor", "toonInfluence", "enabled", "texelSize"],
-                samplers: ["originalColor"],
-                name: "mmdFrameGraphSsaoToonComposite",
-                shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
-            });
-            const ssaoToonCompositeTask = new FrameGraphPostEffectsSsaoToonCompositeTask(
-                "frameGraphPostEffectsSSAOToonComposite",
-                frameGraph,
-                this.ssaoToonCompositeEffect,
-                this.getSettings,
-            );
-            ssaoToonCompositeTask.sourceTexture = ssaoTask.outputTexture;
-            ssaoToonCompositeTask.originalTexture = imageProcessingTask.outputTexture;
-            ssaoToonCompositeTask.disabled = !initialSettings.ssaoEnabled || initialSettings.ssaoStrength <= 0.00001;
-            frameGraph.addTask(ssaoToonCompositeTask);
-            this.ssaoToonCompositeTask = ssaoToonCompositeTask;
-            dofSourceTexture = ssaoToonCompositeTask.outputTexture;
+                this.ssaoToonCompositeEffect = new EffectWrapper({
+                    engine: frameGraph.engine,
+                    fragmentShader: "mmdFrameGraphSsaoToonComposite",
+                    useShaderStore: true,
+                    useAsPostProcess: true,
+                    uniforms: ["shadowColor", "toonInfluence", "enabled", "texelSize"],
+                    samplers: ["originalColor"],
+                    name: "mmdFrameGraphSsaoToonComposite",
+                    shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+                });
+                const ssaoToonCompositeTask = new FrameGraphPostEffectsSsaoToonCompositeTask(
+                    "frameGraphPostEffectsSSAOToonComposite",
+                    frameGraph,
+                    this.ssaoToonCompositeEffect,
+                    this.getSettings,
+                );
+                ssaoToonCompositeTask.sourceTexture = ssaoTask.outputTexture;
+                ssaoToonCompositeTask.originalTexture = imageProcessingTask.outputTexture;
+                ssaoToonCompositeTask.disabled = false;
+                frameGraph.addTask(ssaoToonCompositeTask);
+                this.ssaoToonCompositeTask = ssaoToonCompositeTask;
+                dofSourceTexture = ssaoToonCompositeTask.outputTexture;
+            }
         }
 
         let bloomSourceTexture = dofSourceTexture;
-        if (depthTextureHandle !== undefined && camera) {
+        if (depthTextureHandle !== undefined && camera && initialSettings.dofEnabled) {
             const blurLevel = initialSettings.dofBlurLevel <= ThinDepthOfFieldEffectBlurLevel.Low
                 ? ThinDepthOfFieldEffectBlurLevel.Low
                 : initialSettings.dofBlurLevel === ThinDepthOfFieldEffectBlurLevel.Medium
@@ -1112,12 +1387,82 @@ export class FrameGraphPostEffectsController {
             depthOfFieldTask.sourceTexture = dofSourceTexture;
             depthOfFieldTask.depthTexture = depthTextureHandle;
             depthOfFieldTask.camera = camera;
-            depthOfFieldTask.disabled = !initialSettings.dofEnabled;
+            depthOfFieldTask.disabled = false;
             this.applyDepthOfFieldSettings(depthOfFieldTask, initialSettings);
             frameGraph.addTask(depthOfFieldTask);
             this.depthOfFieldTask = depthOfFieldTask;
             bloomSourceTexture = depthOfFieldTask.outputTexture;
         }
+
+        this.luminousBlurHorizontalEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphLuminousBlur",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["texelStep", "threshold", "extractSource"],
+            name: "mmdFrameGraphLuminousBlurHorizontal",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const luminousBlurHorizontalTask = new FrameGraphPostEffectsLuminousBlurTask(
+            "frameGraphPostEffectsLuminousBlurHorizontal",
+            frameGraph,
+            this.luminousBlurHorizontalEffect,
+            this.getSettings,
+            "horizontal",
+        );
+        luminousBlurHorizontalTask.sourceTexture = luminousTextureHandle ?? bloomSourceTexture;
+        luminousBlurHorizontalTask.disabled = !initialSettings.luminousEnabled
+            || initialSettings.luminousIntensity <= 0.0001
+            || luminousTextureHandle === undefined;
+        frameGraph.addTask(luminousBlurHorizontalTask);
+        this.luminousBlurHorizontalTask = luminousBlurHorizontalTask;
+
+        this.luminousBlurVerticalEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphLuminousBlur",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["texelStep", "threshold", "extractSource"],
+            name: "mmdFrameGraphLuminousBlurVertical",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const luminousBlurVerticalTask = new FrameGraphPostEffectsLuminousBlurTask(
+            "frameGraphPostEffectsLuminousBlurVertical",
+            frameGraph,
+            this.luminousBlurVerticalEffect,
+            this.getSettings,
+            "vertical",
+        );
+        luminousBlurVerticalTask.sourceTexture = luminousBlurHorizontalTask.outputTexture;
+        luminousBlurVerticalTask.disabled = !initialSettings.luminousEnabled
+            || initialSettings.luminousIntensity <= 0.0001
+            || luminousTextureHandle === undefined;
+        frameGraph.addTask(luminousBlurVerticalTask);
+        this.luminousBlurVerticalTask = luminousBlurVerticalTask;
+
+        this.luminousEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphLuminous",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["intensity"],
+            samplers: ["glowSampler"],
+            name: "mmdFrameGraphLuminous",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const luminousTask = new FrameGraphPostEffectsLuminousTask(
+            "frameGraphPostEffectsLuminous",
+            frameGraph,
+            this.luminousEffect,
+            this.getSettings,
+        );
+        luminousTask.sourceTexture = bloomSourceTexture;
+        luminousTask.glowTexture = luminousBlurVerticalTask.outputTexture;
+        luminousTask.disabled = !initialSettings.luminousEnabled
+            || initialSettings.luminousIntensity <= 0.0001
+            || luminousTextureHandle === undefined;
+        frameGraph.addTask(luminousTask);
+        this.luminousTask = luminousTask;
 
         const bloomTask = new FrameGraphBloomTask(
             "frameGraphPostEffectsBloom",
@@ -1127,7 +1472,7 @@ export class FrameGraphPostEffectsController {
             Math.max(0, initialSettings.bloomThreshold),
             false,
         );
-        bloomTask.sourceTexture = bloomSourceTexture;
+        bloomTask.sourceTexture = luminousTask.outputTexture;
         bloomTask.disabled = !initialSettings.bloomEnabled;
         frameGraph.addTask(bloomTask);
         this.bloomTask = bloomTask;
@@ -1288,7 +1633,7 @@ export class FrameGraphPostEffectsController {
         this.activeScene = scene;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Bloom + LUT + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
+            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Luminous + Bloom + LUT + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
@@ -1301,9 +1646,11 @@ export class FrameGraphPostEffectsController {
             this.ready = false;
             this.active = false;
             const message = err instanceof Error ? err.message : String(err);
+            const stack = err instanceof Error ? err.stack : undefined;
             this.emitWarningOnce({
                 message: `Frame Graph post effects failed to build. Using classic post effects. Reason: ${message}`,
                 reason: "build-failed",
+                stack,
             });
         });
         return true;
@@ -1330,6 +1677,19 @@ export class FrameGraphPostEffectsController {
         if (this.depthOfFieldTask) {
             this.depthOfFieldTask.disabled = !settings.dofEnabled;
             this.applyDepthOfFieldSettings(this.depthOfFieldTask, settings);
+        }
+        const luminousDisabled = !settings.luminousEnabled
+            || settings.luminousIntensity <= 0.0001
+            || this.luminousBlurHorizontalTask?.sourceTexture === undefined;
+        if (this.luminousBlurHorizontalTask) {
+            this.luminousBlurHorizontalTask.disabled = luminousDisabled;
+        }
+        if (this.luminousBlurVerticalTask) {
+            this.luminousBlurVerticalTask.disabled = luminousDisabled;
+        }
+        if (this.luminousTask) {
+            this.luminousTask.disabled = luminousDisabled
+                || this.luminousTask.glowTexture === undefined;
         }
         if (this.geometryRendererTask) {
             this.geometryRendererTask.disabled = !this.isGeometryRendererNeeded(settings);
@@ -1420,6 +1780,12 @@ export class FrameGraphPostEffectsController {
                         currentTexture = this.depthOfFieldTask.outputTexture;
                     }
                     break;
+                case "luminous":
+                    if (this.luminousTask) {
+                        this.luminousTask.sourceTexture = currentTexture;
+                        currentTexture = this.luminousTask.outputTexture;
+                    }
+                    break;
                 case "bloom":
                     if (this.bloomTask) {
                         this.bloomTask.sourceTexture = currentTexture;
@@ -1496,6 +1862,15 @@ export class FrameGraphPostEffectsController {
         this.ssaoToonCompositeEffect = null;
         this.ssaoToonCompositeTask = null;
         this.depthOfFieldTask = null;
+        this.luminousBlurHorizontalEffect?.dispose();
+        this.luminousBlurHorizontalEffect = null;
+        this.luminousBlurVerticalEffect?.dispose();
+        this.luminousBlurVerticalEffect = null;
+        this.luminousBlurHorizontalTask = null;
+        this.luminousBlurVerticalTask = null;
+        this.luminousEffect?.dispose();
+        this.luminousEffect = null;
+        this.luminousTask = null;
         this.bloomTask = null;
         this.chromaticAberrationEffect?.dispose();
         this.chromaticAberrationEffect = null;
@@ -1615,7 +1990,10 @@ export class FrameGraphPostEffectsController {
         ssrTask.ssr.thickness = 0.22;
         ssrTask.ssr.reflectivityThreshold = 0.85;
         ssrTask.ssr.roughnessFactor = 0.28;
-        ssrTask.ssr.blurDispersionStrength = 0.08;
+        // Babylon's FrameGraph SSR pipeline currently expects an explicit targetTexture
+        // on the blur-combiner path. Keep the initial MMD_modoki path unblurred so
+        // enabling SSR does not break the whole FrameGraph post stack.
+        ssrTask.ssr.blurDispersionStrength = 0;
         ssrTask.ssr.ssrDownsample = 0;
         ssrTask.ssr.blurDownsample = 0;
         ssrTask.ssr.enableSmoothReflections = true;

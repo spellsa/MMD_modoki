@@ -47,7 +47,9 @@ import { GizmoManager } from "@babylonjs/core/Gizmos/gizmoManager";
 import { DepthRenderer } from "@babylonjs/core/Rendering/depthRenderer";
 import { SceneInstrumentation } from "@babylonjs/core/Instrumentation/sceneInstrumentation";
 import type { PerfCounter } from "@babylonjs/core/Misc/perfCounter";
+import type { SmartArray } from "@babylonjs/core/Misc/smartArray";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import type {
     BoneControlInfo,
     MmdModokiProjectFileV1,
@@ -79,6 +81,7 @@ import {
     getWgslMaterialShaderPresetForMaterial as getWgslMaterialShaderPresetForMaterialImpl,
     getWgslMaterialShaderPresets as getWgslMaterialShaderPresetsImpl,
     getWgslModelShaderStates as getWgslModelShaderStatesImpl,
+    getFrameGraphLuminousMaskMaterialState as getFrameGraphLuminousMaskMaterialStateImpl,
     hasExternalWgslToonShader as hasExternalWgslToonShaderImpl,
     isWgslMaterialShaderAssignmentAvailable as isWgslMaterialShaderAssignmentAvailableImpl,
     ensureMaterialShaderDefaults as ensureMaterialShaderDefaultsImpl,
@@ -1476,6 +1479,7 @@ ${beforeFogAppendBlock}
     private postEffectColorCurvesExposureValue = 0;
     private postEffectGlowEnabledValue = false;
     private postEffectGlowIntensityValue = 0.5;
+    private postEffectGlowThresholdValue = 0.5;
     private postEffectGlowKernelValue = 20;
     private postEffectLutEnabledValue = false;
     private postEffectLutIntensityValue = 1;
@@ -1518,6 +1522,10 @@ ${beforeFogAppendBlock}
     private externalWgslToonShaderPathValue: string | null = null;
     private colorCorrectionPostProcess: PostProcess | null = null;
     private frameGraphPostEffectsSceneColorTarget: RenderTargetTexture | null = null;
+    private frameGraphPostEffectsLuminousMaskTarget: RenderTargetTexture | null = null;
+    private frameGraphPostEffectsLuminousMaskMaterial: StandardMaterial | null = null;
+    private frameGraphPostEffectsLuminousMaskRenderedSubMeshCount = 0;
+    private frameGraphPostEffectsLuminousMaskZeroWarningEmitted = false;
     private originFogPostProcess: PostProcess | null = null;
     private finalAntialiasPostProcess: FxaaPostProcess | null = null;
     private finalLensDistortionPostProcess: PostProcess | null = null;
@@ -5434,9 +5442,12 @@ ${beforeFogAppendBlock}
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
                 fallback: "classic",
                 reason: warning.reason,
+                message: warning.message,
+                stack: warning.stack,
             });
             this.addRuntimeDiagnostic(warning.message);
             this.disposeFrameGraphPostEffectsSceneColorTarget();
+            this.disposeFrameGraphPostEffectsLuminousMaskTarget();
             this.postEffectBackend = "classic";
         }, (info) => {
             logDebugIfEnabled("postfx", "render", "frame graph post effect backend", {
@@ -5453,6 +5464,10 @@ ${beforeFogAppendBlock}
             dofEffectiveFStop: this.dofFStopValue,
             dofLensSize: this.dofLensSizeValue,
             dofFocalLength: this.dofFocalLengthValue,
+            luminousEnabled: this.postEffectGlowEnabledValue,
+            luminousIntensity: this.postEffectGlowIntensityValue,
+            luminousThreshold: this.postEffectGlowThresholdValue,
+            luminousRadius: this.postEffectGlowKernelValue,
             bloomEnabled: this.postEffectBloomEnabledValue,
             bloomWeight: this.postEffectBloomWeightValue,
             bloomThreshold: this.postEffectBloomThresholdValue,
@@ -5481,6 +5496,7 @@ ${beforeFogAppendBlock}
 
         this.configureDofDepthRenderer();
         const sourceTexture = this.createFrameGraphPostEffectsSceneColorTarget();
+        const luminousMaskTexture = this.createFrameGraphPostEffectsLuminousMaskTarget();
         const depthTexture = this.depthRenderer?.getDepthMap().getInternalTexture() ?? null;
         const activated = this.frameGraphPostEffectsController.activate(
             this.scene,
@@ -5488,9 +5504,11 @@ ${beforeFogAppendBlock}
             depthTexture,
             this.camera,
             this.getFrameGraphPostEffectRuntimeOrder(),
+            luminousMaskTexture?.getInternalTexture() ?? null,
         );
         if (!activated) {
             this.disposeFrameGraphPostEffectsSceneColorTarget();
+            this.disposeFrameGraphPostEffectsLuminousMaskTarget();
         }
         this.postEffectBackend = activated ? "frameGraph" : "classic";
     }
@@ -5562,6 +5580,161 @@ ${beforeFogAppendBlock}
         return renderTarget;
     }
 
+    private createFrameGraphPostEffectsLuminousMaskTarget(): RenderTargetTexture | null {
+        if (!this.camera) {
+            return null;
+        }
+        this.disposeFrameGraphPostEffectsLuminousMaskTarget();
+        const size = this.getFrameGraphPostEffectsRenderTargetSize();
+
+        const renderTarget = new RenderTargetTexture(
+            "frameGraphPostEffectsLuminousMask",
+            size,
+            this.scene,
+            {
+                generateMipMaps: false,
+                doNotChangeAspectRatio: true,
+                generateDepthBuffer: true,
+                generateStencilBuffer: false,
+                samples: 1,
+            },
+        );
+        renderTarget.activeCamera = this.camera;
+        renderTarget.renderList = [];
+        renderTarget.getCustomRenderList = () => this.scene.meshes;
+        renderTarget.renderParticles = false;
+        renderTarget.renderSprites = false;
+        renderTarget.skipInitialClear = false;
+        renderTarget.clearColor = new Color4(0, 0, 0, 1);
+        renderTarget.onBeforeRenderObservable.add(() => {
+            this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount = 0;
+        });
+        renderTarget.onAfterRenderObservable.add(() => {
+            this.reportFrameGraphLuminousMaskDiagnostics();
+        });
+        renderTarget.customRenderFunction = (
+            opaqueSubMeshes,
+            alphaTestSubMeshes,
+            transparentSubMeshes,
+            _depthOnlySubMeshes,
+            beforeTransparents,
+        ) => {
+            this.renderFrameGraphLuminousMaskSubMeshes(opaqueSubMeshes, false);
+            this.renderFrameGraphLuminousMaskSubMeshes(alphaTestSubMeshes, false);
+            beforeTransparents?.();
+            const previousAlphaMode = this.engine.getAlphaMode();
+            this.renderFrameGraphLuminousMaskSubMeshes(transparentSubMeshes, true);
+            this.engine.setAlphaMode(previousAlphaMode);
+        };
+        this.camera.customRenderTargets.push(renderTarget);
+        this.frameGraphPostEffectsLuminousMaskTarget = renderTarget;
+        return renderTarget;
+    }
+
+    private renderFrameGraphLuminousMaskSubMeshes(
+        subMeshes: SmartArray<SubMesh>,
+        enableAlphaMode: boolean,
+    ): void {
+        for (let i = 0; i < subMeshes.length; i++) {
+            const subMesh = subMeshes.data[i];
+            if (!subMesh) {
+                continue;
+            }
+            const material = subMesh.getMaterial() as MmdManagerMaterialLike | null;
+            if (!material || this.isMaterialVisible(material) === false) {
+                continue;
+            }
+            const renderingMesh = subMesh.getRenderingMesh();
+            const maskState = getFrameGraphLuminousMaskMaterialStateImpl(this, renderingMesh, material);
+            if (!maskState) {
+                continue;
+            }
+            const replacementMesh = subMesh.getReplacementMesh();
+            const renderPassId = this.frameGraphPostEffectsLuminousMaskTarget?.renderPassId;
+            const maskMaterial = this.configureFrameGraphLuminousMaskMaterial(
+                maskState.color,
+                maskState.alpha,
+                maskState.texture,
+            );
+            if (renderPassId === undefined || !maskMaterial) {
+                continue;
+            }
+            const previousRenderPassMaterial = renderingMesh.getMaterialForRenderPass(renderPassId);
+            renderingMesh.setMaterialForRenderPass(renderPassId, maskMaterial);
+            try {
+                renderingMesh.render(subMesh, enableAlphaMode, replacementMesh || undefined);
+                this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount += 1;
+            } finally {
+                renderingMesh.setMaterialForRenderPass(renderPassId, previousRenderPassMaterial);
+            }
+        }
+    }
+
+    private reportFrameGraphLuminousMaskDiagnostics(): void {
+        if (this.postEffectBackend !== "frameGraph" || !this.postEffectGlowEnabledValue) {
+            return;
+        }
+        const renderedCount = this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount;
+        if (renderedCount > 0) {
+            logDebugIfEnabled("postfx", "render", "frame graph luminous mask rendered", {
+                subMeshCount: renderedCount,
+            });
+            this.frameGraphPostEffectsLuminousMaskZeroWarningEmitted = false;
+            return;
+        }
+        if (this.sceneModels.length === 0 || this.frameGraphPostEffectsLuminousMaskZeroWarningEmitted) {
+            return;
+        }
+        this.frameGraphPostEffectsLuminousMaskZeroWarningEmitted = true;
+        const message = "FrameGraph Luminous is enabled, but no AutoLuminous material submeshes were rendered into the luminous mask.";
+        logWarn("render", "frame graph luminous mask has no AutoLuminous submeshes", {
+            modelCount: this.sceneModels.length,
+            stack: [...this.getFrameGraphPostEffectStackIds()],
+        });
+        this.addRuntimeDiagnostic(message);
+    }
+
+    private configureFrameGraphLuminousMaskMaterial(
+        color: Color3,
+        alpha: number,
+        texture: Texture | null,
+    ): StandardMaterial | null {
+        const material = this.ensureFrameGraphLuminousMaskMaterial();
+        if (!material) {
+            return null;
+        }
+        const clampedAlpha = Math.max(0, Math.min(1, alpha));
+        material.diffuseColor.copyFrom(color);
+        material.ambientColor.copyFrom(color);
+        material.emissiveColor.copyFrom(color);
+        material.alpha = clampedAlpha;
+        material.diffuseTexture = texture;
+        material.emissiveTexture = texture;
+        material.opacityTexture = null;
+        material.useAlphaFromDiffuseTexture = Boolean(texture?.hasAlpha);
+        material.transparencyMode = texture?.hasAlpha || clampedAlpha < 0.999
+            ? Material.MATERIAL_ALPHABLEND
+            : Material.MATERIAL_OPAQUE;
+        material.markAsDirty(Material.AllDirtyFlag);
+        return material;
+    }
+
+    private ensureFrameGraphLuminousMaskMaterial(): StandardMaterial | null {
+        if (this.frameGraphPostEffectsLuminousMaskMaterial) {
+            return this.frameGraphPostEffectsLuminousMaskMaterial;
+        }
+        const material = new StandardMaterial("frameGraphPostEffectsLuminousMaskMaterial", this.scene);
+        material.disableLighting = true;
+        material.backFaceCulling = false;
+        material.specularColor = Color3.Black();
+        material.emissiveColor = Color3.White();
+        material.diffuseColor = Color3.White();
+        material.ambientColor = Color3.White();
+        material.forceDepthWrite = true;
+        this.frameGraphPostEffectsLuminousMaskMaterial = material;
+        return material;
+    }
+
     private getFrameGraphPostEffectsRenderTargetSize(): { width: number; height: number } {
         return {
             width: Math.max(1, this.engine.getRenderWidth()),
@@ -5589,6 +5762,22 @@ ${beforeFogAppendBlock}
         this.frameGraphPostEffectsSceneColorTarget = null;
     }
 
+    private disposeFrameGraphPostEffectsLuminousMaskTarget(): void {
+        if (!this.frameGraphPostEffectsLuminousMaskTarget) {
+            return;
+        }
+        const index = this.camera?.customRenderTargets.indexOf(this.frameGraphPostEffectsLuminousMaskTarget) ?? -1;
+        if (index >= 0) {
+            this.camera?.customRenderTargets.splice(index, 1);
+        }
+        this.frameGraphPostEffectsLuminousMaskTarget.dispose();
+        this.frameGraphPostEffectsLuminousMaskTarget = null;
+        this.frameGraphPostEffectsLuminousMaskMaterial?.dispose();
+        this.frameGraphPostEffectsLuminousMaskMaterial = null;
+        this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount = 0;
+        this.frameGraphPostEffectsLuminousMaskZeroWarningEmitted = false;
+    }
+
     private executePostEffectBackend(): void {
         if (this.postEffectBackend !== "frameGraph") {
             return;
@@ -5611,6 +5800,7 @@ ${beforeFogAppendBlock}
         this.frameGraphPostEffectsController.dispose();
         this.frameGraphPostEffectsController = null;
         this.disposeFrameGraphPostEffectsSceneColorTarget();
+        this.disposeFrameGraphPostEffectsLuminousMaskTarget();
     }
 
     private shutdownPostEffectBackend(): void {
@@ -5624,6 +5814,14 @@ ${beforeFogAppendBlock}
 
     getPostEffectBackend(): PostEffectBackend {
         return this.postEffectBackend;
+    }
+
+    getFrameGraphPostEffectsExecutedFrameCount(): number {
+        return this.frameGraphPostEffectsController?.getExecutedFrameCount() ?? 0;
+    }
+
+    getFrameGraphPostEffectsLuminousMaskRenderedSubMeshCount(): number {
+        return this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount;
     }
 
     public getFrameGraphPostEffectStackIds(): readonly FrameGraphPostEffectId[] {
@@ -5664,6 +5862,8 @@ ${beforeFogAppendBlock}
                 return this.postEffectSsaoEnabledValue;
             case "dof":
                 return this.dofEnabledValue;
+            case "luminous":
+                return this.postEffectGlowEnabledValue;
             case "bloom":
                 return this.postEffectBloomEnabledValue;
             case "lut":
@@ -6181,6 +6381,15 @@ ${beforeFogAppendBlock}
     }
     set postEffectGlowIntensity(v: number) {
         this.postEffectGlowIntensityValue = Math.max(0, Math.min(4, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** LuminousGlow threshold (0..1.5). */
+    get postEffectGlowThreshold(): number {
+        return this.postEffectGlowThresholdValue;
+    }
+    set postEffectGlowThreshold(v: number) {
+        this.postEffectGlowThresholdValue = Math.max(0, Math.min(1.5, v));
         this.applyDefaultPipelinePostProcessSettings();
     }
 

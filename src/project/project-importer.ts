@@ -151,6 +151,7 @@ type ProjectImportHost = {
     postEffectColorCurvesExposure: number;
     postEffectGlowEnabled: boolean;
     postEffectGlowIntensity: number;
+    postEffectGlowThreshold: number;
     postEffectGlowKernel: number;
     postEffectLutPreset: string;
     postEffectLutSourceMode: string;
@@ -778,6 +779,9 @@ export async function importProjectState(
         : false;
     host.postEffectGlowIntensity = typeof data.effects.glowIntensity === "number" && Number.isFinite(data.effects.glowIntensity)
         ? data.effects.glowIntensity
+        : 0.5;
+    host.postEffectGlowThreshold = typeof data.effects.glowThreshold === "number" && Number.isFinite(data.effects.glowThreshold)
+        ? data.effects.glowThreshold
         : 0.5;
     host.postEffectGlowKernel = typeof data.effects.glowKernel === "number" && Number.isFinite(data.effects.glowKernel)
         ? data.effects.glowKernel

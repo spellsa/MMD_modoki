@@ -385,6 +385,7 @@ Diagnostics は通常の編集 UI に常時混ぜず、drawer または Lab 画�
 - [Emissive Light Assist 構想メモ](./emissive-light-assist-concept-2026-06-12.md)
 - [Node Particle Effects 構想メモ](./node-particle-effects-concept-2026-06-12.md)
 - [Lighting Effects 構想メモ](./lighting-effects-concept-2026-06-12.md)
+- [Luminous / AutoLuminous 代替 FrameGraph 再設計メモ](./luminous-frame-graph-redesign-plan-2026-06-13.md)
 - [AutoLuminous GlowLayer 実装メモ](./autoluminous-glowlayer-implementation-note-2026-04-23.md)
 - [MMD AutoLuminous 調査メモ](./mmd-autoluminous-research.md)
 - [Material Shader Customization Guide](./material-shader-customization-guide.md)

@@ -175,6 +175,31 @@ describe("importProjectState", () => {
         expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["lut", "bloom"]);
     });
 
+    it("restores FrameGraph Luminous effect values", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                glowEnabled: true,
+                glowIntensity: 1.25,
+                glowThreshold: 0.18,
+                glowKernel: 48,
+                frameGraphPostStack: [
+                    { id: "luminous", enabled: true },
+                    { id: "bloom", enabled: false },
+                ],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.postEffectGlowEnabled).toBe(true);
+        expect(host.postEffectGlowIntensity).toBe(1.25);
+        expect(host.postEffectGlowThreshold).toBe(0.18);
+        expect(host.postEffectGlowKernel).toBe(48);
+        expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["luminous", "bloom"]);
+    });
+
     it("restores mirroring floor viewport values", async () => {
         const host = createHost();
         const project = createProject({

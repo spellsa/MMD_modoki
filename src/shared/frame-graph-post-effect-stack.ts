@@ -2,6 +2,7 @@ export const FRAME_GRAPH_POST_EFFECT_IDS = [
     "ssr",
     "ssao",
     "dof",
+    "luminous",
     "bloom",
     "lut",
     "sharpen",

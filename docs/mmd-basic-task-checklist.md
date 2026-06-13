@@ -46,6 +46,7 @@
 - [x] AA ON/OFF
 - [x] DoF / レンズ関連調整
 - [x] モデル輪郭調整
+- [x] FrameGraph 効果スタックで Luminous を追加 / 並べ替え / 保存復元
 - [x] PNG 出力
 - [x] WebM 出力
 - [x] UI 非表示モード
@@ -55,6 +56,7 @@
 補足:
 - 動画出力は `WebM` 採用
 - `MP4` は当面スコープ外
+- Luminous は AutoLuminous 資産を拾う補助発光として実装中。現行仕様は [Luminous / AutoLuminous 代替 FrameGraph 再設計メモ](./luminous-frame-graph-redesign-plan-2026-06-13.md) を参照。
 
 ## 3. タイムライン・キーフレーム編集
 

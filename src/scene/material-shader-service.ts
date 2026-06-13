@@ -87,6 +87,12 @@ type MaterialShaderSceneModel = {
     }>;
 };
 
+export type FrameGraphLuminousMaskMaterialState = {
+    color: Color3;
+    alpha: number;
+    texture: Texture | null;
+};
+
 type MaterialShaderHostStatics = {
     WGSL_MATERIAL_SHADER_PRESETS?: readonly { id: WgslMaterialShaderPresetId; label: string }[];
     DEFAULT_WGSL_MATERIAL_SHADER_PRESET?: WgslMaterialShaderPresetId;
@@ -109,6 +115,7 @@ type MaterialShaderHost = Record<string, unknown> & {
     postEffectGlowIntensityValue?: number;
     postEffectGlowKernelValue?: number;
     postEffectBackend?: string;
+    requestedPostEffectBackend?: string;
     postEffectBloomEnabledValue?: boolean;
     postEffectBloomWeightValue?: number;
     postEffectBloomThresholdValue?: number;
@@ -150,7 +157,7 @@ const AUTO_LUMINOUS_TINT_STRENGTH = 0.72;
 const LUMINOUS_GLOW_MIN_SHININESS = 100;
 const LUMINOUS_GLOW_AMBIENT_WEIGHT = 1;
 const LUMINOUS_GLOW_MAX_COLOR = 2;
-const LUMINOUS_GLOW_MAX_SPECULAR_LUMA = 0.06;
+const LUMINOUS_GLOW_MAX_SPECULAR_LENGTH = 0.02;
 const LUMINOUS_GLOW_OCCLUDER_ALPHA = 1;
 const LUMINOUS_GLOW_MAIN_TEXTURE_RATIO = 0.5;
 const LUMINOUS_GLOW_MAIN_TEXTURE_SAMPLES = 4;
@@ -163,6 +170,8 @@ const LUMINOUS_GLOW_HALO_INTENSITY_RATIO = 1.08;
 const LUMINOUS_GLOW_CORE_KERNEL_RATIO = 0.25;
 const LUMINOUS_GLOW_AL_MORPH_BLINK_FRAMES = 30;
 const LUMINOUS_GLOW_AL_MORPH_MAX_MULTIPLIER = 32;
+const LUMINOUS_GLOW_AL_SPECULAR_POWER_SCALE = 1 / 7;
+const LUMINOUS_GLOW_AL_LIGHT_UP_E_BASE = 400;
 const LUMINOUS_GLOW_HALO_DEPTH_EDGE_STRENGTH = 0.72;
 const LUMINOUS_GLOW_CORE_DEPTH_EDGE_STRENGTH = 0.38;
 const LUMINOUS_GLOW_DEPTH_EDGE_THRESHOLD_LOW = 0.0008;
@@ -600,6 +609,11 @@ function computeColorLuminance(color: Color3 | null): number {
     return Math.max(0, color.r * 0.299 + color.g * 0.587 + color.b * 0.114);
 }
 
+function computeColorLength(color: Color3 | null): number {
+    if (!color) return 0;
+    return Math.sqrt(color.r * color.r + color.g * color.g + color.b * color.b);
+}
+
 function scaleColor(color: Color3, factor: number): Color3 {
     return new Color3(
         Math.max(0, color.r * factor),
@@ -716,17 +730,19 @@ function getLuminousGlowMorphScaleForModel(host: MaterialShaderHost, model: Mate
     const clockDown = getLuminousGlowMorphWeight(model, "LClockDown");
 
     let scale = 1;
-    scale *= lerpNumber(1, 2.2, lightUp);
-    scale *= lerpNumber(1, 12, lightUpE);
-    scale *= lerpNumber(1, 0, lightOff);
+    scale *= 1 + lightUp * 2;
+    scale *= Math.pow(LUMINOUS_GLOW_AL_LIGHT_UP_E_BASE, lightUpE);
+    scale *= 1 - lightOff;
 
-    const blinkSpeedScale = lerpNumber(1, 6, clockUp) / Math.max(1e-4, lerpNumber(1, 6, clockDown));
-    const normalizedFrame = (timelineKey * blinkSpeedScale) / LUMINOUS_GLOW_AL_MORPH_BLINK_FRAMES;
+    const clockShift = (1 + clockDown * 5) / (1 + clockUp * 5);
+    const blinkPeriodFrames = Math.max(1, LUMINOUS_GLOW_AL_MORPH_BLINK_FRAMES * clockShift);
+    const normalizedFrame = timelineKey / blinkPeriodFrames;
     const blinkPhase = normalizedFrame - Math.floor(normalizedFrame);
     const blinkFloor = clampUnit(lightMin);
-    const sineWave = blinkFloor + (1 - blinkFloor) * (0.5 + 0.5 * Math.sin(normalizedFrame * Math.PI * 2));
-    const squareThreshold = Math.max(0.05, Math.min(0.95, 0.5 + lightDuty * 0.4));
-    const squareWave = blinkFloor + (1 - blinkFloor) * (blinkPhase < squareThreshold ? 1 : 0);
+    const duty = lightDuty <= 1e-6 ? 0.5 : Math.max(0.05, Math.min(0.95, lightDuty));
+    const easedDutyPhase = Math.min(1, blinkPhase / Math.max(1e-4, duty * 2));
+    const sineWave = blinkFloor + (1 - blinkFloor) * ((1 - Math.cos(easedDutyPhase * Math.PI * 2)) * 0.5);
+    const squareWave = blinkFloor + (1 - blinkFloor) * (blinkPhase < duty ? 1 : 0);
 
     if (lightBlink > 1e-6) {
         scale *= lerpNumber(1, sineWave, lightBlink);
@@ -772,14 +788,103 @@ function getLuminousGlowMorphScaleForMesh(host: MaterialShaderHost, mesh: Materi
     return 1;
 }
 
+export function getFrameGraphLuminousMaskMaterialState(
+    host: MaterialShaderHost,
+    mesh: MaterialShaderMesh,
+    material: MaterialShaderMaterial,
+): FrameGraphLuminousMaskMaterialState | null {
+    const glowState = getLuminousGlowMaterialState(host, material, { allowManualHeuristic: false });
+    if (!glowState) {
+        return null;
+    }
+    if (!glowState.luminous) {
+        return {
+            color: Color3.Black(),
+            alpha: glowState.alpha,
+            texture: null,
+        };
+    }
+
+    const morphScale = getLuminousGlowMorphScaleForMesh(host, mesh);
+    if (morphScale <= 1e-4) {
+        return null;
+    }
+
+    const haloColor = scaleColor(glowState.haloColor, morphScale);
+    const coreColor = scaleColor(glowState.coreColor, morphScale);
+    const color = new Color3(
+        Math.max(haloColor.r, coreColor.r * 0.78),
+        Math.max(haloColor.g, coreColor.g * 0.78),
+        Math.max(haloColor.b, coreColor.b * 0.78),
+    );
+
+    return {
+        color: scaleColor(color, 1.6),
+        alpha: glowState.alpha,
+        texture: glowState.texture,
+    };
+}
+
+function getMaterialDisplayNames(host: MaterialShaderHost, material: MaterialShaderMaterial): string[] {
+    const names: string[] = [];
+    if (typeof material.name === "string" && material.name.length > 0) {
+        names.push(material.name);
+    }
+    if (typeof material.id === "string" && material.id.length > 0) {
+        names.push(material.id);
+    }
+
+    for (const entry of host.sceneModels ?? []) {
+        const materialEntry = entry.materials?.find((candidate) => candidate.material === material);
+        if (!materialEntry) {
+            continue;
+        }
+        if (typeof materialEntry.name === "string" && materialEntry.name.length > 0) {
+            names.push(materialEntry.name);
+        }
+        if (typeof materialEntry.key === "string" && materialEntry.key.length > 0) {
+            names.push(materialEntry.key);
+        }
+        break;
+    }
+
+    return [...new Set(names)];
+}
+
+function hasAutoLuminousMaterialName(host: MaterialShaderHost, material: MaterialShaderMaterial): boolean {
+    for (const rawName of getMaterialDisplayNames(host, material)) {
+        const name = rawName.trim();
+        const lowerName = name.toLowerCase();
+        if (lowerName.length === 0 || lowerName.includes("highlight")) {
+            continue;
+        }
+        if (lowerName.includes("autoluminous") || lowerName.includes("auto_luminous") || lowerName.includes("auto-luminous")) {
+            return true;
+        }
+        if (/(^|[^a-z0-9])al($|[^a-z0-9])/i.test(name)) {
+            return true;
+        }
+        if (/(^|[^a-z0-9])(light|lamp|neon|glow|luminous|emissive|emit|led)($|[^a-z0-9])/i.test(name)) {
+            return true;
+        }
+        if (name.includes("発光") || name.includes("ライト") || name.includes("ランプ") || name.includes("ネオン")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function isLuminousGlowPresetMaterial(host: MaterialShaderHost, material: MaterialShaderMaterial): boolean {
     if (!material || typeof material !== "object") {
         return false;
     }
-    return getWgslMaterialShaderPresetForMaterial(host, material) === "wgsl-autoluminous";
+    return getWgslMaterialShaderPresetForMaterial(host, material) === "wgsl-autoluminous"
+        || hasAutoLuminousMaterialName(host, material);
 }
 
-function getLuminousGlowMaterialState(host: MaterialShaderHost, material: MaterialShaderMaterial): {
+function getLuminousGlowMaterialState(host: MaterialShaderHost, material: MaterialShaderMaterial, options?: {
+    allowManualHeuristic?: boolean;
+}): {
     coreColor: Color3;
     haloColor: Color3;
     alpha: number;
@@ -803,16 +908,16 @@ function getLuminousGlowMaterialState(host: MaterialShaderHost, material: Materi
         : 1;
     const manualGlow = Boolean(host.postEffectGlowEnabledValue) && Number(host.postEffectGlowIntensityValue) > 1e-6;
     const presetLuminous = isLuminousGlowPresetMaterial(host, material);
-    const allowHeuristicGlow = manualGlow;
+    const allowHeuristicGlow = options?.allowManualHeuristic ?? manualGlow;
     const specularColor = readMaterialColor(material, ["specularColor", "reflectivityColor"]);
-    const specularLuma = computeColorLuminance(specularColor);
+    const specularLength = computeColorLength(specularColor);
     if (!presetLuminous && !allowHeuristicGlow) {
         return createLuminousGlowOccluderState(texture);
     }
     if (!presetLuminous && (!Number.isFinite(shininess) || shininess < LUMINOUS_GLOW_MIN_SHININESS)) {
         return createLuminousGlowOccluderState(texture);
     }
-    if (!presetLuminous && specularLuma > LUMINOUS_GLOW_MAX_SPECULAR_LUMA) {
+    if (!presetLuminous && specularLength > LUMINOUS_GLOW_MAX_SPECULAR_LENGTH) {
         return createLuminousGlowOccluderState(texture);
     }
 
@@ -830,7 +935,7 @@ function getLuminousGlowMaterialState(host: MaterialShaderHost, material: Materi
 
     const strength = presetLuminous
         ? 1.25
-        : Math.min(2.5, 0.75 + Math.max(0, shininess - LUMINOUS_GLOW_MIN_SHININESS) / 60);
+        : Math.min(16, Math.max(0.5, (shininess - LUMINOUS_GLOW_MIN_SHININESS) * LUMINOUS_GLOW_AL_SPECULAR_POWER_SCALE));
     const luminousColor = new Color3(
         combined.r * strength,
         combined.g * strength,
@@ -1179,7 +1284,7 @@ function collectLuminousMaterials(host: MaterialShaderHost): Set<object> {
             if (host.isMaterialVisible?.(materialEntry.material) === false) {
                 continue;
             }
-            if (getWgslMaterialShaderPresetForMaterial(host, materialEntry.material) !== "wgsl-autoluminous") {
+            if (!isLuminousGlowPresetMaterial(host, materialEntry.material)) {
                 continue;
             }
             luminousMaterials.add(materialEntry.material as object);
@@ -1194,6 +1299,13 @@ export function syncLuminousGlowLayer(host: MaterialShaderHost): void {
 
     const pipeline = host.defaultRenderingPipeline;
     if (!pipeline) {
+        return;
+    }
+
+    if (host.postEffectBackend === "frameGraph" || host.requestedPostEffectBackend === "frameGraph") {
+        pipeline.glowLayerEnabled = false;
+        pipeline.bloomEnabled = false;
+        disposeManagedLuminousGlowLayer(host);
         return;
     }
 

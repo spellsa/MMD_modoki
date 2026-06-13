@@ -115,6 +115,7 @@ function createHost() {
         postEffectColorCurvesExposure: 0,
         postEffectGlowEnabled: false,
         postEffectGlowIntensity: 0.5,
+        postEffectGlowThreshold: 0.5,
         postEffectGlowKernel: 20,
         postEffectLutEnabled: false,
         postEffectLutIntensity: 1,
@@ -182,13 +183,23 @@ describe("exportProjectState", () => {
     it("writes FrameGraph post effect stack entries", () => {
         const project = exportProjectState({
             ...createHost(),
+            postEffectGlowEnabled: true,
+            postEffectGlowIntensity: 1.25,
+            postEffectGlowThreshold: 0.18,
+            postEffectGlowKernel: 48,
             getFrameGraphPostEffectStackEntries: () => [
+                { id: "luminous", enabled: true },
                 { id: "bloom", enabled: true },
                 { id: "lut", enabled: false },
             ],
         });
 
+        expect(project.effects.glowEnabled).toBe(true);
+        expect(project.effects.glowIntensity).toBe(1.25);
+        expect(project.effects.glowThreshold).toBe(0.18);
+        expect(project.effects.glowKernel).toBe(48);
         expect(project.effects.frameGraphPostStack).toEqual([
+            { id: "luminous", enabled: true },
             { id: "bloom", enabled: true },
             { id: "lut", enabled: false },
         ]);

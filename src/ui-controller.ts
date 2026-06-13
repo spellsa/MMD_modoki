@@ -206,6 +206,12 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         setActive: (manager, active) => { manager.dofEnabled = active; },
     },
     {
+        id: "luminous",
+        label: "Luminous",
+        isActive: (manager) => manager.postEffectGlowEnabled,
+        setActive: (manager, active) => { manager.postEffectGlowEnabled = active; },
+    },
+    {
         id: "bloom",
         label: "Bloom",
         isActive: (manager) => manager.postEffectBloomEnabled,
@@ -4058,6 +4064,11 @@ export class UIController {
                 this.mmdManager.dofLensSize = Math.max(this.mmdManager.dofLensSize, 30);
                 this.mmdManager.dofFocalLength = Math.max(this.mmdManager.dofFocalLength, 50);
                 break;
+            case "luminous":
+                this.mmdManager.postEffectGlowIntensity = Math.max(this.mmdManager.postEffectGlowIntensity, 1.0);
+                this.mmdManager.postEffectGlowThreshold = Math.min(this.mmdManager.postEffectGlowThreshold, 0.15);
+                this.mmdManager.postEffectGlowKernel = Math.max(this.mmdManager.postEffectGlowKernel, 48);
+                break;
             case "lut":
                 this.mmdManager.postEffectLutIntensity = Math.max(this.mmdManager.postEffectLutIntensity, 1);
                 break;
@@ -4099,10 +4110,6 @@ export class UIController {
             return;
         }
 
-        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
-            this.mmdManager.getFrameGraphPostEffectStackIds(),
-            effectId,
-        ));
         this.applyFrameGraphPostEffectDefaultValues(effectId);
         switch (effectId) {
             case "bloom":
@@ -4110,6 +4117,9 @@ export class UIController {
                 break;
             case "dof":
                 this.mmdManager.dofEnabled = true;
+                break;
+            case "luminous":
+                this.mmdManager.postEffectGlowEnabled = true;
                 break;
             case "lut":
                 this.mmdManager.postEffectLutEnabled = true;
@@ -4134,6 +4144,10 @@ export class UIController {
             case "distortion":
                 break;
         }
+        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
+            this.mmdManager.getFrameGraphPostEffectStackIds(),
+            effectId,
+        ));
 
         this.expandedFrameGraphPostEffectId = effectId;
         this.refreshFrameGraphPostAddUi();
@@ -4143,10 +4157,6 @@ export class UIController {
     private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
         const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
         if (!effect) return;
-        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
-            this.mmdManager.getFrameGraphPostEffectStackIds(),
-            effectId,
-        ));
         if (enabled) {
             this.applyFrameGraphPostEffectDefaultValues(effectId);
         }
@@ -4382,6 +4392,13 @@ export class UIController {
                     range("bloomKernel", "Kernel", 1, 256, Math.round(this.mmdManager.postEffectBloomKernel), String(Math.round(this.mmdManager.postEffectBloomKernel))),
                 );
                 break;
+            case "luminous":
+                rows.push(
+                    range("luminousIntensity", "Intensity", 0, 200, Math.round(this.mmdManager.postEffectGlowIntensity * 100), this.mmdManager.postEffectGlowIntensity.toFixed(2)),
+                    range("luminousThreshold", "Threshold", 0, 150, Math.round(this.mmdManager.postEffectGlowThreshold * 100), this.mmdManager.postEffectGlowThreshold.toFixed(2)),
+                    range("luminousRadius", "Radius", 1, 128, Math.round(this.mmdManager.postEffectGlowKernel), `${Math.round(this.mmdManager.postEffectGlowKernel)}px`),
+                );
+                break;
             case "dof":
                 rows.push(
                     select(
@@ -4486,6 +4503,15 @@ export class UIController {
                 break;
             case "bloomKernel":
                 this.mmdManager.postEffectBloomKernel = Number(rawValue);
+                break;
+            case "luminousIntensity":
+                this.mmdManager.postEffectGlowIntensity = Number(rawValue) / 100;
+                break;
+            case "luminousThreshold":
+                this.mmdManager.postEffectGlowThreshold = Number(rawValue) / 100;
+                break;
+            case "luminousRadius":
+                this.mmdManager.postEffectGlowKernel = Number(rawValue);
                 break;
             case "dofFocus":
                 if (!this.mmdManager.dofAutoFocusEnabled) {
@@ -4602,6 +4628,15 @@ export class UIController {
             case "bloomKernel":
                 valueElement.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
                 break;
+            case "luminousIntensity":
+                valueElement.textContent = this.mmdManager.postEffectGlowIntensity.toFixed(2);
+                break;
+            case "luminousThreshold":
+                valueElement.textContent = this.mmdManager.postEffectGlowThreshold.toFixed(2);
+                break;
+            case "luminousRadius":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowKernel)}px`;
+                break;
             case "dofFocus":
                 valueElement.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
                 break;
@@ -4710,7 +4745,9 @@ export class UIController {
                         <button class="effect-layer-main" type="button" data-effect-stack-item="${effect.id}" aria-expanded="${expanded ? "true" : "false"}">
                             <span class="effect-layer-name">${effect.label}</span>
                         </button>
-                        <div class="effect-layer-drag-handle" draggable="true" data-effect-stack-drag="${effect.id}" title="Drag to reorder" aria-label="Drag to reorder">:</div>
+                        <button class="effect-layer-drag-handle" type="button" draggable="true" data-effect-stack-drag="${effect.id}" title="ドラッグして並べ替え" aria-label="ドラッグして並べ替え">
+                            <span class="effect-layer-drag-grip" aria-hidden="true"></span>
+                        </button>
                     </div>
                     ${expanded ? `
                         <div class="effect-layer-details">

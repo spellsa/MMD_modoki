@@ -108,6 +108,7 @@ type ProjectExportHost = {
     postEffectColorCurvesExposure: number;
     postEffectGlowEnabled: boolean;
     postEffectGlowIntensity: number;
+    postEffectGlowThreshold: number;
     postEffectGlowKernel: number;
     postEffectLutEnabled: boolean;
     postEffectLutIntensity: number;
@@ -339,6 +340,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             colorCurvesExposure: host.postEffectColorCurvesExposure,
             glowEnabled: host.postEffectGlowEnabled,
             glowIntensity: host.postEffectGlowIntensity,
+            glowThreshold: host.postEffectGlowThreshold,
             glowKernel: host.postEffectGlowKernel,
             lutEnabled: host.postEffectLutEnabled,
             lutIntensity: host.postEffectLutIntensity,

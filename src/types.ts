@@ -94,6 +94,7 @@ export interface SmokeRendererReadyPayload {
     physicsBackend: string;
     crossOriginIsolated?: boolean;
     sharedArrayBufferAvailable?: boolean;
+    scenario?: AppLogData;
 }
 
 export interface SmokeRendererFailurePayload {
@@ -359,6 +360,7 @@ export interface ProjectEffectState {
     colorCurvesExposure?: number;
     glowEnabled?: boolean;
     glowIntensity?: number;
+    glowThreshold?: number;
     glowKernel?: number;
     lutEnabled?: boolean;
     lutIntensity?: number;

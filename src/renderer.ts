@@ -17,6 +17,7 @@ import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 import { isDebugLogEnabled, logDebug, logError, logInfo, toLogErrorData } from "./app-logger";
 import type { AppLogData, SmokeRendererReadyPayload } from "./types";
+import { POST_EFFECT_BACKEND_STORAGE_KEY } from "./render/post-effect-backend";
 
 let shaderRequestTraceInstalled = false;
 
@@ -34,6 +35,58 @@ function reportSmokeRendererFailure(message: string, details?: AppLogData): void
   } catch {
     // Smoke reporting must not affect normal editor startup.
   }
+}
+
+function waitAnimationFrames(frameCount: number): Promise<void> {
+  return new Promise((resolve) => {
+    let remaining = Math.max(0, Math.floor(frameCount));
+    const step = (): void => {
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      remaining -= 1;
+      window.requestAnimationFrame(step);
+    };
+    step();
+  });
+}
+
+async function runSmokeLuminousScenario(mmdManager: MmdManager, modelPath: string): Promise<AppLogData> {
+  const beforeBackend = mmdManager.getPostEffectBackend();
+  const modelInfo = await mmdManager.loadPMX(modelPath);
+  if (!modelInfo) {
+    throw new Error("Smoke model load returned no model info");
+  }
+
+  const shaderStates = mmdManager.getWgslModelShaderStates();
+  const modelState = shaderStates.find((model) => model.modelPath === modelPath) ?? shaderStates.at(-1);
+  if (!modelState) {
+    throw new Error("Smoke model shader state was not found");
+  }
+
+  mmdManager.setWgslMaterialShaderPreset(modelState.modelIndex, null, "wgsl-autoluminous");
+  mmdManager.postEffectGlowEnabled = true;
+  mmdManager.postEffectGlowIntensity = 1.5;
+  mmdManager.postEffectGlowThreshold = 0;
+  mmdManager.postEffectGlowKernel = 64;
+  mmdManager.setFrameGraphPostEffectStackIds(["luminous"]);
+
+  await waitAnimationFrames(12);
+
+  return {
+    kind: "frameGraphLuminous",
+    modelName: modelInfo.name,
+    materialCount: modelState.materials.length,
+    beforeBackend,
+    afterBackend: mmdManager.getPostEffectBackend(),
+    frameGraphExecutedFrames: mmdManager.getFrameGraphPostEffectsExecutedFrameCount(),
+    luminousMaskSubMeshes: mmdManager.getFrameGraphPostEffectsLuminousMaskRenderedSubMeshCount(),
+    glowEnabled: mmdManager.postEffectGlowEnabled,
+    glowIntensity: mmdManager.postEffectGlowIntensity,
+    glowThreshold: mmdManager.postEffectGlowThreshold,
+    glowKernel: mmdManager.postEffectGlowKernel,
+  };
 }
 
 function isLikelyShaderRequestUrl(url: string): boolean {
@@ -125,6 +178,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initializeApp(): Promise<void> {
   const searchParams = new URLSearchParams(window.location.search);
   const mode = searchParams.get("mode");
+  const smokeModelPath = searchParams.get("smokeModelPath");
   logInfo("renderer", "initialize app", { mode: mode ?? "editor" });
   if (mode === "exporter") {
     await initializePngSequenceExporter(searchParams);
@@ -135,6 +189,13 @@ async function initializeApp(): Promise<void> {
     return;
   }
   enhanceBottomPanelControls(document);
+  if (smokeModelPath) {
+    try {
+      localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, "frameGraph");
+    } catch {
+      // Smoke should still report the actual backend if storage is unavailable.
+    }
+  }
 
   const canvas = document.getElementById("render-canvas") as HTMLCanvasElement;
   if (!canvas) {
@@ -162,11 +223,15 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
+    const scenario = smokeModelPath
+      ? await runSmokeLuminousScenario(mmdManager, smokeModelPath)
+      : undefined;
     reportSmokeRendererReady({
       engine,
       physicsBackend,
       crossOriginIsolated: globalThis.crossOriginIsolated,
       sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
+      scenario,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

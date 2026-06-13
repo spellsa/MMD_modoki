@@ -187,6 +187,7 @@ const SMOKE_TEST_SCREENSHOT_DELAY_MS = Math.max(
   0,
   Number.parseInt(process.env.MMD_MODOKI_SMOKE_SCREENSHOT_DELAY_MS ?? '500', 10) || 0,
 );
+const SMOKE_TEST_MODEL_PATH = process.env.MMD_MODOKI_SMOKE_MODEL_PATH ?? null;
 
 const pngSequenceExportJobMap = new Map<string, PngSequenceExportRequest>();
 const pngSequenceExportActiveCountByOwner = new Map<number, number>();
@@ -676,6 +677,7 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
       physicsBackend,
       crossOriginIsolated,
       sharedArrayBufferAvailable,
+      scenario: payload?.scenario,
       webContentsId: mainWindow.webContents.id,
     };
     void captureSmokeScreenshot(mainWindow, successData).then((data) => {
@@ -726,7 +728,10 @@ const createWindow = () => {
   });
 
   // Load the app
-  const loadPromise = loadEditorWindow(mainWindow);
+  const smokeQuery = isSmokeMode && SMOKE_TEST_MODEL_PATH
+    ? { smokeModelPath: SMOKE_TEST_MODEL_PATH }
+    : undefined;
+  const loadPromise = loadEditorWindow(mainWindow, smokeQuery);
   setupSmokeTestLifecycle(mainWindow, loadPromise);
   void loadPromise;
 
