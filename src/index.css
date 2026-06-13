@@ -2419,7 +2419,7 @@ body.file-drag-active #viewport-container {
 
 .effect-layer-header {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -2453,6 +2453,38 @@ body.file-drag-active #viewport-container {
 
 .effect-layer-main:hover .effect-layer-name {
   color: var(--text-primary);
+}
+
+.effect-layer-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 20px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.effect-layer-drag-handle:hover {
+  color: var(--text-secondary);
+}
+
+.effect-layer-drag-handle:active {
+  cursor: grabbing;
+}
+
+.effect-layer-placeholder--drop-before {
+  border-top-color: #38bdf8;
+  box-shadow: inset 0 2px 0 rgba(56, 189, 248, 0.85);
+}
+
+.effect-layer-placeholder--drop-after {
+  border-bottom-color: #38bdf8;
+  box-shadow: inset 0 -2px 0 rgba(56, 189, 248, 0.85);
 }
 
 .effect-layer-check {

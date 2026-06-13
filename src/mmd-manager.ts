@@ -211,6 +211,12 @@ import {
 } from "./render/post-effect-backend";
 import { FrameGraphPostEffectsController } from "./render/frame-graph-post-effects-controller";
 import {
+    FRAME_GRAPH_POST_EFFECT_IDS,
+    normalizeFrameGraphPostEffectIds,
+    type FrameGraphPostEffectId,
+    type FrameGraphPostEffectStackEntry,
+} from "./shared/frame-graph-post-effect-stack";
+import {
     applyLightColorTemperature as applyLightColorTemperatureImpl,
     applyShadowEdgeSoftness as applyShadowEdgeSoftnessImpl,
     applyShadowFrustumSize as applyShadowFrustumSizeImpl,
@@ -1497,6 +1503,7 @@ ${beforeFogAppendBlock}
     private postEffectFogDensityValue = 0.002;
     private postEffectFogOpacityValue = 0.2;
     private postEffectFogColorValue = new Color3(0.04, 0.04, 0.06);
+    private frameGraphPostEffectStackIdsValue: FrameGraphPostEffectId[] = [];
     private antialiasEnabledValue = true;
     private postEffectFarDofStrengthValue = 0;
     private readonly farDofEnabled = false;
@@ -5480,6 +5487,7 @@ ${beforeFogAppendBlock}
             sourceTexture?.getInternalTexture() ?? null,
             depthTexture,
             this.camera,
+            this.getFrameGraphPostEffectRuntimeOrder(),
         );
         if (!activated) {
             this.disposeFrameGraphPostEffectsSceneColorTarget();
@@ -5616,6 +5624,83 @@ ${beforeFogAppendBlock}
 
     getPostEffectBackend(): PostEffectBackend {
         return this.postEffectBackend;
+    }
+
+    public getFrameGraphPostEffectStackIds(): readonly FrameGraphPostEffectId[] {
+        return normalizeFrameGraphPostEffectIds(
+            this.frameGraphPostEffectStackIdsValue,
+            this.getActiveFrameGraphPostEffectIds(),
+        );
+    }
+
+    public setFrameGraphPostEffectStackIds(ids: readonly FrameGraphPostEffectId[]): void {
+        const normalized = normalizeFrameGraphPostEffectIds(ids);
+        if (this.areFrameGraphPostEffectIdsEqual(this.frameGraphPostEffectStackIdsValue, normalized)) {
+            return;
+        }
+        this.frameGraphPostEffectStackIdsValue = normalized;
+        this.refreshFrameGraphPostEffectsBackendForOrderChange();
+    }
+
+    public getFrameGraphPostEffectStackEntries(): FrameGraphPostEffectStackEntry[] {
+        return this.getFrameGraphPostEffectStackIds().map((id) => ({
+            id,
+            enabled: this.isFrameGraphPostEffectActive(id),
+        }));
+    }
+
+    public getFrameGraphPostEffectRuntimeOrder(): readonly FrameGraphPostEffectId[] {
+        return normalizeFrameGraphPostEffectIds(
+            this.getFrameGraphPostEffectStackIds(),
+            FRAME_GRAPH_POST_EFFECT_IDS,
+        );
+    }
+
+    public isFrameGraphPostEffectActive(id: FrameGraphPostEffectId): boolean {
+        switch (id) {
+            case "ssr":
+                return this.postEffectSsrEnabledValue;
+            case "ssao":
+                return this.postEffectSsaoEnabledValue;
+            case "dof":
+                return this.dofEnabledValue;
+            case "bloom":
+                return this.postEffectBloomEnabledValue;
+            case "lut":
+                return this.postEffectLutEnabledValue;
+            case "sharpen":
+                return this.postEffectSharpenEdgeValue > 0.000001;
+            case "grain":
+                return this.postEffectGrainIntensityValue > 0.000001;
+            case "chromatic":
+                return this.postEffectChromaticAberrationValue > 0.000001;
+            case "vignette":
+                return this.postEffectVignetteEnabledValue;
+            case "edgeBlur":
+                return this.dofLensEdgeBlurValue > 0.000001;
+            case "distortion":
+                return Math.abs(this.dofLensDistortionValue) > 0.000001
+                    || Math.abs(this.dofLensDistortionInfluenceValue) > 0.000001;
+        }
+    }
+
+    private getActiveFrameGraphPostEffectIds(): FrameGraphPostEffectId[] {
+        return FRAME_GRAPH_POST_EFFECT_IDS.filter((id) => this.isFrameGraphPostEffectActive(id));
+    }
+
+    private areFrameGraphPostEffectIdsEqual(
+        a: readonly FrameGraphPostEffectId[],
+        b: readonly FrameGraphPostEffectId[],
+    ): boolean {
+        return a.length === b.length && a.every((id, index) => id === b[index]);
+    }
+
+    private refreshFrameGraphPostEffectsBackendForOrderChange(): void {
+        if (this.postEffectBackend !== "frameGraph" || !this.frameGraphPostEffectsController) {
+            return;
+        }
+        this.disposeFrameGraphPostEffectsController();
+        this.initializePostEffectBackend();
     }
 
     private getPostProcessShaderLanguage(): ShaderLanguage {

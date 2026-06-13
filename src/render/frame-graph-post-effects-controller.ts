@@ -32,6 +32,11 @@ import { ThinSharpenPostProcess } from "@babylonjs/core/PostProcesses/thinSharpe
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
 import { createLutAtlasTextureFrom3dlText } from "./lut-atlas-texture";
+import {
+    FRAME_GRAPH_POST_EFFECT_IDS,
+    normalizeFrameGraphPostEffectIds,
+    type FrameGraphPostEffectId,
+} from "../shared/frame-graph-post-effect-stack";
 
 export type FrameGraphPostEffectsWarning = {
     message: string;
@@ -910,6 +915,7 @@ export class FrameGraphPostEffectsController {
         sourceTexture?: InternalTexture | null,
         depthTexture?: InternalTexture | null,
         camera?: Camera | null,
+        effectOrder: readonly FrameGraphPostEffectId[] = FRAME_GRAPH_POST_EFFECT_IDS,
     ): boolean {
         if (this.active) {
             return true;
@@ -1275,8 +1281,8 @@ export class FrameGraphPostEffectsController {
             "frameGraphPostEffectsOutput",
             frameGraph,
         );
-        outputTask.sourceTexture = fxaaTask.outputTexture;
         frameGraph.addTask(outputTask);
+        this.connectPostEffectOrder(imageProcessingTask.outputTexture, outputTask, effectOrder);
 
         this.frameGraph = frameGraph;
         this.activeScene = scene;
@@ -1372,6 +1378,96 @@ export class FrameGraphPostEffectsController {
 
     getExecutedFrameCount(): number {
         return this.executedFrameCount;
+    }
+
+    private connectPostEffectOrder(
+        baseTexture: FrameGraphTextureHandle,
+        outputTask: FrameGraphCopyToBackbufferColorTask,
+        effectOrder: readonly FrameGraphPostEffectId[],
+    ): void {
+        let currentTexture = baseTexture;
+        let vignetteEdgeBlurConnected = false;
+        const normalizedOrder = normalizeFrameGraphPostEffectIds(effectOrder, FRAME_GRAPH_POST_EFFECT_IDS);
+
+        const connectVignetteEdgeBlur = (): void => {
+            if (vignetteEdgeBlurConnected || !this.vignetteEdgeBlurTask) {
+                return;
+            }
+            this.vignetteEdgeBlurTask.sourceTexture = currentTexture;
+            currentTexture = this.vignetteEdgeBlurTask.outputTexture;
+            vignetteEdgeBlurConnected = true;
+        };
+
+        for (const id of normalizedOrder) {
+            switch (id) {
+                case "ssr":
+                    if (this.ssrTask) {
+                        this.ssrTask.sourceTexture = currentTexture;
+                        currentTexture = this.ssrTask.outputTexture;
+                    }
+                    break;
+                case "ssao":
+                    if (this.ssaoTask && this.ssaoToonCompositeTask) {
+                        this.ssaoTask.sourceTexture = currentTexture;
+                        this.ssaoToonCompositeTask.sourceTexture = this.ssaoTask.outputTexture;
+                        this.ssaoToonCompositeTask.originalTexture = currentTexture;
+                        currentTexture = this.ssaoToonCompositeTask.outputTexture;
+                    }
+                    break;
+                case "dof":
+                    if (this.depthOfFieldTask) {
+                        this.depthOfFieldTask.sourceTexture = currentTexture;
+                        currentTexture = this.depthOfFieldTask.outputTexture;
+                    }
+                    break;
+                case "bloom":
+                    if (this.bloomTask) {
+                        this.bloomTask.sourceTexture = currentTexture;
+                        currentTexture = this.bloomTask.outputTexture;
+                    }
+                    break;
+                case "lut":
+                    if (this.lutTask) {
+                        this.lutTask.sourceTexture = currentTexture;
+                        currentTexture = this.lutTask.outputTexture;
+                    }
+                    break;
+                case "sharpen":
+                    if (this.sharpenTask) {
+                        this.sharpenTask.sourceTexture = currentTexture;
+                        currentTexture = this.sharpenTask.outputTexture;
+                    }
+                    break;
+                case "grain":
+                    if (this.grainTask) {
+                        this.grainTask.sourceTexture = currentTexture;
+                        currentTexture = this.grainTask.outputTexture;
+                    }
+                    break;
+                case "chromatic":
+                    if (this.chromaticAberrationTask) {
+                        this.chromaticAberrationTask.sourceTexture = currentTexture;
+                        currentTexture = this.chromaticAberrationTask.outputTexture;
+                    }
+                    break;
+                case "vignette":
+                case "edgeBlur":
+                    connectVignetteEdgeBlur();
+                    break;
+                case "distortion":
+                    if (this.lensDistortionTask) {
+                        this.lensDistortionTask.sourceTexture = currentTexture;
+                        currentTexture = this.lensDistortionTask.outputTexture;
+                    }
+                    break;
+            }
+        }
+
+        if (this.fxaaTask) {
+            this.fxaaTask.sourceTexture = currentTexture;
+            currentTexture = this.fxaaTask.outputTexture;
+        }
+        outputTask.sourceTexture = currentTexture;
     }
 
     private emitWarningOnce(warning: FrameGraphPostEffectsWarning): void {

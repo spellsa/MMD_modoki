@@ -8,6 +8,10 @@ import type {
 } from "../types";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { createCameraAnimationFromTrack, deserializeCameraTrack, deserializeModelAnimation } from "./project-codec";
+import {
+    normalizeFrameGraphPostEffectStack,
+    type FrameGraphPostEffectId,
+} from "../shared/frame-graph-post-effect-stack";
 
 type ProjectImportRuntimeModel = {
     createRuntimeAnimation(animation: object): unknown;
@@ -172,6 +176,7 @@ type ProjectImportHost = {
     postEffectFogDensity: number;
     postEffectFogOpacity: number;
     setPostEffectFogColor(r: number, g: number, b: number): void;
+    setFrameGraphPostEffectStackIds?: (ids: readonly FrameGraphPostEffectId[]) => void;
     refreshTotalFramesFromContent(): void;
     setRenderFpsLimit(value: number): void;
     renderFpsLimit: number;
@@ -854,6 +859,11 @@ export async function importProjectState(
         Number.isFinite(data.effects.fogColor.g) &&
         Number.isFinite(data.effects.fogColor.b)) {
         host.setPostEffectFogColor(data.effects.fogColor.r, data.effects.fogColor.g, data.effects.fogColor.b);
+    }
+    if (Array.isArray(data.effects.frameGraphPostStack)) {
+        host.setFrameGraphPostEffectStackIds?.(
+            normalizeFrameGraphPostEffectStack(data.effects.frameGraphPostStack).map((entry) => entry.id),
+        );
     }
 
     host.refreshTotalFramesFromContent();

@@ -178,4 +178,19 @@ describe("exportProjectState", () => {
         expect(project.viewport.mirroringFloorHeight).toBe(0.02);
         expect(project.viewport.mirroringFloorResolution).toBe(1024);
     });
+
+    it("writes FrameGraph post effect stack entries", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            getFrameGraphPostEffectStackEntries: () => [
+                { id: "bloom", enabled: true },
+                { id: "lut", enabled: false },
+            ],
+        });
+
+        expect(project.effects.frameGraphPostStack).toEqual([
+            { id: "bloom", enabled: true },
+            { id: "lut", enabled: false },
+        ]);
+    });
 });

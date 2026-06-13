@@ -56,6 +56,11 @@ import {
     normalizePostEffectBackend,
     type PostEffectBackend,
 } from "./render/post-effect-backend";
+import {
+    addFrameGraphPostEffectId,
+    isFrameGraphPostEffectId,
+    type FrameGraphPostEffectId,
+} from "./shared/frame-graph-post-effect-stack";
 
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
@@ -172,18 +177,7 @@ type InterpolationCurveClipboard = {
     sourceChannelCount: number;
 };
 
-type FrameGraphPostAddEffectId =
-    | "bloom"
-    | "dof"
-    | "lut"
-    | "ssao"
-    | "ssr"
-    | "vignette"
-    | "grain"
-    | "sharpen"
-    | "chromatic"
-    | "edgeBlur"
-    | "distortion";
+type FrameGraphPostAddEffectId = FrameGraphPostEffectId;
 
 type FrameGraphPostAddEffect = {
     id: FrameGraphPostAddEffectId;
@@ -367,7 +361,7 @@ export class UIController {
     private postEffectAddButton: HTMLButtonElement | null = null;
     private postEffectEnableFrameGraphButton: HTMLButtonElement | null = null;
     private expandedFrameGraphPostEffectId: FrameGraphPostAddEffectId | null = null;
-    private readonly frameGraphPostStackEffectIds = new Set<FrameGraphPostAddEffectId>();
+    private draggingFrameGraphPostEffectId: FrameGraphPostAddEffectId | null = null;
     private btnInfoKeyframe: HTMLButtonElement | null = null;
     private btnInterpolationKeyframe: HTMLButtonElement | null = null;
     private btnBoneKeyframe: HTMLButtonElement | null = null;
@@ -3971,11 +3965,66 @@ export class UIController {
             }
         });
 
+        this.postEffectStackList?.addEventListener("dragstart", (event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const handle = target?.closest<HTMLElement>("[data-effect-stack-drag]") ?? null;
+            const effectId = handle?.dataset.effectStackDrag ?? "";
+            if (!handle || !this.isFrameGraphPostAddEffectId(effectId)) {
+                return;
+            }
+            this.draggingFrameGraphPostEffectId = effectId;
+            event.dataTransfer?.setData("text/plain", effectId);
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+            }
+        });
+
+        this.postEffectStackList?.addEventListener("dragover", (event) => {
+            if (!this.draggingFrameGraphPostEffectId) return;
+            const row = this.getFrameGraphPostStackDropRow(event.target);
+            if (!row) return;
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = "move";
+            }
+            this.updateFrameGraphPostStackDropMarker(row, event);
+        });
+
+        this.postEffectStackList?.addEventListener("drop", (event) => {
+            const draggedId = this.draggingFrameGraphPostEffectId
+                ?? event.dataTransfer?.getData("text/plain")
+                ?? "";
+            const row = this.getFrameGraphPostStackDropRow(event.target);
+            const targetId = row?.dataset.effectStackRow ?? "";
+            if (!this.isFrameGraphPostAddEffectId(draggedId) || !this.isFrameGraphPostAddEffectId(targetId)) {
+                this.clearFrameGraphPostStackDropMarkers();
+                return;
+            }
+            event.preventDefault();
+            const placement = this.getFrameGraphPostStackDropPlacement(row, event);
+            this.moveFrameGraphPostEffectToDisplayPosition(draggedId, targetId, placement);
+            this.clearFrameGraphPostStackDropMarkers();
+            this.draggingFrameGraphPostEffectId = null;
+        });
+
+        this.postEffectStackList?.addEventListener("dragend", () => {
+            this.draggingFrameGraphPostEffectId = null;
+            this.clearFrameGraphPostStackDropMarkers();
+        });
+
+        this.postEffectStackList?.addEventListener("dragleave", (event) => {
+            const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+            if (related && this.postEffectStackList?.contains(related)) {
+                return;
+            }
+            this.clearFrameGraphPostStackDropMarkers();
+        });
+
         this.refreshFrameGraphPostAddUi();
     }
 
     private isFrameGraphPostAddEffectId(value: string): value is FrameGraphPostAddEffectId {
-        return FRAME_GRAPH_POST_ADD_EFFECTS.some((effect) => effect.id === value);
+        return isFrameGraphPostEffectId(value);
     }
 
     private switchPostEffectBackendToFrameGraph(): void {
@@ -4050,7 +4099,10 @@ export class UIController {
             return;
         }
 
-        this.frameGraphPostStackEffectIds.add(effectId);
+        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
+            this.mmdManager.getFrameGraphPostEffectStackIds(),
+            effectId,
+        ));
         this.applyFrameGraphPostEffectDefaultValues(effectId);
         switch (effectId) {
             case "bloom":
@@ -4091,7 +4143,10 @@ export class UIController {
     private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
         const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
         if (!effect) return;
-        this.frameGraphPostStackEffectIds.add(effectId);
+        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
+            this.mmdManager.getFrameGraphPostEffectStackIds(),
+            effectId,
+        ));
         if (enabled) {
             this.applyFrameGraphPostEffectDefaultValues(effectId);
         }
@@ -4101,6 +4156,53 @@ export class UIController {
 
     private getFrameGraphPostEffectLabel(effectId: FrameGraphPostAddEffectId): string {
         return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.label ?? effectId;
+    }
+
+    private getFrameGraphPostStackDropRow(target: EventTarget | null): HTMLElement | null {
+        return target instanceof Element
+            ? target.closest<HTMLElement>("[data-effect-stack-row]")
+            : null;
+    }
+
+    private getFrameGraphPostStackDropPlacement(row: HTMLElement, event: DragEvent): "before" | "after" {
+        const rect = row.getBoundingClientRect();
+        return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    }
+
+    private updateFrameGraphPostStackDropMarker(row: HTMLElement, event: DragEvent): void {
+        const placement = this.getFrameGraphPostStackDropPlacement(row, event);
+        this.clearFrameGraphPostStackDropMarkers();
+        row.classList.toggle("effect-layer-placeholder--drop-before", placement === "before");
+        row.classList.toggle("effect-layer-placeholder--drop-after", placement === "after");
+    }
+
+    private clearFrameGraphPostStackDropMarkers(): void {
+        this.postEffectStackList
+            ?.querySelectorAll<HTMLElement>(".effect-layer-placeholder--drop-before, .effect-layer-placeholder--drop-after")
+            .forEach((row) => {
+                row.classList.remove("effect-layer-placeholder--drop-before", "effect-layer-placeholder--drop-after");
+            });
+    }
+
+    private moveFrameGraphPostEffectToDisplayPosition(
+        draggedId: FrameGraphPostAddEffectId,
+        targetId: FrameGraphPostAddEffectId,
+        placement: "before" | "after",
+    ): void {
+        if (draggedId === targetId) {
+            return;
+        }
+        const displayIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()].reverse();
+        const withoutDragged = displayIds.filter((id) => id !== draggedId);
+        const targetIndex = withoutDragged.indexOf(targetId);
+        if (targetIndex < 0) {
+            return;
+        }
+        const insertIndex = placement === "before" ? targetIndex : targetIndex + 1;
+        withoutDragged.splice(insertIndex, 0, draggedId);
+        this.mmdManager.setFrameGraphPostEffectStackIds(withoutDragged.reverse());
+        this.expandedFrameGraphPostEffectId = draggedId;
+        this.refreshFrameGraphPostAddUi();
     }
 
     private refreshFrameGraphPostAddUi(): void {
@@ -4122,7 +4224,8 @@ export class UIController {
     }
 
     private isFrameGraphPostEffectInStack(effectId: FrameGraphPostAddEffectId): boolean {
-        return this.frameGraphPostStackEffectIds.has(effectId) || this.isFrameGraphPostEffectActive(effectId);
+        return this.mmdManager.getFrameGraphPostEffectStackIds().includes(effectId)
+            || this.isFrameGraphPostEffectActive(effectId);
     }
 
     private escapeEffectStackHtml(value: string): string {
@@ -4217,7 +4320,10 @@ export class UIController {
     private async applyFrameGraphPostStackAction(action: string): Promise<void> {
         if (action !== "lutFile") return;
         await this.lutPanelController?.chooseExternalLut();
-        this.frameGraphPostStackEffectIds.add("lut");
+        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
+            this.mmdManager.getFrameGraphPostEffectStackIds(),
+            "lut",
+        ));
         this.expandedFrameGraphPostEffectId = "lut";
         this.refreshFrameGraphPostAddUi();
     }
@@ -4564,9 +4670,11 @@ export class UIController {
 
     private renderFrameGraphPostStack(frameGraphReady: boolean): void {
         if (!this.postEffectStackList) return;
-        const stackEffects = FRAME_GRAPH_POST_ADD_EFFECTS
-            .filter((effect) => effect.isActive(this.mmdManager) || this.frameGraphPostStackEffectIds.has(effect.id))
-            .slice()
+        const stackEffectIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()];
+        const effectById = new Map(FRAME_GRAPH_POST_ADD_EFFECTS.map((effect) => [effect.id, effect]));
+        const stackEffects = stackEffectIds
+            .map((id) => effectById.get(id) ?? null)
+            .filter((effect): effect is FrameGraphPostAddEffect => effect !== null)
             .reverse();
 
         if (!frameGraphReady) {
@@ -4594,7 +4702,7 @@ export class UIController {
             const expanded = effect.id === this.expandedFrameGraphPostEffectId;
             const enabled = effect.isActive(this.mmdManager);
             return `
-                <div class="effect-layer-placeholder effect-layer-placeholder--active effect-layer-placeholder--check${enabled ? "" : " effect-layer-placeholder--off"}">
+                <div class="effect-layer-placeholder effect-layer-placeholder--active effect-layer-placeholder--check${enabled ? "" : " effect-layer-placeholder--off"}" data-effect-stack-row="${effect.id}">
                     <div class="effect-layer-header">
                         <label class="effect-layer-check-wrap" title="表示 / 非表示">
                             <input class="effect-layer-check" type="checkbox" data-effect-stack-toggle="${effect.id}"${enabled ? " checked" : ""}>
@@ -4602,6 +4710,7 @@ export class UIController {
                         <button class="effect-layer-main" type="button" data-effect-stack-item="${effect.id}" aria-expanded="${expanded ? "true" : "false"}">
                             <span class="effect-layer-name">${effect.label}</span>
                         </button>
+                        <div class="effect-layer-drag-handle" draggable="true" data-effect-stack-drag="${effect.id}" title="Drag to reorder" aria-label="Drag to reorder">:</div>
                     </div>
                     ${expanded ? `
                         <div class="effect-layer-details">

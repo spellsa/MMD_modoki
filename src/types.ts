@@ -1,3 +1,5 @@
+import type { FrameGraphPostEffectStackEntry } from "./shared/frame-graph-post-effect-stack";
+
 export interface ElectronAPI {
     openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
     openDirectoryDialog: () => Promise<string | null>;
@@ -382,6 +384,7 @@ export interface ProjectEffectState {
     fogDensity?: number;
     fogOpacity?: number;
     fogColor?: ProjectRgbColor;
+    frameGraphPostStack?: FrameGraphPostEffectStackEntry[];
     gammaEncodingVersion?: 2;
 }
 

@@ -104,6 +104,7 @@ function createHost() {
         setPostEffectExternalLut: vi.fn(),
         setExternalWgslToonShader: vi.fn(),
         setPostEffectFogColor: vi.fn(),
+        setFrameGraphPostEffectStackIds: vi.fn(),
         refreshTotalFramesFromContent: vi.fn(),
         setRenderFpsLimit: vi.fn(),
         seekTo: vi.fn(),
@@ -153,6 +154,25 @@ describe("importProjectState", () => {
         expect(host.postEffectSsaoRadius).toBe(0.75);
         expect(host.postEffectSsaoFadeEnd).toBe(42);
         expect(host.postEffectSsaoDebugView).toBe(true);
+    });
+
+    it("restores normalized FrameGraph post effect stack order", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                frameGraphPostStack: [
+                    { id: "lut", enabled: true },
+                    { id: "bad" as "lut", enabled: true },
+                    { id: "bloom", enabled: false },
+                    { id: "lut", enabled: false },
+                ],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["lut", "bloom"]);
     });
 
     it("restores mirroring floor viewport values", async () => {

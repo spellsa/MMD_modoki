@@ -350,3 +350,26 @@ SSAO / SSR が OFF なのに GeometryRenderer を作ると重い。ordered stack
 
 順序入れ替えは欲しい機能だが、runtime chain の変更は描画全体に響く。まず state と保存形式を固め、固定順との差分を小さく見ながら task builder へ進める。
 
+## 2026-06-13 実装メモ
+
+初回実装として、次を入れた。
+
+- `src/shared/frame-graph-post-effect-stack.ts` に stack order helper を追加
+- 効果 stack row に上下ボタンを追加
+- UI の表示順は「上が後、下が先」を維持
+- `MmdManager` が ordered stack を持ち、順序変更時に FrameGraph backend を再構築する
+- `effects.frameGraphPostStack` として project save / load に保存する
+- `FrameGraphPostEffectsController` で task の `sourceTexture -> outputTexture` 接続を runtime order から張り直す
+- `ImageProcessing` と `FXAA` は内部固定扱いのままにした
+
+制約:
+
+- `Vignette` と `EdgeBlur` は現状同じ custom task なので、どちらか先に出てきた位置でまとめて適用される
+- 完全な別順序化が必要なら、次の段階で shader / task を分離する
+- Classic PostProcess backend は対象外
+
+確認:
+
+- `npm.cmd run test:unit -- --run src/shared/frame-graph-post-effect-stack.test.ts src/project/project-serializer.test.ts src/project/project-importer.test.ts`
+- `npm.cmd run lint`
+- `npm.cmd run smoke:launch`

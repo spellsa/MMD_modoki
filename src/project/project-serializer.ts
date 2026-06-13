@@ -6,6 +6,7 @@ import type {
     ProjectMotionImport,
     ProjectSerializedAccessoryTransformTrack,
 } from "../types";
+import type { FrameGraphPostEffectStackEntry } from "../shared/frame-graph-post-effect-stack";
 import { serializeCameraTrack, serializeModelAnimation } from "./project-codec";
 
 type ProjectExportAccessory = {
@@ -149,6 +150,7 @@ type ProjectExportHost = {
     getBackgroundVideoPath: () => string | null;
     getExternalWgslToonShaderPath: () => string | null;
     getPostEffectFogColor: () => { r: number; g: number; b: number };
+    getFrameGraphPostEffectStackEntries?: () => FrameGraphPostEffectStackEntry[];
     isGroundVisible: () => boolean;
     isSkydomeVisible: () => boolean;
 };
@@ -362,6 +364,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             fogDensity: host.postEffectFogDensity,
             fogOpacity: host.postEffectFogOpacity,
             fogColor: host.getPostEffectFogColor(),
+            frameGraphPostStack: host.getFrameGraphPostEffectStackEntries?.(),
             gammaEncodingVersion: 2,
         },
         accessories,
