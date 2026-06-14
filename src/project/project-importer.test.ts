@@ -101,6 +101,10 @@ function createHost() {
         applyLightColorTemperature: vi.fn(),
         applyToonShadowInfluenceToAllModels: vi.fn(),
         syncLuminousGlowLayer: vi.fn(),
+        postEffectGlowGlareCount: 0,
+        postEffectGlowGlareLength: 48,
+        postEffectGlowGlareAngle: 0,
+        postEffectGlowGlarePower: 0.4,
         setPostEffectExternalLut: vi.fn(),
         setExternalWgslToonShader: vi.fn(),
         setPostEffectFogColor: vi.fn(),
@@ -184,6 +188,10 @@ describe("importProjectState", () => {
                 glowIntensity: 1.25,
                 glowThreshold: 0.18,
                 glowKernel: 48,
+                glowGlareCount: 6,
+                glowGlareLength: 96,
+                glowGlareAngle: 15,
+                glowGlarePower: 0.75,
                 frameGraphPostStack: [
                     { id: "luminous", enabled: true },
                     { id: "bloom", enabled: false },
@@ -197,6 +205,10 @@ describe("importProjectState", () => {
         expect(host.postEffectGlowIntensity).toBe(1.25);
         expect(host.postEffectGlowThreshold).toBe(0.18);
         expect(host.postEffectGlowKernel).toBe(48);
+        expect(host.postEffectGlowGlareCount).toBe(6);
+        expect(host.postEffectGlowGlareLength).toBe(96);
+        expect(host.postEffectGlowGlareAngle).toBe(15);
+        expect(host.postEffectGlowGlarePower).toBe(0.75);
         expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["luminous", "bloom"]);
     });
 

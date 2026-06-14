@@ -1481,6 +1481,10 @@ ${beforeFogAppendBlock}
     private postEffectGlowIntensityValue = 0.5;
     private postEffectGlowThresholdValue = 0.5;
     private postEffectGlowKernelValue = 20;
+    private postEffectGlowGlareCountValue = 0;
+    private postEffectGlowGlareLengthValue = 48;
+    private postEffectGlowGlareAngleValue = 0;
+    private postEffectGlowGlarePowerValue = 0.4;
     private postEffectLutEnabledValue = false;
     private postEffectLutIntensityValue = 1;
     private postEffectLutPresetValue = "anime-soft";
@@ -5468,6 +5472,10 @@ ${beforeFogAppendBlock}
             luminousIntensity: this.postEffectGlowIntensityValue,
             luminousThreshold: this.postEffectGlowThresholdValue,
             luminousRadius: this.postEffectGlowKernelValue,
+            luminousGlareCount: this.postEffectGlowGlareCountValue,
+            luminousGlareLength: this.postEffectGlowGlareLengthValue,
+            luminousGlareAngle: this.postEffectGlowGlareAngleValue,
+            luminousGlarePower: this.postEffectGlowGlarePowerValue,
             bloomEnabled: this.postEffectBloomEnabledValue,
             bloomWeight: this.postEffectBloomWeightValue,
             bloomThreshold: this.postEffectBloomThresholdValue,
@@ -5567,11 +5575,12 @@ ${beforeFogAppendBlock}
             },
         );
         renderTarget.activeCamera = this.camera;
-        renderTarget.renderList = [];
-        // Use the camera custom RT path instead of scene.customRenderTargets:
-        // camera RTs are collected after active-mesh evaluation, which is
-        // closer to the normal camera render path used by the editor viewport.
-        renderTarget.getCustomRenderList = () => this.scene.meshes;
+        // Keep the render list unset so ObjectRenderer can reuse the scene's
+        // active-mesh evaluation. A custom list can skip per-pass light binding
+        // data for WebGPU MMD materials and produce "Light*" draw-context
+        // warnings or an unlit scene-color texture.
+        renderTarget.renderList = null;
+        renderTarget.getCustomRenderList = null;
         renderTarget.renderParticles = true;
         renderTarget.renderSprites = true;
         renderTarget.skipInitialClear = false;
@@ -5660,12 +5669,15 @@ ${beforeFogAppendBlock}
                 continue;
             }
             const previousRenderPassMaterial = renderingMesh.getMaterialForRenderPass(renderPassId);
+            const previousReplacementRenderPassMaterial = replacementMesh?.getMaterialForRenderPass(renderPassId);
             renderingMesh.setMaterialForRenderPass(renderPassId, maskMaterial);
+            replacementMesh?.setMaterialForRenderPass(renderPassId, maskMaterial);
             try {
                 renderingMesh.render(subMesh, enableAlphaMode, replacementMesh || undefined);
                 this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount += 1;
             } finally {
                 renderingMesh.setMaterialForRenderPass(renderPassId, previousRenderPassMaterial);
+                replacementMesh?.setMaterialForRenderPass(renderPassId, previousReplacementRenderPassMaterial);
             }
         }
     }
@@ -6399,6 +6411,45 @@ ${beforeFogAppendBlock}
     }
     set postEffectGlowKernel(v: number) {
         this.postEffectGlowKernelValue = Math.max(1, Math.min(256, Math.round(v)));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Luminous glare ray count (0..12). */
+    get postEffectGlowGlareCount(): number {
+        return this.postEffectGlowGlareCountValue;
+    }
+    set postEffectGlowGlareCount(v: number) {
+        this.postEffectGlowGlareCountValue = Math.max(0, Math.min(12, Math.round(v)));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Luminous glare ray length in pixels (0..256). */
+    get postEffectGlowGlareLength(): number {
+        return this.postEffectGlowGlareLengthValue;
+    }
+    set postEffectGlowGlareLength(v: number) {
+        this.postEffectGlowGlareLengthValue = Math.max(0, Math.min(256, Math.round(v)));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Luminous glare base angle in degrees. */
+    get postEffectGlowGlareAngle(): number {
+        return this.postEffectGlowGlareAngleValue;
+    }
+    set postEffectGlowGlareAngle(v: number) {
+        const value = Number(v);
+        this.postEffectGlowGlareAngleValue = Number.isFinite(value)
+            ? Math.max(-180, Math.min(180, value))
+            : 0;
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    /** Luminous glare intensity multiplier (0..4). */
+    get postEffectGlowGlarePower(): number {
+        return this.postEffectGlowGlarePowerValue;
+    }
+    set postEffectGlowGlarePower(v: number) {
+        this.postEffectGlowGlarePowerValue = Math.max(0, Math.min(4, v));
         this.applyDefaultPipelinePostProcessSettings();
     }
 

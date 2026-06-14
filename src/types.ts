@@ -362,6 +362,10 @@ export interface ProjectEffectState {
     glowIntensity?: number;
     glowThreshold?: number;
     glowKernel?: number;
+    glowGlareCount?: number;
+    glowGlareLength?: number;
+    glowGlareAngle?: number;
+    glowGlarePower?: number;
     lutEnabled?: boolean;
     lutIntensity?: number;
     lutPreset?: string;

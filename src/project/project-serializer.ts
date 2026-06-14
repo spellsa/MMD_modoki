@@ -110,6 +110,10 @@ type ProjectExportHost = {
     postEffectGlowIntensity: number;
     postEffectGlowThreshold: number;
     postEffectGlowKernel: number;
+    postEffectGlowGlareCount: number;
+    postEffectGlowGlareLength: number;
+    postEffectGlowGlareAngle: number;
+    postEffectGlowGlarePower: number;
     postEffectLutEnabled: boolean;
     postEffectLutIntensity: number;
     postEffectLutPreset: string;
@@ -342,6 +346,10 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             glowIntensity: host.postEffectGlowIntensity,
             glowThreshold: host.postEffectGlowThreshold,
             glowKernel: host.postEffectGlowKernel,
+            glowGlareCount: host.postEffectGlowGlareCount,
+            glowGlareLength: host.postEffectGlowGlareLength,
+            glowGlareAngle: host.postEffectGlowGlareAngle,
+            glowGlarePower: host.postEffectGlowGlarePower,
             lutEnabled: host.postEffectLutEnabled,
             lutIntensity: host.postEffectLutIntensity,
             lutPreset: host.postEffectLutPreset,

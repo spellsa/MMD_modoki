@@ -153,6 +153,10 @@ type ProjectImportHost = {
     postEffectGlowIntensity: number;
     postEffectGlowThreshold: number;
     postEffectGlowKernel: number;
+    postEffectGlowGlareCount: number;
+    postEffectGlowGlareLength: number;
+    postEffectGlowGlareAngle: number;
+    postEffectGlowGlarePower: number;
     postEffectLutPreset: string;
     postEffectLutSourceMode: string;
     setPostEffectExternalLut(path: string | null, label: string | null, content: string | null): void;
@@ -786,6 +790,18 @@ export async function importProjectState(
     host.postEffectGlowKernel = typeof data.effects.glowKernel === "number" && Number.isFinite(data.effects.glowKernel)
         ? data.effects.glowKernel
         : 20;
+    host.postEffectGlowGlareCount = typeof data.effects.glowGlareCount === "number" && Number.isFinite(data.effects.glowGlareCount)
+        ? data.effects.glowGlareCount
+        : 0;
+    host.postEffectGlowGlareLength = typeof data.effects.glowGlareLength === "number" && Number.isFinite(data.effects.glowGlareLength)
+        ? data.effects.glowGlareLength
+        : 48;
+    host.postEffectGlowGlareAngle = typeof data.effects.glowGlareAngle === "number" && Number.isFinite(data.effects.glowGlareAngle)
+        ? data.effects.glowGlareAngle
+        : 0;
+    host.postEffectGlowGlarePower = typeof data.effects.glowGlarePower === "number" && Number.isFinite(data.effects.glowGlarePower)
+        ? data.effects.glowGlarePower
+        : 0.4;
     host.postEffectLutPreset = typeof data.effects.lutPreset === "string"
         ? data.effects.lutPreset
         : host.postEffectLutPreset;

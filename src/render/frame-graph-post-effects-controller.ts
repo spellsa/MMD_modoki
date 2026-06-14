@@ -29,6 +29,7 @@ import { ThinFXAAPostProcess } from "@babylonjs/core/PostProcesses/thinFXAAPostP
 import { ThinGrainPostProcess } from "@babylonjs/core/PostProcesses/thinGrainPostProcess";
 import { ThinImageProcessingPostProcess } from "@babylonjs/core/PostProcesses/thinImageProcessingPostProcess";
 import { ThinSharpenPostProcess } from "@babylonjs/core/PostProcesses/thinSharpenPostProcess";
+import { ThinBlurPostProcess } from "@babylonjs/core/PostProcesses/thinBlurPostProcess";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
 import { createLutAtlasTextureFrom3dlText } from "./lut-atlas-texture";
@@ -63,6 +64,10 @@ export type FrameGraphPostEffectsSettings = {
     luminousIntensity: number;
     luminousThreshold: number;
     luminousRadius: number;
+    luminousGlareCount: number;
+    luminousGlareLength: number;
+    luminousGlareAngle: number;
+    luminousGlarePower: number;
     bloomEnabled: boolean;
     bloomWeight: number;
     bloomThreshold: number;
@@ -236,22 +241,60 @@ function ensureColorCorrectionShaders(): void {
 function ensureLuminousShaders(): void {
     const shaderKey = "mmdFrameGraphLuminousPixelShader";
     const blurShaderKey = "mmdFrameGraphLuminousBlurPixelShader";
+    const extractShaderKey = "mmdFrameGraphLuminousExtractPixelShader";
     if (!ShaderStore.ShadersStore[shaderKey]) {
         ShaderStore.ShadersStore[shaderKey] = `
             precision highp float;
             varying vec2 vUV;
             uniform sampler2D textureSampler;
             uniform sampler2D glowSampler;
+            uniform sampler2D haloSampler;
             uniform float intensity;
+            uniform float glareCount;
+            uniform float glareLength;
+            uniform float glareAngle;
+            uniform float glarePower;
+            uniform vec2 texelSize;
 
             vec3 tonemapSoft(vec3 color) {
                 return color / (vec3(1.0) + color);
             }
 
+            vec3 sampleGlareRay(float rayIndex) {
+                float count = max(1.0, glareCount);
+                float angle = glareAngle + rayIndex * 3.14159265 / count;
+                vec2 direction = vec2(cos(angle), sin(angle));
+                vec2 perpendicular = vec2(-direction.y, direction.x);
+                vec3 color = texture2D(glowSampler, vUV).rgb * 0.04;
+                for (int i = 0; i < 12; i++) {
+                    float t = (float(i) + 0.35) / 12.0;
+                    vec2 delta = direction * texelSize * glareLength * t;
+                    vec2 width = perpendicular * texelSize * (1.25 + glareLength * t * 0.018);
+                    float weight = exp(-t * 3.4) * 0.035;
+                    color += texture2D(glowSampler, clamp(vUV + delta + width, vec2(0.0), vec2(1.0))).rgb * weight;
+                    color += texture2D(glowSampler, clamp(vUV + delta - width, vec2(0.0), vec2(1.0))).rgb * weight;
+                    color += texture2D(glowSampler, clamp(vUV - delta + width, vec2(0.0), vec2(1.0))).rgb * weight;
+                    color += texture2D(glowSampler, clamp(vUV - delta - width, vec2(0.0), vec2(1.0))).rgb * weight;
+                }
+                return color;
+            }
+
             void main(void) {
                 vec4 base = texture2D(textureSampler, vUV);
-                vec3 glowSource = texture2D(glowSampler, vUV).rgb;
-                vec3 glow = tonemapSoft(glowSource * intensity * 5.4);
+                vec3 coreSource = texture2D(glowSampler, vUV).rgb;
+                vec3 haloSource = texture2D(haloSampler, vUV).rgb;
+                vec3 glare = vec3(0.0);
+                if (glareCount > 0.5 && glarePower > 0.0001 && glareLength > 0.5) {
+                    for (int i = 0; i < 12; i++) {
+                        if (float(i) >= glareCount) {
+                            break;
+                        }
+                        glare += sampleGlareRay(float(i));
+                    }
+                    glare /= sqrt(max(1.0, glareCount));
+                }
+                vec3 glowSource = coreSource * 3.6 + haloSource * 2.2;
+                vec3 glow = tonemapSoft((glowSource + glare * glarePower * 1.45) * intensity);
                 vec3 screen = vec3(1.0) - (vec3(1.0) - clamp(base.rgb, vec3(0.0), vec3(1.0))) * (vec3(1.0) - glow);
                 vec3 softAdd = min(base.rgb + glow * 0.78, vec3(1.45));
                 vec3 result = mix(screen, softAdd, 0.48);
@@ -266,22 +309,109 @@ function ensureLuminousShaders(): void {
             var textureSampler: texture_2d<f32>;
             var glowSamplerSampler: sampler;
             var glowSampler: texture_2d<f32>;
+            var haloSamplerSampler: sampler;
+            var haloSampler: texture_2d<f32>;
             uniform intensity: f32;
+            uniform glareCount: f32;
+            uniform glareLength: f32;
+            uniform glareAngle: f32;
+            uniform glarePower: f32;
+            uniform texelSize: vec2f;
 
             fn tonemapSoft(color: vec3f) -> vec3f {
                 return color / (vec3f(1.0) + color);
+            }
+
+            fn sampleGlareRay(uv: vec2f, rayIndex: f32) -> vec3f {
+                let count = max(1.0, uniforms.glareCount);
+                let angle = uniforms.glareAngle + rayIndex * 3.14159265 / count;
+                let direction = vec2f(cos(angle), sin(angle));
+                let perpendicular = vec2f(-direction.y, direction.x);
+                var color = textureSample(glowSampler, glowSamplerSampler, uv).rgb * 0.04;
+                for (var i: i32 = 0; i < 12; i = i + 1) {
+                    let t = (f32(i) + 0.35) / 12.0;
+                    let delta = direction * uniforms.texelSize * uniforms.glareLength * t;
+                    let width = perpendicular * uniforms.texelSize * (1.25 + uniforms.glareLength * t * 0.018);
+                    let weight = exp(-t * 3.4) * 0.035;
+                    color += textureSample(glowSampler, glowSamplerSampler, clamp(uv + delta + width, vec2f(0.0), vec2f(1.0))).rgb * weight;
+                    color += textureSample(glowSampler, glowSamplerSampler, clamp(uv + delta - width, vec2f(0.0), vec2f(1.0))).rgb * weight;
+                    color += textureSample(glowSampler, glowSamplerSampler, clamp(uv - delta + width, vec2f(0.0), vec2f(1.0))).rgb * weight;
+                    color += textureSample(glowSampler, glowSamplerSampler, clamp(uv - delta - width, vec2f(0.0), vec2f(1.0))).rgb * weight;
+                }
+                return color;
             }
 
             #define CUSTOM_FRAGMENT_DEFINITIONS
             @fragment
             fn main(input: FragmentInputs)->FragmentOutputs {
                 let base = textureSample(textureSampler, textureSamplerSampler, input.vUV);
-                let glowSource = textureSample(glowSampler, glowSamplerSampler, input.vUV).rgb;
-                let glow = tonemapSoft(glowSource * uniforms.intensity * 5.4);
+                let coreSource = textureSample(glowSampler, glowSamplerSampler, input.vUV).rgb;
+                let haloSource = textureSample(haloSampler, haloSamplerSampler, input.vUV).rgb;
+                var glare = vec3f(0.0);
+                if (uniforms.glareCount > 0.5 && uniforms.glarePower > 0.0001 && uniforms.glareLength > 0.5) {
+                    for (var i: i32 = 0; i < 12; i = i + 1) {
+                        if (f32(i) >= uniforms.glareCount) {
+                            break;
+                        }
+                        glare += sampleGlareRay(input.vUV, f32(i));
+                    }
+                    glare /= sqrt(max(1.0, uniforms.glareCount));
+                }
+                let glowSource = coreSource * 3.6 + haloSource * 2.2;
+                let glow = tonemapSoft((glowSource + glare * uniforms.glarePower * 1.45) * uniforms.intensity);
                 let screen = vec3f(1.0) - (vec3f(1.0) - clamp(base.rgb, vec3f(0.0), vec3f(1.0))) * (vec3f(1.0) - glow);
                 let softAdd = min(base.rgb + glow * 0.78, vec3f(1.45));
                 let result = mix(screen, softAdd, vec3f(0.48));
                 fragmentOutputs.color = vec4f(result, base.a);
+                return fragmentOutputs;
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStore[extractShaderKey]) {
+        ShaderStore.ShadersStore[extractShaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform float threshold;
+
+            float luminance(vec3 color) {
+                return dot(color, vec3(0.299, 0.587, 0.114));
+            }
+
+            void main(void) {
+                vec3 color = texture2D(textureSampler, vUV).rgb;
+                float peak = max(max(color.r, color.g), color.b);
+                float signal = max(luminance(color), peak);
+                float knee = 0.24;
+                float effectiveThreshold = threshold * 0.35;
+                float mask = smoothstep(max(0.0, effectiveThreshold - knee), min(1.5, effectiveThreshold + knee), signal);
+                vec3 saturated = mix(color, color * color * 1.35 + color * 0.35, 0.38);
+                gl_FragColor = vec4(saturated * mask, 1.0);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[extractShaderKey]) {
+        ShaderStore.ShadersStoreWGSL[extractShaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            uniform threshold: f32;
+
+            fn luminance(color: vec3f) -> f32 {
+                return dot(color, vec3f(0.299, 0.587, 0.114));
+            }
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let color = textureSample(textureSampler, textureSamplerSampler, input.vUV).rgb;
+                let peak = max(max(color.r, color.g), color.b);
+                let signal = max(luminance(color), peak);
+                let knee = 0.24;
+                let effectiveThreshold = uniforms.threshold * 0.35;
+                let mask = smoothstep(max(0.0, effectiveThreshold - knee), min(1.5, effectiveThreshold + knee), signal);
+                let saturated = mix(color, color * color * 1.35 + color * 0.35, vec3f(0.38));
+                fragmentOutputs.color = vec4f(saturated * mask, 1.0);
                 return fragmentOutputs;
             }
         `;
@@ -889,6 +1019,7 @@ class FrameGraphPostEffectsColorCorrectionTask extends FrameGraphPostProcessTask
 
 class FrameGraphPostEffectsLuminousTask extends FrameGraphPostProcessTask {
     glowTexture?: FrameGraphTextureHandle;
+    haloTexture?: FrameGraphTextureHandle;
 
     constructor(
         name: string,
@@ -914,9 +1045,22 @@ class FrameGraphPostEffectsLuminousTask extends FrameGraphPostProcessTask {
             (context) => {
                 const settings = this.getSettings();
                 const effect = this.postProcess.effect;
+                const engine = this.postProcess.options.engine;
+                const width = Math.max(1, engine.getRenderWidth());
+                const height = Math.max(1, engine.getRenderHeight());
                 effect.setFloat("intensity", settings.luminousEnabled ? Math.max(0, settings.luminousIntensity) : 0);
+                // The in-composite glare prototype aliases badly on dense stage lines, especially in 4K output.
+                // Keep persisted values wired for future multi-pass glare, but disable this lightweight path.
+                effect.setFloat("glareCount", 0);
+                effect.setFloat("glareLength", Math.max(0, Math.min(256, settings.luminousGlareLength)));
+                effect.setFloat("glareAngle", Math.max(-180, Math.min(180, settings.luminousGlareAngle)) * Math.PI / 180);
+                effect.setFloat("glarePower", Math.max(0, Math.min(4, settings.luminousGlarePower)));
+                effect.setFloat2("texelSize", 1 / width, 1 / height);
                 if (this.glowTexture !== undefined) {
                     context.bindTextureHandle(effect, "glowSampler", this.glowTexture);
+                }
+                if (this.haloTexture !== undefined) {
+                    context.bindTextureHandle(effect, "haloSampler", this.haloTexture);
                 }
                 additionalBindings?.(context);
             },
@@ -924,23 +1068,38 @@ class FrameGraphPostEffectsLuminousTask extends FrameGraphPostProcessTask {
         if (this.glowTexture !== undefined) {
             pass.addDependencies(this.glowTexture);
         }
+        if (this.haloTexture !== undefined) {
+            pass.addDependencies(this.haloTexture);
+        }
         return pass;
     }
 }
 
-class FrameGraphPostEffectsLuminousBlurTask extends FrameGraphPostProcessTask {
+function resolveLuminousBlurKernel(settings: FrameGraphPostEffectsSettings, band: "core" | "halo"): number {
+    const radius = Math.max(1, Math.min(128, settings.luminousRadius));
+    const ideal = band === "core"
+        ? Math.max(5, Math.min(33, radius * 0.32))
+        : Math.max(9, Math.min(129, radius));
+    const kernels = band === "core"
+        ? [5, 9, 13, 17, 25, 33]
+        : [9, 13, 17, 25, 33, 49, 65, 97, 129];
+    return kernels.reduce((best, candidate) => (
+        Math.abs(candidate - ideal) < Math.abs(best - ideal) ? candidate : best
+    ), kernels[0]);
+}
+
+class FrameGraphPostEffectsLuminousExtractTask extends FrameGraphPostProcessTask {
     constructor(
         name: string,
         frameGraph: FrameGraph,
         postProcess: EffectWrapper,
         private readonly getSettings: () => FrameGraphPostEffectsSettings,
-        private readonly direction: "horizontal" | "vertical",
     ) {
         super(name, frameGraph, postProcess);
     }
 
     override getClassName(): string {
-        return "FrameGraphPostEffectsLuminousBlurTask";
+        return "FrameGraphPostEffectsLuminousExtractTask";
     }
 
     override record(
@@ -954,15 +1113,47 @@ class FrameGraphPostEffectsLuminousBlurTask extends FrameGraphPostProcessTask {
             (context) => {
                 const settings = this.getSettings();
                 const effect = this.postProcess.effect;
+                effect.setFloat("threshold", Math.max(0, Math.min(1.5, settings.luminousThreshold)));
+                additionalBindings?.(context);
+            },
+        );
+    }
+}
+
+class FrameGraphPostEffectsLuminousThinBlurTask extends FrameGraphPostProcessTask {
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: ThinBlurPostProcess,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+        private readonly direction: "horizontal" | "vertical",
+        private readonly band: "core" | "halo",
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsLuminousThinBlurTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        return super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const blur = this.postProcess as ThinBlurPostProcess;
                 const engine = this.postProcess.options.engine;
                 const width = Math.max(1, engine.getRenderWidth());
                 const height = Math.max(1, engine.getRenderHeight());
-                const spread = Math.max(0.5, Math.min(128, settings.luminousRadius)) / 7;
-                const stepX = this.direction === "horizontal" ? spread / width : 0;
-                const stepY = this.direction === "vertical" ? spread / height : 0;
-                effect.setFloat2("texelStep", stepX, stepY);
-                effect.setFloat("threshold", Math.max(0, Math.min(1.5, settings.luminousThreshold)));
-                effect.setFloat("extractSource", this.direction === "horizontal" ? 1 : 0);
+                blur.textureWidth = width;
+                blur.textureHeight = height;
+                blur.direction = this.direction === "horizontal" ? new Vector2(1, 0) : new Vector2(0, 1);
+                blur.kernel = resolveLuminousBlurKernel(settings, this.band);
                 additionalBindings?.(context);
             },
         );
@@ -1102,10 +1293,16 @@ export class FrameGraphPostEffectsController {
     private ssaoToonCompositeTask: FrameGraphPostEffectsSsaoToonCompositeTask | null = null;
     private ssrTask: FrameGraphSSRRenderingPipelineTask | null = null;
     private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
-    private luminousBlurHorizontalEffect: EffectWrapper | null = null;
-    private luminousBlurVerticalEffect: EffectWrapper | null = null;
-    private luminousBlurHorizontalTask: FrameGraphPostEffectsLuminousBlurTask | null = null;
-    private luminousBlurVerticalTask: FrameGraphPostEffectsLuminousBlurTask | null = null;
+    private luminousExtractEffect: EffectWrapper | null = null;
+    private luminousExtractTask: FrameGraphPostEffectsLuminousExtractTask | null = null;
+    private luminousCoreBlurHorizontalEffect: ThinBlurPostProcess | null = null;
+    private luminousCoreBlurVerticalEffect: ThinBlurPostProcess | null = null;
+    private luminousCoreBlurHorizontalTask: FrameGraphPostEffectsLuminousThinBlurTask | null = null;
+    private luminousCoreBlurVerticalTask: FrameGraphPostEffectsLuminousThinBlurTask | null = null;
+    private luminousHaloBlurHorizontalEffect: ThinBlurPostProcess | null = null;
+    private luminousHaloBlurVerticalEffect: ThinBlurPostProcess | null = null;
+    private luminousHaloBlurHorizontalTask: FrameGraphPostEffectsLuminousThinBlurTask | null = null;
+    private luminousHaloBlurVerticalTask: FrameGraphPostEffectsLuminousThinBlurTask | null = null;
     private luminousEffect: EffectWrapper | null = null;
     private luminousTask: FrameGraphPostEffectsLuminousTask | null = null;
     private bloomTask: FrameGraphBloomTask | null = null;
@@ -1145,6 +1342,10 @@ export class FrameGraphPostEffectsController {
             luminousIntensity: 0.5,
             luminousThreshold: 0.5,
             luminousRadius: 20,
+            luminousGlareCount: 0,
+            luminousGlareLength: 48,
+            luminousGlareAngle: 0,
+            luminousGlarePower: 0.4,
             bloomEnabled: false,
             bloomWeight: 1,
             bloomThreshold: 1,
@@ -1394,59 +1595,120 @@ export class FrameGraphPostEffectsController {
             bloomSourceTexture = depthOfFieldTask.outputTexture;
         }
 
-        this.luminousBlurHorizontalEffect = new EffectWrapper({
+        const luminousDisabled = !initialSettings.luminousEnabled
+            || initialSettings.luminousIntensity <= 0.0001
+            || luminousTextureHandle === undefined;
+
+        this.luminousExtractEffect = new EffectWrapper({
             engine: frameGraph.engine,
-            fragmentShader: "mmdFrameGraphLuminousBlur",
+            fragmentShader: "mmdFrameGraphLuminousExtract",
             useShaderStore: true,
             useAsPostProcess: true,
-            uniforms: ["texelStep", "threshold", "extractSource"],
-            name: "mmdFrameGraphLuminousBlurHorizontal",
+            uniforms: ["threshold"],
+            name: "mmdFrameGraphLuminousExtract",
             shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
         });
-        const luminousBlurHorizontalTask = new FrameGraphPostEffectsLuminousBlurTask(
-            "frameGraphPostEffectsLuminousBlurHorizontal",
+        const luminousExtractTask = new FrameGraphPostEffectsLuminousExtractTask(
+            "frameGraphPostEffectsLuminousExtract",
             frameGraph,
-            this.luminousBlurHorizontalEffect,
+            this.luminousExtractEffect,
+            this.getSettings,
+        );
+        luminousExtractTask.sourceTexture = luminousTextureHandle ?? bloomSourceTexture;
+        luminousExtractTask.disabled = luminousDisabled;
+        frameGraph.addTask(luminousExtractTask);
+        this.luminousExtractTask = luminousExtractTask;
+
+        const blurShaderOptions = {
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        };
+        this.luminousCoreBlurHorizontalEffect = new ThinBlurPostProcess(
+            "mmdFrameGraphLuminousCoreBlurHorizontal",
+            frameGraph.engine,
+            new Vector2(1, 0),
+            resolveLuminousBlurKernel(initialSettings, "core"),
+            blurShaderOptions,
+        );
+        const luminousCoreBlurHorizontalTask = new FrameGraphPostEffectsLuminousThinBlurTask(
+            "frameGraphPostEffectsLuminousCoreBlurHorizontal",
+            frameGraph,
+            this.luminousCoreBlurHorizontalEffect,
             this.getSettings,
             "horizontal",
+            "core",
         );
-        luminousBlurHorizontalTask.sourceTexture = luminousTextureHandle ?? bloomSourceTexture;
-        luminousBlurHorizontalTask.disabled = !initialSettings.luminousEnabled
-            || initialSettings.luminousIntensity <= 0.0001
-            || luminousTextureHandle === undefined;
-        frameGraph.addTask(luminousBlurHorizontalTask);
-        this.luminousBlurHorizontalTask = luminousBlurHorizontalTask;
+        luminousCoreBlurHorizontalTask.sourceTexture = luminousExtractTask.outputTexture;
+        luminousCoreBlurHorizontalTask.disabled = luminousDisabled;
+        frameGraph.addTask(luminousCoreBlurHorizontalTask);
+        this.luminousCoreBlurHorizontalTask = luminousCoreBlurHorizontalTask;
 
-        this.luminousBlurVerticalEffect = new EffectWrapper({
-            engine: frameGraph.engine,
-            fragmentShader: "mmdFrameGraphLuminousBlur",
-            useShaderStore: true,
-            useAsPostProcess: true,
-            uniforms: ["texelStep", "threshold", "extractSource"],
-            name: "mmdFrameGraphLuminousBlurVertical",
-            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
-        });
-        const luminousBlurVerticalTask = new FrameGraphPostEffectsLuminousBlurTask(
-            "frameGraphPostEffectsLuminousBlurVertical",
+        this.luminousCoreBlurVerticalEffect = new ThinBlurPostProcess(
+            "mmdFrameGraphLuminousCoreBlurVertical",
+            frameGraph.engine,
+            new Vector2(0, 1),
+            resolveLuminousBlurKernel(initialSettings, "core"),
+            blurShaderOptions,
+        );
+        const luminousCoreBlurVerticalTask = new FrameGraphPostEffectsLuminousThinBlurTask(
+            "frameGraphPostEffectsLuminousCoreBlurVertical",
             frameGraph,
-            this.luminousBlurVerticalEffect,
+            this.luminousCoreBlurVerticalEffect,
             this.getSettings,
             "vertical",
+            "core",
         );
-        luminousBlurVerticalTask.sourceTexture = luminousBlurHorizontalTask.outputTexture;
-        luminousBlurVerticalTask.disabled = !initialSettings.luminousEnabled
-            || initialSettings.luminousIntensity <= 0.0001
-            || luminousTextureHandle === undefined;
-        frameGraph.addTask(luminousBlurVerticalTask);
-        this.luminousBlurVerticalTask = luminousBlurVerticalTask;
+        luminousCoreBlurVerticalTask.sourceTexture = luminousCoreBlurHorizontalTask.outputTexture;
+        luminousCoreBlurVerticalTask.disabled = luminousDisabled;
+        frameGraph.addTask(luminousCoreBlurVerticalTask);
+        this.luminousCoreBlurVerticalTask = luminousCoreBlurVerticalTask;
+
+        this.luminousHaloBlurHorizontalEffect = new ThinBlurPostProcess(
+            "mmdFrameGraphLuminousHaloBlurHorizontal",
+            frameGraph.engine,
+            new Vector2(1, 0),
+            resolveLuminousBlurKernel(initialSettings, "halo"),
+            blurShaderOptions,
+        );
+        const luminousHaloBlurHorizontalTask = new FrameGraphPostEffectsLuminousThinBlurTask(
+            "frameGraphPostEffectsLuminousHaloBlurHorizontal",
+            frameGraph,
+            this.luminousHaloBlurHorizontalEffect,
+            this.getSettings,
+            "horizontal",
+            "halo",
+        );
+        luminousHaloBlurHorizontalTask.sourceTexture = luminousExtractTask.outputTexture;
+        luminousHaloBlurHorizontalTask.disabled = luminousDisabled;
+        frameGraph.addTask(luminousHaloBlurHorizontalTask);
+        this.luminousHaloBlurHorizontalTask = luminousHaloBlurHorizontalTask;
+
+        this.luminousHaloBlurVerticalEffect = new ThinBlurPostProcess(
+            "mmdFrameGraphLuminousHaloBlurVertical",
+            frameGraph.engine,
+            new Vector2(0, 1),
+            resolveLuminousBlurKernel(initialSettings, "halo"),
+            blurShaderOptions,
+        );
+        const luminousHaloBlurVerticalTask = new FrameGraphPostEffectsLuminousThinBlurTask(
+            "frameGraphPostEffectsLuminousHaloBlurVertical",
+            frameGraph,
+            this.luminousHaloBlurVerticalEffect,
+            this.getSettings,
+            "vertical",
+            "halo",
+        );
+        luminousHaloBlurVerticalTask.sourceTexture = luminousHaloBlurHorizontalTask.outputTexture;
+        luminousHaloBlurVerticalTask.disabled = luminousDisabled;
+        frameGraph.addTask(luminousHaloBlurVerticalTask);
+        this.luminousHaloBlurVerticalTask = luminousHaloBlurVerticalTask;
 
         this.luminousEffect = new EffectWrapper({
             engine: frameGraph.engine,
             fragmentShader: "mmdFrameGraphLuminous",
             useShaderStore: true,
             useAsPostProcess: true,
-            uniforms: ["intensity"],
-            samplers: ["glowSampler"],
+            uniforms: ["intensity", "glareCount", "glareLength", "glareAngle", "glarePower", "texelSize"],
+            samplers: ["glowSampler", "haloSampler"],
             name: "mmdFrameGraphLuminous",
             shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
         });
@@ -1457,10 +1719,9 @@ export class FrameGraphPostEffectsController {
             this.getSettings,
         );
         luminousTask.sourceTexture = bloomSourceTexture;
-        luminousTask.glowTexture = luminousBlurVerticalTask.outputTexture;
-        luminousTask.disabled = !initialSettings.luminousEnabled
-            || initialSettings.luminousIntensity <= 0.0001
-            || luminousTextureHandle === undefined;
+        luminousTask.glowTexture = luminousCoreBlurVerticalTask.outputTexture;
+        luminousTask.haloTexture = luminousHaloBlurVerticalTask.outputTexture;
+        luminousTask.disabled = luminousDisabled;
         frameGraph.addTask(luminousTask);
         this.luminousTask = luminousTask;
 
@@ -1680,16 +1941,26 @@ export class FrameGraphPostEffectsController {
         }
         const luminousDisabled = !settings.luminousEnabled
             || settings.luminousIntensity <= 0.0001
-            || this.luminousBlurHorizontalTask?.sourceTexture === undefined;
-        if (this.luminousBlurHorizontalTask) {
-            this.luminousBlurHorizontalTask.disabled = luminousDisabled;
+            || this.luminousExtractTask?.sourceTexture === undefined;
+        if (this.luminousExtractTask) {
+            this.luminousExtractTask.disabled = luminousDisabled;
         }
-        if (this.luminousBlurVerticalTask) {
-            this.luminousBlurVerticalTask.disabled = luminousDisabled;
+        if (this.luminousCoreBlurHorizontalTask) {
+            this.luminousCoreBlurHorizontalTask.disabled = luminousDisabled;
+        }
+        if (this.luminousCoreBlurVerticalTask) {
+            this.luminousCoreBlurVerticalTask.disabled = luminousDisabled;
+        }
+        if (this.luminousHaloBlurHorizontalTask) {
+            this.luminousHaloBlurHorizontalTask.disabled = luminousDisabled;
+        }
+        if (this.luminousHaloBlurVerticalTask) {
+            this.luminousHaloBlurVerticalTask.disabled = luminousDisabled;
         }
         if (this.luminousTask) {
             this.luminousTask.disabled = luminousDisabled
-                || this.luminousTask.glowTexture === undefined;
+                || this.luminousTask.glowTexture === undefined
+                || this.luminousTask.haloTexture === undefined;
         }
         if (this.geometryRendererTask) {
             this.geometryRendererTask.disabled = !this.isGeometryRendererNeeded(settings);
@@ -1862,12 +2133,21 @@ export class FrameGraphPostEffectsController {
         this.ssaoToonCompositeEffect = null;
         this.ssaoToonCompositeTask = null;
         this.depthOfFieldTask = null;
-        this.luminousBlurHorizontalEffect?.dispose();
-        this.luminousBlurHorizontalEffect = null;
-        this.luminousBlurVerticalEffect?.dispose();
-        this.luminousBlurVerticalEffect = null;
-        this.luminousBlurHorizontalTask = null;
-        this.luminousBlurVerticalTask = null;
+        this.luminousExtractEffect?.dispose();
+        this.luminousExtractEffect = null;
+        this.luminousExtractTask = null;
+        this.luminousCoreBlurHorizontalEffect?.dispose();
+        this.luminousCoreBlurHorizontalEffect = null;
+        this.luminousCoreBlurVerticalEffect?.dispose();
+        this.luminousCoreBlurVerticalEffect = null;
+        this.luminousCoreBlurHorizontalTask = null;
+        this.luminousCoreBlurVerticalTask = null;
+        this.luminousHaloBlurHorizontalEffect?.dispose();
+        this.luminousHaloBlurHorizontalEffect = null;
+        this.luminousHaloBlurVerticalEffect?.dispose();
+        this.luminousHaloBlurVerticalEffect = null;
+        this.luminousHaloBlurHorizontalTask = null;
+        this.luminousHaloBlurVerticalTask = null;
         this.luminousEffect?.dispose();
         this.luminousEffect = null;
         this.luminousTask = null;

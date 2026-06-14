@@ -32,6 +32,7 @@
 - ローカル参照
   - `local-references/autoluminous-original/AutoLuminous4/`
   - Git 管理外の参考資料として置く。本家ファイルをそのまま移植するのではなく、パス構成、抽出条件、ぼかし方、マスクの考え方を読むために使う。
+  - 光芒については `Glare / GlareAngle / GlareLength / GlarePower` と directional blur の考え方を参考にする。
 
 ## 結論
 
@@ -114,6 +115,7 @@ luminous source mask render target
 - 効果パネルの `+` から追加でき、行のチェックボックスで有効 / 無効を切り替える。
 - stack 上の順序入れ替えに対応し、下にあるものが先、上にあるものが後にかかる。
 - 詳細 UI は `Intensity / Threshold / Radius` を持つ。
+- 光芒用の `Glare / Length / Angle / Power` は保存形式だけ残し、現行 UI / 描画では無効化する。
 - project save/load は既存 glow 設定に `glowThreshold` を加え、FrameGraph stack と合わせて保存する。
 - source mask は PMX / MMD 材質判定から専用 render target に描く。
 - 通常材質は黒い遮蔽として扱い、テクスチャ色だけで光らせない。
@@ -144,6 +146,8 @@ luminous source mask render target
 - blend mode / tone map mode の UI 選択。
 - depth-aware blur / composite。
 - 本家 AutoLuminous の AL code / texture sequence / popup light 的な特殊機能。
+- 本家同等の多段 directional blur / glare accumulation。
+- 光芒は簡易 composite sampling では品質不足のため、専用実装まで UI に出さない。
 - 完全な AutoLuminous 互換。
 
 ## 旧 GlowLayer から引き継いだもの
@@ -233,6 +237,21 @@ FrameGraph 版では合成モードを内部パラメータ化する。
 - Bloom に渡す発光寄与: 50%
 
 ユーザーが派手にしたい場合だけ上げられるようにする。
+
+### 5. 光芒は専用パスで実装する
+
+AutoLuminous 本家の `Glare` は、通常のにじみとは別に方向性のある blur を足す機能である。
+MMD_modoki でも欲しい機能だが、FrameGraph Luminous の composite pass 内で軽量な方向サンプリングとして実装した試作は、細いグリッドや点列を拾ったときにモアレ / 複製感が目立った。
+MMD動画では 4K 出力や細い発光ステージが多いため、この品質では採用しない。
+
+採用条件:
+
+- 光芒専用 render target を使う。
+- 低解像度または multi-scale の中間バッファで十分に平均化する。
+- direction ごとに accumulation し、長い線分を少数点でコピーしない。
+- 本数、伸び、角度、強さは UI に出す前に動画出力で確認する。
+
+現行では `glowGlareCount / glowGlareLength / glowGlareAngle / glowGlarePower` の保存値だけ将来互換用に残し、描画と UI は無効化する。
 
 ## FrameGraph 上の処理案
 
@@ -354,6 +373,10 @@ type LuminousEffectSettings = {
     corePercent: number;
     haloPercent: number;
     radiusPercent: number;
+    glareCount: number;
+    glareLengthPx: number;
+    glareAngleDeg: number;
+    glarePowerPercent: number;
     blendMode: "add" | "screen" | "softAdd" | "tint";
     toneMap: "soft" | "filmic" | "neon";
     bloomSendPercent: number;
@@ -387,7 +410,9 @@ FrameGraph 効果スタックへ `Luminous` を追加した。
 - `Luminous` を FrameGraph post stack の effect ID に追加
 - `+` パネルから `Luminous` を追加可能にした
 - 詳細 UI に `Intensity / Threshold / Radius` を追加
+- `Glare / Length / Angle / Power` は簡易試作の品質不足により UI から外した
 - project save/load に `glowThreshold` を追加
+- project save/load に `glowGlareCount / glowGlareLength / glowGlareAngle / glowGlarePower` を追加
 - FrameGraph backend で `Luminous` fullscreen pass を追加
 - `DoF -> Luminous -> Bloom -> LUT` のように stack 順で並べ替え可能にした
 - FrameGraph backend 使用時は旧 `GlowLayer` を停止し、二重発光を避けるようにした
@@ -407,6 +432,7 @@ FrameGraph 効果スタックへ `Luminous` を追加した。
 - blend mode / tone map mode の UI 選択
 - depth-aware blur / composite
 - multi-scale render target によるより自然な広域 halo
+- 本家 AutoLuminous と同等の directional blur accumulation
 - 本家 AutoLuminous の AL code / texture sequence / popup light 的な特殊機能
 
 つまり現行の `Luminous` は、旧 `GlowLayer` より FrameGraph stack 向きの実用経路に近づいたが、本家 AutoLuminous 完全互換ではない。
@@ -462,6 +488,9 @@ pure helper:
 - specular が強すぎるだけの材質は誤爆しない
 - `LightOff` morph で強度が落ちる
 - `LightUp / LightUpE` morph で強度が上がる
+- `Glare / Length / Angle / Power` が保存 / 復元される
+- 簡易 composite glare が有効化されていない
+- 将来の光芒実装では、細いグリッド / 点列 / 4K 出力でモアレが出ない
 - project settings の normalize が不正値を落とす
 
 UI / project:

@@ -4513,6 +4513,18 @@ export class UIController {
             case "luminousRadius":
                 this.mmdManager.postEffectGlowKernel = Number(rawValue);
                 break;
+            case "luminousGlareCount":
+                this.mmdManager.postEffectGlowGlareCount = Number(rawValue);
+                break;
+            case "luminousGlareLength":
+                this.mmdManager.postEffectGlowGlareLength = Number(rawValue);
+                break;
+            case "luminousGlareAngle":
+                this.mmdManager.postEffectGlowGlareAngle = Number(rawValue);
+                break;
+            case "luminousGlarePower":
+                this.mmdManager.postEffectGlowGlarePower = Number(rawValue) / 100;
+                break;
             case "dofFocus":
                 if (!this.mmdManager.dofAutoFocusEnabled) {
                     this.mmdManager.dofFocusDistanceMm = Number(rawValue);
@@ -4636,6 +4648,18 @@ export class UIController {
                 break;
             case "luminousRadius":
                 valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowKernel)}px`;
+                break;
+            case "luminousGlareCount":
+                valueElement.textContent = String(Math.round(this.mmdManager.postEffectGlowGlareCount));
+                break;
+            case "luminousGlareLength":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowGlareLength)}px`;
+                break;
+            case "luminousGlareAngle":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowGlareAngle)}deg`;
+                break;
+            case "luminousGlarePower":
+                valueElement.textContent = this.mmdManager.postEffectGlowGlarePower.toFixed(2);
                 break;
             case "dofFocus":
                 valueElement.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;

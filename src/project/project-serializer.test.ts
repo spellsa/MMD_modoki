@@ -117,6 +117,10 @@ function createHost() {
         postEffectGlowIntensity: 0.5,
         postEffectGlowThreshold: 0.5,
         postEffectGlowKernel: 20,
+        postEffectGlowGlareCount: 0,
+        postEffectGlowGlareLength: 48,
+        postEffectGlowGlareAngle: 0,
+        postEffectGlowGlarePower: 0.4,
         postEffectLutEnabled: false,
         postEffectLutIntensity: 1,
         postEffectLutPreset: "anime-soft",
@@ -187,6 +191,10 @@ describe("exportProjectState", () => {
             postEffectGlowIntensity: 1.25,
             postEffectGlowThreshold: 0.18,
             postEffectGlowKernel: 48,
+            postEffectGlowGlareCount: 6,
+            postEffectGlowGlareLength: 96,
+            postEffectGlowGlareAngle: 15,
+            postEffectGlowGlarePower: 0.75,
             getFrameGraphPostEffectStackEntries: () => [
                 { id: "luminous", enabled: true },
                 { id: "bloom", enabled: true },
@@ -198,6 +206,10 @@ describe("exportProjectState", () => {
         expect(project.effects.glowIntensity).toBe(1.25);
         expect(project.effects.glowThreshold).toBe(0.18);
         expect(project.effects.glowKernel).toBe(48);
+        expect(project.effects.glowGlareCount).toBe(6);
+        expect(project.effects.glowGlareLength).toBe(96);
+        expect(project.effects.glowGlareAngle).toBe(15);
+        expect(project.effects.glowGlarePower).toBe(0.75);
         expect(project.effects.frameGraphPostStack).toEqual([
             { id: "luminous", enabled: true },
             { id: "bloom", enabled: true },
