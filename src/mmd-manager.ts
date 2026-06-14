@@ -315,6 +315,7 @@ type FramePerformanceSection =
     | "boneGizmo"
     | "boneVisualizer"
     | "rigidBodyVisualizer"
+    | "characterContactShadow"
     | "editorDof"
     | "frameStateUpdate";
 type FramePerformanceStats = {
@@ -334,6 +335,7 @@ const FRAME_PERFORMANCE_SECTIONS: readonly FramePerformanceSection[] = [
     "boneGizmo",
     "boneVisualizer",
     "rigidBodyVisualizer",
+    "characterContactShadow",
     "editorDof",
     "frameStateUpdate",
 ];
@@ -4223,8 +4225,64 @@ ${beforeFogAppendBlock}
             boneVisualizerTarget: this.boneVisualizerTarget !== null,
             sections,
             sceneInstrumentation: this.getSceneInstrumentationSnapshot(),
+            frameGraphPostEffects: this.getFrameGraphPostEffectsPerformanceSnapshot(),
         });
         this.framePerformanceStats = MmdManager.createFramePerformanceStats();
+    }
+
+    private getFrameGraphPostEffectsPerformanceSnapshot(): Record<string, unknown> {
+        const controllerSnapshot = this.frameGraphPostEffectsController?.getDiagnosticsSnapshot() ?? null;
+        const taskNames = controllerSnapshot
+            ? Object.entries(controllerSnapshot.tasks)
+                .filter(([, enabled]) => enabled)
+                .map(([name]) => name)
+            : [];
+        const resourceNames = controllerSnapshot
+            ? Object.entries(controllerSnapshot.resources)
+                .filter(([, enabled]) => enabled)
+                .map(([name]) => name)
+            : [];
+        return {
+            backend: this.postEffectBackend,
+            requestedBackend: this.requestedPostEffectBackend,
+            active: this.postEffectBackend === "frameGraph" && this.frameGraphPostEffectsController !== null,
+            ready: this.frameGraphPostEffectsController?.isReady() ?? false,
+            executedFrameCount: this.getFrameGraphPostEffectsExecutedFrameCount(),
+            stack: [...this.getFrameGraphPostEffectRuntimeOrder()],
+            activeEffects: this.getActiveFrameGraphPostEffectIds(),
+            resources: {
+                sceneColor: this.frameGraphPostEffectsSceneColorTarget !== null,
+                depthScene: this.depthRenderer !== null,
+                luminousMask: this.frameGraphPostEffectsLuminousMaskTarget !== null,
+                viewDepth: controllerSnapshot?.resources.viewDepth ?? false,
+                viewNormal: controllerSnapshot?.resources.viewNormal ?? false,
+                reflectivity: controllerSnapshot?.resources.reflectivity ?? false,
+            },
+            renderTargets: {
+                sceneColor: MmdManager.getRenderTargetSizeLabel(this.frameGraphPostEffectsSceneColorTarget),
+                luminousMask: MmdManager.getRenderTargetSizeLabel(this.frameGraphPostEffectsLuminousMaskTarget),
+            },
+            luminousMaskRenderedSubMeshes: this.getFrameGraphPostEffectsLuminousMaskRenderedSubMeshCount(),
+            controller: controllerSnapshot
+                ? {
+                    active: controllerSnapshot.active,
+                    ready: controllerSnapshot.ready,
+                    executedFrameCount: controllerSnapshot.executedFrameCount,
+                    taskNames,
+                    resourceNames,
+                    luminousCoreKernel: controllerSnapshot.luminousBlur.coreKernel,
+                    luminousHaloKernel: controllerSnapshot.luminousBlur.haloKernel,
+                }
+                : null,
+        };
+    }
+
+    private static getRenderTargetSizeLabel(
+        renderTarget: RenderTargetTexture | null,
+    ): string | null {
+        if (!renderTarget) return null;
+        const size = renderTarget.getSize();
+        return `${size.width}x${size.height}`;
     }
 
     private getSceneInstrumentationSnapshot(): Record<string, unknown> | null {
@@ -5519,6 +5577,12 @@ ${beforeFogAppendBlock}
             this.disposeFrameGraphPostEffectsLuminousMaskTarget();
         }
         this.postEffectBackend = activated ? "frameGraph" : "classic";
+        if (activated) {
+            logDebugIfEnabled("postfx", "render", "frame graph post effect performance snapshot", {
+                storageKey: MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
+                snapshot: this.getFrameGraphPostEffectsPerformanceSnapshot(),
+            });
+        }
     }
 
     private isFrameGraphImageProcessingTaskNeeded(): boolean {
@@ -5688,9 +5752,6 @@ ${beforeFogAppendBlock}
         }
         const renderedCount = this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount;
         if (renderedCount > 0) {
-            logDebugIfEnabled("postfx", "render", "frame graph luminous mask rendered", {
-                subMeshCount: renderedCount,
-            });
             this.frameGraphPostEffectsLuminousMaskZeroWarningEmitted = false;
             return;
         }

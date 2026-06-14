@@ -50,6 +50,47 @@ export type FrameGraphPostEffectsInfo = {
     event: "activated" | "ready";
 };
 
+export type FrameGraphPostEffectsDiagnosticsSnapshot = {
+    active: boolean;
+    ready: boolean;
+    executedFrameCount: number;
+    tasks: {
+        imageProcessing: boolean;
+        geometryRenderer: boolean;
+        ssr: boolean;
+        ssao: boolean;
+        ssaoToonComposite: boolean;
+        dof: boolean;
+        luminousExtract: boolean;
+        luminousCoreBlur: boolean;
+        luminousHaloBlur: boolean;
+        luminousComposite: boolean;
+        bloom: boolean;
+        lut: boolean;
+        colorCorrection: boolean;
+        sharpen: boolean;
+        grain: boolean;
+        chromatic: boolean;
+        vignetteEdgeBlur: boolean;
+        lensDistortion: boolean;
+        fxaa: boolean;
+    };
+    resources: {
+        geometryRenderer: boolean;
+        viewDepth: boolean;
+        viewNormal: boolean;
+        reflectivity: boolean;
+        depthOfField: boolean;
+        luminousExtract: boolean;
+        luminousCoreBlur: boolean;
+        luminousHaloBlur: boolean;
+    };
+    luminousBlur: {
+        coreKernel: number;
+        haloKernel: number;
+    };
+};
+
 export type FrameGraphPostEffectsSettings = {
     contrast: number;
     gammaPower: number;
@@ -1372,6 +1413,60 @@ export class FrameGraphPostEffectsController {
             antialiasEnabled: true,
         }),
     ) {}
+
+    isActive(): boolean {
+        return this.active;
+    }
+
+    isReady(): boolean {
+        return this.ready;
+    }
+
+    getDiagnosticsSnapshot(): FrameGraphPostEffectsDiagnosticsSnapshot {
+        const settings = this.getSettings();
+        return {
+            active: this.active,
+            ready: this.ready,
+            executedFrameCount: this.executedFrameCount,
+            tasks: {
+                imageProcessing: this.imageProcessingTask !== null,
+                geometryRenderer: this.geometryRendererTask !== null,
+                ssr: this.ssrTask !== null,
+                ssao: this.ssaoTask !== null,
+                ssaoToonComposite: this.ssaoToonCompositeTask !== null,
+                dof: this.depthOfFieldTask !== null,
+                luminousExtract: this.luminousExtractTask !== null,
+                luminousCoreBlur: this.luminousCoreBlurHorizontalTask !== null
+                    && this.luminousCoreBlurVerticalTask !== null,
+                luminousHaloBlur: this.luminousHaloBlurHorizontalTask !== null
+                    && this.luminousHaloBlurVerticalTask !== null,
+                luminousComposite: this.luminousTask !== null,
+                bloom: this.bloomTask !== null,
+                lut: this.lutTask !== null,
+                colorCorrection: this.colorCorrectionEffect !== null,
+                sharpen: this.sharpenTask !== null,
+                grain: this.grainTask !== null,
+                chromatic: this.chromaticAberrationTask !== null,
+                vignetteEdgeBlur: this.vignetteEdgeBlurTask !== null,
+                lensDistortion: this.lensDistortionTask !== null,
+                fxaa: this.fxaaTask !== null,
+            },
+            resources: {
+                geometryRenderer: this.geometryRendererTask !== null,
+                viewDepth: this.geometryRendererTask !== null,
+                viewNormal: this.geometryRendererTask !== null,
+                reflectivity: this.geometryRendererTask !== null && this.ssrTask !== null,
+                depthOfField: this.depthOfFieldTask !== null,
+                luminousExtract: this.luminousExtractTask !== null,
+                luminousCoreBlur: this.luminousCoreBlurVerticalTask !== null,
+                luminousHaloBlur: this.luminousHaloBlurVerticalTask !== null,
+            },
+            luminousBlur: {
+                coreKernel: resolveLuminousBlurKernel(settings, "core"),
+                haloKernel: resolveLuminousBlurKernel(settings, "halo"),
+            },
+        };
+    }
 
     activate(
         scene?: Scene,
