@@ -6,6 +6,7 @@ export type EditorActionAvailabilitySnapshot = {
     selectedTrackKeyframeCount: number;
     hasEditableInterpolationChannels: boolean;
     hasInterpolationClipboard: boolean;
+    hasKeyframeClipboard?: boolean;
     hasLoadedModels?: boolean;
     hasInfoKeyframeTarget?: boolean;
     hasSelectedBone?: boolean;
@@ -25,6 +26,10 @@ export function canExecuteEditorAction(
         case "keyframe.addCurrent":
         case "keyframe.deleteSelected":
             return snapshot.hasSelectedTimelineTrack;
+        case "keyframe.copySelected":
+            return snapshot.hasSelectedTimelineTrack;
+        case "keyframe.paste":
+            return snapshot.hasSelectedTimelineTrack && (snapshot.hasKeyframeClipboard ?? false);
         case "keyframe.nudgeSelected":
             return snapshot.hasSelectedTimelineTrack && snapshot.hasSelectedFrame;
         case "keyframe.registerInfo":

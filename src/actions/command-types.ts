@@ -1,4 +1,5 @@
 import type { TrackCategory } from "../types";
+import type { TimelineKeyframePayload } from "../editor/timeline-edit-service";
 
 export type CommandScope =
     | "keyframe"
@@ -36,6 +37,13 @@ export type KeyframeCommandDiff =
         toFrame: number;
         beforeFrames: number[];
         afterFrames: number[];
+    }
+    | {
+        type: "keyframe.paste";
+        track: CommandTrackRef;
+        frame: number;
+        before: TimelineKeyframePayload | null;
+        after: TimelineKeyframePayload;
     };
 
 export type BoneTransformCommandSnapshot = {

@@ -7,11 +7,13 @@ import type {
     EditCommandDiff,
     KeyframeCommandDiff,
 } from "./command-types";
+import type { TimelineKeyframePayload } from "../editor/timeline-edit-service";
 
 export type CommandExecutionContext = {
     addTimelineKeyframe(track: CommandTrackRef, frame: number): boolean;
     removeTimelineKeyframe(track: CommandTrackRef, frame: number): boolean;
     moveTimelineKeyframe(track: CommandTrackRef, fromFrame: number, toFrame: number): boolean;
+    applyTimelineKeyframePayload?(track: CommandTrackRef, frame: number, payload: TimelineKeyframePayload | null): boolean;
     applyBoneTransform?(boneName: string, snapshot: BoneTransformCommandSnapshot): boolean;
     applyCameraTransform?(snapshot: CameraTransformCommandSnapshot): boolean;
     setSelectedFrame(frame: number | null): void;
@@ -31,11 +33,29 @@ export function executeCommand(
             return executeKeyframeDelete(command.diff, direction, context);
         case "keyframe.move":
             return executeKeyframeMove(command.diff, direction, context);
+        case "keyframe.paste":
+            return executeKeyframePaste(command.diff, direction, context);
         case "edit.boneTransform":
             return executeBoneTransform(command.diff, direction, context);
         case "edit.cameraTransform":
             return executeCameraTransform(command.diff, direction, context);
     }
+}
+
+function executeKeyframePaste(
+    diff: Extract<KeyframeCommandDiff, { type: "keyframe.paste" }>,
+    direction: CommandDirection,
+    context: CommandExecutionContext,
+): boolean {
+    if (!context.applyTimelineKeyframePayload) return false;
+    const payload = direction === "apply" ? diff.after : diff.before;
+    const applied = context.applyTimelineKeyframePayload(diff.track, diff.frame, payload);
+    if (!applied) return false;
+
+    context.setSelectedFrame(direction === "apply" ? diff.frame : (diff.before ? diff.frame : null));
+    context.seekToBoundary(diff.frame);
+    context.refreshAfterKeyframeEdit();
+    return true;
 }
 
 function executeKeyframeAdd(

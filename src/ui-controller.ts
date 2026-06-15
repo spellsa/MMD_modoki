@@ -50,7 +50,8 @@ import {
 } from "./actions/keyframe-command-builder";
 import { buildBoneTransformCommand } from "./actions/bone-transform-command-builder";
 import { buildCameraTransformCommand } from "./actions/camera-transform-command-builder";
-import type { BoneTransformCommandSnapshot, CameraTransformCommandSnapshot } from "./actions/command-types";
+import type { BoneTransformCommandSnapshot, BuiltCommand, CameraTransformCommandSnapshot, CommandTrackRef } from "./actions/command-types";
+import type { TimelineKeyframePayload } from "./editor/timeline-edit-service";
 import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     normalizePostEffectBackend,
@@ -77,6 +78,14 @@ type PendingBoneTransformCommand = {
     boneName: string;
     frame: number;
     before: BoneTransformCommandSnapshot;
+};
+
+type KeyframeClipboard = {
+    version: 1;
+    sourceTarget: "model" | "camera";
+    sourceFrame: number;
+    track: CommandTrackRef;
+    payload: TimelineKeyframePayload;
 };
 
 type RuntimeMovableBoneTrackLike = {
@@ -338,6 +347,8 @@ export class UIController {
     private statusDot: HTMLElement;
     private viewportOverlay: HTMLElement;
     private btnKeyframeAdd: HTMLButtonElement;
+    private btnKeyframeCopy: HTMLButtonElement;
+    private btnKeyframePaste: HTMLButtonElement;
     private btnKeyframeDelete: HTMLButtonElement;
     private btnKeyframeNudgeLeft: HTMLButtonElement;
     private btnKeyframeNudgeRight: HTMLButtonElement;
@@ -389,6 +400,7 @@ export class UIController {
     private interpolationDragState: InterpolationDragState | null = null;
     private currentInterpolationPreview: TimelineInterpolationPreview | null = null;
     private interpolationCurveClipboard: InterpolationCurveClipboard | null = null;
+    private keyframeClipboard: KeyframeClipboard | null = null;
     private timelineWaveformRequestId = 0;
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
@@ -460,6 +472,8 @@ export class UIController {
         this.statusDot = queryRequiredElement(".status-dot");
         this.viewportOverlay = getRequiredElement("viewport-overlay");
         this.btnKeyframeAdd = document.getElementById("btn-kf-add") as HTMLButtonElement;
+        this.btnKeyframeCopy = document.getElementById("btn-kf-copy") as HTMLButtonElement;
+        this.btnKeyframePaste = document.getElementById("btn-kf-paste") as HTMLButtonElement;
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
         this.btnKeyframeNudgeRight = document.getElementById("btn-kf-nudge-right") as HTMLButtonElement;
@@ -968,6 +982,12 @@ export class UIController {
 
         this.btnKeyframeAdd.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.addCurrent", source: "button" });
+        });
+        this.btnKeyframeCopy.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.copySelected", source: "button" });
+        });
+        this.btnKeyframePaste.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.paste", source: "button" });
         });
         this.btnKeyframeDelete.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.deleteSelected", source: "button" });
@@ -1974,6 +1994,8 @@ export class UIController {
             this.seekToAdjacentKeyframePoint(action.direction);
         });
         this.actionDispatcher.register("keyframe.addCurrent", (action) => this.addKeyframeAtCurrentFrame(null, action.source));
+        this.actionDispatcher.register("keyframe.copySelected", () => this.copySelectedKeyframe());
+        this.actionDispatcher.register("keyframe.paste", () => this.pasteKeyframeClipboard());
         this.actionDispatcher.register("keyframe.deleteSelected", (action) => this.deleteSelectedKeyframe(action.source));
         this.actionDispatcher.register("keyframe.nudgeSelected", (action) => {
             this.nudgeSelectedKeyframe(action.deltaFrames);
@@ -5690,6 +5712,13 @@ export class UIController {
                 fromFrame,
                 toFrame,
             ),
+            applyTimelineKeyframePayload: (track, frame, payload) => {
+                const applied = this.mmdManager.applyTimelineKeyframePayload(track, frame, payload);
+                if (applied) {
+                    this.refreshRuntimeAnimationForTrack(track);
+                }
+                return applied;
+            },
             applyBoneTransform: (boneName, snapshot) => this.applyBoneTransformSnapshotFromCommand(boneName, snapshot),
             applyCameraTransform: (snapshot) => this.applyCameraTransformSnapshotFromCommand(snapshot),
             setSelectedFrame: (frame) => this.timeline.setSelectedFrame(frame),
@@ -5906,6 +5935,8 @@ export class UIController {
             this.renderInterpolationCurves(null);
             this.updateInterpolationActionButtons();
             this.btnKeyframeAdd.disabled = true;
+            this.btnKeyframeCopy.disabled = true;
+            this.btnKeyframePaste.disabled = true;
             this.btnKeyframeDelete.disabled = true;
             this.btnKeyframeNudgeLeft.disabled = false;
             this.btnKeyframeNudgeRight.disabled = false;
@@ -5926,11 +5957,21 @@ export class UIController {
 
         const hasCurrentFrameKey = this.mmdManager.hasTimelineKeyframe(track, currentFrame);
         const canDelete = selectedFrame !== null || hasCurrentFrameKey;
+        const copyFrame = selectedFrame ?? currentFrame;
+        const canCopy = this.mmdManager.hasTimelineKeyframe(track, copyFrame);
         this.btnKeyframeDelete.disabled = !canDelete;
+        this.btnKeyframeCopy.disabled = !canCopy;
+        this.btnKeyframePaste.disabled = !this.canPasteKeyframeClipboardToCurrentSelection();
 
         this.btnKeyframeNudgeLeft.disabled = false;
         this.btnKeyframeNudgeRight.disabled = false;
         this.updateSectionKeyframeButtons();
+    }
+
+    private canPasteKeyframeClipboardToCurrentSelection(): boolean {
+        const clipboard = this.keyframeClipboard;
+        if (!clipboard) return false;
+        return this.resolveKeyframePasteTarget(clipboard) !== null;
     }
 
     private updateSectionKeyframeButtons(): void {
@@ -6982,6 +7023,14 @@ export class UIController {
     private refreshRuntimeAnimationFromInterpolationEdit(): void {
         const track = this.getSelectedTimelineTrack();
         if (!track || track.category === "morph") return;
+        this.refreshRuntimeAnimationForTrack(track);
+    }
+
+    private refreshRuntimeAnimationForTrack(track: Pick<KeyframeTrack, "category">): void {
+        if (track.category === "morph") {
+            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
+            return;
+        }
 
         const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
         if (track.category === "camera") {
@@ -8084,6 +8133,140 @@ export class UIController {
             block[i] = Math.max(0, Math.min(255, normalized));
         }
         return block;
+    }
+
+    private copySelectedKeyframe(): void {
+        const track = this.getSelectedTimelineTrack();
+        if (!track) {
+            this.showToast("Please select a track", "error");
+            return;
+        }
+
+        const frame = this.timeline.getSelectedFrame() ?? this.mmdManager.currentFrame;
+        const payload = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        if (!payload) {
+            this.showToast(`Frame ${frame}: no keyframe to copy`, "info");
+            return;
+        }
+
+        this.keyframeClipboard = {
+            version: 1,
+            sourceTarget: this.mmdManager.getTimelineTarget(),
+            sourceFrame: Math.max(0, Math.floor(frame)),
+            track: { category: track.category, name: track.name },
+            payload: this.cloneKeyframePayload(payload),
+        };
+        this.updateTimelineEditState();
+        this.showToast(`Frame ${frame}: keyframe copied`, "success");
+    }
+
+    private pasteKeyframeClipboard(): void {
+        const clipboard = this.keyframeClipboard;
+        if (!clipboard) {
+            this.showToast("No keyframe to paste", "info");
+            return;
+        }
+
+        const target = this.resolveKeyframePasteTarget(clipboard);
+        if (!target) {
+            this.showToast("No compatible paste target", "error");
+            return;
+        }
+
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const before = this.mmdManager.readTimelineKeyframePayload(target.track, frame);
+        const after = this.cloneKeyframePayload(clipboard.payload);
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.paste:${createCommandTrackKey(target.track)}:${frame}:${nowMs}`,
+            label: `Paste keyframe at frame ${frame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.paste",
+                track: target.track,
+                frame,
+                before,
+                after,
+            },
+        };
+
+        const pasted = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!pasted) {
+            this.showToast(`Frame ${frame}: keyframe paste failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        this.timeline.setSelectedFrame(frame);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`Frame ${frame}: keyframe pasted`, "success");
+    }
+
+    private resolveKeyframePasteTarget(clipboard: KeyframeClipboard): { track: CommandTrackRef } | null {
+        const currentTarget = this.mmdManager.getTimelineTarget();
+        if (currentTarget !== clipboard.sourceTarget) return null;
+
+        const selectedTrack = this.getSelectedTimelineTrack();
+        if (selectedTrack && this.isCompatibleKeyframePayloadTarget(selectedTrack, clipboard.payload)) {
+            return { track: { category: selectedTrack.category, name: selectedTrack.name } };
+        }
+        return { track: clipboard.track };
+    }
+
+    private isCompatibleKeyframePayloadTarget(
+        track: Pick<KeyframeTrack, "category">,
+        payload: TimelineKeyframePayload,
+    ): boolean {
+        switch (payload.kind) {
+            case "camera":
+                return track.category === "camera";
+            case "morph":
+                return track.category === "morph";
+            case "bone":
+            case "movableBone":
+                return track.category === "root" || track.category === "semi-standard" || track.category === "bone";
+        }
+    }
+
+    private cloneKeyframePayload(payload: TimelineKeyframePayload): TimelineKeyframePayload {
+        switch (payload.kind) {
+            case "camera":
+                return {
+                    kind: "camera",
+                    positions: [...payload.positions],
+                    positionInterpolations: [...payload.positionInterpolations],
+                    rotations: [...payload.rotations],
+                    rotationInterpolations: [...payload.rotationInterpolations],
+                    distances: [...payload.distances],
+                    distanceInterpolations: [...payload.distanceInterpolations],
+                    fovs: [...payload.fovs],
+                    fovInterpolations: [...payload.fovInterpolations],
+                };
+            case "movableBone":
+                return {
+                    kind: "movableBone",
+                    positions: [...payload.positions],
+                    positionInterpolations: [...payload.positionInterpolations],
+                    rotations: [...payload.rotations],
+                    rotationInterpolations: [...payload.rotationInterpolations],
+                    physicsToggles: [...payload.physicsToggles],
+                };
+            case "bone":
+                return {
+                    kind: "bone",
+                    rotations: [...payload.rotations],
+                    rotationInterpolations: [...payload.rotationInterpolations],
+                    physicsToggles: [...payload.physicsToggles],
+                };
+            case "morph":
+                return {
+                    kind: "morph",
+                    weights: [...payload.weights],
+                };
+        }
     }
 
     private deleteSelectedKeyframe(source: ActionSource = "system"): void {

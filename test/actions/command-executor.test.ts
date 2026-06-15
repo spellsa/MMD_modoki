@@ -9,6 +9,7 @@ type Call =
     | ["add", CommandTrackRef, number]
     | ["remove", CommandTrackRef, number]
     | ["move", CommandTrackRef, number, number]
+    | ["paste", CommandTrackRef, number, "payload" | null]
     | ["boneTransform", string, BoneTransformCommandSnapshot]
     | ["select", number | null]
     | ["seek", number]
@@ -29,6 +30,10 @@ function createContext(result = true): { context: CommandExecutionContext; calls
             },
             moveTimelineKeyframe: (targetTrack, fromFrame, toFrame) => {
                 calls.push(["move", targetTrack, fromFrame, toFrame]);
+                return result;
+            },
+            applyTimelineKeyframePayload: (targetTrack, frame, payload) => {
+                calls.push(["paste", targetTrack, frame, payload ? "payload" : null]);
                 return result;
             },
             applyBoneTransform: (boneName, snapshot) => {
@@ -196,6 +201,43 @@ describe("executeCommand", () => {
         expect(result).toBe(false);
         expect(calls).toEqual([
             ["move", track, 10, 11],
+        ]);
+    });
+
+    it("applies and reverts keyframe paste commands", () => {
+        const payload = {
+            kind: "morph" as const,
+            weights: [0.5],
+        };
+
+        const applyContext = createContext();
+        expect(executeCommand(createCommand({
+            type: "keyframe.paste",
+            track,
+            frame: 12,
+            before: null,
+            after: payload,
+        }), "apply", applyContext.context)).toBe(true);
+        expect(applyContext.calls).toEqual([
+            ["paste", track, 12, "payload"],
+            ["select", 12],
+            ["seek", 12],
+            ["refresh"],
+        ]);
+
+        const revertContext = createContext();
+        expect(executeCommand(createCommand({
+            type: "keyframe.paste",
+            track,
+            frame: 12,
+            before: null,
+            after: payload,
+        }), "revert", revertContext.context)).toBe(true);
+        expect(revertContext.calls).toEqual([
+            ["paste", track, 12, null],
+            ["select", null],
+            ["seek", 12],
+            ["refresh"],
         ]);
     });
 

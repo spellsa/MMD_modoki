@@ -147,6 +147,8 @@ function createCommandId(diff: KeyframeCommandDiff, nowMs: number): string {
             return `${diff.type}:${trackKey}:${diff.frame}:${nowMs}`;
         case "keyframe.move":
             return `${diff.type}:${trackKey}:${diff.fromFrame}:${diff.toFrame}:${nowMs}`;
+        case "keyframe.paste":
+            return `${diff.type}:${trackKey}:${diff.frame}:${nowMs}`;
     }
 }
 

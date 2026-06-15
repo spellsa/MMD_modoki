@@ -252,6 +252,7 @@ import {
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
+    applyTimelineKeyframePayload as applyTimelineKeyframePayloadImpl,
     buildModelTrackFrameMapFromAnimation as buildModelTrackFrameMapFromAnimationImpl,
     addInfoKeyframe as addInfoKeyframeImpl,
     emitMergedKeyframeTracks as emitMergedKeyframeTracksImpl,
@@ -266,8 +267,10 @@ import {
     hasTimelineKeyframe as hasTimelineKeyframeImpl,
     moveTimelineKeyframe as moveTimelineKeyframeImpl,
     mergeModelAnimations as mergeModelAnimationsImpl,
+    readTimelineKeyframePayload as readTimelineKeyframePayloadImpl,
     refreshTotalFramesFromContent as refreshTotalFramesFromContentImpl,
     removeTimelineKeyframe as removeTimelineKeyframeImpl,
+    type TimelineKeyframePayload,
 } from "./editor/timeline-edit-service";
 import {
     disposeBoneGizmoSystem as disposeBoneGizmoSystemImpl,
@@ -3202,6 +3205,21 @@ ${beforeFogAppendBlock}
         toFrame: number,
     ): boolean {
         return moveTimelineKeyframeImpl(this, track, fromFrame, toFrame);
+    }
+
+    public readTimelineKeyframePayload(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        frame: number,
+    ): TimelineKeyframePayload | null {
+        return readTimelineKeyframePayloadImpl(this, track, frame);
+    }
+
+    public applyTimelineKeyframePayload(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        frame: number,
+        payload: TimelineKeyframePayload | null,
+    ): boolean {
+        return applyTimelineKeyframePayloadImpl(this, track, frame, payload);
     }
 
     public isGroundVisible(): boolean {
