@@ -74,6 +74,7 @@ type EffectsPipelineHost = {
     applyAntialiasSettings(): void;
     updateEditorDofFocusAndFStop(): void;
     applyDofLensBlurSettings(): void;
+    refreshFrameGraphPostEffectsBackendForResourcePlanChange(): boolean;
     initializeDofPipeline(): void;
     configureDofDepthRenderer(): void;
     applyEditorDofSettings(): void;
@@ -278,12 +279,17 @@ export function getDofEnabled(host: EffectsPipelineHost): boolean {
 }
 export function setDofEnabled(host: EffectsPipelineHost, v: boolean): void {
     if (host.postEffectBackend === "frameGraph") {
-        host.dofEnabledValue = Boolean(v);
+        const next = Boolean(v);
+        const changed = host.dofEnabledValue !== next;
+        host.dofEnabledValue = next;
         if (host.dofEnabledValue) {
             host.updateEditorDofFocusAndFStop();
         }
         if (host.defaultRenderingPipeline) {
             host.defaultRenderingPipeline.depthOfFieldEnabled = false;
+        }
+        if (changed && host.refreshFrameGraphPostEffectsBackendForResourcePlanChange()) {
+            return;
         }
         host.applyDofLensBlurSettings();
         host.applyAntialiasSettings();

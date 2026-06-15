@@ -38,6 +38,11 @@ import {
     normalizeFrameGraphPostEffectIds,
     type FrameGraphPostEffectId,
 } from "../shared/frame-graph-post-effect-stack";
+import {
+    buildFrameGraphResourcePlan,
+    type FrameGraphResourcePlan,
+    type FrameGraphSharedResourceKey,
+} from "./frame-graph-resource-plan";
 
 export type FrameGraphPostEffectsWarning = {
     message: string;
@@ -54,6 +59,14 @@ export type FrameGraphPostEffectsDiagnosticsSnapshot = {
     active: boolean;
     ready: boolean;
     executedFrameCount: number;
+    resourcePlan: {
+        effectOrder: FrameGraphPostEffectId[];
+        activeEffects: FrameGraphPostEffectId[];
+        requirementKeys: FrameGraphSharedResourceKey[];
+        needsGeometryRenderer: boolean;
+        needsDepthRenderer: boolean;
+        needsLuminousMask: boolean;
+    } | null;
     tasks: {
         imageProcessing: boolean;
         geometryRenderer: boolean;
@@ -1329,6 +1342,7 @@ export class FrameGraphPostEffectsController {
     private imageProcessingEffect: ThinImageProcessingPostProcess | null = null;
     private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
     private geometryRendererTask: FrameGraphGeometryRendererTask | null = null;
+    private resourcePlan: FrameGraphResourcePlan | null = null;
     private ssaoTask: FrameGraphSSAO2RenderingPipelineTask | null = null;
     private ssaoToonCompositeEffect: EffectWrapper | null = null;
     private ssaoToonCompositeTask: FrameGraphPostEffectsSsaoToonCompositeTask | null = null;
@@ -1424,10 +1438,21 @@ export class FrameGraphPostEffectsController {
 
     getDiagnosticsSnapshot(): FrameGraphPostEffectsDiagnosticsSnapshot {
         const settings = this.getSettings();
+        const resourcePlan = this.resourcePlan;
         return {
             active: this.active,
             ready: this.ready,
             executedFrameCount: this.executedFrameCount,
+            resourcePlan: resourcePlan
+                ? {
+                    effectOrder: [...resourcePlan.effectOrder],
+                    activeEffects: [...resourcePlan.activeEffects],
+                    requirementKeys: [...resourcePlan.requirementKeys],
+                    needsGeometryRenderer: resourcePlan.needsGeometryRenderer,
+                    needsDepthRenderer: resourcePlan.needsDepthRenderer,
+                    needsLuminousMask: resourcePlan.needsLuminousMask,
+                }
+                : null,
             tasks: {
                 imageProcessing: this.imageProcessingTask !== null,
                 geometryRenderer: this.geometryRendererTask !== null,
@@ -1535,6 +1560,8 @@ export class FrameGraphPostEffectsController {
             this.imageProcessingEffect,
         );
         const initialSettings = this.getSettings();
+        const resourcePlan = buildFrameGraphResourcePlan(initialSettings, effectOrder);
+        this.resourcePlan = resourcePlan;
         this.updateLutTexture(scene, initialSettings);
         imageProcessingTask.sourceTexture = sourceTextureHandle;
         imageProcessingTask.disabled = !initialSettings.imageProcessingEnabled;
@@ -1543,7 +1570,7 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingTask = imageProcessingTask;
 
         let dofSourceTexture = imageProcessingTask.outputTexture;
-        const geometryRendererNeeded = camera !== null && this.isGeometryRendererNeeded(initialSettings);
+        const geometryRendererNeeded = camera !== null && resourcePlan.needsGeometryRenderer;
         if (camera && geometryRendererNeeded) {
             const sourceTextureSize = this.getSourceTextureSize(scene, sourceTexture);
             const geometryDepthTexture = frameGraph.textureManager.createRenderTargetTexture(
@@ -1690,9 +1717,9 @@ export class FrameGraphPostEffectsController {
             bloomSourceTexture = depthOfFieldTask.outputTexture;
         }
 
-        const luminousDisabled = !initialSettings.luminousEnabled
-            || initialSettings.luminousIntensity <= 0.0001
-            || luminousTextureHandle === undefined;
+        let luminousOutputTexture = bloomSourceTexture;
+        if (resourcePlan.needsLuminousMask && luminousTextureHandle !== undefined) {
+            const luminousDisabled = false;
 
         this.luminousExtractEffect = new EffectWrapper({
             engine: frameGraph.engine,
@@ -1819,6 +1846,8 @@ export class FrameGraphPostEffectsController {
         luminousTask.disabled = luminousDisabled;
         frameGraph.addTask(luminousTask);
         this.luminousTask = luminousTask;
+        luminousOutputTexture = luminousTask.outputTexture;
+        }
 
         const bloomTask = new FrameGraphBloomTask(
             "frameGraphPostEffectsBloom",
@@ -1828,7 +1857,7 @@ export class FrameGraphPostEffectsController {
             Math.max(0, initialSettings.bloomThreshold),
             false,
         );
-        bloomTask.sourceTexture = luminousTask.outputTexture;
+        bloomTask.sourceTexture = luminousOutputTexture;
         bloomTask.disabled = !initialSettings.bloomEnabled;
         frameGraph.addTask(bloomTask);
         this.bloomTask = bloomTask;
@@ -2017,6 +2046,11 @@ export class FrameGraphPostEffectsController {
             return;
         }
         const settings = this.getSettings();
+        const resourcePlan = buildFrameGraphResourcePlan(
+            settings,
+            this.resourcePlan?.effectOrder ?? FRAME_GRAPH_POST_EFFECT_IDS,
+        );
+        this.resourcePlan = resourcePlan;
         if (this.activeScene) {
             this.updateLutTexture(this.activeScene, settings);
         }
@@ -2058,7 +2092,7 @@ export class FrameGraphPostEffectsController {
                 || this.luminousTask.haloTexture === undefined;
         }
         if (this.geometryRendererTask) {
-            this.geometryRendererTask.disabled = !this.isGeometryRendererNeeded(settings);
+            this.geometryRendererTask.disabled = !resourcePlan.needsGeometryRenderer;
         }
         if (this.ssrTask) {
             this.ssrTask.disabled = !this.isSsrEnabled(settings);
@@ -2220,6 +2254,7 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingEffect = null;
         this.imageProcessingTask = null;
         this.geometryRendererTask = null;
+        this.resourcePlan = null;
         this.ssrTask?.dispose();
         this.ssrTask = null;
         this.ssaoTask?.dispose();
@@ -2381,11 +2416,6 @@ export class FrameGraphPostEffectsController {
 
     private isSsrEnabled(settings: FrameGraphPostEffectsSettings): boolean {
         return settings.ssrEnabled && settings.ssrStrength > 0.00001;
-    }
-
-    private isGeometryRendererNeeded(settings: FrameGraphPostEffectsSettings): boolean {
-        return this.isSsrEnabled(settings)
-            || (settings.ssaoEnabled && settings.ssaoStrength > 0.00001);
     }
 
     private applyChromaticAberrationSettings(

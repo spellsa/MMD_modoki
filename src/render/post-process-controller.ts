@@ -1351,7 +1351,9 @@ export function setupEditorDofPipeline(host: PostProcessHost): void {
     host.applyDefaultPipelinePostProcessSettings();
     host.applySsrSettings();
     host.applyFogSettings();
-    host.configureDofDepthRenderer();
+    if (host.postEffectBackend === "classic") {
+        host.configureDofDepthRenderer();
+    }
     host.setupOriginFogPostProcess();
     if (host.dofLensDistortionFollowsCameraFov) {
         host.updateDofLensDistortionFromCameraFov();
@@ -1553,7 +1555,7 @@ export function applyDefaultPipelinePostProcessSettings(host: PostProcessHost): 
         pipeline.sharpen.colorAmount = 1;
     }
 
-    if (host.dofEnabledValue) {
+    if (host.postEffectBackend === "classic" && host.dofEnabledValue) {
         configureDofDepthRenderer(host);
         applyEditorDofSettings(host);
     }

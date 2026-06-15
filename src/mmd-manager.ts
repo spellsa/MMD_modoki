@@ -212,7 +212,11 @@ import {
     readPostEffectBackendLocalStorage,
     type PostEffectBackend,
 } from "./render/post-effect-backend";
-import { FrameGraphPostEffectsController } from "./render/frame-graph-post-effects-controller";
+import {
+    FrameGraphPostEffectsController,
+    type FrameGraphPostEffectsSettings,
+} from "./render/frame-graph-post-effects-controller";
+import { buildFrameGraphResourcePlan } from "./render/frame-graph-resource-plan";
 import {
     FRAME_GRAPH_POST_EFFECT_IDS,
     normalizeFrameGraphPostEffectIds,
@@ -4232,6 +4236,7 @@ ${beforeFogAppendBlock}
 
     private getFrameGraphPostEffectsPerformanceSnapshot(): Record<string, unknown> {
         const controllerSnapshot = this.frameGraphPostEffectsController?.getDiagnosticsSnapshot() ?? null;
+        const resourcePlan = controllerSnapshot?.resourcePlan ?? null;
         const taskNames = controllerSnapshot
             ? Object.entries(controllerSnapshot.tasks)
                 .filter(([, enabled]) => enabled)
@@ -4250,6 +4255,16 @@ ${beforeFogAppendBlock}
             executedFrameCount: this.getFrameGraphPostEffectsExecutedFrameCount(),
             stack: [...this.getFrameGraphPostEffectRuntimeOrder()],
             activeEffects: this.getActiveFrameGraphPostEffectIds(),
+            resourcePlan: resourcePlan
+                ? {
+                    effectOrder: resourcePlan.effectOrder,
+                    activeEffects: resourcePlan.activeEffects,
+                    requirementKeys: resourcePlan.requirementKeys,
+                    needsGeometryRenderer: resourcePlan.needsGeometryRenderer,
+                    needsDepthRenderer: resourcePlan.needsDepthRenderer,
+                    needsLuminousMask: resourcePlan.needsLuminousMask,
+                }
+                : null,
             resources: {
                 sceneColor: this.frameGraphPostEffectsSceneColorTarget !== null,
                 depthScene: this.depthRenderer !== null,
@@ -4270,6 +4285,7 @@ ${beforeFogAppendBlock}
                     executedFrameCount: controllerSnapshot.executedFrameCount,
                     taskNames,
                     resourceNames,
+                    planRequirementKeys: resourcePlan?.requirementKeys ?? [],
                     luminousCoreKernel: controllerSnapshot.luminousBlur.coreKernel,
                     luminousHaloKernel: controllerSnapshot.luminousBlur.haloKernel,
                 }
@@ -5516,7 +5532,53 @@ ${beforeFogAppendBlock}
                 event: info.event,
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
             });
-        }, () => ({
+        }, () => this.getFrameGraphPostEffectsSettings());
+
+        const settings = this.getFrameGraphPostEffectsSettings();
+        const resourcePlan = buildFrameGraphResourcePlan(settings, this.getFrameGraphPostEffectRuntimeOrder());
+        if (resourcePlan.needsDepthRenderer) {
+            this.configureDofDepthRenderer();
+        } else {
+            this.disposeDofDepthRenderer();
+        }
+        const sourceTexture = this.createFrameGraphPostEffectsSceneColorTarget();
+        const luminousMaskTexture = resourcePlan.needsLuminousMask
+            ? this.createFrameGraphPostEffectsLuminousMaskTarget()
+            : null;
+        const depthTexture = resourcePlan.needsDepthRenderer
+            ? this.depthRenderer?.getDepthMap().getInternalTexture() ?? null
+            : null;
+        const activated = this.frameGraphPostEffectsController.activate(
+            this.scene,
+            sourceTexture?.getInternalTexture() ?? null,
+            depthTexture,
+            this.camera,
+            this.getFrameGraphPostEffectRuntimeOrder(),
+            luminousMaskTexture?.getInternalTexture() ?? null,
+        );
+        if (!activated) {
+            this.disposeFrameGraphPostEffectsSceneColorTarget();
+            this.disposeFrameGraphPostEffectsLuminousMaskTarget();
+        }
+        this.postEffectBackend = activated ? "frameGraph" : "classic";
+        if (activated) {
+            logDebugIfEnabled("postfx", "render", "frame graph post effect performance snapshot", {
+                storageKey: MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
+                snapshot: this.getFrameGraphPostEffectsPerformanceSnapshot(),
+            });
+        }
+    }
+
+    private isFrameGraphImageProcessingTaskNeeded(): boolean {
+        const epsilon = 1e-4;
+        return this.postEffectToneMappingEnabledValue
+            || this.postEffectDitheringEnabledValue
+            || this.postEffectColorCurvesEnabledValue
+            || Math.abs(this.postEffectExposureValue - 1) > epsilon;
+    }
+
+    private getFrameGraphPostEffectsSettings(): FrameGraphPostEffectsSettings {
+        return {
             contrast: this.postEffectContrastValue,
             gammaPower: this.postEffectGammaValue,
             imageProcessingEnabled: this.isFrameGraphImageProcessingTaskNeeded(),
@@ -5558,39 +5620,16 @@ ${beforeFogAppendBlock}
             lutRuntimeText: this.getFrameGraphPostEffectLutRuntimeText(),
             lutTextureKey: this.getFrameGraphPostEffectLutTextureKey(),
             antialiasEnabled: this.antialiasEnabledValue,
-        }));
-
-        this.configureDofDepthRenderer();
-        const sourceTexture = this.createFrameGraphPostEffectsSceneColorTarget();
-        const luminousMaskTexture = this.createFrameGraphPostEffectsLuminousMaskTarget();
-        const depthTexture = this.depthRenderer?.getDepthMap().getInternalTexture() ?? null;
-        const activated = this.frameGraphPostEffectsController.activate(
-            this.scene,
-            sourceTexture?.getInternalTexture() ?? null,
-            depthTexture,
-            this.camera,
-            this.getFrameGraphPostEffectRuntimeOrder(),
-            luminousMaskTexture?.getInternalTexture() ?? null,
-        );
-        if (!activated) {
-            this.disposeFrameGraphPostEffectsSceneColorTarget();
-            this.disposeFrameGraphPostEffectsLuminousMaskTarget();
-        }
-        this.postEffectBackend = activated ? "frameGraph" : "classic";
-        if (activated) {
-            logDebugIfEnabled("postfx", "render", "frame graph post effect performance snapshot", {
-                storageKey: MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
-                snapshot: this.getFrameGraphPostEffectsPerformanceSnapshot(),
-            });
-        }
+        };
     }
 
-    private isFrameGraphImageProcessingTaskNeeded(): boolean {
-        const epsilon = 1e-4;
-        return this.postEffectToneMappingEnabledValue
-            || this.postEffectDitheringEnabledValue
-            || this.postEffectColorCurvesEnabledValue
-            || Math.abs(this.postEffectExposureValue - 1) > epsilon;
+    private disposeDofDepthRenderer(): void {
+        if (!this.depthRenderer) {
+            return;
+        }
+        this.depthRenderer.dispose();
+        this.depthRenderer = null;
+        MmdManager.toonContactAoDepthRenderer = null;
     }
 
     private getFrameGraphPostEffectLutRuntimeText(): string | null {
@@ -5974,6 +6013,15 @@ ${beforeFogAppendBlock}
         }
         this.disposeFrameGraphPostEffectsController();
         this.initializePostEffectBackend();
+    }
+
+    private refreshFrameGraphPostEffectsBackendForResourcePlanChange(): boolean {
+        if (this.postEffectBackend !== "frameGraph" || !this.frameGraphPostEffectsController) {
+            return false;
+        }
+        this.disposeFrameGraphPostEffectsController();
+        this.initializePostEffectBackend();
+        return this.postEffectBackend === "frameGraph";
     }
 
     private getPostProcessShaderLanguage(): ShaderLanguage {
@@ -6444,7 +6492,12 @@ ${beforeFogAppendBlock}
         return this.postEffectGlowEnabledValue;
     }
     set postEffectGlowEnabled(v: boolean) {
-        this.postEffectGlowEnabledValue = Boolean(v);
+        const next = Boolean(v);
+        const changed = this.postEffectGlowEnabledValue !== next;
+        this.postEffectGlowEnabledValue = next;
+        if (changed && this.refreshFrameGraphPostEffectsBackendForResourcePlanChange()) {
+            return;
+        }
         this.applyDefaultPipelinePostProcessSettings();
     }
 
@@ -7102,6 +7155,11 @@ ${beforeFogAppendBlock}
 
     private initializeDofPipeline(): void {
         try {
+            if (this.postEffectBackend === "frameGraph") {
+                this.disposeClassicDofPipelineResources();
+                this.postEffectFarDofStrengthValue = 0;
+                return;
+            }
             this.setupEditorDofPipeline();
             if (this.farDofEnabled) {
                 this.setupFarDofPostProcess();
@@ -7193,6 +7251,37 @@ ${beforeFogAppendBlock}
                 MmdManager.toonContactAoFallbackTexture.dispose();
                 MmdManager.toonContactAoFallbackTexture = null;
             }
+        }
+    }
+
+    private disposeClassicDofPipelineResources(): void {
+        if (this.defaultRenderingPipeline) {
+            this.defaultRenderingPipeline.dispose();
+            this.defaultRenderingPipeline = null;
+        }
+        if (this.dofPostProcess) {
+            this.dofPostProcess.dispose(this.camera);
+            this.dofPostProcess = null;
+        }
+        if (this.finalAntialiasPostProcess) {
+            this.finalAntialiasPostProcess.dispose(this.camera);
+            this.finalAntialiasPostProcess = null;
+        }
+        if (this.finalLensDistortionPostProcess) {
+            this.finalLensDistortionPostProcess.dispose(this.camera);
+            this.finalLensDistortionPostProcess = null;
+        }
+        if (this.lensRenderingPipeline) {
+            this.lensRenderingPipeline.dispose(false);
+            this.lensRenderingPipeline = null;
+        }
+        if (this.standaloneLensBlurPostProcess) {
+            this.standaloneLensBlurPostProcess.dispose(this.camera);
+            this.standaloneLensBlurPostProcess = null;
+        }
+        if (this.standaloneEdgeBlurPostProcess) {
+            this.standaloneEdgeBlurPostProcess.dispose(this.camera);
+            this.standaloneEdgeBlurPostProcess = null;
         }
     }
 
