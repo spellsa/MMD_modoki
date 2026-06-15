@@ -55,6 +55,22 @@ export type FrameGraphPostEffectsInfo = {
     event: "activated" | "ready";
 };
 
+type EffectWrapperReadyLike = {
+    effect?: {
+        isReady?: () => boolean;
+    } | null;
+    drawWrapper?: {
+        effect?: {
+            isReady?: () => boolean;
+        } | null;
+    } | null;
+    _drawWrapper?: {
+        effect?: {
+            isReady?: () => boolean;
+        } | null;
+    } | null;
+};
+
 export type FrameGraphPostEffectsDiagnosticsSnapshot = {
     active: boolean;
     ready: boolean;
@@ -102,6 +118,7 @@ export type FrameGraphPostEffectsDiagnosticsSnapshot = {
         coreKernel: number;
         haloKernel: number;
     };
+    connectedOrder: FrameGraphPostEffectId[];
 };
 
 export type FrameGraphPostEffectsSettings = {
@@ -1373,12 +1390,15 @@ export class FrameGraphPostEffectsController {
     private sharpenTask: FrameGraphSharpenTask | null = null;
     private fxaaEffect: ThinFXAAPostProcess | null = null;
     private fxaaTask: FrameGraphFXAATask | null = null;
+    private outputTask: FrameGraphCopyToBackbufferColorTask | null = null;
+    private baseOutputTexture: FrameGraphTextureHandle | null = null;
     private frameGraph: FrameGraph | null = null;
     private activeScene: Scene | null = null;
     private ready = false;
     private active = false;
     private executedFrameCount = 0;
     private lastImageProcessingEnabled: boolean | null = null;
+    private connectedOrder: FrameGraphPostEffectId[] = [];
 
     constructor(
         private readonly onWarning: (warning: FrameGraphPostEffectsWarning) => void,
@@ -1436,6 +1456,22 @@ export class FrameGraphPostEffectsController {
         return this.ready;
     }
 
+    private isEffectWrapperReady(effectWrapper: EffectWrapper | ThinBlurPostProcess | null): boolean {
+        if (!effectWrapper) return true;
+        const readyLike = effectWrapper as EffectWrapperReadyLike;
+        const effect = readyLike.effect ?? readyLike.drawWrapper?.effect ?? readyLike._drawWrapper?.effect ?? null;
+        return effect !== null && (typeof effect.isReady !== "function" || effect.isReady());
+    }
+
+    private areLuminousEffectsReady(): boolean {
+        return this.isEffectWrapperReady(this.luminousExtractEffect)
+            && this.isEffectWrapperReady(this.luminousCoreBlurHorizontalEffect)
+            && this.isEffectWrapperReady(this.luminousCoreBlurVerticalEffect)
+            && this.isEffectWrapperReady(this.luminousHaloBlurHorizontalEffect)
+            && this.isEffectWrapperReady(this.luminousHaloBlurVerticalEffect)
+            && this.isEffectWrapperReady(this.luminousEffect);
+    }
+
     getDiagnosticsSnapshot(): FrameGraphPostEffectsDiagnosticsSnapshot {
         const settings = this.getSettings();
         const resourcePlan = this.resourcePlan;
@@ -1490,6 +1526,7 @@ export class FrameGraphPostEffectsController {
                 coreKernel: resolveLuminousBlurKernel(settings, "core"),
                 haloKernel: resolveLuminousBlurKernel(settings, "halo"),
             },
+            connectedOrder: [...this.connectedOrder],
         };
     }
 
@@ -2012,6 +2049,8 @@ export class FrameGraphPostEffectsController {
             frameGraph,
         );
         frameGraph.addTask(outputTask);
+        this.outputTask = outputTask;
+        this.baseOutputTexture = imageProcessingTask.outputTexture;
         this.connectPostEffectOrder(imageProcessingTask.outputTexture, outputTask, effectOrder);
 
         this.frameGraph = frameGraph;
@@ -2070,7 +2109,8 @@ export class FrameGraphPostEffectsController {
         }
         const luminousDisabled = !settings.luminousEnabled
             || settings.luminousIntensity <= 0.0001
-            || this.luminousExtractTask?.sourceTexture === undefined;
+            || this.luminousExtractTask?.sourceTexture === undefined
+            || !this.areLuminousEffectsReady();
         if (this.luminousExtractTask) {
             this.luminousExtractTask.disabled = luminousDisabled;
         }
@@ -2133,7 +2173,19 @@ export class FrameGraphPostEffectsController {
         if (this.fxaaTask) {
             this.fxaaTask.disabled = !settings.antialiasEnabled;
         }
-        this.frameGraph.execute();
+        try {
+            this.frameGraph.execute();
+        } catch (err: unknown) {
+            this.ready = false;
+            this.active = false;
+            const message = err instanceof Error ? err.message : String(err);
+            const stack = err instanceof Error ? err.stack : undefined;
+            this.emitWarningOnce({
+                message: `Frame Graph post effects failed during execute. Disabled Frame Graph post effects. Reason: ${message}`,
+                reason: "build-failed",
+                stack,
+            });
+        }
     }
 
     getExecutedFrameCount(): number {
@@ -2147,73 +2199,84 @@ export class FrameGraphPostEffectsController {
     ): void {
         let currentTexture = baseTexture;
         let vignetteEdgeBlurConnected = false;
+        this.connectedOrder = [];
         const normalizedOrder = normalizeFrameGraphPostEffectIds(effectOrder, FRAME_GRAPH_POST_EFFECT_IDS);
 
         const connectVignetteEdgeBlur = (): void => {
-            if (vignetteEdgeBlurConnected || !this.vignetteEdgeBlurTask) {
+            if (vignetteEdgeBlurConnected || !this.vignetteEdgeBlurTask || this.vignetteEdgeBlurTask.disabled) {
                 return;
             }
             this.vignetteEdgeBlurTask.sourceTexture = currentTexture;
             currentTexture = this.vignetteEdgeBlurTask.outputTexture;
             vignetteEdgeBlurConnected = true;
+            this.connectedOrder.push("vignette");
         };
 
         for (const id of normalizedOrder) {
             switch (id) {
                 case "ssr":
-                    if (this.ssrTask) {
+                    if (this.ssrTask && !this.ssrTask.disabled) {
                         this.ssrTask.sourceTexture = currentTexture;
                         currentTexture = this.ssrTask.outputTexture;
+                        this.connectedOrder.push("ssr");
                     }
                     break;
                 case "ssao":
-                    if (this.ssaoTask && this.ssaoToonCompositeTask) {
+                    if (this.ssaoTask && !this.ssaoTask.disabled && this.ssaoToonCompositeTask && !this.ssaoToonCompositeTask.disabled) {
                         this.ssaoTask.sourceTexture = currentTexture;
                         this.ssaoToonCompositeTask.sourceTexture = this.ssaoTask.outputTexture;
                         this.ssaoToonCompositeTask.originalTexture = currentTexture;
                         currentTexture = this.ssaoToonCompositeTask.outputTexture;
+                        this.connectedOrder.push("ssao");
                     }
                     break;
                 case "dof":
-                    if (this.depthOfFieldTask) {
+                    if (this.depthOfFieldTask && !this.depthOfFieldTask.disabled) {
                         this.depthOfFieldTask.sourceTexture = currentTexture;
                         currentTexture = this.depthOfFieldTask.outputTexture;
+                        this.connectedOrder.push("dof");
                     }
                     break;
                 case "luminous":
-                    if (this.luminousTask) {
+                    if (this.luminousTask && !this.luminousTask.disabled) {
                         this.luminousTask.sourceTexture = currentTexture;
                         currentTexture = this.luminousTask.outputTexture;
+                        this.connectedOrder.push("luminous");
                     }
                     break;
                 case "bloom":
-                    if (this.bloomTask) {
+                    if (this.bloomTask && !this.bloomTask.disabled) {
                         this.bloomTask.sourceTexture = currentTexture;
                         currentTexture = this.bloomTask.outputTexture;
+                        this.connectedOrder.push("bloom");
                     }
                     break;
                 case "lut":
-                    if (this.lutTask) {
+                    if (this.lutTask && !this.lutTask.disabled) {
                         this.lutTask.sourceTexture = currentTexture;
                         currentTexture = this.lutTask.outputTexture;
+                        this.connectedOrder.push("lut");
                     }
                     break;
                 case "sharpen":
-                    if (this.sharpenTask) {
+                    if (this.sharpenTask && !this.sharpenTask.disabled) {
                         this.sharpenTask.sourceTexture = currentTexture;
                         currentTexture = this.sharpenTask.outputTexture;
+                        this.connectedOrder.push("sharpen");
                     }
                     break;
                 case "grain":
-                    if (this.grainTask) {
+                    if (this.grainTask && !this.grainTask.disabled) {
                         this.grainTask.sourceTexture = currentTexture;
                         currentTexture = this.grainTask.outputTexture;
+                        this.connectedOrder.push("grain");
                     }
                     break;
                 case "chromatic":
-                    if (this.chromaticAberrationTask) {
+                    if (this.chromaticAberrationTask && !this.chromaticAberrationTask.disabled) {
                         this.chromaticAberrationTask.sourceTexture = currentTexture;
                         currentTexture = this.chromaticAberrationTask.outputTexture;
+                        this.connectedOrder.push("chromatic");
                     }
                     break;
                 case "vignette":
@@ -2221,15 +2284,16 @@ export class FrameGraphPostEffectsController {
                     connectVignetteEdgeBlur();
                     break;
                 case "distortion":
-                    if (this.lensDistortionTask) {
+                    if (this.lensDistortionTask && !this.lensDistortionTask.disabled) {
                         this.lensDistortionTask.sourceTexture = currentTexture;
                         currentTexture = this.lensDistortionTask.outputTexture;
+                        this.connectedOrder.push("distortion");
                     }
                     break;
             }
         }
 
-        if (this.fxaaTask) {
+        if (this.fxaaTask && !this.fxaaTask.disabled) {
             this.fxaaTask.sourceTexture = currentTexture;
             currentTexture = this.fxaaTask.outputTexture;
         }
@@ -2300,6 +2364,9 @@ export class FrameGraphPostEffectsController {
         this.fxaaEffect?.dispose();
         this.fxaaEffect = null;
         this.fxaaTask = null;
+        this.outputTask = null;
+        this.baseOutputTexture = null;
+        this.connectedOrder = [];
         this.frameGraph?.dispose();
         this.frameGraph = null;
         this.activeScene = null;

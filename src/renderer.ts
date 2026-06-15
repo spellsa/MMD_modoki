@@ -207,6 +207,9 @@ async function initializeApp(): Promise<void> {
   try {
     const mmdManager = await MmdManager.create(canvas);
     await mmdManager.waitForPhysicsInitialization();
+    window.mmdModokiDiagnostics = {
+      dumpPerformanceSnapshot: () => mmdManager.dumpPerformanceSnapshot(),
+    };
     const engine = mmdManager.getEngineType();
     const physicsBackend = mmdManager.getPhysicsBackendLabel();
     logInfo("renderer", "MmdManager initialized", {

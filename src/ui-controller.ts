@@ -4110,6 +4110,8 @@ export class UIController {
             return;
         }
 
+        const wasActive = this.mmdManager.isFrameGraphPostEffectActive(effectId);
+        const previousStackIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()];
         this.applyFrameGraphPostEffectDefaultValues(effectId);
         switch (effectId) {
             case "bloom":
@@ -4144,10 +4146,12 @@ export class UIController {
             case "distortion":
                 break;
         }
-        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
-            this.mmdManager.getFrameGraphPostEffectStackIds(),
-            effectId,
-        ));
+        const nextStackIds = addFrameGraphPostEffectId(previousStackIds, effectId);
+        const stackChanged = !this.areFrameGraphPostEffectIdsEqual(previousStackIds, nextStackIds);
+        this.mmdManager.setFrameGraphPostEffectStackIds(nextStackIds);
+        if (!stackChanged && wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
+            this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();
+        }
 
         this.expandedFrameGraphPostEffectId = effectId;
         this.refreshFrameGraphPostAddUi();
@@ -4157,15 +4161,26 @@ export class UIController {
     private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
         const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
         if (!effect) return;
+        const wasActive = this.mmdManager.isFrameGraphPostEffectActive(effectId);
         if (enabled) {
             this.applyFrameGraphPostEffectDefaultValues(effectId);
         }
         effect.setActive(this.mmdManager, enabled);
+        if (wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
+            this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();
+        }
         this.refreshFrameGraphPostAddUi();
     }
 
     private getFrameGraphPostEffectLabel(effectId: FrameGraphPostAddEffectId): string {
         return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.label ?? effectId;
+    }
+
+    private areFrameGraphPostEffectIdsEqual(
+        a: readonly FrameGraphPostEffectId[],
+        b: readonly FrameGraphPostEffectId[],
+    ): boolean {
+        return a.length === b.length && a.every((id, index) => id === b[index]);
     }
 
     private getFrameGraphPostStackDropRow(target: EventTarget | null): HTMLElement | null {
@@ -4493,6 +4508,8 @@ export class UIController {
     private applyFrameGraphPostStackControl(control: HTMLInputElement | HTMLSelectElement, commit: boolean): void {
         const field = control.dataset.effectStackControl ?? "";
         const rawValue = control instanceof HTMLInputElement ? Number(control.value) : control.value;
+        const effectId = this.getFrameGraphPostEffectIdForControlField(field);
+        const wasActive = effectId ? this.mmdManager.isFrameGraphPostEffectActive(effectId) : false;
 
         switch (field) {
             case "bloomWeight":
@@ -4619,8 +4636,61 @@ export class UIController {
         }
 
         this.updateFrameGraphPostStackControlValue(control);
+        if (commit && effectId && wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
+            this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();
+        }
         if (commit) {
             this.refreshFrameGraphPostAddUi();
+        }
+    }
+
+    private getFrameGraphPostEffectIdForControlField(field: string): FrameGraphPostAddEffectId | null {
+        switch (field) {
+            case "bloomWeight":
+            case "bloomThreshold":
+            case "bloomKernel":
+                return "bloom";
+            case "luminousIntensity":
+            case "luminousThreshold":
+            case "luminousRadius":
+            case "luminousGlareCount":
+            case "luminousGlareLength":
+            case "luminousGlareAngle":
+            case "luminousGlarePower":
+                return "luminous";
+            case "dofFocus":
+            case "dofTargetModel":
+            case "dofTargetBone":
+            case "dofFocusOffset":
+            case "dofFStop":
+            case "dofLensSize":
+            case "dofFocalLength":
+                return "dof";
+            case "lutPreset":
+            case "lutSource":
+            case "lutIntensity":
+                return "lut";
+            case "ssaoStrength":
+            case "ssaoRadius":
+            case "ssaoFadeEnd":
+                return "ssao";
+            case "ssrStrength":
+            case "ssrStep":
+                return "ssr";
+            case "vignetteWeight":
+                return "vignette";
+            case "grainIntensity":
+                return "grain";
+            case "sharpenEdge":
+                return "sharpen";
+            case "chromaticAberration":
+                return "chromatic";
+            case "edgeBlur":
+                return "edgeBlur";
+            case "distortion":
+                return "distortion";
+            default:
+                return null;
         }
     }
 

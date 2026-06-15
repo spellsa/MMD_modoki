@@ -208,6 +208,10 @@ import {
 } from "./render/ssao-controller";
 import { ensureSimpleSsaoShader as ensureSimpleSsaoShaderImpl } from "./render/ssao-shader";
 import {
+    normalizePerformanceLogMode,
+    PerformanceProfiler,
+} from "./diagnostics/performance-profiler";
+import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     readPostEffectBackendLocalStorage,
     type PostEffectBackend,
@@ -314,6 +318,18 @@ type FramePerformanceSection =
     | "motionBlur"
     | "backgroundVideo"
     | "sceneRender"
+    | "sceneRenderCore"
+    | "postEffectBackend"
+    | "boneGizmoUtilityLayer"
+    | "frameGraphSceneColorRenderTarget"
+    | "frameGraphLuminousMaskRenderTarget"
+    | "mmdBeforePhysics"
+    | "mmdAfterPhysics"
+    | "sceneAnimations"
+    | "activeMeshesEvaluation"
+    | "renderTargetsRender"
+    | "cameraRender"
+    | "drawPhase"
     | "cameraMotionToViewport"
     | "viewportCameraInput"
     | "boneGizmo"
@@ -322,11 +338,6 @@ type FramePerformanceSection =
     | "characterContactShadow"
     | "editorDof"
     | "frameStateUpdate";
-type FramePerformanceStats = {
-    samples: number;
-    totalMs: number;
-    maxMs: number;
-};
 
 const FRAME_PERFORMANCE_SECTIONS: readonly FramePerformanceSection[] = [
     "frameTotal",
@@ -334,6 +345,18 @@ const FRAME_PERFORMANCE_SECTIONS: readonly FramePerformanceSection[] = [
     "motionBlur",
     "backgroundVideo",
     "sceneRender",
+    "sceneRenderCore",
+    "postEffectBackend",
+    "boneGizmoUtilityLayer",
+    "frameGraphSceneColorRenderTarget",
+    "frameGraphLuminousMaskRenderTarget",
+    "mmdBeforePhysics",
+    "mmdAfterPhysics",
+    "sceneAnimations",
+    "activeMeshesEvaluation",
+    "renderTargetsRender",
+    "cameraRender",
+    "drawPhase",
     "cameraMotionToViewport",
     "viewportCameraInput",
     "boneGizmo",
@@ -347,6 +370,7 @@ const FRAME_PERFORMANCE_SECTIONS: readonly FramePerformanceSection[] = [
 let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
+const FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE = 0.5;
 const DOF_FOCUS_BONE_CANDIDATES = [
     "頭",
     "head",
@@ -697,6 +721,7 @@ export class MmdManager {
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
+    private static readonly FRAME_PERFORMANCE_LOG_INTERVAL_MS = 10_000;
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
         {
@@ -1292,10 +1317,8 @@ ${beforeFogAppendBlock}
     private readonly runtimeDiagnostics = new Set<string>();
     private readonly webGpuTextureMipmapDecisionCache = new Map<string, Promise<boolean>>();
     private scene: Scene;
-    private readonly framePerformanceLogEnabled = MmdManager.readBooleanLocalStorage(
-        MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
-        false,
-    );
+    private readonly framePerformanceLogMode = MmdManager.readPerformanceLogModeLocalStorage();
+    private readonly framePerformanceLogEnabled = this.framePerformanceLogMode !== "off";
     private readonly requestedPostEffectBackend = readPostEffectBackendLocalStorage();
     private postEffectBackend: PostEffectBackend = this.requestedPostEffectBackend;
     private frameGraphPostEffectsController: FrameGraphPostEffectsController | null = null;
@@ -1321,8 +1344,10 @@ ${beforeFogAppendBlock}
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
     private renderFpsLimit = 0;
-    private nextFramePerformanceLogMs = performance.now() + 10_000;
-    private framePerformanceStats = MmdManager.createFramePerformanceStats();
+    private nextFramePerformanceLogMs = performance.now() + MmdManager.FRAME_PERFORMANCE_LOG_INTERVAL_MS;
+    private readonly framePerformanceProfiler = new PerformanceProfiler(FRAME_PERFORMANCE_SECTIONS);
+    private readonly framePerformancePhaseStartMs = new Map<FramePerformanceSection, number>();
+    private readonly performanceHookedRuntimes = new WeakSet<object>();
     private ground: Mesh | null = null;
     private mirroringFloor: Mesh | null = null;
     private mirroringFloorMaterial: StandardMaterial | null = null;
@@ -2069,11 +2094,17 @@ ${beforeFogAppendBlock}
 
     private applyModelShadowCasterState(entry: SceneModelEntry): void {
         for (const mesh of entry.shadowCasterMeshes) {
-            if (entry.castShadow) {
+            if (this.shadowEnabled && entry.castShadow) {
                 this.shadowGenerator.addShadowCaster(mesh, true);
             } else {
                 this.shadowGenerator.removeShadowCaster(mesh, true);
             }
+        }
+    }
+
+    private applyShadowCasterStateToAllModels(): void {
+        for (const entry of this.sceneModels) {
+            this.applyModelShadowCasterState(entry);
         }
     }
 
@@ -3732,18 +3763,6 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private static createFramePerformanceStats(): Record<FramePerformanceSection, FramePerformanceStats> {
-        const stats = {} as Record<FramePerformanceSection, FramePerformanceStats>;
-        for (const section of FRAME_PERFORMANCE_SECTIONS) {
-            stats[section] = {
-                samples: 0,
-                totalMs: 0,
-                maxMs: 0,
-            };
-        }
-        return stats;
-    }
-
     private static summarizePerfCounter(counter: PerfCounter): {
         current: number;
         lastSecAverage: number;
@@ -3756,6 +3775,16 @@ ${beforeFogAppendBlock}
             average: Math.round(counter.average * 1000) / 1000,
             max: Math.round(counter.max * 1000) / 1000,
         };
+    }
+
+    private static readPerformanceLogModeLocalStorage(): "off" | "summary" | "trace" {
+        try {
+            return normalizePerformanceLogMode(
+                globalThis.localStorage?.getItem(MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY),
+            );
+        } catch {
+            return "off";
+        }
     }
 
     private static readRuntimeModeLocalStorage(): RuntimeMode {
@@ -3955,6 +3984,7 @@ ${beforeFogAppendBlock}
         this.skydome.receiveShadows = false;
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
+        this.installMmdRuntimePerformanceHooks(this.mmdRuntime);
         this.mmdRuntime.register(this.scene);
         this.physicsController = new PhysicsRuntimeController({
             scene: this.scene,
@@ -3978,6 +4008,7 @@ ${beforeFogAppendBlock}
         this.syncMmdCameraFromViewportCamera();
         this.mmdRuntime.addAnimatable(this.mmdCamera);
         this.physicsInitializationPromise = this.initializeRuntimeModeAndPhysics();
+        this.installScenePerformancePhaseObservers();
 
         // VMD Loader
         this.vmdLoader = new VmdLoader(this.scene);
@@ -4072,13 +4103,25 @@ ${beforeFogAppendBlock}
             if (this.framePerformanceLogEnabled) {
                 this.recordFramePerformanceSection("backgroundVideo", performance.now() - sectionStartMs);
             }
-            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
+            const renderBlockStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
+            sectionStartMs = renderBlockStartMs;
             this.scene.render();
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("sceneRenderCore", performance.now() - sectionStartMs);
+            }
+            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.executePostEffectBackend();
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("postEffectBackend", performance.now() - sectionStartMs);
+            }
+            sectionStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             this.renderBoneGizmoUtilityLayerAfterPostEffects();
+            if (this.framePerformanceLogEnabled) {
+                this.recordFramePerformanceSection("boneGizmoUtilityLayer", performance.now() - sectionStartMs);
+            }
             const afterRenderMs = performance.now();
             if (this.framePerformanceLogEnabled) {
-                this.recordFramePerformanceSection("sceneRender", afterRenderMs - sectionStartMs);
+                this.recordFramePerformanceSection("sceneRender", afterRenderMs - renderBlockStartMs);
             }
             this.logPhysicsPerformanceSample(afterRenderMs);
             if (!this._isPlaying) {
@@ -4152,6 +4195,7 @@ ${beforeFogAppendBlock}
 
         const wasmInstance = await loadBundledMprWasmInstance();
         const wasmRuntime = new MmdWasmRuntime(wasmInstance, this.scene, new MmdWasmPhysics(this.scene));
+        this.installMmdRuntimePerformanceHooks(wasmRuntime);
         wasmRuntime.register(this.scene);
 
         this.mmdRuntime.unregister(this.scene);
@@ -4194,11 +4238,65 @@ ${beforeFogAppendBlock}
 
     private recordFramePerformanceSection(section: FramePerformanceSection, durationMs: number): void {
         if (!this.framePerformanceLogEnabled) return;
-        if (!Number.isFinite(durationMs) || durationMs < 0) return;
-        const stats = this.framePerformanceStats[section];
-        stats.samples += 1;
-        stats.totalMs += durationMs;
-        stats.maxMs = Math.max(stats.maxMs, durationMs);
+        this.framePerformanceProfiler.record(section, durationMs);
+    }
+
+    private markFramePerformancePhase(section: FramePerformanceSection): void {
+        if (!this.framePerformanceLogEnabled) return;
+        this.framePerformancePhaseStartMs.set(section, performance.now());
+    }
+
+    private recordFramePerformancePhase(section: FramePerformanceSection): void {
+        if (!this.framePerformanceLogEnabled) return;
+        const startMs = this.framePerformancePhaseStartMs.get(section);
+        if (startMs === undefined) return;
+        this.framePerformancePhaseStartMs.delete(section);
+        this.recordFramePerformanceSection(section, performance.now() - startMs);
+    }
+
+    private installScenePerformancePhaseObservers(): void {
+        if (!this.framePerformanceLogEnabled) return;
+
+        this.scene.onBeforeAnimationsObservable.add(() => this.markFramePerformancePhase("sceneAnimations"));
+        this.scene.onAfterAnimationsObservable.add(() => this.recordFramePerformancePhase("sceneAnimations"));
+
+        this.scene.onBeforeActiveMeshesEvaluationObservable.add(() => this.markFramePerformancePhase("activeMeshesEvaluation"));
+        this.scene.onAfterActiveMeshesEvaluationObservable.add(() => this.recordFramePerformancePhase("activeMeshesEvaluation"));
+
+        this.scene.onBeforeRenderTargetsRenderObservable.add(() => this.markFramePerformancePhase("renderTargetsRender"));
+        this.scene.onAfterRenderTargetsRenderObservable.add(() => this.recordFramePerformancePhase("renderTargetsRender"));
+
+        this.scene.onBeforeCameraRenderObservable.add(() => this.markFramePerformancePhase("cameraRender"));
+        this.scene.onAfterCameraRenderObservable.add(() => this.recordFramePerformancePhase("cameraRender"));
+
+        this.scene.onBeforeDrawPhaseObservable.add(() => this.markFramePerformancePhase("drawPhase"));
+        this.scene.onAfterDrawPhaseObservable.add(() => this.recordFramePerformancePhase("drawPhase"));
+    }
+
+    private installMmdRuntimePerformanceHooks(runtime: RuntimeMmdRuntime): void {
+        if (!this.framePerformanceLogEnabled || this.performanceHookedRuntimes.has(runtime)) return;
+
+        const originalBeforePhysics = runtime.beforePhysics.bind(runtime);
+        runtime.beforePhysics = (deltaTime: number): void => {
+            this.framePerformanceProfiler.measure("mmdBeforePhysics", () => originalBeforePhysics(deltaTime));
+        };
+
+        const originalAfterPhysics = runtime.afterPhysics.bind(runtime);
+        runtime.afterPhysics = (): void => {
+            this.framePerformanceProfiler.measure("mmdAfterPhysics", () => originalAfterPhysics());
+        };
+
+        this.performanceHookedRuntimes.add(runtime);
+    }
+
+    private installRenderTargetPerformanceHook(
+        renderTarget: RenderTargetTexture,
+        section: FramePerformanceSection,
+    ): void {
+        if (!this.framePerformanceLogEnabled) return;
+
+        renderTarget.onBeforeRenderObservable.add(() => this.markFramePerformancePhase(section));
+        renderTarget.onAfterRenderObservable.add(() => this.recordFramePerformancePhase(section));
     }
 
     private logFramePerformanceSample(nowMs: number): void {
@@ -4206,32 +4304,44 @@ ${beforeFogAppendBlock}
         if (nowMs < this.nextFramePerformanceLogMs) {
             return;
         }
-        this.nextFramePerformanceLogMs = nowMs + 10_000;
+        this.nextFramePerformanceLogMs = nowMs + MmdManager.FRAME_PERFORMANCE_LOG_INTERVAL_MS;
+        logInfo("performance", "frame performance sample", this.createPerformanceSnapshot({
+            kind: "summary",
+            sections: this.framePerformanceProfiler.summarizeAndReset(),
+        }));
+    }
 
-        const sections: Record<string, { samples: number; avgMs: number | null; maxMs: number | null }> = {};
-        for (const section of FRAME_PERFORMANCE_SECTIONS) {
-            const stats = this.framePerformanceStats[section];
-            sections[section] = {
-                samples: stats.samples,
-                avgMs: stats.samples > 0 ? Math.round((stats.totalMs / stats.samples) * 1000) / 1000 : null,
-                maxMs: stats.samples > 0 ? Math.round(stats.maxMs * 1000) / 1000 : null,
-            };
-        }
+    public dumpPerformanceSnapshot(): Record<string, unknown> {
+        const snapshot = this.createPerformanceSnapshot({
+            kind: "manual",
+            sections: this.framePerformanceProfiler.summarize(),
+        });
+        logInfo("performance", "manual performance snapshot", snapshot);
+        return snapshot;
+    }
 
-        logInfo("performance", "frame performance sample", {
+    private createPerformanceSnapshot(options: {
+        kind: "summary" | "manual";
+        sections: Record<FramePerformanceSection, { samples: number; avgMs: number | null; maxMs: number | null }>;
+    }): Record<string, unknown> {
+        const renderTargets = this.getRenderTargetPerformanceSnapshot();
+        return {
+            kind: options.kind,
+            logMode: this.framePerformanceLogMode,
+            intervalMs: MmdManager.FRAME_PERFORMANCE_LOG_INTERVAL_MS,
             runtimeMode: this.runtimeMode,
             engine: this.getEngineType(),
             fps: this.getFps(),
             modelCount: this.sceneModels.length,
             isPlaying: this._isPlaying,
             physicsBackend: this.getPhysicsBackendLabel(),
-            rigidBodyVisualizerEnabled: this.rigidBodyVisualizerEnabled,
-            boneVisualizerTarget: this.boneVisualizerTarget !== null,
-            sections,
+            editor: this.getEditorPerformanceSnapshot(),
+            sections: options.sections,
             sceneInstrumentation: this.getSceneInstrumentationSnapshot(),
+            renderTargetDetails: this.getRenderTargetDetails(),
+            renderTargets,
             frameGraphPostEffects: this.getFrameGraphPostEffectsPerformanceSnapshot(),
-        });
-        this.framePerformanceStats = MmdManager.createFramePerformanceStats();
+        };
     }
 
     private getFrameGraphPostEffectsPerformanceSnapshot(): Record<string, unknown> {
@@ -4276,6 +4386,7 @@ ${beforeFogAppendBlock}
             renderTargets: {
                 sceneColor: MmdManager.getRenderTargetSizeLabel(this.frameGraphPostEffectsSceneColorTarget),
                 luminousMask: MmdManager.getRenderTargetSizeLabel(this.frameGraphPostEffectsLuminousMaskTarget),
+                luminousMaskScale: FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE,
             },
             luminousMaskRenderedSubMeshes: this.getFrameGraphPostEffectsLuminousMaskRenderedSubMeshCount(),
             controller: controllerSnapshot
@@ -4286,10 +4397,147 @@ ${beforeFogAppendBlock}
                     taskNames,
                     resourceNames,
                     planRequirementKeys: resourcePlan?.requirementKeys ?? [],
+                    connectedOrder: controllerSnapshot.connectedOrder,
                     luminousCoreKernel: controllerSnapshot.luminousBlur.coreKernel,
                     luminousHaloKernel: controllerSnapshot.luminousBlur.haloKernel,
                 }
                 : null,
+        };
+    }
+
+    private getEditorPerformanceSnapshot(): Record<string, unknown> {
+        return {
+            rigidBodyVisualizerEnabled: this.rigidBodyVisualizerEnabled,
+            boneVisualizerTarget: this.boneVisualizerTarget !== null,
+            boneGizmoActive: this.boneGizmoManager !== null,
+            characterContactShadowEnabled: this.characterContactShadowEnabledValue,
+            mirroringFloorEnabled: this.mirroringFloorEnabledValue,
+            shadowEnabled: this.shadowEnabled,
+            antialiasEnabled: this.antialiasEnabledValue,
+        };
+    }
+
+    private getRenderTargetPerformanceSnapshot(): Record<string, unknown> {
+        const customRenderTargets = this.camera?.customRenderTargets ?? [];
+        const entries = customRenderTargets.map((target, index) => this.createTextureSnapshot(
+            `camera.customRenderTargets[${index}]`,
+            target,
+            "cameraCustomRenderTarget",
+        ));
+        const depthMap = this.depthRenderer?.getDepthMap() ?? null;
+        const ssaoDepthMap = this.ssaoDepthRenderer?.getDepthMap() ?? null;
+        const shadowMap = this.shadowGenerator?.getShadowMap() ?? null;
+
+        return {
+            cameraCustomRenderTargetCount: customRenderTargets.length,
+            cameraCustomRenderTargetNames: entries.map((entry) => entry?.name ?? null),
+            cameraCustomRenderTargetSizes: entries.map((entry) => entry?.size ?? null),
+            cameraCustomRenderTargets: entries,
+            named: {
+                frameGraphSceneColor: this.createTextureSnapshot(
+                    "frameGraphPostEffectsSceneColor",
+                    this.frameGraphPostEffectsSceneColorTarget,
+                    "frameGraph",
+                ),
+                frameGraphLuminousMask: this.createTextureSnapshot(
+                    "frameGraphPostEffectsLuminousMask",
+                    this.frameGraphPostEffectsLuminousMaskTarget,
+                    "frameGraph",
+                ),
+                dofDepth: this.createTextureSnapshot("dofDepth", depthMap, "depth"),
+                ssaoDepth: this.createTextureSnapshot("ssaoDepth", ssaoDepthMap, "depth"),
+                shadowMap: this.createTextureSnapshot("shadowMap", shadowMap, "shadow"),
+                mirroringFloor: this.createTextureSnapshot("mirroringFloor", this.mirroringFloorTexture, "reflection"),
+            },
+        };
+    }
+
+    private getRenderTargetDetails(): Record<string, unknown>[] {
+        const details: Record<string, unknown>[] = [];
+        const customRenderTargets = this.camera?.customRenderTargets ?? [];
+        for (let i = 0; i < customRenderTargets.length; i += 1) {
+            details.push(this.createRenderTargetDetail(
+                `camera.customRenderTargets[${i}]`,
+                customRenderTargets[i],
+                "cameraCustomRenderTarget",
+            ));
+        }
+
+        if (this.frameGraphPostEffectsSceneColorTarget) {
+            details.push(this.createRenderTargetDetail(
+                "frameGraphPostEffectsSceneColor",
+                this.frameGraphPostEffectsSceneColorTarget,
+                "frameGraphSceneColor",
+            ));
+        }
+        if (this.frameGraphPostEffectsLuminousMaskTarget) {
+            details.push(this.createRenderTargetDetail(
+                "frameGraphPostEffectsLuminousMask",
+                this.frameGraphPostEffectsLuminousMaskTarget,
+                "frameGraphLuminousMask",
+            ));
+        }
+
+        const depthMap = this.depthRenderer?.getDepthMap();
+        if (depthMap) {
+            details.push(this.createRenderTargetDetail("dofDepth", depthMap, "depth"));
+        }
+        const ssaoDepthMap = this.ssaoDepthRenderer?.getDepthMap();
+        if (ssaoDepthMap) {
+            details.push(this.createRenderTargetDetail("ssaoDepth", ssaoDepthMap, "depth"));
+        }
+        const shadowMap = this.shadowGenerator?.getShadowMap();
+        if (shadowMap) {
+            details.push(this.createRenderTargetDetail("shadowMap", shadowMap, "shadow"));
+        }
+        if (this.mirroringFloorTexture) {
+            details.push(this.createRenderTargetDetail("mirroringFloor", this.mirroringFloorTexture, "reflection"));
+        }
+
+        return details;
+    }
+
+    private createRenderTargetDetail(
+        label: string,
+        renderTarget: RenderTargetTexture,
+        kind: string,
+    ): Record<string, unknown> {
+        const size = renderTarget.getSize();
+        const renderList = renderTarget.renderList;
+        return {
+            label,
+            name: renderTarget.name || label,
+            kind,
+            width: size.width,
+            height: size.height,
+            size: `${size.width}x${size.height}`,
+            samples: renderTarget.samples,
+            renderListMode: renderList === null ? "sceneActiveMeshes" : "customList",
+            renderListLength: Array.isArray(renderList) ? renderList.length : null,
+            hasCustomRenderList: typeof renderTarget.getCustomRenderList === "function",
+            hasCustomRenderFunction: typeof renderTarget.customRenderFunction === "function",
+            renderParticles: renderTarget.renderParticles,
+            renderSprites: renderTarget.renderSprites,
+            skipInitialClear: renderTarget.skipInitialClear,
+            activeCamera: renderTarget.activeCamera?.name ?? null,
+        };
+    }
+
+    private createTextureSnapshot(
+        label: string,
+        texture: BaseTexture | null | undefined,
+        kind: string,
+    ): Record<string, unknown> | null {
+        if (!texture) return null;
+        const size = texture.getSize();
+        return {
+            label,
+            name: texture.name || label,
+            kind,
+            width: size.width,
+            height: size.height,
+            size: `${size.width}x${size.height}`,
+            samples: texture instanceof RenderTargetTexture ? texture.samples : null,
         };
     }
 
@@ -5687,6 +5935,7 @@ ${beforeFogAppendBlock}
         renderTarget.renderParticles = true;
         renderTarget.renderSprites = true;
         renderTarget.skipInitialClear = false;
+        this.installRenderTargetPerformanceHook(renderTarget, "frameGraphSceneColorRenderTarget");
         this.camera.customRenderTargets.push(renderTarget);
         this.frameGraphPostEffectsSceneColorTarget = renderTarget;
         return renderTarget;
@@ -5697,7 +5946,11 @@ ${beforeFogAppendBlock}
             return null;
         }
         this.disposeFrameGraphPostEffectsLuminousMaskTarget();
-        const size = this.getFrameGraphPostEffectsRenderTargetSize();
+        const sourceSize = this.getFrameGraphPostEffectsRenderTargetSize();
+        const size = {
+            width: Math.max(1, Math.round(sourceSize.width * FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE)),
+            height: Math.max(1, Math.round(sourceSize.height * FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE)),
+        };
 
         const renderTarget = new RenderTargetTexture(
             "frameGraphPostEffectsLuminousMask",
@@ -5724,6 +5977,7 @@ ${beforeFogAppendBlock}
         renderTarget.onAfterRenderObservable.add(() => {
             this.reportFrameGraphLuminousMaskDiagnostics();
         });
+        this.installRenderTargetPerformanceHook(renderTarget, "frameGraphLuminousMaskRenderTarget");
         renderTarget.customRenderFunction = (
             opaqueSubMeshes,
             alphaTestSubMeshes,
@@ -5895,6 +6149,9 @@ ${beforeFogAppendBlock}
             return;
         }
         this.frameGraphPostEffectsController?.execute();
+        if (this.frameGraphPostEffectsController && !this.frameGraphPostEffectsController.isActive()) {
+            this.shutdownPostEffectBackend();
+        }
     }
 
     private renderBoneGizmoUtilityLayerAfterPostEffects(): void {
@@ -6013,6 +6270,10 @@ ${beforeFogAppendBlock}
         }
         this.disposeFrameGraphPostEffectsController();
         this.initializePostEffectBackend();
+    }
+
+    public refreshFrameGraphPostEffectsBackendForStackStateChange(): void {
+        this.refreshFrameGraphPostEffectsBackendForOrderChange();
     }
 
     private refreshFrameGraphPostEffectsBackendForResourcePlanChange(): boolean {
@@ -7054,7 +7315,8 @@ ${beforeFogAppendBlock}
         return getShadowEnabledImpl(this);
     }
     setShadowEnabled(enabled: boolean): void {
-        return setShadowEnabledImpl(this, enabled);
+        setShadowEnabledImpl(this, enabled);
+        this.applyShadowCasterStateToAllModels();
     }
 
     /** Shadow edge softness for contact hardening (0.005..0.12) */

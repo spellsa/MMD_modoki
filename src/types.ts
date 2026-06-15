@@ -129,6 +129,9 @@ declare global {
             ) => void;
             apply: (root?: ParentNode) => void;
         };
+        mmdModokiDiagnostics?: {
+            dumpPerformanceSnapshot: () => Record<string, unknown>;
+        };
     }
 }
 
