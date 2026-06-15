@@ -1132,12 +1132,6 @@ body.shader-resizing #shader-resizer::before {
   background: var(--bg-secondary);
 }
 
-.timeline-edit-buttons {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
 .timeline-nav-row {
   display: flex;
   flex-direction: column;
@@ -1327,15 +1321,31 @@ body.shader-resizing #shader-resizer::before {
 }
 
 .timeline-edit-btn {
-  height: 24px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: transparent;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   transition: all var(--transition-fast);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-edit-btn--compact {
+  width: 38px;
+  padding-inline: 3px;
+}
+
+.timeline-edit-btn--physics-toggle {
+  min-width: 54px;
+  padding-inline: 6px;
 }
 
 .timeline-edit-btn:hover {
@@ -1350,15 +1360,38 @@ body.shader-resizing #shader-resizer::before {
 }
 
 .timeline-edit-btn:disabled:hover {
-  border-color: var(--border-color);
-  background: transparent;
+  border-color: rgba(255, 255, 255, 0.13);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
   color: var(--text-secondary);
 }
 
 #timeline-action-toolbar {
-  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 6px 6px;
   border-top: 1px solid var(--border-color);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0));
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(0, 0, 0, 0.04)),
+    var(--bg-secondary);
+}
+
+.timeline-key-dock-command-row,
+.timeline-key-dock-register-row {
+  display: grid;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.timeline-key-dock-command-row {
+  grid-template-columns: repeat(3, 58px);
+  justify-content: center;
+}
+
+.timeline-key-dock-register-row {
+  grid-template-columns: repeat(3, 58px);
+  justify-content: center;
 }
 
 #timeline-container {
