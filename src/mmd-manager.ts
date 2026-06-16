@@ -273,6 +273,13 @@ import {
     type TimelineKeyframePayload,
 } from "./editor/timeline-edit-service";
 import {
+    buildMmdAnimationFromEditorMotion,
+    createEditorModelMotionFromMmdAnimation,
+    resolveBoneTrackKind,
+} from "./editor/mmd-animation-builder";
+import { upsertBoneKey, type EditorBoneTrackKind } from "./editor/motion-document";
+import { bindModelAnimationToRuntime } from "./editor/runtime-animation-binder";
+import {
     disposeBoneGizmoSystem as disposeBoneGizmoSystemImpl,
     handleBoneGizmoBeforeRender as handleBoneGizmoBeforeRenderImpl,
     initializeBoneGizmoSystem as initializeBoneGizmoSystemImpl,
@@ -314,6 +321,10 @@ type EditorRuntimeBone = IMmdRuntimeBone & {
 
 type RuntimeMode = "classic" | "wasm";
 type RuntimeModel = PhysicsRuntimeModel;
+type BoneKeyframePoseInput = {
+    position: { x: number; y: number; z: number };
+    rotation: { x: number; y: number; z: number };
+};
 type RuntimeMmdRuntime = MmdRuntime | MmdWasmRuntime;
 type FramePerformanceSection =
     | "frameTotal"
@@ -1398,6 +1409,7 @@ ${beforeFogAppendBlock}
     private hasCameraMotion = false;
     private readonly modelKeyframeTracksByModel = new WeakMap<RuntimeModel, Map<string, Uint32Array>>();
     private readonly modelSourceAnimationsByModel = new WeakMap<RuntimeModel, MmdAnimation>();
+    private readonly editorModelAnimations = new WeakSet<MmdAnimation>();
     private cameraSourceAnimation: MmdAnimation | null = null;
     private readonly modelMotionImportsByModel = new WeakMap<RuntimeModel, ProjectMotionImport[]>();
     private cameraMotionPath: string | null = null;
@@ -3222,6 +3234,71 @@ ${beforeFogAppendBlock}
         return applyTimelineKeyframePayloadImpl(this, track, frame, payload);
     }
 
+    public registerEditorBoneKeyframe(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        frame: number,
+        pose: BoneKeyframePoseInput,
+    ): { created: boolean } | null {
+        if (!this.currentModel || !this.activeModelInfo) return null;
+        if (track.category !== "root" && track.category !== "semi-standard" && track.category !== "bone") {
+            return null;
+        }
+
+        const normalizedFrame = Math.max(0, Math.floor(frame));
+        const existingAnimation = this.modelSourceAnimationsByModel.get(this.currentModel) ?? null;
+        const motion = createEditorModelMotionFromMmdAnimation(
+            existingAnimation?.name ?? `${this.activeModelInfo.name}:manual`,
+            existingAnimation,
+            this.activeModelInfo,
+        );
+        const kind = this.resolveEditorBoneTrackKind(track);
+        const upsert = upsertBoneKey(motion, track.name, kind, {
+            frame: normalizedFrame,
+            position: kind === "movableBone"
+                ? [pose.position.x, pose.position.y, pose.position.z]
+                : undefined,
+            positionInterpolation: kind === "movableBone"
+                ? this.createDefaultPositionInterpolationBlock()
+                : undefined,
+            rotation: this.rotationDegreesToQuaternionBlock(pose.rotation.x, pose.rotation.y, pose.rotation.z),
+            rotationInterpolation: this.createDefaultInterpolationBlock(),
+            physicsToggle: 1,
+        });
+        const animation = buildMmdAnimationFromEditorMotion(
+            upsert.motion.name,
+            upsert.motion,
+            this.activeModelInfo,
+            existingAnimation?.cameraTrack ?? null,
+        );
+
+        this.editorModelAnimations.add(animation);
+        this.modelSourceAnimationsByModel.set(this.currentModel, animation);
+        this.modelKeyframeTracksByModel.set(
+            this.currentModel,
+            buildModelTrackFrameMapFromAnimationImpl(this, animation),
+        );
+        const handle = bindModelAnimationToRuntime(
+            {
+                runtimeMode: this.runtimeMode,
+                scene: this.scene,
+                mmdWasmInstance: this.mmdWasmInstance,
+                mmdRuntime: this.mmdRuntime,
+            },
+            this.currentModel,
+            animation,
+            normalizedFrame,
+            this.createEditorAnimationRetargetingMap(this.currentModel),
+        );
+        if (this.ensureRuntimeDurationCoversEditorAnimation(animation)) {
+            this.mmdRuntime.seekAnimation(normalizedFrame, true);
+        }
+        this.logEditorAnimationRegistrationDiagnostics(this.currentModel, animation, handle, track, normalizedFrame);
+        refreshTotalFramesFromContentImpl(this);
+        emitMergedKeyframeTracksImpl(this);
+        this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+        return { created: upsert.before === null };
+    }
+
     public isGroundVisible(): boolean {
         return this.ground?.isEnabled() ?? false;
     }
@@ -4123,7 +4200,14 @@ ${beforeFogAppendBlock}
             }
             const renderBlockStartMs = this.framePerformanceLogEnabled ? performance.now() : 0;
             sectionStartMs = renderBlockStartMs;
-            this.scene.render();
+            try {
+                this.scene.render();
+            } catch (err: unknown) {
+                if (this.tryRecoverFrameGraphRenderTargetFailure(err)) {
+                    return;
+                }
+                throw err;
+            }
             if (this.framePerformanceLogEnabled) {
                 this.recordFramePerformanceSection("sceneRenderCore", performance.now() - sectionStartMs);
             }
@@ -5267,10 +5351,156 @@ ${beforeFogAppendBlock}
     }
 
     private createModelRuntimeAnimation(model: RuntimeModel, animation: MmdAnimation): MmdRuntimeAnimationHandle {
+        const retargetingMap = this.editorModelAnimations.has(animation)
+            ? this.createEditorAnimationRetargetingMap(model)
+            : undefined;
         if (this.runtimeMode === "wasm" && this.mmdWasmInstance) {
-            return model.createRuntimeAnimation(new MmdWasmAnimation(animation, this.mmdWasmInstance, this.scene));
+            return model.createRuntimeAnimation(
+                new MmdWasmAnimation(animation, this.mmdWasmInstance, this.scene),
+                retargetingMap,
+            );
         }
-        return model.createRuntimeAnimation(animation);
+        return model.createRuntimeAnimation(animation, retargetingMap);
+    }
+
+    private resolveEditorBoneTrackKind(track: Pick<KeyframeTrack, "name" | "category">): EditorBoneTrackKind {
+        return resolveBoneTrackKind(
+            track.name,
+            track.category === "root" ? "movableBone" : "bone",
+            this.activeModelInfo,
+        );
+    }
+
+    private rotationDegreesToQuaternionBlock(xDeg: number, yDeg: number, zDeg: number): [number, number, number, number] {
+        const degToRad = Math.PI / 180;
+        const rotation = Quaternion.RotationYawPitchRoll(yDeg * degToRad, xDeg * degToRad, zDeg * degToRad);
+        return [rotation.x, rotation.y, rotation.z, rotation.w];
+    }
+
+    private createDefaultInterpolationBlock(): [number, number, number, number] {
+        return [20, 107, 20, 107];
+    }
+
+    private createDefaultPositionInterpolationBlock(): [
+        number, number, number, number,
+        number, number, number, number,
+        number, number, number, number,
+    ] {
+        return [
+            ...this.createDefaultInterpolationBlock(),
+            ...this.createDefaultInterpolationBlock(),
+            ...this.createDefaultInterpolationBlock(),
+        ];
+    }
+
+    private createEditorAnimationRetargetingMap(model: RuntimeModel): Record<string, string> | undefined {
+        const runtimeBones = model.runtimeBones as readonly EditorRuntimeBone[] | undefined;
+        if (!runtimeBones) return undefined;
+
+        const retargetingMap: Record<string, string> = {};
+        let hasAlias = false;
+        for (const runtimeBone of runtimeBones) {
+            const runtimeName = runtimeBone.name;
+            const linkedName = runtimeBone.linkedBone?.name;
+            if (!runtimeName || !linkedName || runtimeName === linkedName) continue;
+            retargetingMap[linkedName] = runtimeName;
+            hasAlias = true;
+        }
+        return hasAlias ? retargetingMap : undefined;
+    }
+
+    private ensureRuntimeDurationCoversEditorAnimation(animation: MmdAnimation): boolean {
+        const requiredDuration = Math.max(0, animation.endFrame);
+        if (this.mmdRuntime.animationFrameTimeDuration >= requiredDuration) {
+            return false;
+        }
+
+        const runtimeInternal = this.mmdRuntime as RuntimeMmdRuntime & {
+            _onAnimationDurationChanged?: (newAnimationFrameTimeDuration: number) => void;
+        };
+        runtimeInternal._onAnimationDurationChanged?.(requiredDuration);
+        if (this.mmdRuntime.animationFrameTimeDuration >= requiredDuration) {
+            return true;
+        }
+
+        logWarn("animation", "editor animation duration did not propagate to runtime", {
+            requiredDuration,
+            runtimeDuration: this.mmdRuntime.animationFrameTimeDuration,
+            animationStartFrame: animation.startFrame,
+            animationEndFrame: animation.endFrame,
+        });
+        return false;
+    }
+
+    private logEditorAnimationRegistrationDiagnostics(
+        model: RuntimeModel,
+        animation: MmdAnimation,
+        handle: MmdRuntimeAnimationHandle,
+        track: Pick<KeyframeTrack, "name" | "category">,
+        frame: number,
+    ): void {
+        const runtimeAnimation = model.runtimeAnimations.get(handle) as {
+            boneBindIndexMap?: ArrayLike<EditorRuntimeBone | null>;
+            movableBoneBindIndexMap?: ArrayLike<EditorRuntimeBone | null>;
+            _boneBindIndexMap?: { array?: ArrayLike<number> };
+            _movableBoneBindIndexMap?: { array?: ArrayLike<number> };
+        } | undefined;
+        const boneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name) ?? null;
+        const movableBoneTrack = animation.movableBoneTracks.find((candidate) => candidate.name === track.name) ?? null;
+        const boneBindIndex = boneTrack
+            ? this.readRuntimeAnimationBindIndex(runtimeAnimation, "bone", animation.boneTracks.indexOf(boneTrack))
+            : null;
+        const movableBoneBindIndex = movableBoneTrack
+            ? this.readRuntimeAnimationBindIndex(
+                runtimeAnimation,
+                "movableBone",
+                animation.movableBoneTracks.indexOf(movableBoneTrack),
+            )
+            : null;
+        const runtimeFrame = this.mmdRuntime.currentFrameTime;
+        const runtimeDuration = this.mmdRuntime.animationFrameTimeDuration;
+
+        const data = {
+            track: track.name,
+            category: track.category,
+            frame,
+            runtimeFrame,
+            runtimeDuration,
+            animationStartFrame: animation.startFrame,
+            animationEndFrame: animation.endFrame,
+            boneFrames: boneTrack ? Array.from(boneTrack.frameNumbers) : null,
+            movableBoneFrames: movableBoneTrack ? Array.from(movableBoneTrack.frameNumbers) : null,
+            boneBindIndex,
+            movableBoneBindIndex,
+        };
+        if (runtimeFrame !== frame || runtimeDuration < frame || boneBindIndex === -1 || movableBoneBindIndex === -1) {
+            logWarn("animation", "editor bone keyframe runtime diagnostic detected a suspicious state", data);
+            return;
+        }
+        logInfo("animation", "editor bone keyframe runtime diagnostic", data);
+    }
+
+    private readRuntimeAnimationBindIndex(
+        runtimeAnimation: {
+            boneBindIndexMap?: ArrayLike<EditorRuntimeBone | null>;
+            movableBoneBindIndexMap?: ArrayLike<EditorRuntimeBone | null>;
+            _boneBindIndexMap?: { array?: ArrayLike<number> };
+            _movableBoneBindIndexMap?: { array?: ArrayLike<number> };
+        } | undefined,
+        kind: EditorBoneTrackKind,
+        index: number,
+    ): number | null {
+        if (!runtimeAnimation || index < 0) return null;
+        if (kind === "bone") {
+            const wasmIndex = runtimeAnimation._boneBindIndexMap?.array?.[index];
+            if (typeof wasmIndex === "number") return wasmIndex;
+            const classicBone = runtimeAnimation.boneBindIndexMap?.[index];
+            return classicBone ? index : classicBone === null ? -1 : null;
+        }
+        const wasmIndex = runtimeAnimation._movableBoneBindIndexMap?.array?.[index];
+        if (typeof wasmIndex === "number") return wasmIndex;
+        const classicBone = runtimeAnimation.movableBoneBindIndexMap?.[index];
+        return classicBone ? index : classicBone === null ? -1 : null;
     }
 
     private stabilizePhysicsAfterHardSeek(): void {
@@ -6170,6 +6400,34 @@ ${beforeFogAppendBlock}
         if (this.frameGraphPostEffectsController && !this.frameGraphPostEffectsController.isActive()) {
             this.shutdownPostEffectBackend();
         }
+    }
+
+    private tryRecoverFrameGraphRenderTargetFailure(err: unknown): boolean {
+        if (this.postEffectBackend !== "frameGraph" || !this.frameGraphPostEffectsController) {
+            return false;
+        }
+        if (!this.isFrameGraphRenderTargetFailure(err)) {
+            return false;
+        }
+
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
+        logWarn("render", "Frame Graph render target failed during scene render; falling back to classic post effects", {
+            message,
+            stack,
+        });
+        this.addRuntimeDiagnostic(`Frame Graph post effects disabled after render target failure: ${message}`);
+        this.shutdownPostEffectBackend();
+        return true;
+    }
+
+    private isFrameGraphRenderTargetFailure(err: unknown): boolean {
+        const message = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack ?? "" : "";
+        const details = `${message}\n${stack}`;
+        return details.includes("generateMipMapsMultiFramebuffer")
+            || details.includes("MultiRenderTarget")
+            || details.includes("_renderRenderTarget");
     }
 
     private renderBoneGizmoUtilityLayerAfterPostEffects(): void {

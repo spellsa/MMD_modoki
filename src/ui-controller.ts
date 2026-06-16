@@ -7528,15 +7528,6 @@ export class UIController {
             return;
         }
 
-        if (track.category === "camera" && !this.mmdManager.ensureCameraAnimationForEditing()) {
-            this.showToast("Failed to prepare camera keyframe track", "error");
-            return;
-        }
-        if (track.category !== "camera" && !this.mmdManager.ensureModelAnimationForEditing(track)) {
-            this.showToast("Failed to prepare model keyframe track", "error");
-            return;
-        }
-
         const frame = this.mmdManager.currentFrame;
         const poseSnapshot = poseSnapshotOverride
             ?? (track.category === "camera" || this.isBoneTrackForEditor(track)
@@ -7548,6 +7539,19 @@ export class UIController {
             poseSnapshotOverride,
             poseSnapshot,
         });
+        if (this.tryRegisterEditorBoneKeyframe(track, poseSnapshot)) {
+            return;
+        }
+
+        if (track.category === "camera" && !this.mmdManager.ensureCameraAnimationForEditing()) {
+            this.showToast("Failed to prepare camera keyframe track", "error");
+            return;
+        }
+        if (track.category !== "camera" && !this.mmdManager.ensureModelAnimationForEditing(track)) {
+            this.showToast("Failed to prepare model keyframe track", "error");
+            return;
+        }
+
         const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
         const command = buildKeyframeCommand(
             { type: "keyframe.addCurrent", source },
@@ -7633,7 +7637,43 @@ export class UIController {
         }
 
         this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
+        const selectedTrack = this.timeline.getSelectedTrack();
+        if (selectedTrack) {
+            if (this.tryRegisterEditorBoneKeyframe(selectedTrack, poseSnapshot)) {
+                return;
+            }
+        }
         this.addKeyframeAtCurrentFrame(poseSnapshot, "button");
+    }
+
+    private tryRegisterEditorBoneKeyframe(
+        track: KeyframeTrack,
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+    ): boolean {
+        if (!poseSnapshot || !this.isBoneTrackForEditor(track) || track.name === "Camera") {
+            return false;
+        }
+
+        const result = this.mmdManager.registerEditorBoneKeyframe(track, this.mmdManager.currentFrame, poseSnapshot);
+        if (!result) {
+            return false;
+        }
+
+        this.timeline.setSelectedFrame(null);
+        this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
+        if (this.bottomPanel.getSelectedBone() === track.name) {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
+        }
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(
+            result.created
+                ? `Frame ${this.mmdManager.currentFrame}: keyframe added`
+                : `Frame ${this.mmdManager.currentFrame} keyframe updated`,
+            "success",
+        );
+        return true;
     }
 
     private registerMorphKeyframesAtCurrentFrame(): void {
