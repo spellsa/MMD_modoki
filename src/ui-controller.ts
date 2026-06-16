@@ -5715,7 +5715,7 @@ export class UIController {
             applyTimelineKeyframePayload: (track, frame, payload) => {
                 const applied = this.mmdManager.applyTimelineKeyframePayload(track, frame, payload);
                 if (applied) {
-                    this.refreshRuntimeAnimationForTrack(track);
+                    this.refreshRuntimeAnimationForTrack();
                 }
                 return applied;
             },
@@ -7023,36 +7023,11 @@ export class UIController {
     private refreshRuntimeAnimationFromInterpolationEdit(): void {
         const track = this.getSelectedTimelineTrack();
         if (!track || track.category === "morph") return;
-        this.refreshRuntimeAnimationForTrack(track);
+        this.refreshRuntimeAnimationForTrack();
     }
 
-    private refreshRuntimeAnimationForTrack(track: Pick<KeyframeTrack, "category">): void {
-        if (track.category === "morph") {
-            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
-            return;
-        }
-
-        const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
-        if (track.category === "camera") {
-            const animation = managerInternal.cameraSourceAnimation;
-            const mmdCamera = managerInternal.mmdCamera;
-            if (!animation || !mmdCamera) return;
-
-            if (managerInternal.cameraAnimationHandle !== null && managerInternal.cameraAnimationHandle !== undefined) {
-                mmdCamera.destroyRuntimeAnimation(managerInternal.cameraAnimationHandle);
-            }
-            const handle = mmdCamera.createRuntimeAnimation(animation as unknown);
-            mmdCamera.setRuntimeAnimation(handle);
-            managerInternal.cameraAnimationHandle = handle;
-            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
-            return;
-        }
-
-        const currentModel = managerInternal.currentModel;
-        const animation = currentModel ? managerInternal.modelSourceAnimationsByModel?.get(currentModel) : null;
-        if (!currentModel || !animation) return;
-        const handle = currentModel.createRuntimeAnimation(animation);
-        currentModel.setRuntimeAnimation(handle);
+    private refreshRuntimeAnimationForTrack(): void {
+        this.mmdManager.refreshActiveRuntimeAnimationHandles();
         this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
     }
 
@@ -7567,16 +7542,11 @@ export class UIController {
             ?? (track.category === "camera" || this.isBoneTrackForEditor(track)
                 ? this.captureCurrentBonePoseSnapshot(track.name)
                 : null);
-        const shouldRefreshRuntimePreview =
-            this.mmdManager.isPlaying
-            || !this.isBoneTrackForEditor(track)
-            || poseSnapshot === null;
         this.debugKeyframeFlow("add keyframe request", {
             frame,
             track,
             poseSnapshotOverride,
             poseSnapshot,
-            shouldRefreshRuntimePreview,
         });
         const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
         const command = buildKeyframeCommand(
@@ -7584,14 +7554,13 @@ export class UIController {
             this.collectKeyframeCommandSnapshot(),
         );
         const created = command
-            ? executeCommand(command, "apply", this.createCommandExecutionContext())
+            ? executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }))
             : false;
         if (!created) {
             const overwritten = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
             if (overwritten) {
-                if (shouldRefreshRuntimePreview) {
-                    this.refreshRuntimeAnimationFromInterpolationEdit();
-                }
+                this.refreshRuntimeAnimationForTrack();
+                this.applyRegisteredKeyframePoseToViewport(track, poseSnapshot);
                 this.timeline.setSelectedFrame(null);
                 this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
                 if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
@@ -7608,8 +7577,9 @@ export class UIController {
         }
 
         const persistedInterpolation = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
-        if (persistedInterpolation && shouldRefreshRuntimePreview) {
-            this.refreshRuntimeAnimationFromInterpolationEdit();
+        if (persistedInterpolation) {
+            this.refreshRuntimeAnimationForTrack();
+            this.applyRegisteredKeyframePoseToViewport(track, poseSnapshot);
         }
 
         this.timeline.setSelectedFrame(null);
@@ -7676,10 +7646,15 @@ export class UIController {
         const frame = this.mmdManager.currentFrame;
         let touched = false;
         for (const morph of snapshot.morphs) {
-            touched = this.mmdManager.addTimelineKeyframe({ name: morph.name, category: "morph" }, frame) || touched;
+            touched = this.mmdManager.applyTimelineKeyframePayload(
+                { name: morph.name, category: "morph" },
+                frame,
+                { kind: "morph", weights: [morph.value] },
+            ) || touched;
         }
 
         if (snapshot.morphs.length > 0) {
+            this.refreshRuntimeAnimationForTrack();
             this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(snapshot.frameIndex));
             this.updateSectionKeyframeButtons();
             this.timeline.setSelectedFrame(null);
@@ -7726,7 +7701,9 @@ export class UIController {
         curves: ReadonlyMap<string, InterpolationCurve>,
         poseSnapshot: SelectedBonePoseSnapshot | null = null,
     ): boolean {
-        if (track.category === "morph") return false;
+        if (track.category === "morph") {
+            return this.persistMorphKeyframeValue(track, frame);
+        }
 
         const normalizedFrame = Math.max(0, Math.floor(frame));
         const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
@@ -7747,8 +7724,10 @@ export class UIController {
         const modelAnimation = managerInternal.modelSourceAnimationsByModel?.get(currentModel);
         if (!modelAnimation) return false;
 
+        const preferMovableTrack = this.shouldUseMovableBoneTrack(track);
         const movableTrackLike = modelAnimation.movableBoneTracks.find((candidate) => candidate.name === track.name);
-        if (movableTrackLike) {
+        const boneTrackLike = modelAnimation.boneTracks.find((candidate) => candidate.name === track.name);
+        if (preferMovableTrack && movableTrackLike) {
             return this.persistMovableBoneKeyframeInterpolation(
                 track.name,
                 movableTrackLike as RuntimeMovableBoneTrackLike & RuntimeMovableBoneTrackMutable,
@@ -7758,7 +7737,6 @@ export class UIController {
             );
         }
 
-        const boneTrackLike = modelAnimation.boneTracks.find((candidate) => candidate.name === track.name);
         if (boneTrackLike) {
             return this.persistBoneKeyframeInterpolation(
                 track.name,
@@ -7769,7 +7747,68 @@ export class UIController {
             );
         }
 
+        if (movableTrackLike) {
+            return this.persistMovableBoneKeyframeInterpolation(
+                track.name,
+                movableTrackLike as RuntimeMovableBoneTrackLike & RuntimeMovableBoneTrackMutable,
+                normalizedFrame,
+                curves,
+                poseSnapshot,
+            );
+        }
+
         return false;
+    }
+
+    private shouldUseMovableBoneTrack(track: Pick<KeyframeTrack, "name" | "category">): boolean {
+        if (track.category === "camera" || track.category === "morph") return false;
+        const modelInfo = this.mmdManager.activeModelInfo;
+        const boneControl = modelInfo?.boneControlInfos?.find((candidate) => candidate.name === track.name);
+        if (boneControl) return boneControl.movable;
+        return track.category === "root";
+    }
+
+    private persistMorphKeyframeValue(track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+        if (track.category !== "morph") return false;
+        const weight = this.mmdManager.getMorphWeight(track.name);
+        return this.mmdManager.applyTimelineKeyframePayload(track, frame, {
+            kind: "morph",
+            weights: [Number.isFinite(weight) ? weight : 0],
+        });
+    }
+
+    private applyRegisteredKeyframePoseToViewport(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+    ): void {
+        if (!poseSnapshot || track.category === "morph") return;
+
+        if (track.category === "camera") {
+            const target = poseSnapshot.target ?? this.mmdManager.getCameraTarget();
+            this.mmdManager.applyCameraTrackPose(
+                target,
+                poseSnapshot.rotation,
+                poseSnapshot.distance ?? this.mmdManager.getCameraDistance(),
+                poseSnapshot.fov,
+            );
+            return;
+        }
+
+        if (track.category !== "root" && track.category !== "semi-standard" && track.category !== "bone") return;
+        this.mmdManager.setBoneTranslation(
+            track.name,
+            poseSnapshot.position.x,
+            poseSnapshot.position.y,
+            poseSnapshot.position.z,
+            false,
+        );
+        this.mmdManager.setBoneRotation(
+            track.name,
+            poseSnapshot.rotation.x,
+            poseSnapshot.rotation.y,
+            poseSnapshot.rotation.z,
+            false,
+        );
     }
 
     private persistCameraKeyframeInterpolation(
@@ -7854,7 +7893,7 @@ export class UIController {
         const transform = poseSnapshot ?? this.getPendingBonePoseSnapshot(boneName, frame) ?? this.mmdManager.getBoneTransform(boneName);
         const fallbackPosition = this.readFloatBlock(track.positions, referenceIndex, 3, [0, 0, 0]);
         const fallbackRotation = this.readFloatBlock(track.rotations, referenceIndex, 4, [0, 0, 0, 1]);
-        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [0]);
+        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [1]);
         const positionBlock = transform
             ? [transform.position.x, transform.position.y, transform.position.z]
             : fallbackPosition;
@@ -7920,7 +7959,7 @@ export class UIController {
 
         const transform = poseSnapshot ?? this.getPendingBonePoseSnapshot(boneName, frame) ?? this.mmdManager.getBoneTransform(boneName);
         const fallbackRotation = this.readFloatBlock(track.rotations, referenceIndex, 4, [0, 0, 0, 1]);
-        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [0]);
+        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [1]);
         const rotationBlock = transform
             ? this.rotationDegreesToQuaternionBlock(transform.rotation.x, transform.rotation.y, transform.rotation.z)
             : fallbackRotation;

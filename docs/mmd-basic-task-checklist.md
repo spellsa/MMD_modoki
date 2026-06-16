@@ -282,3 +282,9 @@
   - 2026-06-01: 下バーの数値編集責務を下パネル / ハンドル / 上パネルへ逃がせる状態になったため、ビューポート下バーをシークバー枠として再利用する方針へ変更
   - 設計メモ: [viewport-seekbar-design-note-2026-06-01.md](./viewport-seekbar-design-note-2026-06-01.md)
   - 初回は waveform や key marker ではなく、current frame / seek track / 再生操作 / フレーム範囲 UI の集約から検討する
+## 2026-06-16 追記: キー登録再設計
+
+- [ ] 手打ちキー登録を `EditorMotionDocument -> MmdAnimationBuilder -> RuntimeBinder` 構成で再設計する
+- [ ] 現行の場当たり的な `MmdAnimation` 直接 mutation 経路を登録ボタンから外す
+- [ ] 同一ボーンにキー A / キー B を登録し、再生 / シーク / viewport / bottom panel / XYZ graph が一致することを確認する
+- 詳細: [キー登録再設計メモ 2026-06-16](./keyframe-registration-redesign-plan-2026-06-16.md)

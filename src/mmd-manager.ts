@@ -5239,7 +5239,7 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private refreshActiveRuntimeAnimationHandles(): void {
+    public refreshActiveRuntimeAnimationHandles(): void {
         if (this.cameraSourceAnimation) {
             if (this.cameraAnimationHandle !== null) {
                 this.mmdCamera.destroyRuntimeAnimation(this.cameraAnimationHandle);
