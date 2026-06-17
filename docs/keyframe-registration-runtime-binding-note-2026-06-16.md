@@ -128,8 +128,20 @@ camera.position - camera.target
   -> CameraKeyframePayload.rotations = [rx, ry, rz] radians
 ```
 
+ただし、MMD の右ドラッグ視点回転は基本的に Z 回転を編集しない。右ドラッグ、pan、zoom、target / distance 変更のような視点操作では、`syncCameraRotationFromCurrentView({ preserveRoll: true })` を使い、現在の Rz を保持したまま Rx / Ry だけを現在ビューへ合わせる。
+
+この preserve 経路では `camera.upVector` を再計算しない。ArcRotateCamera は `alpha` / `beta` と `upVector` の組み合わせで姿勢を解釈するため、右ドラッグ中に upVector を書き換えると視点軸がずれて、カメラが勝手に回り続けるような挙動につながる。
+
+また、右ドラッグ回転は ArcRotateCamera の `alpha` / `beta` を直接編集しない。Rz が入ったカメラで `alpha` / `beta` を動かしてから Euler へ戻すと、手入力した Rz が見た目上別のロールへ変換されることがある。現行では `cameraRotationEulerDeg.x/y` を直接更新し、Rz を保持したまま target 中心の camera position / upVector を再計算する。
+
+右ドラッグで更新される Ry は `[-180, 180)` に正規化する。正規化しないと、ビューポート上は回転していても内部値が 180 度を超えて蓄積し、下パネルの数値入力レンジで 180 / -180 に張り付いて見える。
+
+カメラ Z 回転は、数値入力、軸ハンドル、カメラモーション seek / runtime pose のように、明示的にロールを扱う経路でだけ変更する。
+
 確認観点:
 
 - Camera の Rz を 0 以外にして登録しても、登録ボタン押下直後に見た目が変わらないこと
 - 登録済みカメラキーを seek / 再生したとき、Rz が 0 に戻らないこと
+- 右ドラッグ視点回転だけでは、下パネルのカメラ Z 回転値が勝手に変わらないこと
+- 右ドラッグで Ry が 180 / -180 境界をまたいでも、数値表示が張り付かず折り返されること
 - 下パネルのカメラ Z 回転表示、タイムライン Graph、ビューポートの見た目が同じ向きになること

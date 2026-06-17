@@ -1777,14 +1777,11 @@ ${beforeFogAppendBlock}
         if (mode === "rotate") {
             const sensibilityX = Math.max(80, this.camera.angularSensibilityX || 1000);
             const sensibilityY = Math.max(80, this.camera.angularSensibilityY || 1000);
-            this.camera.alpha -= deltaX / sensibilityX;
-            this.camera.beta -= deltaY / sensibilityY;
-            if (this.camera.lowerBetaLimit !== null && this.camera.lowerBetaLimit !== undefined) {
-                this.camera.beta = Math.max(this.camera.lowerBetaLimit, this.camera.beta);
-            }
-            if (this.camera.upperBetaLimit !== null && this.camera.upperBetaLimit !== undefined) {
-                this.camera.beta = Math.min(this.camera.upperBetaLimit, this.camera.beta);
-            }
+            this.cameraRotationEulerDeg.x -= (deltaY / sensibilityY) * (180 / Math.PI);
+            this.cameraRotationEulerDeg.y -= (deltaX / sensibilityX) * (180 / Math.PI);
+            this.cameraRotationEulerDeg.y = this.normalizeCameraAngleDeg(this.cameraRotationEulerDeg.y);
+            this.clampCameraRotationPitch();
+            this.applyCameraOrbitRotationFromEuler();
         } else if (mode === "pan") {
             const forward = this.camera.target.subtract(this.camera.position);
             if (forward.lengthSquared() > 1e-8) {
@@ -1812,7 +1809,10 @@ ${beforeFogAppendBlock}
             this.camera.radius = this.clampCameraRadius(this.camera.radius + deltaY * zoomScale);
         }
 
-        this.syncCameraRotationFromCurrentView();
+        if (mode !== "rotate") {
+            this.syncCameraRotationFromCurrentView({ preserveRoll: true });
+        }
+        this.clearCameraInertialOffsets();
         this.syncMmdCameraFromViewportCamera();
         this.updateOrthographicCameraBounds();
         this.onCameraTransformEdited?.();
@@ -8497,14 +8497,19 @@ ${beforeFogAppendBlock}
     }
 
     setCameraRotation(xDeg: number, yDeg: number, zDeg: number): void {
-        this.cameraRotationEulerDeg.set(xDeg, yDeg, zDeg);
+        this.cameraRotationEulerDeg.set(
+            xDeg,
+            this.normalizeCameraAngleDeg(yDeg),
+            this.normalizeCameraAngleDeg(zDeg),
+        );
         this.applyCameraRotationFromEuler();
         this.syncMmdCameraFromViewportCamera();
     }
 
     setCameraTarget(x: number, y: number, z: number): void {
         this.camera.target = new Vector3(x, y, z);
-        this.syncCameraRotationFromCurrentView();
+        this.syncCameraRotationFromCurrentView({ preserveRoll: true });
+        this.clearCameraInertialOffsets();
         this.syncMmdCameraFromViewportCamera();
     }
 
@@ -8531,7 +8536,8 @@ ${beforeFogAppendBlock}
         const min = Math.max(0.1, this.camera.lowerRadiusLimit ?? this.camera.minZ);
         const max = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
         this.camera.radius = Math.max(min, Math.min(max, distance));
-        this.syncCameraRotationFromCurrentView();
+        this.syncCameraRotationFromCurrentView({ preserveRoll: true });
+        this.clearCameraInertialOffsets();
         this.syncMmdCameraFromViewportCamera();
         this.updateOrthographicCameraBounds();
         this.updateEditorDofFocusAndFStop();
@@ -8656,8 +8662,8 @@ ${beforeFogAppendBlock}
         this.camera.fov = this.mmdCamera.fov;
         this.cameraRotationEulerDeg.set(
             (this.mmdCamera.rotation.x * 180) / Math.PI,
-            (this.mmdCamera.rotation.y * 180) / Math.PI,
-            (this.mmdCamera.rotation.z * 180) / Math.PI,
+            this.normalizeCameraAngleDeg((this.mmdCamera.rotation.y * 180) / Math.PI),
+            this.normalizeCameraAngleDeg((this.mmdCamera.rotation.z * 180) / Math.PI),
         );
         this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
@@ -8690,7 +8696,8 @@ ${beforeFogAppendBlock}
         }
         if (!this.hasViewportCameraChangedSinceLastSync()) return;
 
-        this.syncCameraRotationFromCurrentView();
+        this.syncCameraRotationFromCurrentView({ preserveRoll: true });
+        this.clearCameraInertialOffsets();
         this.syncMmdCameraFromViewportCamera(true);
         this.updateDofFocalLengthFromCameraFov();
         this.onCameraTransformEdited?.();
@@ -8710,13 +8717,47 @@ ${beforeFogAppendBlock}
         this.camera.target = target;
     }
 
-    private syncCameraRotationFromCurrentView(): void {
+    private applyCameraOrbitRotationFromEuler(): void {
+        const xRad = (this.cameraRotationEulerDeg.x * Math.PI) / 180;
+        const yRad = (this.cameraRotationEulerDeg.y * Math.PI) / 180;
+        const zRad = (this.cameraRotationEulerDeg.z * Math.PI) / 180;
+        const rot = Matrix.RotationYawPitchRoll(-yRad, -xRad, -zRad);
+        const forwardOffset = Vector3.TransformNormal(new Vector3(0, 0, 1), rot).normalize();
+        const up = Vector3.TransformNormal(new Vector3(0, 1, 0), rot).normalize();
+        const distance = Math.max(this.getCameraDistance(), this.camera.lowerRadiusLimit ?? 2);
+        const target = this.camera.target.clone();
+
+        this.camera.upVector = up;
+        this.camera.setPosition(target.subtract(forwardOffset.scale(distance)));
+        this.camera.setTarget(target);
+    }
+
+    private clampCameraRotationPitch(): void {
+        const lower = this.camera.lowerBetaLimit;
+        const upper = this.camera.upperBetaLimit;
+        let minPitch = -89.9;
+        let maxPitch = 89.9;
+        if (lower !== null && lower !== undefined) {
+            minPitch = (lower * 180) / Math.PI - 90;
+        }
+        if (upper !== null && upper !== undefined) {
+            maxPitch = (upper * 180) / Math.PI - 90;
+        }
+        this.cameraRotationEulerDeg.x = Math.max(minPitch, Math.min(maxPitch, this.cameraRotationEulerDeg.x));
+    }
+
+    private syncCameraRotationFromCurrentView(options: { preserveRoll?: boolean } = {}): void {
         const toPosition = this.camera.position.subtract(this.camera.target);
         if (toPosition.lengthSquared() < 1e-8) return;
 
+        const previousRollDeg = this.cameraRotationEulerDeg.z;
         toPosition.normalize();
         this.cameraRotationEulerDeg.x = (Math.asin(-toPosition.y) * 180) / Math.PI;
         this.cameraRotationEulerDeg.y = (Math.atan2(toPosition.x, -toPosition.z) * 180) / Math.PI;
+        if (options.preserveRoll) {
+            this.cameraRotationEulerDeg.z = previousRollDeg;
+            return;
+        }
         const xRad = (this.cameraRotationEulerDeg.x * Math.PI) / 180;
         const yRad = (this.cameraRotationEulerDeg.y * Math.PI) / 180;
         const baseRotation = Matrix.RotationYawPitchRoll(-yRad, -xRad, 0);
@@ -8730,6 +8771,20 @@ ${beforeFogAppendBlock}
                 this.cameraRotationEulerDeg.z = (rollRad * 180) / Math.PI;
             }
         }
+    }
+
+    private clearCameraInertialOffsets(): void {
+        this.camera.inertialAlphaOffset = 0;
+        this.camera.inertialBetaOffset = 0;
+        this.camera.inertialRadiusOffset = 0;
+        this.camera.inertialPanningX = 0;
+        this.camera.inertialPanningY = 0;
+    }
+
+    private normalizeCameraAngleDeg(value: number): number {
+        if (!Number.isFinite(value)) return 0;
+        const normalized = ((value + 180) % 360 + 360) % 360 - 180;
+        return Object.is(normalized, -0) ? 0 : normalized;
     }
 
     private getOrCreateModelTrackFrameMap(model: RuntimeModel): Map<string, Uint32Array> {
