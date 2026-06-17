@@ -51,7 +51,7 @@ import {
 import { buildBoneTransformCommand } from "./actions/bone-transform-command-builder";
 import { buildCameraTransformCommand } from "./actions/camera-transform-command-builder";
 import type { BoneTransformCommandSnapshot, BuiltCommand, CameraTransformCommandSnapshot, CommandTrackRef } from "./actions/command-types";
-import type { TimelineKeyframePayload } from "./editor/timeline-edit-service";
+import type { CameraKeyframePayload, TimelineKeyframePayload } from "./editor/timeline-edit-service";
 import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     normalizePostEffectBackend,
@@ -7539,6 +7539,9 @@ export class UIController {
             poseSnapshotOverride,
             poseSnapshot,
         });
+        if (this.tryRegisterEditorCameraKeyframe(track, poseSnapshot)) {
+            return;
+        }
         if (this.tryRegisterEditorBoneKeyframe(track, poseSnapshot)) {
             return;
         }
@@ -7639,11 +7642,92 @@ export class UIController {
         this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
         const selectedTrack = this.timeline.getSelectedTrack();
         if (selectedTrack) {
+            if (this.tryRegisterEditorCameraKeyframe(selectedTrack, poseSnapshot)) {
+                return;
+            }
             if (this.tryRegisterEditorBoneKeyframe(selectedTrack, poseSnapshot)) {
                 return;
             }
         }
         this.addKeyframeAtCurrentFrame(poseSnapshot, "button");
+    }
+
+    private tryRegisterEditorCameraKeyframe(
+        track: KeyframeTrack,
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+    ): boolean {
+        if (track.category !== "camera") {
+            return false;
+        }
+
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
+        const before = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        const after = this.createCameraKeyframePayload(poseSnapshot, interpolationSnapshot);
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.camera:${createCommandTrackKey(track)}:${frame}:${nowMs}`,
+            label: `Register camera keyframe at frame ${frame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.paste",
+                track: { category: track.category, name: track.name },
+                frame,
+                before,
+                after,
+            },
+        };
+
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) {
+            this.showToast(`Frame ${frame}: camera keyframe failed`, "error");
+            return true;
+        }
+
+        this.commandHistory.push(command);
+        this.timeline.setSelectedFrame(null);
+        this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
+        if (this.bottomPanel.getSelectedBone() === "Camera") {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+        }
+        this.refreshCameraUiFromRuntime(true);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(
+            before
+                ? `Frame ${frame} camera keyframe updated`
+                : `Frame ${frame}: camera keyframe added`,
+            "success",
+        );
+        return true;
+    }
+
+    private createCameraKeyframePayload(
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+        curves: ReadonlyMap<string, InterpolationCurve>,
+    ): CameraKeyframePayload {
+        const target = poseSnapshot?.target ?? this.mmdManager.getCameraTarget();
+        const rotationDeg = poseSnapshot?.rotation ?? this.mmdManager.getCameraRotation();
+        const distance = Math.max(0.0001, poseSnapshot?.distance ?? this.mmdManager.getCameraDistance());
+        const fov = poseSnapshot?.fov ?? this.mmdManager.getCameraFov();
+        const degToRad = Math.PI / 180;
+        return {
+            kind: "camera",
+            positions: [target.x, target.y, target.z],
+            positionInterpolations: this.composePositionInterpolationBlock(curves, "cam-x", "cam-y", "cam-z"),
+            rotations: [
+                rotationDeg.x * degToRad,
+                rotationDeg.y * degToRad,
+                rotationDeg.z * degToRad,
+            ],
+            rotationInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-rot")),
+            distances: [-distance],
+            distanceInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-dist")),
+            fovs: [fov],
+            fovInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-fov")),
+        };
     }
 
     private tryRegisterEditorBoneKeyframe(

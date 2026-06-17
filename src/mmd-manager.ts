@@ -8717,6 +8717,19 @@ ${beforeFogAppendBlock}
         toPosition.normalize();
         this.cameraRotationEulerDeg.x = (Math.asin(-toPosition.y) * 180) / Math.PI;
         this.cameraRotationEulerDeg.y = (Math.atan2(toPosition.x, -toPosition.z) * 180) / Math.PI;
+        const xRad = (this.cameraRotationEulerDeg.x * Math.PI) / 180;
+        const yRad = (this.cameraRotationEulerDeg.y * Math.PI) / 180;
+        const baseRotation = Matrix.RotationYawPitchRoll(-yRad, -xRad, 0);
+        const baseRight = Vector3.TransformNormal(new Vector3(1, 0, 0), baseRotation).normalize();
+        const baseUp = Vector3.TransformNormal(new Vector3(0, 1, 0), baseRotation).normalize();
+        const currentUp = this.camera.upVector.clone();
+        if (currentUp.lengthSquared() > 1e-8) {
+            currentUp.normalize();
+            const rollRad = Math.atan2(Vector3.Dot(currentUp, baseRight), Vector3.Dot(currentUp, baseUp));
+            if (Number.isFinite(rollRad)) {
+                this.cameraRotationEulerDeg.z = (rollRad * 180) / Math.PI;
+            }
+        }
     }
 
     private getOrCreateModelTrackFrameMap(model: RuntimeModel): Map<string, Uint32Array> {
