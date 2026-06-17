@@ -2312,6 +2312,7 @@ ${beforeFogAppendBlock}
         this.syncRigidBodyVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.emitMergedKeyframeTracks();
+        this.dumpRenderDiagnostics(`after setTimelineTarget:${target}`);
     }
     public getTimelineTarget(): "model" | "camera" {
         return this.timelineTarget;
@@ -4178,7 +4179,7 @@ ${beforeFogAppendBlock}
                 }
                 this.nextRenderDueTimestampMs = nowMs + (1000 / this.renderFpsLimit);
             }
-
+            this.syncFrameGraphRenderTargetState();
             const deltaMs = Math.max(0, Math.min(100, nowMs - this.lastRenderTimestampMs));
             this.lastRenderTimestampMs = nowMs;
 
@@ -4504,6 +4505,117 @@ ${beforeFogAppendBlock}
                     luminousHaloKernel: controllerSnapshot.luminousBlur.haloKernel,
                 }
                 : null,
+        };
+    }
+
+    public dumpRenderDiagnostics(reason: string): Record<string, unknown> {
+        try {
+            const snapshot = this.createRenderDiagnosticsSnapshot(reason);
+            logDebugIfEnabled("postfx", "render", "render diagnostics", snapshot);
+            return snapshot;
+        } catch (err) {
+            const fallback = {
+                reason,
+                failed: true,
+                error: toLogErrorData(err),
+            };
+            logWarn("render", "render diagnostics failed", fallback);
+            return fallback;
+        }
+    }
+
+    private createRenderDiagnosticsSnapshot(reason: string): Record<string, unknown> {
+        const imageProcessing = this.scene.imageProcessingConfiguration;
+        const colorToData = (value: unknown): Record<string, number> | null => {
+            if (!value || typeof value !== "object") return null;
+            const color = value as { r?: unknown; g?: unknown; b?: unknown; a?: unknown };
+            const result: Record<string, number> = {};
+            if (typeof color.r === "number") result.r = color.r;
+            if (typeof color.g === "number") result.g = color.g;
+            if (typeof color.b === "number") result.b = color.b;
+            if (typeof color.a === "number") result.a = color.a;
+            return Object.keys(result).length > 0 ? result : null;
+        };
+
+        const materialSamples = this.sceneModels
+            .find((sceneModel) => sceneModel.model === this.currentModel)
+            ?.materials.slice(0, 8).map((entry) => {
+                const material = entry.material as {
+                    name?: unknown;
+                    getClassName?: () => string;
+                    diffuseColor?: unknown;
+                    ambientColor?: unknown;
+                    emissiveColor?: unknown;
+                    specularColor?: unknown;
+                    albedoColor?: unknown;
+                    reflectivityColor?: unknown;
+                    disableLighting?: unknown;
+                    useLogarithmicDepth?: unknown;
+                    imageProcessingConfiguration?: unknown;
+                };
+                return {
+                    key: entry.key,
+                    name: typeof material.name === "string" ? material.name : entry.name,
+                    className: material.getClassName?.() ?? null,
+                    diffuseColor: colorToData(material.diffuseColor),
+                    ambientColor: colorToData(material.ambientColor),
+                    emissiveColor: colorToData(material.emissiveColor),
+                    specularColor: colorToData(material.specularColor),
+                    albedoColor: colorToData(material.albedoColor),
+                    reflectivityColor: colorToData(material.reflectivityColor),
+                    disableLighting: material.disableLighting,
+                    useLogarithmicDepth: material.useLogarithmicDepth,
+                    hasOwnImageProcessingConfiguration: material.imageProcessingConfiguration !== undefined,
+                };
+            }) ?? [];
+
+        const customRenderTargets = this.camera.customRenderTargets.map((target, index) => ({
+            index,
+            name: target.name,
+            size: MmdManager.getRenderTargetSizeLabel(target),
+            isFrameGraphSceneColor: target === this.frameGraphPostEffectsSceneColorTarget,
+            isLuminousMask: target === this.frameGraphPostEffectsLuminousMaskTarget,
+        }));
+
+        return {
+            reason,
+            timelineTarget: this.timelineTarget,
+            modelCount: this.sceneModels.length,
+            currentModel: this.activeModelInfo?.name ?? null,
+            engine: this.getEngineType(),
+            postEffectBackend: this.postEffectBackend,
+            requestedPostEffectBackend: this.requestedPostEffectBackend,
+            shouldExecuteFrameGraphPostEffects: this.shouldExecuteFrameGraphPostEffects(),
+            activeFrameGraphEffects: this.getActiveFrameGraphPostEffectIds(),
+            frameGraphStack: this.getFrameGraphPostEffectRuntimeOrder(),
+            sceneImageProcessing: {
+                isEnabled: imageProcessing.isEnabled,
+                applyByPostProcess: imageProcessing.applyByPostProcess,
+                contrast: imageProcessing.contrast,
+                exposure: imageProcessing.exposure,
+                toneMappingEnabled: imageProcessing.toneMappingEnabled,
+                toneMappingType: imageProcessing.toneMappingType,
+                colorCurvesEnabled: imageProcessing.colorCurvesEnabled,
+                vignetteEnabled: imageProcessing.vignetteEnabled,
+                ditheringEnabled: imageProcessing.ditheringEnabled,
+                ditheringIntensity: imageProcessing.ditheringIntensity,
+            },
+            postEffectValues: {
+                contrast: this.postEffectContrastValue,
+                gamma: this.postEffectGammaValue,
+                exposure: this.postEffectExposureValue,
+                toneMappingEnabled: this.postEffectToneMappingEnabledValue,
+                toneMappingType: this.postEffectToneMappingTypeValue,
+                colorCurvesEnabled: this.postEffectColorCurvesEnabledValue,
+                colorCurvesSaturation: this.postEffectColorCurvesSaturationValue,
+                lutEnabled: this.postEffectLutEnabledValue,
+                bloomEnabled: this.postEffectBloomEnabledValue,
+                luminousInStack: this.getFrameGraphPostEffectStackIds().includes("luminous"),
+                luminousActive: this.isFrameGraphPostEffectActive("luminous"),
+            },
+            cameraCustomRenderTargets: customRenderTargets,
+            frameGraphPostEffects: this.getFrameGraphPostEffectsPerformanceSnapshot(),
+            materialSamples,
         };
     }
 
@@ -6057,6 +6169,7 @@ ${beforeFogAppendBlock}
             this.disposeFrameGraphPostEffectsLuminousMaskTarget();
         }
         this.postEffectBackend = activated ? "frameGraph" : "classic";
+        this.applyImageProcessingSettings();
         if (activated) {
             logDebugIfEnabled("postfx", "render", "frame graph post effect performance snapshot", {
                 storageKey: MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
@@ -6184,8 +6297,8 @@ ${beforeFogAppendBlock}
         renderTarget.renderSprites = true;
         renderTarget.skipInitialClear = false;
         this.installRenderTargetPerformanceHook(renderTarget, "frameGraphSceneColorRenderTarget");
-        this.camera.customRenderTargets.push(renderTarget);
         this.frameGraphPostEffectsSceneColorTarget = renderTarget;
+        this.syncFrameGraphRenderTargetState();
         return renderTarget;
     }
 
@@ -6396,9 +6509,37 @@ ${beforeFogAppendBlock}
         if (this.postEffectBackend !== "frameGraph") {
             return;
         }
+        if (!this.shouldExecuteFrameGraphPostEffects()) {
+            return;
+        }
         this.frameGraphPostEffectsController?.execute();
         if (this.frameGraphPostEffectsController && !this.frameGraphPostEffectsController.isActive()) {
             this.shutdownPostEffectBackend();
+        }
+    }
+
+    private shouldExecuteFrameGraphPostEffects(): boolean {
+        return this.getActiveFrameGraphPostEffectIds().length > 0
+            || this.isFrameGraphImageProcessingTaskNeeded();
+    }
+
+    private syncFrameGraphRenderTargetState(): void {
+        const sceneColorTarget = this.frameGraphPostEffectsSceneColorTarget;
+        const customRenderTargets = this.camera?.customRenderTargets;
+        if (!sceneColorTarget || !customRenderTargets) {
+            return;
+        }
+        const index = customRenderTargets.indexOf(sceneColorTarget);
+        const shouldRenderSceneColorTarget = this.postEffectBackend === "frameGraph"
+            && this.shouldExecuteFrameGraphPostEffects();
+        if (shouldRenderSceneColorTarget) {
+            if (index < 0) {
+                customRenderTargets.push(sceneColorTarget);
+            }
+            return;
+        }
+        if (index >= 0) {
+            customRenderTargets.splice(index, 1);
         }
     }
 

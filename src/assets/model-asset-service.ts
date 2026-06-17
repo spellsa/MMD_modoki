@@ -92,12 +92,15 @@ type ModelAssetHost = {
     syncLuminousGlowLayer?: () => void;
     syncGlobalIlluminationSceneModels?: () => void;
     syncIblShadowsScene?: () => void;
+    refreshFrameGraphPostEffectsBackendForStackStateChange?: () => void;
+    dumpRenderDiagnostics?: (reason: string) => void;
     shouldActivateAsCurrent(modelInfo: ModelInfo): boolean;
     currentMesh: MmdMesh | null;
     currentModel: ModelAssetRuntimeModel | null;
     activeModelInfo: ModelInfo | null;
     timelineTarget: "model" | "camera";
     refreshBoneVisualizerTarget(): void;
+    setTimelineTarget(target: "model" | "camera"): void;
     updateBoneGizmoTarget(): void;
     onModelLoaded?: (modelInfo: ModelInfo) => void;
     emitMergedKeyframeTracks(): void;
@@ -463,17 +466,19 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.syncLuminousGlowLayer?.();
         host.syncGlobalIlluminationSceneModels?.();
         host.syncIblShadowsScene?.();
+        host.refreshFrameGraphPostEffectsBackendForStackStateChange?.();
+        host.dumpRenderDiagnostics?.("after model scene sync");
 
         const activateAsCurrent = host.shouldActivateAsCurrent(modelInfo);
         if (activateAsCurrent) {
             host.currentMesh = mmdMesh;
             host.currentModel = mmdModel;
             host.activeModelInfo = modelInfo;
-            host.timelineTarget = "model";
             host.refreshBoneVisualizerTarget();
-            host.updateBoneGizmoTarget();
+            host.setTimelineTarget("model");
             host.onModelLoaded?.(modelInfo);
             host.emitMergedKeyframeTracks();
+            host.dumpRenderDiagnostics?.("after active model load");
         }
 
         host.onSceneModelLoaded?.(modelInfo, host.sceneModels.length, activateAsCurrent);
