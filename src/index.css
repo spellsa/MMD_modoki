@@ -3320,7 +3320,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 
 .morph-controls.morph-category-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-auto-rows: minmax(0, 1fr);
   gap: 6px;
   overflow: hidden;
@@ -3333,15 +3333,15 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   flex-direction: column;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: rgba(28, 28, 30, 0.55);
+  background: rgba(20, 20, 22, 0.72);
   overflow: hidden;
 }
 
 .morph-category-header {
-  height: 20px;
-  padding: 2px 6px;
+  height: 22px;
+  padding: 3px 7px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.045);
   color: var(--text-secondary);
   font-size: 10px;
   font-weight: 700;
@@ -3352,9 +3352,10 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .morph-category-body {
   flex: 1;
   min-height: 0;
+  max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 3px 5px;
+  padding: 5px 7px 6px;
 }
 
 .morph-category-body::-webkit-scrollbar {
@@ -3440,9 +3441,82 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .morph-category-body .morph-slider-row {
-  grid-template-columns: minmax(44px, 34%) minmax(0, 1fr) 32px;
-  gap: 5px;
-  padding: 2px 0;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-areas:
+    "label key"
+    "slider number";
+  gap: 4px 7px;
+  min-height: 43px;
+  padding: 5px 0 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.morph-category-body .morph-slider-row:last-child {
+  border-bottom: none;
+}
+
+.morph-category-body .morph-slider-row label {
+  grid-area: label;
+  align-self: center;
+  padding-left: 1px;
+  line-height: 1.2;
+}
+
+.morph-category-body .morph-slider-row input[type="range"] {
+  grid-area: slider;
+  align-self: center;
+  margin: 0;
+}
+
+.morph-category-body .morph-slider-row .morph-value {
+  grid-area: number;
+  align-self: center;
+}
+
+.morph-category-body .morph-slider-row.range-has-number {
+  grid-template-columns: minmax(0, 1fr) 54px;
+}
+
+.morph-category-body .morph-row-keyframe-btn {
+  grid-area: key;
+  justify-self: end;
+  align-self: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.morph-category-body .morph-row-keyframe-btn:hover,
+.morph-category-body .morph-row-keyframe-btn:focus-visible {
+  background: transparent;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.morph-category-body .morph-row-keyframe-btn.is-registered {
+  color: #f7f7f7;
+}
+
+.morph-category-body .morph-slider-row .range-number-input {
+  grid-area: number;
+  align-self: center;
+  width: 54px;
+  height: 22px;
+  padding-inline: 5px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.morph-category-body .morph-slider-row.range-has-number .morph-value {
+  display: none;
 }
 
 .morph-category-body .morph-slider-row label,

@@ -288,3 +288,12 @@
 - [ ] 現行の場当たり的な `MmdAnimation` 直接 mutation 経路を登録ボタンから外す
 - [ ] 同一ボーンにキー A / キー B を登録し、再生 / シーク / viewport / bottom panel / XYZ graph が一致することを確認する
 - 詳細: [キー登録再設計メモ 2026-06-16](./keyframe-registration-redesign-plan-2026-06-16.md)
+
+## 2026-06-18 UI 再整理メモ
+
+- [ ] UI 再整理を、MMD 編集導線、常設 UI、popup / dialog、実験機能の分離として進める
+- [ ] 現行 UI inventory を作り、常設 / popup 候補 / 実験候補 / 削除候補を分類する
+- [ ] 下パネルの Model Mode / Camera Mode section 定義を仕様として固定し、可能なら pure helper + unit test に切り出す
+- [ ] 右パネルを Material / PostFX / Environment / Experimental のカテゴリに整理する案を具体化する
+- [ ] キー登録、前後キー移動、補間編集、dirty 表示の導線を優先して再配置する
+- 詳細: [UI 再整理スコープメモ 2026-06-18](./ui-reorganization-scope-2026-06-18.md)

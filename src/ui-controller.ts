@@ -979,6 +979,9 @@ export class UIController {
         this.bottomPanel.onMorphValueEdited = (frameIndex) => {
             this.actionDispatcher.dispatch({ type: "edit.morphValueChanged", source: "panel", frameIndex });
         };
+        this.bottomPanel.onMorphKeyframeRequested = (morph) => {
+            this.registerSingleMorphKeyframeAtCurrentFrame(morph);
+        };
 
         this.btnKeyframeAdd.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.addCurrent", source: "button" });
@@ -7781,6 +7784,7 @@ export class UIController {
             this.refreshRuntimeAnimationForTrack();
             this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(snapshot.frameIndex));
             this.updateSectionKeyframeButtons();
+            this.bottomPanel.updateMorphKeyframeButtonStates(frame);
             this.timeline.setSelectedFrame(null);
             this.updateTimelineEditState();
             this.showToast(
@@ -7791,6 +7795,31 @@ export class UIController {
         }
 
         this.showToast("No morphs in the selected frame", "error");
+    }
+
+    private registerSingleMorphKeyframeAtCurrentFrame(morph: { frameIndex: number; name: string; value: number }): void {
+        const frame = this.mmdManager.currentFrame;
+        const touched = this.mmdManager.applyTimelineKeyframePayload(
+            { name: morph.name, category: "morph" },
+            frame,
+            { kind: "morph", weights: [morph.value] },
+        );
+        this.refreshRuntimeAnimationForTrack();
+        const frameSnapshot = this.bottomPanel.getSelectedMorphFrameSnapshot();
+        const allFrameMorphsRegistered = frameSnapshot?.morphs.every((frameMorph) =>
+            this.mmdManager.hasTimelineKeyframe({ category: "morph", name: frameMorph.name }, frame),
+        ) ?? false;
+        if (allFrameMorphsRegistered) {
+            this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(morph.frameIndex));
+        }
+        this.updateSectionKeyframeButtons();
+        this.bottomPanel.updateMorphKeyframeButtonStates(frame);
+        this.timeline.setSelectedFrame(null);
+        this.updateTimelineEditState();
+        this.showToast(
+            touched ? `Frame ${frame}: ${morph.name} morph keyframe added` : `Frame ${frame}: ${morph.name} morph keyframe already registered`,
+            "success",
+        );
     }
 
     private registerAccessoryTransformKeyframe(): void {

@@ -27,6 +27,7 @@ export class BottomPanel {
     private boneSliders: Map<BoneSliderKey, HTMLInputElement> = new Map();
     private boneSliderValues: Map<BoneSliderKey, HTMLElement> = new Map();
     private morphSliders: Map<string, HTMLInputElement> = new Map();
+    private morphKeyframeButtons: Map<string, HTMLButtonElement> = new Map();
     private morphFrames: MorphDisplayFrameInfo[] = [];
     private boneControlMap: Map<string, BoneControlInfo> = new Map();
     private boneNames: Set<string> = new Set();
@@ -40,6 +41,7 @@ export class BottomPanel {
     public onBoneTransformEdited: ((boneName: string | null) => void) | null = null;
     public onBoneTransformEditCommitted: ((boneName: string | null) => void) | null = null;
     public onMorphValueEdited: ((frameIndex: number | null) => void) | null = null;
+    public onMorphKeyframeRequested: ((morph: { frameIndex: number; index: number; name: string; value: number }) => void) | null = null;
     public onRangeInputsRendered: ((root: ParentNode) => void) | null = null;
     public onRangeSliderSynced: ((slider: HTMLInputElement) => void) | null = null;
 
@@ -79,6 +81,7 @@ export class BottomPanel {
 
     updateMorphControls(info: ModelInfo): void {
         this.morphSliders.clear();
+        this.morphKeyframeButtons.clear();
         this.morphFrames = info.morphDisplayFrames.length > 0
             ? info.morphDisplayFrames
             : info.morphNames.length > 0
@@ -125,6 +128,7 @@ export class BottomPanel {
     clearMorphControls(): void {
         this.morphFrames = [];
         this.morphSliders.clear();
+        this.morphKeyframeButtons.clear();
         this.currentMorphFrameIndex = null;
         this.morphContainer.className = "morph-controls";
         setPanelEmptyState(this.morphContainer, t("empty.noModel"));
@@ -191,7 +195,7 @@ export class BottomPanel {
         return {
             frameIndex: this.currentMorphFrameIndex,
             morphs: frame.morphs.map((morph) => {
-                const slider = this.morphSliders.get(`${morph.index}:${morph.name}`);
+                const slider = this.morphSliders.get(this.getMorphControlKey(morph.index, morph.name));
                 const rawValue = slider ? Number.parseFloat(slider.value) : 0;
                 return {
                     index: morph.index,
@@ -207,7 +211,7 @@ export class BottomPanel {
 
         for (const frame of this.morphFrames) {
             for (const morphInfo of frame.morphs) {
-                const slider = this.morphSliders.get(`${morphInfo.index}:${morphInfo.name}`);
+                const slider = this.morphSliders.get(this.getMorphControlKey(morphInfo.index, morphInfo.name));
                 if (!slider) continue;
                 if (!force && this.isSliderEditing(slider)) continue;
 
@@ -225,6 +229,18 @@ export class BottomPanel {
                     valueDisplay.textContent = nextValue;
                 }
             }
+        }
+        this.updateMorphKeyframeButtonStates(this.mmdManager.currentFrame);
+    }
+
+    updateMorphKeyframeButtonStates(frame = this.mmdManager?.currentFrame ?? 0): void {
+        if (!this.mmdManager) return;
+        for (const [key, button] of this.morphKeyframeButtons) {
+            const morphName = button.dataset.morphName;
+            if (!morphName) continue;
+            const registered = this.mmdManager.hasTimelineKeyframe({ name: morphName, category: "morph" }, frame);
+            this.setMorphKeyframeButtonState(button, registered ? "registered" : "dirty");
+            this.morphKeyframeButtons.set(key, button);
         }
     }
 
@@ -521,6 +537,7 @@ export class BottomPanel {
     private renderMorphGroups(): void {
         this.morphContainer.innerHTML = "";
         this.morphSliders.clear();
+        this.morphKeyframeButtons.clear();
         this.morphContainer.className = "morph-controls";
 
         const groups = this.buildMorphGroups();
@@ -549,6 +566,7 @@ export class BottomPanel {
         }
 
         this.onRangeInputsRendered?.(this.morphContainer);
+        this.updateMorphKeyframeButtonStates();
     }
 
     private buildMorphGroups(): Array<{
@@ -600,6 +618,7 @@ export class BottomPanel {
     private createMorphSliderRow(morphInfo: { frameIndex: number; index: number; name: string }): HTMLElement {
         const morphName = morphInfo.name;
         const morphIndex = morphInfo.index;
+        const morphKey = this.getMorphControlKey(morphIndex, morphName);
         const slider = document.createElement("input");
         slider.type = "range";
         slider.min = "0";
@@ -619,6 +638,14 @@ export class BottomPanel {
             legacySliderClass: "morph-slider",
             legacyValueClass: "morph-value",
         });
+        const keyframeButton = document.createElement("button");
+        keyframeButton.type = "button";
+        keyframeButton.className = "morph-row-keyframe-btn";
+        keyframeButton.textContent = "♢";
+        keyframeButton.dataset.morphName = morphName;
+        keyframeButton.setAttribute("aria-label", `${morphName} keyframe`);
+        keyframeButton.title = t("button.register");
+        rendered.row.appendChild(keyframeButton);
 
         slider.addEventListener("input", () => {
             const val = Number.parseFloat(slider.value);
@@ -630,13 +657,36 @@ export class BottomPanel {
                 this.mmdManager.setMorphWeight(morphName, val);
             }
             this.currentMorphFrameIndex = morphInfo.frameIndex;
+            this.setMorphKeyframeButtonState(keyframeButton, "dirty");
             this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
             this.onMorphValueEdited?.(this.currentMorphFrameIndex);
         });
+        keyframeButton.addEventListener("click", () => {
+            const rawValue = Number.parseFloat(slider.value);
+            const value = Number.isFinite(rawValue) ? rawValue : 0;
+            this.currentMorphFrameIndex = morphInfo.frameIndex;
+            this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
+            this.onMorphKeyframeRequested?.({
+                frameIndex: morphInfo.frameIndex,
+                index: morphIndex,
+                name: morphName,
+                value,
+            });
+        });
 
-        this.morphSliders.set(`${morphIndex}:${morphName}`, slider);
+        this.morphSliders.set(morphKey, slider);
+        this.morphKeyframeButtons.set(morphKey, keyframeButton);
 
         return rendered.row;
+    }
+
+    private getMorphControlKey(morphIndex: number, morphName: string): string {
+        return `${morphIndex}:${morphName}`;
+    }
+
+    private setMorphKeyframeButtonState(button: HTMLButtonElement, state: "dirty" | "registered"): void {
+        button.classList.toggle("is-registered", state === "registered");
+        button.textContent = state === "registered" ? "♦" : "♢";
     }
     private isSliderEditing(slider: HTMLInputElement): boolean {
         const activeElement = document.activeElement;
