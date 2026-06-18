@@ -245,7 +245,7 @@ body.png-capture-mode #viewport-axis-handle {
   align-self: stretch;
   justify-self: stretch;
   min-width: 0;
-  margin-left: 148px;
+  margin-left: 0;
   margin-right: 250px;
   padding: 2px 6px;
   border: 1px solid rgba(255, 255, 255, 0.055);
@@ -258,6 +258,41 @@ body.png-capture-mode #viewport-axis-handle {
   z-index: 320;
   -webkit-app-region: no-drag;
   pointer-events: none;
+}
+
+.app-menu-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  margin-right: 6px;
+  padding-right: 6px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: auto;
+}
+
+.app-menu-quick-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.58);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: default;
+}
+
+.app-menu-quick-button:hover,
+.app-menu-quick-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  outline: none;
 }
 
 .app-menu-group {
@@ -793,20 +828,6 @@ select.popup-form-control {
 .toolbar-runtime-select option {
   color: var(--text-primary);
   background: var(--bg-primary);
-}
-
-.app-logo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--miku-teal);
-}
-
-.app-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: currentColor;
-  letter-spacing: 0;
 }
 
 .toolbar-divider {
@@ -5699,7 +5720,7 @@ body.bottom-panel-resizing {
 
 @media (max-width: 1760px) {
   #app-menu-bar {
-    margin-left: 136px;
+    margin-left: 0;
     margin-right: 230px;
     padding: 0 4px;
   }
@@ -5795,7 +5816,7 @@ body.bottom-panel-resizing {
   }
 
   #app-menu-bar {
-    margin-left: 168px;
+    margin-left: 0;
     margin-right: 280px;
   }
 
@@ -5806,10 +5827,6 @@ body.bottom-panel-resizing {
   .toolbar-left,
   .toolbar-right {
     gap: 8px;
-  }
-
-  .app-title {
-    font-size: 16px;
   }
 
   .toolbar-btn {
@@ -6086,7 +6103,7 @@ body.bottom-panel-resizing {
 
 @media (min-width: 1600px) and (max-width: 1760px) and (min-height: 900px) {
   #app-menu-bar {
-    margin-left: 152px;
+    margin-left: 0;
     margin-right: 250px;
   }
 
