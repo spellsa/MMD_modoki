@@ -121,6 +121,8 @@ export function canExecuteEditorAction(
         case "edit.cameraTransformChanged":
         case "edit.morphValueChanged":
         case "effect.setModelEdgeWidth":
+        case "effect.setModelEdgeColorOverride":
+        case "effect.setModelEdgeColor":
         case "effect.setContrastOffset":
         case "effect.setGammaOffset":
         case "effect.setExposure":

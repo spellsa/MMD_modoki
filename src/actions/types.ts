@@ -153,6 +153,8 @@ export type EditAction =
 
 export type EffectAction =
     | { type: "effect.setModelEdgeWidth"; source: ActionSource; percent: number }
+    | { type: "effect.setModelEdgeColorOverride"; source: ActionSource; enabled: boolean }
+    | { type: "effect.setModelEdgeColor"; source: ActionSource; r: number; g: number; b: number }
     | { type: "effect.setContrastOffset"; source: ActionSource; offsetPercent: number }
     | { type: "effect.setGammaOffset"; source: ActionSource; offsetPercent: number }
     | { type: "effect.setExposure"; source: ActionSource; value: number }

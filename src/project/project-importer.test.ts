@@ -95,6 +95,8 @@ function createHost() {
         setPhysicsEnabled: vi.fn(),
         isPhysicsAvailable: vi.fn(() => false),
         setDofFocusTargetByPath: vi.fn(),
+        setModelEdgeColor: vi.fn(),
+        modelEdgeColorOverrideEnabled: false,
         updateEditorDofFocusAndFStop: vi.fn(),
         applyEditorDofSettings: vi.fn(),
         applyDofLensBlurSettings: vi.fn(),
@@ -158,6 +160,22 @@ describe("importProjectState", () => {
         expect(host.postEffectSsaoRadius).toBe(0.75);
         expect(host.postEffectSsaoFadeEnd).toBe(42);
         expect(host.postEffectSsaoDebugView).toBe(true);
+    });
+
+    it("restores model edge color settings", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                modelEdgeColorOverrideEnabled: true,
+                modelEdgeColor: { r: 0.2, g: 0.3, b: 0.4 },
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.modelEdgeColorOverrideEnabled).toBe(true);
+        expect(host.setModelEdgeColor).toHaveBeenCalledWith(0.2, 0.3, 0.4);
     });
 
     it("restores normalized FrameGraph post effect stack order", async () => {

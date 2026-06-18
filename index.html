@@ -49,15 +49,20 @@
       <div class="app-menu-group">
         <button class="app-menu-trigger" type="button" data-i18n="menu.view">表示</button>
         <div class="app-menu-list" role="menu">
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleGround"><span data-i18n="menu.view.toggleGround">床を表示/非表示</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleEdge"><span data-i18n="menu.view.toggleEdge">エッジを表示/非表示</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleSkydome"><span data-i18n="menu.view.toggleSkydome">空を表示</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleGround"><span data-i18n="menu.view.toggleGround">床を表示</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleEdge"><span data-i18n="menu.view.toggleEdge">エッジを表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.edgeSettings"><span data-i18n="menu.view.edgeSettings">エッジ設定...</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleSkydome"><span data-i18n="menu.view.toggleSkydome">空を表示/非表示</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleAntialias"><span data-i18n="menu.view.toggleAntialias">アンチエイリアス</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleShadow"><span data-i18n="menu.view.toggleShadow">影表示</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleAntialias"><span data-i18n="menu.view.toggleAntialias">アンチエイリアス</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleShadow"><span data-i18n="menu.view.toggleShadow">影表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.lightShadowSettings"><span data-i18n="menu.view.lightShadowSettings">照明/影品質設定...</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleGi"><span data-i18n="menu.view.toggleGi">グローバルイルミネーション</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleFxPanel"><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.iblShadowSettings"><span data-i18n="menu.view.iblShadowSettings">IBL影詳細...</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleCharacterContactShadow"><span data-i18n="menu.view.toggleCharacterContactShadow">キャラ接地影</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.contactShadowSettings"><span data-i18n="menu.view.contactShadowSettings">足下影詳細...</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleMirrorFloor"><span data-i18n="menu.view.toggleMirrorFloor">Mirror床</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.mirrorFloorSettings"><span data-i18n="menu.view.mirrorFloorSettings">Mirror床設定...</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleGi"><span data-i18n="menu.view.toggleGi">グローバルイルミネーション</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleFxPanel"><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.front"><span data-i18n="menu.view.camera.front">正面</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.back"><span data-i18n="menu.view.camera.back">背面</span></button>
@@ -66,7 +71,7 @@
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.top"><span data-i18n="menu.view.camera.top">上面</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.bottom"><span data-i18n="menu.view.camera.bottom">下面</span></button>
           <div class="app-menu-separator" role="separator"></div>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleActiveModel"><span data-i18n="menu.view.toggleActiveModel">選択モデルを表示/非表示</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleActiveModel"><span data-i18n="menu.view.toggleActiveModel">選択モデルを表示</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.toggleFullscreenUi"><span data-i18n="menu.view.toggleFullscreenUi">表示UIを隠す</span><span class="app-menu-shortcut">Esc</span></button>
         </div>
@@ -74,10 +79,11 @@
       <div class="app-menu-group">
         <button class="app-menu-trigger" type="button" data-i18n="menu.background">背景</button>
         <div class="app-menu-list" role="menu">
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleMedia"><span data-i18n="menu.background.toggleMedia">背景画像/動画を表示/非表示</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleBlack"><span data-i18n="menu.background.toggleBlack">黒背景を表示/非表示</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.toggleMirrorFloor"><span data-i18n="menu.background.toggleMirrorFloor">Mirror床を有効/無効</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleMedia"><span data-i18n="menu.background.toggleMedia">背景画像/動画を表示</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleBlack"><span data-i18n="menu.background.toggleBlack">黒背景を表示</span></button>
           <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleHdriBackground"><span data-i18n="menu.background.toggleHdriBackground">HDRI背景を表示</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.hdriSettings"><span data-i18n="menu.background.hdriSettings">HDRI詳細...</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.settings"><span data-i18n="menu.background.settings">背景設定...</span></button>
         </div>
       </div>
@@ -91,8 +97,8 @@
       <div class="app-menu-group">
         <button class="app-menu-trigger" type="button" data-i18n="menu.physics">物理演算</button>
         <div class="app-menu-list" role="menu">
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="physics.togglePhysics"><span data-i18n="menu.physics.togglePhysics">物理演算を有効/無効</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="physics.toggleRigidBodies"><span data-i18n="menu.physics.toggleRigidBodies">剛体表示を有効/無効</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="physics.togglePhysics"><span data-i18n="menu.physics.togglePhysics">物理演算</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="physics.toggleRigidBodies"><span data-i18n="menu.physics.toggleRigidBodies">剛体を表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="physics.gravitySettings"><span data-i18n="menu.physics.gravitySettings">重力設定...</span></button>
         </div>
       </div>

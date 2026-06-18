@@ -325,6 +325,39 @@ body.png-capture-mode #viewport-axis-handle {
   white-space: nowrap;
 }
 
+.app-menu-item--check {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+
+.app-menu-item--check::before {
+  content: "";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.app-menu-item--check[aria-checked="true"]::before {
+  content: "✓";
+  border-color: rgba(57, 197, 187, 0.55);
+  background: rgba(57, 197, 187, 0.16);
+  color: #7ddfd8;
+}
+
+.app-menu-item--check:disabled::before {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.24);
+}
+
 .app-menu-item:hover,
 .app-menu-item:focus-visible {
   background: rgba(255, 255, 255, 0.1);
@@ -566,6 +599,13 @@ select.popup-form-control {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.popup-form-note {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .popup-form-inline {

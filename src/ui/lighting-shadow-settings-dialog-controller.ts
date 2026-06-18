@@ -109,48 +109,6 @@ export class LightingShadowSettingsDialogController implements PopupContentContr
         });
         grid.appendChild(createPopupFormField(t("label.softTransparentShadow"), softTransparentShadow));
 
-        const iblShadows = createCheckbox(this.mmdManager.iblShadowsEnabled);
-        iblShadows.addEventListener("change", () => {
-            this.dispatchAction({ type: "effect.setIblShadows", source: "menu", enabled: iblShadows.checked });
-            iblShadows.checked = this.mmdManager.iblShadowsEnabled;
-            this.refreshUi();
-        });
-        grid.appendChild(createPopupFormField(t("label.iblShadows"), iblShadows));
-
-        this.appendRange(grid, t("label.iblShadowOpacity"), 0, 100, 1, this.mmdManager.iblShadowOpacity * 100, (value) => `${Math.round(value)}%`, (value) => {
-            this.dispatchAction({ type: "effect.setIblShadowOpacity", source: "menu", value: value / 100 });
-            this.refreshUi();
-            return `${Math.round(this.mmdManager.iblShadowOpacity * 100)}%`;
-        });
-        this.appendRange(grid, t("label.iblShadowRange"), 50, 1200, 10, this.mmdManager.iblShadowDistanceScale * 100, (value) => (value / 100).toFixed(1), (value) => {
-            this.dispatchAction({ type: "effect.setIblShadowDistanceScale", source: "menu", value: value / 100 });
-            this.refreshUi();
-            return this.mmdManager.iblShadowDistanceScale.toFixed(1);
-        });
-
-        const contactShadow = createCheckbox(this.mmdManager.characterContactShadowEnabled);
-        contactShadow.addEventListener("change", () => {
-            this.dispatchAction({
-                type: "effect.setCharacterContactShadow",
-                source: "menu",
-                enabled: contactShadow.checked,
-            });
-            contactShadow.checked = this.mmdManager.characterContactShadowEnabled;
-            this.refreshUi();
-        });
-        grid.appendChild(createPopupFormField(t("label.characterContactShadow"), contactShadow));
-
-        this.appendRange(grid, t("label.characterContactShadowOpacity"), 0, 100, 1, this.mmdManager.characterContactShadowOpacity * 100, (value) => `${Math.round(value)}%`, (value) => {
-            this.dispatchAction({ type: "effect.setCharacterContactShadowOpacity", source: "menu", value: value / 100 });
-            this.refreshUi();
-            return `${Math.round(this.mmdManager.characterContactShadowOpacity * 100)}%`;
-        });
-        this.appendRange(grid, t("label.characterContactShadowScale"), 50, 300, 5, this.mmdManager.characterContactShadowScale * 100, (value) => (value / 100).toFixed(2), (value) => {
-            this.dispatchAction({ type: "effect.setCharacterContactShadowScale", source: "menu", value: value / 100 });
-            this.refreshUi();
-            return this.mmdManager.characterContactShadowScale.toFixed(2);
-        });
-
         container.appendChild(form);
     }
 

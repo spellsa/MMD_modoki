@@ -312,6 +312,7 @@ import {
     PhysicsModelController,
     type PhysicsRuntimeModel,
 } from "./physics/physics-model-controller";
+import { applyMmdOutlineTaperingShader } from "./render/mmd-outline-tuning";
 
 type EditorRuntimeBone = IMmdRuntimeBone & {
     getAnimationPositionOffsetToRef?: (target: Vector3) => Vector3;
@@ -538,6 +539,8 @@ import "@babylonjs/core/ShadersWGSL/screenSpaceReflection2BlurCombiner.fragment"
 import "@babylonjs/core/ShadersWGSL/ssao2.fragment";
 import "@babylonjs/core/ShadersWGSL/ssaoCombine.fragment";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.vertex";
+
+applyMmdOutlineTaperingShader();
 import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.fragment";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingBlendVolume.fragment";
 import "babylon-mmd/esm/Loader/ShadersWGSL/textureAlphaChecker.vertex";
@@ -1563,6 +1566,8 @@ ${beforeFogAppendBlock}
     private readonly farDofEnabled = false;
     private readonly farDofFocusSharpRadiusMm = 1000;
     private modelEdgeWidthValue = 0;
+    private modelEdgeColorOverrideEnabledValue = false;
+    private modelEdgeColorValue = { r: 0, g: 0, b: 0 };
     private readonly modelEdgeMaterialDefaults = new WeakMap<object, { enabled: boolean; width: number; alpha: number; colorR: number; colorG: number; colorB: number }>();
     private readonly materialBaseAlphaByMaterial = new WeakMap<object, number>();
     private readonly materialShaderDefaultsByMaterial = new WeakMap<object, MaterialShaderDefaults>();
@@ -2026,6 +2031,12 @@ ${beforeFogAppendBlock}
             material.outlineWidth = enabled ? outlineDefaults.width * this.modelEdgeWidthValue : 0;
             if ("outlineAlpha" in material) {
                 material.outlineAlpha = outlineDefaults.alpha;
+            }
+            if ("outlineColor" in material && material.outlineColor?.set) {
+                const color = this.modelEdgeColorOverrideEnabledValue
+                    ? this.modelEdgeColorValue
+                    : { r: outlineDefaults.colorR, g: outlineDefaults.colorG, b: outlineDefaults.colorB };
+                material.outlineColor.set(color.r, color.g, color.b);
             }
         }
 
@@ -5237,7 +5248,10 @@ ${beforeFogAppendBlock}
                 mat.outlineAlpha = defaults.alpha;
             }
             if ("outlineColor" in mat && mat.outlineColor?.set) {
-                mat.outlineColor.set(defaults.colorR, defaults.colorG, defaults.colorB);
+                const color = this.modelEdgeColorOverrideEnabledValue
+                    ? this.modelEdgeColorValue
+                    : { r: defaults.colorR, g: defaults.colorG, b: defaults.colorB };
+                mat.outlineColor.set(color.r, color.g, color.b);
             }
         }
     }
@@ -7593,6 +7607,27 @@ ${beforeFogAppendBlock}
     }
     set modelEdgeWidth(v: number) {
         this.modelEdgeWidthValue = Math.max(0, Math.min(2, v));
+        this.applyModelEdgeToAllModels();
+    }
+
+    get modelEdgeColorOverrideEnabled(): boolean {
+        return this.modelEdgeColorOverrideEnabledValue;
+    }
+    set modelEdgeColorOverrideEnabled(enabled: boolean) {
+        this.modelEdgeColorOverrideEnabledValue = Boolean(enabled);
+        this.applyModelEdgeToAllModels();
+    }
+
+    getModelEdgeColor(): { r: number; g: number; b: number } {
+        return { ...this.modelEdgeColorValue };
+    }
+
+    setModelEdgeColor(r: number, g: number, b: number): void {
+        this.modelEdgeColorValue = {
+            r: Math.max(0, Math.min(1, Number.isFinite(r) ? r : 0)),
+            g: Math.max(0, Math.min(1, Number.isFinite(g) ? g : 0)),
+            b: Math.max(0, Math.min(1, Number.isFinite(b) ? b : 0)),
+        };
         this.applyModelEdgeToAllModels();
     }
 

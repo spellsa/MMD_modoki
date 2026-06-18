@@ -87,6 +87,8 @@ function createHost() {
         dofLensDistortion: 0,
         dofLensDistortionInfluence: 0,
         modelEdgeWidth: 0,
+        modelEdgeColorOverrideEnabled: false,
+        getModelEdgeColor: () => ({ r: 0, g: 0, b: 0 }),
         postEffectContrast: 1,
         postEffectGamma: 1,
         postEffectExposure: 1,
@@ -182,6 +184,17 @@ describe("exportProjectState", () => {
         expect(project.viewport.mirroringFloorSize).toBe(60);
         expect(project.viewport.mirroringFloorHeight).toBe(0.02);
         expect(project.viewport.mirroringFloorResolution).toBe(1024);
+    });
+
+    it("writes model edge color settings", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            modelEdgeColorOverrideEnabled: true,
+            getModelEdgeColor: () => ({ r: 0.1, g: 0.2, b: 0.3 }),
+        });
+
+        expect(project.effects.modelEdgeColorOverrideEnabled).toBe(true);
+        expect(project.effects.modelEdgeColor).toEqual({ r: 0.1, g: 0.2, b: 0.3 });
     });
 
     it("writes FrameGraph post effect stack entries", () => {

@@ -2,9 +2,12 @@ import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
 import type { EditorAction } from "../actions/types";
 import { BackgroundSettingsDialogController } from "./background-settings-dialog-controller";
+import { ContactShadowSettingsDialogController } from "./contact-shadow-settings-dialog-controller";
 import { EdgeSettingsDialogController } from "./edge-settings-dialog-controller";
 import { GravitySettingsDialogController } from "./gravity-settings-dialog-controller";
+import { IblShadowSettingsDialogController } from "./ibl-shadow-settings-dialog-controller";
 import { LightingShadowSettingsDialogController } from "./lighting-shadow-settings-dialog-controller";
+import { MirrorFloorSettingsDialogController } from "./mirror-floor-settings-dialog-controller";
 import { PopupDialogController } from "./popup-dialog-controller";
 import type { WebmExportSettingsAdapter } from "./export-ui-controller";
 import { WebmExportDialogController } from "./webm-export-dialog-controller";
@@ -24,12 +27,13 @@ type AppMenuControllerDeps = {
     createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
 };
 
-type DialogKind = "about" | "shortcuts" | "preferences";
+type DialogKind = "about" | "shortcuts" | "preferences" | "hdriSettings";
 
 type AppMenuElements = {
     root: HTMLElement | null;
     groups: HTMLElement[];
     triggers: HTMLButtonElement[];
+    checkItems: HTMLButtonElement[];
 };
 
 function resolveElements(): AppMenuElements {
@@ -38,6 +42,7 @@ function resolveElements(): AppMenuElements {
         root,
         groups: root ? Array.from(root.querySelectorAll<HTMLElement>(".app-menu-group")) : [],
         triggers: root ? Array.from(root.querySelectorAll<HTMLButtonElement>(".app-menu-trigger")) : [],
+        checkItems: root ? Array.from(root.querySelectorAll<HTMLButtonElement>(".app-menu-item--check[data-menu-command]")) : [],
     };
 }
 
@@ -97,6 +102,7 @@ export class AppMenuController {
             const command = item.dataset.menuCommand;
             if (!command) return;
             this.executeCommand(command, item);
+            this.refreshCheckItems();
             this.setOpenGroup(null);
         });
 
@@ -161,10 +167,63 @@ export class AppMenuController {
     }
 
     private setOpenGroup(group: HTMLElement | null): void {
+        if (group) {
+            this.refreshCheckItems();
+        }
         this.elements.groups.forEach((item) => {
             item.classList.toggle("menu-open", item === group);
         });
         this.openGroup = group;
+    }
+
+    private refreshCheckItems(): void {
+        this.elements.checkItems.forEach((item) => {
+            const command = item.dataset.menuCommand ?? "";
+            const state = this.resolveCheckState(command);
+            if (!state) return;
+            item.setAttribute("aria-checked", state.checked ? "true" : "false");
+            item.disabled = state.disabled;
+        });
+    }
+
+    private resolveCheckState(command: string): { checked: boolean; disabled: boolean } | null {
+        switch (command) {
+            case "view.toggleGround":
+                return { checked: this.mmdManager.isGroundVisible(), disabled: false };
+            case "view.toggleEdge":
+                return { checked: this.mmdManager.modelEdgeWidth > 0.001, disabled: false };
+            case "view.toggleSkydome":
+                return { checked: this.mmdManager.isSkydomeVisible(), disabled: false };
+            case "view.toggleAntialias":
+                return { checked: this.mmdManager.antialiasEnabled, disabled: false };
+            case "view.toggleShadow":
+                return { checked: this.mmdManager.getShadowEnabled(), disabled: false };
+            case "view.toggleCharacterContactShadow":
+                return { checked: this.mmdManager.characterContactShadowEnabled, disabled: false };
+            case "view.toggleMirrorFloor":
+                return { checked: this.mmdManager.mirroringFloorEnabled, disabled: false };
+            case "view.toggleGi":
+                return { checked: this.mmdManager.isGlobalIlluminationEnabled(), disabled: this.mmdManager.isGlobalIlluminationPending() };
+            case "view.toggleFxPanel":
+                return { checked: this.isShaderPanelVisible(), disabled: false };
+            case "view.toggleActiveModel":
+                return { checked: this.isActiveModelVisible(), disabled: !this.hasActiveModel() };
+            case "background.toggleMedia":
+                return { checked: this.mmdManager.isBackgroundMediaVisible(), disabled: !this.mmdManager.hasBackgroundMedia() };
+            case "background.toggleBlack":
+                return { checked: this.mmdManager.isBackgroundBlack(), disabled: false };
+            case "background.toggleHdriBackground":
+                return { checked: false, disabled: true };
+            case "physics.togglePhysics":
+                return { checked: this.mmdManager.getPhysicsEnabled(), disabled: !this.mmdManager.isPhysicsAvailable() };
+            case "physics.toggleRigidBodies":
+                return {
+                    checked: this.mmdManager.isRigidBodyVisualizerAvailable() && this.mmdManager.isRigidBodyVisualizerEnabled(),
+                    disabled: !this.mmdManager.isRigidBodyVisualizerAvailable(),
+                };
+            default:
+                return null;
+        }
     }
 
     private executeCommand(command: string, invoker?: HTMLElement | null): void {
@@ -241,14 +300,38 @@ export class AppMenuController {
             case "view.toggleShadow":
                 this.dispatchAction({ type: "runtime.toggleShadow", source: "menu" });
                 return;
+            case "view.toggleCharacterContactShadow":
+                this.dispatchAction({
+                    type: "effect.setCharacterContactShadow",
+                    source: "menu",
+                    enabled: !this.mmdManager.characterContactShadowEnabled,
+                });
+                this.refreshLightingUi();
+                return;
+            case "view.toggleMirrorFloor":
+                this.dispatchAction({
+                    type: "camera.setMirroringFloorEnabled",
+                    source: "menu",
+                    enabled: !this.isMirroringFloorEnabled(),
+                });
+                return;
+            case "view.mirrorFloorSettings":
+                this.openMirrorFloorSettingsDialog(invoker ?? null);
+                return;
             case "view.toggleGi":
                 this.dispatchAction({ type: "runtime.toggleGlobalIllumination", source: "menu" });
                 return;
             case "view.lightShadowSettings":
                 this.openLightingShadowSettingsDialog(invoker ?? null);
                 return;
+            case "view.iblShadowSettings":
+                this.openIblShadowSettingsDialog(invoker ?? null);
+                return;
             case "view.toggleFxPanel":
                 this.dispatchAction({ type: "layout.shaderPanel.toggle", source: "menu" });
+                return;
+            case "view.contactShadowSettings":
+                this.openContactShadowSettingsDialog(invoker ?? null);
                 return;
             case "view.camera.front":
                 this.dispatchAction({ type: "camera.setViewPreset", source: "menu", view: "front" });
@@ -280,12 +363,8 @@ export class AppMenuController {
             case "background.toggleBlack":
                 this.dispatchAction({ type: "viewport.toggleBackgroundBlack", source: "menu" });
                 return;
-            case "background.toggleMirrorFloor":
-                this.dispatchAction({
-                    type: "camera.setMirroringFloorEnabled",
-                    source: "menu",
-                    enabled: !this.isMirroringFloorEnabled(),
-                });
+            case "background.toggleHdriBackground":
+                this.showToast(t("menu.toast.hdriNotReady"), "info");
                 return;
             case "expression.addKeyframe":
                 this.dispatchAction({ type: "keyframe.addCurrent", source: "menu" });
@@ -304,6 +383,9 @@ export class AppMenuController {
                 return;
             case "background.settings":
                 this.openBackgroundSettingsDialog(invoker ?? null);
+                return;
+            case "background.hdriSettings":
+                this.openDialog("hdriSettings", invoker ?? null);
                 return;
             case "physics.gravitySettings":
                 this.openGravitySettingsDialog(invoker ?? null);
@@ -366,6 +448,47 @@ export class AppMenuController {
                 return {
                     title: t("dialog.preferences.title"),
                     body: `<p>${t("dialog.preferences.body")}</p>`,
+                };
+            case "hdriSettings":
+                return {
+                    title: t("dialog.hdri.title"),
+                    body: `
+                        <div class="popup-form">
+                            <div class="popup-form-grid">
+                                <label class="popup-form-field">
+                                    <span class="popup-form-label">${t("dialog.hdri.current")}</span>
+                                    <span class="popup-form-value">${t("option.none")}</span>
+                                </label>
+                                <label class="popup-form-field">
+                                    <span class="popup-form-label">${t("dialog.hdri.backgroundVisible")}</span>
+                                    <input class="popup-form-checkbox" type="checkbox" disabled>
+                                </label>
+                                <label class="popup-form-field">
+                                    <span class="popup-form-label">${t("dialog.hdri.lightingEnabled")}</span>
+                                    <input class="popup-form-checkbox" type="checkbox" disabled>
+                                </label>
+                                <label class="popup-form-field">
+                                    <span class="popup-form-label">${t("dialog.hdri.intensity")}</span>
+                                    <div class="popup-form-range-row">
+                                        <input class="popup-form-control popup-form-range" type="range" min="0" max="200" value="100" disabled>
+                                        <span class="popup-form-value">100%</span>
+                                    </div>
+                                </label>
+                                <label class="popup-form-field">
+                                    <span class="popup-form-label">${t("dialog.hdri.rotation")}</span>
+                                    <div class="popup-form-range-row">
+                                        <input class="popup-form-control popup-form-range" type="range" min="0" max="360" value="0" disabled>
+                                        <span class="popup-form-value">0°</span>
+                                    </div>
+                                </label>
+                                <div class="popup-form-button-row">
+                                    <button class="popup-form-button popup-form-button-secondary" type="button" disabled>${t("dialog.hdri.load")}</button>
+                                    <button class="popup-form-button popup-form-button-secondary" type="button" disabled>${t("dialog.hdri.clear")}</button>
+                                </div>
+                                <p class="popup-form-note">${t("dialog.hdri.placeholder")}</p>
+                            </div>
+                        </div>
+                    `,
                 };
         }
     }
@@ -435,6 +558,51 @@ export class AppMenuController {
         });
     }
 
+    private openIblShadowSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "ibl-shadow-settings",
+            surface: "modal",
+            title: t("dialog.iblShadow.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new IblShadowSettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshLightingUi(),
+            }),
+        });
+    }
+
+    private openContactShadowSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "contact-shadow-settings",
+            surface: "modal",
+            title: t("dialog.contactShadow.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new ContactShadowSettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshLightingUi(),
+            }),
+        });
+    }
+
+    private openMirrorFloorSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "mirror-floor-settings",
+            surface: "modal",
+            title: t("dialog.mirrorFloor.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new MirrorFloorSettingsDialogController({
+                mmdManager: this.mmdManager,
+                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshCameraUi(),
+            }),
+        });
+    }
+
     private openWebmExportDialog(invoker: HTMLElement | null): void {
         this.popupDialogController.open({
             id: "webm-export",
@@ -470,5 +638,17 @@ export class AppMenuController {
 
     private isMirroringFloorEnabled(): boolean {
         return this.mmdManager.mirroringFloorEnabled;
+    }
+
+    private hasActiveModel(): boolean {
+        return this.mmdManager.getActiveModelInfo() !== null;
+    }
+
+    private isActiveModelVisible(): boolean {
+        return this.hasActiveModel() && this.mmdManager.getActiveModelVisibility();
+    }
+
+    private isShaderPanelVisible(): boolean {
+        return !document.getElementById("main-content")?.classList.contains("shader-panel-collapsed");
     }
 }

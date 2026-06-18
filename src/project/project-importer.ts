@@ -123,6 +123,8 @@ type ProjectImportHost = {
     dofLensDistortion: number;
     dofLensDistortionInfluence: number;
     modelEdgeWidth: number;
+    modelEdgeColorOverrideEnabled: boolean;
+    setModelEdgeColor: (r: number, g: number, b: number) => void;
     postEffectContrast: number;
     postEffectGamma: number;
     postEffectExposure: number;
@@ -700,6 +702,15 @@ export async function importProjectState(
     host.dofLensDistortion = readFiniteNumber(data.effects.dofLensDistortion, 0);
     host.dofLensDistortionInfluence = readFiniteNumber(data.effects.dofLensDistortionInfluence, 0);
     host.modelEdgeWidth = readFiniteNumber(data.effects.modelEdgeWidth, 1);
+    host.modelEdgeColorOverrideEnabled = typeof data.effects.modelEdgeColorOverrideEnabled === "boolean"
+        ? data.effects.modelEdgeColorOverrideEnabled
+        : false;
+    const modelEdgeColor = data.effects.modelEdgeColor;
+    host.setModelEdgeColor(
+        modelEdgeColor && Number.isFinite(modelEdgeColor.r) ? modelEdgeColor.r : 0,
+        modelEdgeColor && Number.isFinite(modelEdgeColor.g) ? modelEdgeColor.g : 0,
+        modelEdgeColor && Number.isFinite(modelEdgeColor.b) ? modelEdgeColor.b : 0,
+    );
     host.postEffectContrast = readFiniteNumber(data.effects.contrast, 1);
     const importedGamma = readFiniteNumber(data.effects.gamma, 1);
     const gammaEncodingVersion = (data.effects as { gammaEncodingVersion?: unknown }).gammaEncodingVersion;

@@ -2193,6 +2193,14 @@ export class UIController {
         this.actionDispatcher.register("effect.setModelEdgeWidth", (action) => {
             this.modelEdgeController?.setModelEdgeWidthPercent(action.percent);
         });
+        this.actionDispatcher.register("effect.setModelEdgeColorOverride", (action) => {
+            this.mmdManager.modelEdgeColorOverrideEnabled = action.enabled;
+            this.modelEdgeController?.refresh();
+        });
+        this.actionDispatcher.register("effect.setModelEdgeColor", (action) => {
+            this.mmdManager.setModelEdgeColor(action.r, action.g, action.b);
+            this.modelEdgeController?.refresh();
+        });
         this.actionDispatcher.register("effect.setContrastOffset", (action) => {
             this.colorPostFxController?.setContrastOffsetPercent(action.offsetPercent);
         });
