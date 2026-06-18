@@ -60,6 +60,19 @@
   --bottom-panel-row-gap: 6px;
   --bottom-panel-row-min-height: 22px;
   --bottom-panel-select-height: 22px;
+  --bottom-panel-font-2xs: 0.5625rem;
+  --bottom-panel-font-xs: 0.6875rem;
+  --bottom-panel-font-sm: clamp(0.75rem, 0.42vw + 0.3rem, 0.9375rem);
+  --bottom-panel-font-md: clamp(0.8125rem, 0.46vw + 0.35rem, 1rem);
+  --bottom-panel-font-lg: clamp(0.875rem, 0.5vw + 0.4rem, 1.0625rem);
+  --bottom-panel-font-header: var(--bottom-panel-font-md);
+  --bottom-panel-font-label: var(--bottom-panel-font-sm);
+  --bottom-panel-font-value: var(--bottom-panel-font-sm);
+  --bottom-panel-font-control: var(--bottom-panel-font-sm);
+  --bottom-panel-font-empty: var(--bottom-panel-font-lg);
+  --bottom-panel-number-width: clamp(3.5rem, 4.2vw, 4.25rem);
+  --bottom-panel-number-height: clamp(1.375rem, 2.45vh, 1.625rem);
+  --bottom-panel-number-pad-x: clamp(0.25rem, 0.36vw, 0.375rem);
 
   /* Typography */
   --font-sans: 'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif;
@@ -3158,7 +3171,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   min-height: 30px;
   box-sizing: border-box;
   padding: 6px 12px;
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-header);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -3177,7 +3190,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.02);
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--bottom-panel-font-lg);
   line-height: 1;
   font-family: var(--font-mono);
   cursor: pointer;
@@ -3229,7 +3242,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .panel-select-label {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
   color: var(--text-tertiary);
   text-align: right;
 }
@@ -3243,7 +3256,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-control);
   font-family: var(--font-sans);
   outline: none;
 }
@@ -3274,7 +3287,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-md);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3284,7 +3297,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .bone-selection-count {
   grid-column: 2;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
   line-height: 1.2;
 }
 
@@ -3314,7 +3327,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   justify-content: center;
   height: 100%;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: var(--bottom-panel-font-empty);
 }
 
 .bone-slider-row {
@@ -3331,7 +3344,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .bone-slider-label {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
   color: var(--text-secondary);
   text-align: right;
   white-space: nowrap;
@@ -3360,7 +3373,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .bone-slider-value {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-value);
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   text-align: right;
@@ -3390,7 +3403,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .bone-number-label {
   min-width: 0;
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
   font-weight: 700;
   text-align: right;
   white-space: nowrap;
@@ -3407,7 +3420,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   background: var(--bg-card);
   color-scheme: dark;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-control);
   font-variant-numeric: tabular-nums;
   text-align: right;
   outline: none;
@@ -3443,7 +3456,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-bottom: 1px solid var(--border-color);
   background: rgba(255, 255, 255, 0.045);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
   font-weight: 700;
   line-height: 16px;
   white-space: nowrap;
@@ -3455,7 +3468,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 5px 7px 6px;
+  padding: 3px 7px 4px;
 }
 
 .morph-category-body::-webkit-scrollbar {
@@ -3474,7 +3487,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
 }
 
 .morph-slider-row {
@@ -3488,7 +3501,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .morph-slider-row label {
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-md);
   color: var(--text-secondary);
   min-width: 0;
   overflow: hidden;
@@ -3525,7 +3538,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .morph-slider-row .morph-value {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-value);
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   text-align: right;
@@ -3541,13 +3554,13 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .morph-category-body .morph-slider-row {
-  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-columns: minmax(0, 1fr) var(--bottom-panel-number-width) 20px;
   grid-template-areas:
-    "label key"
-    "slider number";
-  gap: 4px 7px;
-  min-height: 43px;
-  padding: 5px 0 6px;
+    "label number key"
+    "slider slider slider";
+  gap: 3px 7px;
+  min-height: 42px;
+  padding: 3px 0 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
 }
 
@@ -3574,22 +3587,22 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .morph-category-body .morph-slider-row.range-has-number {
-  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-columns: minmax(0, 1fr) var(--bottom-panel-number-width) 20px;
 }
 
 .morph-category-body .morph-row-keyframe-btn {
   grid-area: key;
   justify-self: end;
   align-self: center;
-  min-width: 18px;
-  height: 18px;
+  min-width: 16px;
+  height: 16px;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--bottom-panel-font-lg);
   line-height: 1;
   cursor: pointer;
 }
@@ -3608,11 +3621,13 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .morph-category-body .morph-slider-row .range-number-input {
   grid-area: number;
   align-self: center;
-  width: 54px;
-  height: 22px;
-  padding-inline: 5px;
+  justify-self: center;
+  width: min(var(--bottom-panel-number-width), 3.75rem);
+  height: 1.25rem;
+  padding-inline: var(--bottom-panel-number-pad-x);
   border-radius: 4px;
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-control);
+  text-align: center;
 }
 
 .morph-category-body .morph-slider-row.range-has-number .morph-value {
@@ -3621,7 +3636,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 
 .morph-category-body .morph-slider-row label,
 .morph-category-body .morph-slider-row .morph-value {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-value);
 }
 
 #interpolation-section { order: 1; }
@@ -4145,14 +4160,14 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   white-space: nowrap;
 }
 
-#bottom-panel #info-section .info-mmd-extra {
+#bottom-panel .info-mmd-extra {
   display: grid;
   gap: 3px;
   padding-top: 3px;
   border-top: 1px solid var(--border-color);
 }
 
-#bottom-panel #info-section .info-mini-row {
+#bottom-panel .info-mini-row {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 42px;
   align-items: center;
@@ -4160,15 +4175,15 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   min-height: 21px;
 }
 
-#bottom-panel #info-section .info-mini-label {
+#bottom-panel .info-mini-label {
   color: var(--text-tertiary);
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
   line-height: 1;
   text-align: right;
   white-space: nowrap;
 }
 
-#bottom-panel #info-section .info-mini-select {
+#bottom-panel .info-mini-select {
   width: 100%;
   min-width: 0;
   height: 21px;
@@ -4178,10 +4193,10 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
 }
 
-#bottom-panel #info-section .info-mini-btn {
+#bottom-panel .info-mini-btn {
   min-width: 0;
   height: 21px;
   padding: 0 4px;
@@ -4189,15 +4204,21 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   border-radius: var(--radius-sm);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
   font-weight: 600;
   white-space: nowrap;
 }
 
-#bottom-panel #info-section .info-mini-btn:disabled,
-#bottom-panel #info-section .info-mini-select:disabled {
+#bottom-panel .info-mini-btn:disabled,
+#bottom-panel .info-mini-select:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+#bottom-panel #bone-section .bone-parent-controls {
+  flex-shrink: 0;
+  padding: 5px var(--bottom-panel-content-pad-x) 6px;
+  background: rgba(255, 255, 255, 0.012);
 }
 
 .transport-buttons {
@@ -4542,12 +4563,14 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 62px;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) clamp(64px, 24%, 88px);
+  gap: clamp(5px, 2.4%, 10px);
   align-items: start;
 }
 
 .interp-curve-list {
+  display: flex;
+  align-items: flex-start;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -4556,7 +4579,7 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .interpolation-side {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: 6px;
   align-content: start;
 }
 
@@ -4575,24 +4598,30 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 
 .interp-type-row {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
   min-height: var(--bottom-panel-row-min-height);
   padding: 0;
 }
 
 .interpolation-side-label {
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-sm);
   line-height: 1;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .interp-curve-empty {
-  min-height: 100%;
-  padding: 8px 6px;
-  font-size: 10px;
+  width: 100%;
+  max-width: min(100%, 23vh);
+  aspect-ratio: 1 / 1;
+  padding: clamp(4px, 4%, 8px) clamp(3px, 3%, 6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--bottom-panel-font-md);
   color: var(--text-tertiary);
   border: 1px dashed var(--border-color);
   border-radius: var(--radius-sm);
@@ -4603,6 +4632,8 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .interp-curve-card {
   display: grid;
   gap: 3px;
+  width: 100%;
+  max-width: min(100%, 23vh);
 }
 
 .interp-curve-card--disabled {
@@ -4640,14 +4671,14 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .interp-curve-name {
-  font-size: 8px;
+  font-size: var(--bottom-panel-font-2xs);
   color: var(--text-secondary);
   font-weight: 600;
 }
 
 .interp-curve-value {
   min-width: 0;
-  font-size: 7px;
+  font-size: var(--bottom-panel-font-2xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -4658,13 +4689,13 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 .interp-type-select {
   width: 100%;
   max-width: none;
-  height: 20px;
+  height: clamp(1.5rem, 2.6vh, 1.75rem);
   padding: 0 6px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-control);
   font-family: var(--font-sans);
   outline: none;
 }
@@ -4740,18 +4771,18 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 
 .interp-placeholder-actions {
   display: grid;
-  gap: 3px;
+  gap: 5px;
 }
 
 .interp-placeholder-btn {
   width: 100%;
-  height: 18px;
-  min-height: 18px;
-  padding: 0 2px;
+  height: clamp(1.5rem, 2.8vh, 1.875rem);
+  min-height: 1.5rem;
+  padding: 0 clamp(0.125rem, 3%, 0.375rem);
   justify-content: center;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
-  font-size: 6px;
-  font-weight: 400;
+  font-size: var(--bottom-panel-font-sm);
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1;
   border-radius: 3px;
@@ -4762,17 +4793,6 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
   color: rgba(241, 245, 249, 0.64);
 }
 
-@media (max-width: 1180px) {
-  .interpolation-workbench {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .interpolation-side {
-    grid-template-columns: minmax(0, 1fr) 62px;
-    align-items: start;
-  }
-}
-
 .info-row {
   display: flex;
   justify-content: space-between;
@@ -4781,12 +4801,12 @@ body.bottom-panel-resizing #bottom-panel-resizer::before {
 }
 
 .info-label {
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-md);
   color: var(--text-tertiary);
 }
 
 .info-value {
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-md);
   font-family: var(--font-mono);
   color: var(--text-secondary);
 }
@@ -5136,7 +5156,7 @@ body.bottom-panel-resizing {
   align-items: center;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
 }
 
 .light-check {
@@ -5146,7 +5166,7 @@ body.bottom-panel-resizing {
 }
 
 .light-label {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
   color: var(--text-secondary);
   text-align: right;
   min-width: 0;
@@ -5191,7 +5211,7 @@ body.bottom-panel-resizing {
   border-radius: var(--radius-sm);
   background: var(--bg-card);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-control);
   font-family: var(--font-sans);
   padding: 0 6px;
   outline: none;
@@ -5203,7 +5223,7 @@ body.bottom-panel-resizing {
 }
 
 .light-value {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-value);
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   text-align: right;
@@ -5247,7 +5267,7 @@ body.bottom-panel-resizing {
 }
 
 .shadow-label {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
   color: var(--text-tertiary);
   text-align: right;
   min-width: 0;
@@ -5285,7 +5305,7 @@ body.bottom-panel-resizing {
 }
 
 .shadow-value {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-value);
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   text-align: right;
@@ -5336,7 +5356,7 @@ body.bottom-panel-resizing {
   color: var(--text-secondary);
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-md);
   font-weight: 500;
   transition: all var(--transition-fast);
 }
@@ -5387,7 +5407,7 @@ body.bottom-panel-resizing {
 }
 
 .physics-label {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
   color: var(--text-tertiary);
   text-align: right;
   min-width: 0;
@@ -5425,7 +5445,7 @@ body.bottom-panel-resizing {
 }
 
 .physics-value {
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-value);
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   text-align: right;
@@ -5473,7 +5493,7 @@ body.bottom-panel-resizing {
 
 .accessory-controls .panel-select {
   height: 22px;
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
 }
 
 .accessory-transform {
@@ -5496,7 +5516,7 @@ body.bottom-panel-resizing {
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.015);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--bottom-panel-font-md);
   text-align: center;
   padding: 10px 8px;
 }
@@ -5507,7 +5527,7 @@ body.bottom-panel-resizing {
 
 .accessory-empty-sub {
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: var(--bottom-panel-font-label);
 }
 
 .accessory-row {
@@ -5526,7 +5546,7 @@ body.bottom-panel-resizing {
 }
 
 .accessory-label {
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
   color: var(--text-tertiary);
   text-align: right;
   min-width: 0;
@@ -5542,7 +5562,7 @@ body.bottom-panel-resizing {
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--bottom-panel-font-xs);
   text-align: right;
   outline: none;
 }
@@ -5553,6 +5573,43 @@ body.bottom-panel-resizing {
 }
 
 .accessory-number:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#bottom-panel .range-number-input,
+#bottom-panel .bone-number-input,
+#bottom-panel .accessory-number,
+#bottom-panel .output-number {
+  width: var(--bottom-panel-number-width);
+  min-width: 0;
+  height: var(--bottom-panel-number-height);
+  padding-inline: var(--bottom-panel-number-pad-x);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  color-scheme: dark;
+  font-family: var(--font-mono);
+  font-size: var(--bottom-panel-font-control);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  outline: none;
+}
+
+#bottom-panel .range-number-input:focus,
+#bottom-panel .bone-number-input:focus,
+#bottom-panel .accessory-number:focus,
+#bottom-panel .output-number:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+#bottom-panel .range-number-input:disabled,
+#bottom-panel .bone-number-input:disabled,
+#bottom-panel .accessory-number:disabled,
+#bottom-panel .output-number:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -6187,13 +6244,23 @@ body.bottom-panel-resizing {
 @media (max-height: 1120px) {
   :root {
     --bottom-panel-height: 188px;
+    --bottom-panel-font-2xs: 0.5rem;
+    --bottom-panel-font-xs: 0.625rem;
+    --bottom-panel-font-sm: 0.75rem;
+    --bottom-panel-font-md: 0.75rem;
+    --bottom-panel-font-lg: 0.8125rem;
+    --bottom-panel-font-header: var(--bottom-panel-font-sm);
+    --bottom-panel-font-empty: var(--bottom-panel-font-md);
+    --bottom-panel-number-width: 3.625rem;
+    --bottom-panel-number-height: 1.375rem;
+    --bottom-panel-number-pad-x: 0.25rem;
   }
 
   #bottom-panel .section-header {
     gap: 4px;
     min-height: 22px;
     padding: 3px 8px;
-    font-size: 9px;
+    font-size: var(--bottom-panel-font-header);
     letter-spacing: 0.03em;
   }
 
@@ -6203,6 +6270,7 @@ body.bottom-panel-resizing {
   }
 
   .output-controls,
+  .interpolation-info,
   .camera-controls,
   .bone-controls,
   .morph-controls,
@@ -6230,16 +6298,17 @@ body.bottom-panel-resizing {
   .output-dim-sep,
   .output-toggle-label,
   .control-row label,
-  .camera-view-btn,
-  .panel-empty-state {
-    font-size: 9px;
+    .camera-view-btn,
+    .panel-empty-state {
+    font-size: var(--bottom-panel-font-label);
   }
 
   .panel-select,
+  .interp-type-select,
   .bone-selection-name,
   .output-select,
   .output-number {
-    font-size: 9px;
+    font-size: var(--bottom-panel-font-control);
     padding-top: 1px;
     padding-bottom: 1px;
   }
@@ -6250,7 +6319,7 @@ body.bottom-panel-resizing {
   }
 
   .bone-selection-count {
-    font-size: 8px;
+    font-size: var(--bottom-panel-font-xs);
   }
 
   .bone-slider-row {
@@ -6275,12 +6344,12 @@ body.bottom-panel-resizing {
 
   .bone-number-label,
   .bone-number-input {
-    font-size: 9px;
+    font-size: var(--bottom-panel-font-control);
   }
 
   .bone-number-input {
-    height: 20px;
-    padding-inline: 3px;
+    height: var(--bottom-panel-number-height);
+    padding-inline: var(--bottom-panel-number-pad-x);
   }
 
   .morph-slider-row {
@@ -6291,6 +6360,47 @@ body.bottom-panel-resizing {
 
   .morph-slider-row.range-has-number {
     grid-template-columns: minmax(40px, 34%) minmax(0, 1fr) 48px;
+  }
+
+  .interpolation-workbench {
+    grid-template-columns: minmax(0, 1fr) clamp(58px, 24%, 76px);
+    gap: 5px;
+  }
+
+  .interp-type-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+  }
+
+  .interp-curve-name,
+  .interp-curve-value {
+    font-size: var(--bottom-panel-font-2xs);
+  }
+
+  .interpolation-side-label {
+    font-size: var(--bottom-panel-font-xs);
+  }
+
+  .interp-curve-card {
+    max-width: min(100%, 18vh);
+  }
+
+  .interp-curve-empty {
+    max-width: min(100%, 18vh);
+    padding: clamp(4px, 3%, 6px) clamp(2px, 2%, 4px);
+    font-size: var(--bottom-panel-font-sm);
+  }
+
+  .interp-curve-legend {
+    gap: 1px 4px;
+    padding: 2px 4px;
+  }
+
+  .interp-placeholder-btn {
+    height: clamp(1.375rem, 2.55vh, 1.625rem);
+    min-height: 1.375rem;
+    padding-inline: 0.125rem;
+    font-size: var(--bottom-panel-font-xs);
   }
 
   .light-row {
@@ -6310,7 +6420,7 @@ body.bottom-panel-resizing {
 
   .light-select {
     height: 18px;
-    font-size: 9px;
+    font-size: var(--bottom-panel-font-control);
   }
 
   .accessory-row {
@@ -6340,14 +6450,14 @@ body.bottom-panel-resizing {
   }
 
   .range-number-input {
-    width: 58px;
-    height: 22px;
-    padding: 0 4px;
-    font-size: 10px;
+    width: var(--bottom-panel-number-width);
+    height: var(--bottom-panel-number-height);
+    padding: 0 var(--bottom-panel-number-pad-x);
+    font-size: var(--bottom-panel-font-control);
   }
 
   .control-row.range-has-number .range-number-input {
-    flex-basis: 58px;
+    flex-basis: var(--bottom-panel-number-width);
   }
 
   .output-row {

@@ -308,22 +308,18 @@ export class BottomPanel {
             max: number;
             step: number;
             value: number;
+            disabled?: boolean;
         }[] = [];
 
-        if (boneControlInfo.movable) {
-            controlDefs.push(
-                { key: "tx", label: "X", min: -30, max: 30, step: 0.01, value: transform.position.x },
-                { key: "ty", label: "Y", min: -30, max: 30, step: 0.01, value: transform.position.y },
-                { key: "tz", label: "Z", min: -30, max: 30, step: 0.01, value: transform.position.z },
-            );
-        }
-        if (boneControlInfo.rotatable) {
-            controlDefs.push(
-                { key: "rx", label: "Rx", min: -180, max: 180, step: 0.1, value: transform.rotation.x },
-                { key: "ry", label: "Ry", min: -180, max: 180, step: 0.1, value: transform.rotation.y },
-                { key: "rz", label: "Rz", min: -180, max: 180, step: 0.1, value: transform.rotation.z },
-            );
-        }
+        controlDefs.push(
+            { key: "tx", label: "X", min: -30, max: 30, step: 0.01, value: transform.position.x, disabled: !boneControlInfo.movable },
+            { key: "ty", label: "Y", min: -30, max: 30, step: 0.01, value: transform.position.y, disabled: !boneControlInfo.movable },
+            { key: "tz", label: "Z", min: -30, max: 30, step: 0.01, value: transform.position.z, disabled: !boneControlInfo.movable },
+            { key: "rx", label: "Rx", min: -180, max: 180, step: 0.1, value: transform.rotation.x, disabled: !boneControlInfo.rotatable },
+            { key: "ry", label: "Ry", min: -180, max: 180, step: 0.1, value: transform.rotation.y, disabled: !boneControlInfo.rotatable },
+            { key: "rz", label: "Rz", min: -180, max: 180, step: 0.1, value: transform.rotation.z, disabled: !boneControlInfo.rotatable },
+        );
+
         if (isCameraControl) {
             controlDefs.push(
                 { key: "camDistance", label: t("slider.distance"), min: 0.1, max: 400, step: 0.1, value: this.mmdManager?.getCameraDistance() ?? 45 },
@@ -343,6 +339,10 @@ export class BottomPanel {
             max: def.max,
             step: def.step,
             value: this.formatPanelNumberValue(this.clamp(def.value, def.min, def.max), def.step),
+            disabled: def.disabled,
+            legacyRowClass: "bone-number-row",
+            legacyLabelClass: "bone-number-label",
+            legacyInputClass: "bone-number-input",
         })));
         for (const def of controlDefs) {
             const input = grid.inputs.get(def.key);
@@ -359,6 +359,7 @@ export class BottomPanel {
         max: number;
         step: number;
         value: number;
+        disabled?: boolean;
     }): void {
         const beginInputInteraction = (): void => {
             if (this.activeSliderInteractions.has(input)) return;
