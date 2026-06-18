@@ -386,6 +386,10 @@ let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE = 0.5;
+const VIEWPORT_CAMERA_ROTATE_SENSIBILITY = 400;
+const VIEWPORT_CAMERA_PAN_SCALE = 0.0022;
+const VIEWPORT_CAMERA_DRAG_ZOOM_SCALE = 0.0075;
+const VIEWPORT_CAMERA_WHEEL_ZOOM_EXPONENT = 0.00225;
 const DOF_FOCUS_BONE_CANDIDATES = [
     "頭",
     "head",
@@ -1751,6 +1755,28 @@ ${beforeFogAppendBlock}
             event.preventDefault();
         }
     };
+    private readonly onCanvasWheel = (event: WheelEvent) => {
+        if (this.hasActiveCameraAnimation() && this._isPlaying) {
+            return;
+        }
+
+        const deltaScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+            ? 16
+            : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+                ? 600
+                : 1;
+        const scaledDelta = event.deltaY * deltaScale;
+        if (!Number.isFinite(scaledDelta) || Math.abs(scaledDelta) < 0.001) return;
+
+        const zoomFactor = Math.exp(scaledDelta * VIEWPORT_CAMERA_WHEEL_ZOOM_EXPONENT);
+        this.camera.radius = this.clampCameraRadius(this.camera.radius * zoomFactor);
+        this.syncCameraRotationFromCurrentView({ preserveRoll: true });
+        this.clearCameraInertialOffsets();
+        this.syncMmdCameraFromViewportCamera();
+        this.updateOrthographicCameraBounds();
+        this.onCameraTransformEdited?.();
+        event.preventDefault();
+    };
     private suspendSceneRenderCount = 0;
 
     private resolveCameraMouseDragMode(event: PointerEvent): "rotate" | "pan" | "zoom" | null {
@@ -1780,8 +1806,8 @@ ${beforeFogAppendBlock}
         if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
 
         if (mode === "rotate") {
-            const sensibilityX = Math.max(80, this.camera.angularSensibilityX || 1000);
-            const sensibilityY = Math.max(80, this.camera.angularSensibilityY || 1000);
+            const sensibilityX = Math.max(80, this.camera.angularSensibilityX || VIEWPORT_CAMERA_ROTATE_SENSIBILITY);
+            const sensibilityY = Math.max(80, this.camera.angularSensibilityY || VIEWPORT_CAMERA_ROTATE_SENSIBILITY);
             this.cameraRotationEulerDeg.x -= (deltaY / sensibilityY) * (180 / Math.PI);
             this.cameraRotationEulerDeg.y -= (deltaX / sensibilityX) * (180 / Math.PI);
             this.cameraRotationEulerDeg.y = this.normalizeCameraAngleDeg(this.cameraRotationEulerDeg.y);
@@ -1804,13 +1830,13 @@ ${beforeFogAppendBlock}
                     right.normalize();
                 }
                 const trueUp = Vector3.Cross(right, forward).normalize();
-                const panScale = Math.max(0.001, this.camera.radius * 0.0014);
+                const panScale = Math.max(0.001, this.camera.radius * VIEWPORT_CAMERA_PAN_SCALE);
                 const move = right.scale(deltaX * panScale).add(trueUp.scale(deltaY * panScale));
                 this.camera.target.addInPlace(move);
                 this.camera.position.addInPlace(move);
             }
         } else {
-            const zoomScale = Math.max(0.01, this.camera.radius * 0.0045);
+            const zoomScale = Math.max(0.01, this.camera.radius * VIEWPORT_CAMERA_DRAG_ZOOM_SCALE);
             this.camera.radius = this.clampCameraRadius(this.camera.radius + deltaY * zoomScale);
         }
 
@@ -3971,9 +3997,12 @@ ${beforeFogAppendBlock}
         this.camera.maxZ = 100000;
         this.camera.lowerRadiusLimit = 3;
         this.camera.upperRadiusLimit = null;
-        this.camera.wheelDeltaPercentage = 0.01;
+        this.camera.angularSensibilityX = VIEWPORT_CAMERA_ROTATE_SENSIBILITY;
+        this.camera.angularSensibilityY = VIEWPORT_CAMERA_ROTATE_SENSIBILITY;
+        this.camera.wheelDeltaPercentage = 0;
         this.camera.attachControl(canvas, true);
         this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
+        this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
         this.scene.activeCamera = this.camera;
         this.initializeBoneGizmoSystem();
         canvas.addEventListener("pointerdown", this.onCanvasPointerDown);
@@ -3984,6 +4013,7 @@ ${beforeFogAppendBlock}
         canvas.addEventListener("mousedown", this.onCanvasMouseDown);
         canvas.addEventListener("auxclick", this.onCanvasAuxClick);
         canvas.addEventListener("contextmenu", this.onCanvasContextMenu);
+        canvas.addEventListener("wheel", this.onCanvasWheel, { passive: false });
         this.syncCameraRotationFromCurrentView();
         this.recordViewportCameraSyncState();
         this.updateDofFocalLengthFromCameraFov();
@@ -9355,6 +9385,7 @@ ${beforeFogAppendBlock}
         this.renderingCanvas.removeEventListener("mousedown", this.onCanvasMouseDown);
         this.renderingCanvas.removeEventListener("auxclick", this.onCanvasAuxClick);
         this.renderingCanvas.removeEventListener("contextmenu", this.onCanvasContextMenu);
+        this.renderingCanvas.removeEventListener("wheel", this.onCanvasWheel);
         this.disposeBoneGizmoSystem();
         window.removeEventListener("resize", this.onWindowResize);
         if (this.resizeObserver) {
