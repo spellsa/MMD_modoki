@@ -132,11 +132,6 @@ export class Timeline {
     private waveformPeaks: Float32Array | null = null;
     private rotationOverlay: TimelineRotationOverlay | null = null;
 
-    // Drag-seek
-    private isDragging = false;
-    private dragBaseFrame = 0;
-    private dragBaseX = 0;
-
     // RAF
     private staticRaf: number | null = null;
     private overlayRaf: number | null = null;
@@ -146,7 +141,6 @@ export class Timeline {
     // Scroll sync guard
     private syncingScroll = false;
 
-    public onSeek: ((frame: number, phase: TimelineSeekPhase) => void) | null = null;
     public onSelectionChanged: ((track: KeyframeTrack | null, frame: number | null) => void) | null = null;
 
     // ── Constructor ─────────────────────────────────────────────────
@@ -184,44 +178,15 @@ export class Timeline {
         this.staticCanvas.style.pointerEvents = "auto";
         this.staticCanvas.addEventListener("mousedown", (e) => {
             this.selectTrackFromStaticEvent(e);
-            this.isDragging = true;
-            this.dragBaseFrame = this.currentFrame;
-            this.dragBaseX = e.clientX;
-            this.seekFromEvent(e, this.staticCanvas, "dragStart");
         });
 
         // Seek only: overlay layer
         this.overlayCanvas.style.pointerEvents = "auto";
-        this.overlayCanvas.addEventListener("mousedown", (e) => {
-            this.isDragging = true;
-            this.dragBaseFrame = this.currentFrame;
-            this.dragBaseX = e.clientX;
-            this.seekFromEvent(e, this.overlayCanvas, "dragStart");
-        });
 
         // Select from labels
         this.labelCanvas.style.pointerEvents = "auto";
         this.labelCanvas.addEventListener("mousedown", (e) => {
             this.selectTrackFromLabelEvent(e);
-        });
-        window.addEventListener("mousemove", (e) => {
-            if (!this.isDragging) return;
-            const dx = e.clientX - this.dragBaseX;
-            const delta = Math.round(-dx / PX_PER_F);
-            const frame = Math.max(0, this.dragBaseFrame + delta);
-            if (frame !== this.currentFrame) {
-                this.currentFrame = frame;
-                this.viewOffset = frame * PX_PER_F;
-                this.onSeek?.(frame, "dragMove");
-                this.scheduleOverlay();
-                this.scheduleStatic();
-                this.scheduleWaveform();
-            }
-        });
-        window.addEventListener("mouseup", () => {
-            if (!this.isDragging) return;
-            this.isDragging = false;
-            this.onSeek?.(this.currentFrame, "dragEnd");
         });
 
         // ── Bidirectional scroll sync ──────────────────────────────
@@ -247,21 +212,6 @@ export class Timeline {
         const trackWidth = this.trackScrollEl.clientWidth;
         if (labelWidth <= 0 || trackWidth <= 0) return PLAYHEAD_X_FALLBACK;
         return Math.max(12, Math.round((trackWidth - labelWidth) / 2));
-    }
-
-    private seekFromEvent(e: MouseEvent, canvas: HTMLCanvasElement, phase: TimelineSeekPhase = "jump"): void {
-        const rect = canvas.getBoundingClientRect();
-        const playheadX = this.getPlayheadX();
-        const frame = Math.max(
-            0,
-            Math.round(this.currentFrame + (e.clientX - rect.left - playheadX) / PX_PER_F)
-        );
-        this.currentFrame = frame;
-        this.viewOffset = frame * PX_PER_F;
-        this.onSeek?.(frame, phase);
-        this.scheduleOverlay();
-        this.scheduleStatic();
-        this.scheduleWaveform();
     }
 
     // ── Public API ───────────────────────────────────────────────────

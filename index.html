@@ -318,22 +318,6 @@
             </div>
             <div class="timeline-waveform-row">
               <div class="timeline-waveform-spacer" aria-hidden="true"></div>
-              <div class="volume-control timeline-waveform-volume">
-                <button id="btn-mute" class="volume-mute-btn" title="ミュート切替" data-i18n-title="playback.mute.title">
-                  <svg id="icon-volume-on" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-                    <path d="M2 5h3l4-3v10l-4-3H2V5zm8 .5a3 3 0 0 1 0 3" stroke="currentColor" stroke-width="1.2"
-                      fill="none" />
-                    <path d="M11.5 3.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="1.2" fill="none" />
-                  </svg>
-                  <svg id="icon-volume-off" width="14" height="14" viewBox="0 0 14 14" fill="currentColor"
-                    style="display:none">
-                    <path d="M2 5h3l4-3v10l-4-3H2V5z" />
-                    <path d="M10 5l3 4m0-4l-3 4" stroke="currentColor" stroke-width="1.2" fill="none" />
-                  </svg>
-                </button>
-                <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" value="100" step="1">
-                <span id="volume-value" class="volume-value" hidden>100%</span>
-              </div>
               <canvas id="timeline-waveform-canvas" aria-label="Waveform preview"></canvas>
             </div>
           </div>
@@ -448,6 +432,31 @@
             <span class="viewport-seek-frame-sep">/</span>
             <span id="viewport-seek-total-frame" class="viewport-seek-total-frame">0</span>
           </div>
+          <div class="viewport-seek-volume volume-control">
+            <button id="viewport-volume-mute" class="volume-mute-btn" type="button" title="ミュート切替" data-i18n-title="playback.mute.title">
+              <svg id="viewport-icon-volume-on" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+                <path d="M2 5h3l4-3v10l-4-3H2V5zm8 .5a3 3 0 0 1 0 3" stroke="currentColor" stroke-width="1.2"
+                  fill="none" />
+                <path d="M11.5 3.5a5 5 0 0 1 0 7" stroke="currentColor" stroke-width="1.2" fill="none" />
+              </svg>
+              <svg id="viewport-icon-volume-off" width="14" height="14" viewBox="0 0 14 14" fill="currentColor"
+                style="display:none" aria-hidden="true">
+                <path d="M2 5h3l4-3v10l-4-3H2V5z" />
+                <path d="M10 5l3 4m0-4l-3 4" stroke="currentColor" stroke-width="1.2" fill="none" />
+              </svg>
+            </button>
+            <input type="range" id="viewport-volume-slider" class="volume-slider" min="0" max="100" value="100" step="1" aria-label="Volume">
+          </div>
+          <label class="viewport-seek-aspect">
+            <select id="viewport-output-aspect" class="viewport-seek-aspect-select" aria-label="Aspect">
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+              <option value="viewport" data-i18n="output.aspect.viewport">現在の画面比</option>
+            </select>
+          </label>
           <div class="viewport-seek-actions" role="group" aria-label="Viewport quick actions">
             <button id="viewport-seek-export-png" class="viewport-seek-action-btn" type="button" data-i18n-title="menu.file.exportPng" aria-label="PNG出力">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">

@@ -89,6 +89,7 @@ type ExportUiElements = {
     appRoot: HTMLElement;
     busyOverlay: HTMLElement | null;
     busyText: HTMLElement | null;
+    viewportOutputAspectSelect: HTMLSelectElement | null;
     outputStartFrameInput: HTMLInputElement | null;
     outputEndFrameInput: HTMLInputElement | null;
     playbackFrameStartToggleInput: HTMLInputElement | null;
@@ -112,6 +113,7 @@ function resolveExportUiElements(): ExportUiElements {
         appRoot: document.getElementById("app") as HTMLElement,
         busyOverlay: document.getElementById("ui-busy-overlay"),
         busyText: document.getElementById("ui-busy-text"),
+        viewportOutputAspectSelect: document.getElementById("viewport-output-aspect") as HTMLSelectElement | null,
         outputStartFrameInput: document.getElementById("output-start-frame") as HTMLInputElement | null,
         outputEndFrameInput: document.getElementById("output-end-frame") as HTMLInputElement | null,
         playbackFrameStartToggleInput: document.getElementById("playback-frame-start-toggle") as HTMLInputElement | null,
@@ -235,6 +237,7 @@ export class ExportUiController {
     }
 
     public refreshLocalizedState(): void {
+        this.syncViewportAspectSelect();
         if (!this.hasBackgroundExportActive()) return;
         this.updateBackgroundExportBusyMessage();
     }
@@ -312,6 +315,7 @@ export class ExportUiController {
             ? Math.max(0.1, width / height)
             : this.resolveSelectedOutputAspectRatio();
         this.onOutputAspectChanged();
+        this.syncViewportAspectSelect();
     }
 
     public syncFrameRangeFromTimeline(force = false): void {
@@ -323,6 +327,19 @@ export class ExportUiController {
 
     public getSelectedAspectPreset(): string {
         return this.outputState.aspectPreset;
+    }
+
+    public setAspectPreset(value: string, applyPreset = true): void {
+        if (!this.isOutputAspectPreset(value)) return;
+        this.outputState.aspectPreset = value;
+        if (applyPreset) {
+            this.applyOutputPreset();
+            return;
+        }
+
+        this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
+        this.onOutputAspectChanged();
+        this.syncViewportAspectSelect();
     }
 
     public resolveSelectedOutputAspectRatio(): number {
@@ -615,6 +632,9 @@ export class ExportUiController {
             if (this.dispatchAction?.({ type: "output.sanitizeFrameRange", source: "panel", boundary: "end" })) return;
             this.sanitizeOutputFrameRange("end");
         });
+        this.elements.viewportOutputAspectSelect?.addEventListener("change", () => {
+            this.setAspectPreset(this.elements.viewportOutputAspectSelect?.value ?? "16:9");
+        });
 
         this.outputAspectRatio = this.resolveSelectedOutputAspectRatio();
         this.applyOutputPreset();
@@ -689,7 +709,7 @@ export class ExportUiController {
         return {
             getState: () => this.getOutputFormState(),
             setAspectPreset: (value) => {
-                if (this.isOutputAspectPreset(value)) this.outputState.aspectPreset = value;
+                this.setAspectPreset(value, false);
             },
             setSizePreset: (value) => {
                 if (this.isOutputSizePreset(value)) this.outputState.sizePreset = value;
@@ -747,6 +767,14 @@ export class ExportUiController {
         }
 
         this.onOutputAspectChanged();
+        this.syncViewportAspectSelect();
+    }
+
+    private syncViewportAspectSelect(): void {
+        if (!this.elements.viewportOutputAspectSelect) return;
+        if (this.elements.viewportOutputAspectSelect.value !== this.outputState.aspectPreset) {
+            this.elements.viewportOutputAspectSelect.value = this.outputState.aspectPreset;
+        }
     }
 
     public syncOutputDimensionWithLock(source: "width" | "height"): void {

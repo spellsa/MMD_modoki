@@ -137,7 +137,9 @@ export class LayoutUiController {
         const topBarHeight = this.elements.viewportTopBar && this.isElementVisible(this.elements.viewportTopBar)
             ? this.elements.viewportTopBar.getBoundingClientRect().height
             : 0;
-        const bottomBarHeight = this.elements.viewportBottomBar && this.isElementVisible(this.elements.viewportBottomBar)
+        const bottomBarHeight = this.elements.viewportBottomBar
+            && this.isElementVisible(this.elements.viewportBottomBar)
+            && !this.isElementOverlay(this.elements.viewportBottomBar)
             ? this.elements.viewportBottomBar.getBoundingClientRect().height
             : 0;
         const containerHeight = Math.max(
@@ -179,6 +181,11 @@ export class LayoutUiController {
 
     private isElementVisible(element: HTMLElement): boolean {
         return element.getClientRects().length > 0 && getComputedStyle(element).display !== "none";
+    }
+
+    private isElementOverlay(element: HTMLElement): boolean {
+        const position = getComputedStyle(element).position;
+        return position === "absolute" || position === "fixed";
     }
 
     private setupEventListeners(): void {

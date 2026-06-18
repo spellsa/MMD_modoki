@@ -933,10 +933,6 @@ export class UIController {
             this.actionDispatcher.dispatch({ type: "keyframe.registerAccessoryTransform", source: "button" });
         });
 
-        // Timeline seek
-        this.timeline.onSeek = (frame, phase) => {
-            this.actionDispatcher.dispatch({ type: "timeline.seekFrame", source: "timeline", frame, phase });
-        };
         this.timeline.onSelectionChanged = (track) => {
             this.actionDispatcher.dispatch({
                 type: "timeline.selectionChanged",
@@ -2624,29 +2620,27 @@ export class UIController {
         }, 1000);
 
         // Volume fader
-        const slider = document.getElementById("volume-slider") as HTMLInputElement;
-        const volLabel = getRequiredElement("volume-value");
-        const muteBtn = getRequiredElement("btn-mute");
-        const iconOn = getRequiredElement("icon-volume-on");
-        const iconOff = getRequiredElement("icon-volume-off");
+        const slider = document.getElementById("viewport-volume-slider") as HTMLInputElement | null;
+        const muteBtn = document.getElementById("viewport-volume-mute");
+        const iconOn = document.getElementById("viewport-icon-volume-on");
+        const iconOff = document.getElementById("viewport-icon-volume-off");
 
         const updateVolumeUI = (isMuted: boolean) => {
-            const pct = Number(slider.value);
-            volLabel.textContent = `${pct}%`;
-            iconOn.style.display = isMuted ? "none" : "";
-            iconOff.style.display = isMuted ? "" : "none";
-            muteBtn.classList.toggle("muted", isMuted);
+            if (iconOn) iconOn.style.display = isMuted ? "none" : "";
+            if (iconOff) iconOff.style.display = isMuted ? "" : "none";
+            muteBtn?.classList.toggle("muted", isMuted);
         };
 
-        slider.addEventListener("input", () => {
+        slider?.addEventListener("input", () => {
             this.mmdManager.volume = Number(slider.value) / 100;
             updateVolumeUI(this.mmdManager.muted);
         });
 
-        muteBtn.addEventListener("click", async () => {
+        muteBtn?.addEventListener("click", async () => {
             await this.mmdManager.toggleMute();
             updateVolumeUI(this.mmdManager.muted);
         });
+        updateVolumeUI(this.mmdManager.muted);
     }
 
     private showStartupRenderingDiagnostics(): void {
