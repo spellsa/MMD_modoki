@@ -14,14 +14,6 @@ export type LightingShadowSettingsDialogControllerDeps = {
     refreshUi: () => void;
 };
 
-function createCheckbox(checked: boolean): HTMLInputElement {
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.className = "popup-form-checkbox";
-    input.checked = checked;
-    return input;
-}
-
 function createRange(min: number, max: number, step: number, value: number): HTMLInputElement {
     const input = document.createElement("input");
     input.type = "range";
@@ -51,6 +43,30 @@ export class LightingShadowSettingsDialogController implements PopupContentContr
         grid.className = "popup-form-grid";
         form.appendChild(grid);
 
+        const mode = document.createElement("select");
+        mode.className = "popup-form-control";
+        [
+            { value: "cascaded", label: t("dialog.lightShadow.modeCascaded"), disabled: !this.mmdManager.isCascadedShadowSupported() },
+            { value: "standard", label: t("dialog.lightShadow.modeStandard"), disabled: false },
+        ].forEach((entry) => {
+            const option = document.createElement("option");
+            option.value = entry.value;
+            option.textContent = entry.label;
+            option.disabled = entry.disabled;
+            mode.appendChild(option);
+        });
+        mode.value = this.mmdManager.shadowMode === "standard" ? "standard" : "cascaded";
+        if (mode.selectedOptions[0]?.disabled) {
+            mode.value = "standard";
+        }
+        mode.addEventListener("change", () => {
+            const nextMode = mode.value === "standard" ? "standard" : "cascaded";
+            this.dispatchAction({ type: "effect.setShadowMode", source: "menu", mode: nextMode });
+            mode.value = this.mmdManager.shadowMode === "standard" ? "standard" : "cascaded";
+            this.refreshUi();
+        });
+        grid.appendChild(createPopupFormField(t("label.shadowMode"), mode));
+
         const quality = document.createElement("select");
         quality.className = "popup-form-control";
         [
@@ -71,43 +87,22 @@ export class LightingShadowSettingsDialogController implements PopupContentContr
         });
         grid.appendChild(createPopupFormField(t("label.shadowQuality"), quality));
 
-        this.appendRange(grid, t("label.shadowMaxZ"), 500, 12000, 50, this.mmdManager.shadowMaxZ, (value) => String(Math.round(value)), (value) => {
-            this.dispatchAction({ type: "effect.setShadowMaxZ", source: "menu", value });
-            this.refreshUi();
-            return String(Math.round(this.mmdManager.shadowMaxZ));
-        });
-        this.appendRange(grid, t("label.shadowFrustumSize"), 120, 6000, 20, this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)), (value) => {
-            this.dispatchAction({ type: "effect.setShadowFrustumSize", source: "menu", value });
-            this.refreshUi();
-            return String(Math.round(this.mmdManager.shadowFrustumSize));
-        });
         this.appendRange(grid, t("label.shadowDarkness"), 0, 100, 1, this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2), (value) => {
             this.dispatchAction({ type: "effect.setShadowDarkness", source: "menu", value: value / 100 });
             this.refreshUi();
             return this.mmdManager.shadowDarkness.toFixed(2);
         });
-        this.appendRange(grid, t("label.shadowBias"), 0, 10000, 1, this.mmdManager.shadowBias * 1_000_000, (value) => (value / 1_000_000).toFixed(5), (value) => {
-            this.dispatchAction({ type: "effect.setShadowBias", source: "menu", value: value / 1_000_000 });
-            this.refreshUi();
-            return this.mmdManager.shadowBias.toFixed(5);
-        });
-        this.appendRange(grid, t("label.shadowNormalBias"), 0, 10000, 1, this.mmdManager.shadowNormalBias * 100_000, (value) => (value / 100_000).toFixed(5), (value) => {
-            this.dispatchAction({ type: "effect.setShadowNormalBias", source: "menu", value: value / 100_000 });
-            this.refreshUi();
-            return this.mmdManager.shadowNormalBias.toFixed(5);
-        });
 
-        const softTransparentShadow = createCheckbox(this.mmdManager.softTransparentShadowEnabled);
-        softTransparentShadow.addEventListener("change", () => {
-            this.dispatchAction({
-                type: "effect.setSoftTransparentShadow",
-                source: "menu",
-                enabled: softTransparentShadow.checked,
-            });
-            softTransparentShadow.checked = this.mmdManager.softTransparentShadowEnabled;
+        this.appendRange(grid, t("label.selfShadowEdge"), 5, 120, 1, this.mmdManager.selfShadowEdgeSoftness * 1000, (value) => (value / 1000).toFixed(3), (value) => {
+            this.dispatchAction({ type: "effect.setSelfShadowSoftness", source: "menu", value: value / 1000 });
             this.refreshUi();
+            return this.mmdManager.selfShadowEdgeSoftness.toFixed(3);
         });
-        grid.appendChild(createPopupFormField(t("label.softTransparentShadow"), softTransparentShadow));
+        this.appendRange(grid, t("label.occlusionShadowEdge"), 5, 120, 1, this.mmdManager.occlusionShadowEdgeSoftness * 1000, (value) => (value / 1000).toFixed(3), (value) => {
+            this.dispatchAction({ type: "effect.setOcclusionShadowSoftness", source: "menu", value: value / 1000 });
+            this.refreshUi();
+            return this.mmdManager.occlusionShadowEdgeSoftness.toFixed(3);
+        });
 
         container.appendChild(form);
     }

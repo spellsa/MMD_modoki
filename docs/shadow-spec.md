@@ -57,26 +57,43 @@ PMX の材質フラグには、影に関するビットがあります。
 共通設定:
 
 - マップ解像度: `min(8192, GPU上限)`
-- フィルタ: `PCF`（`usePercentageCloserFiltering = true`）
+- フィルタ既定: `PCF`
 - 品質: `QUALITY_MEDIUM`
-- `Contact Hardening` は既定では無効（`useContactHardeningShadow = false`）
+- `Contact Hardening` / `Blur ESM` は既定では無効
 - 接地感調整
   - `bias = 0.0005`
   - `normalBias = 0.01`
   - `frustumEdgeFalloff = 0.26`
 - 透明材質対応
-  - `transparencyShadow = true`
-  - `enableSoftTransparentShadow = true`
-  - `useOpacityTextureForTransparentShadow = true`
+  - `transparentShadowEnabled = true`
+  - `softTransparentShadowEnabled = true`
+  - ON 時は `transparencyShadow = true` / `enableSoftTransparentShadow = true` / `useOpacityTextureForTransparentShadow = true`
 
 補足:
 
 - Babylon.js の soft transparent shadow は、fragment alpha を元に shadow map へ dithering pattern を生成する方式です。
 - 公式 Shadows ドキュメントでも、PCF などの filtering を使っていても拡大時や対象によって pattern が見える場合があり、filtering method の比較が必要とされています。
-- 現行の `CascadedShadowGenerator` は Babylon.js 実装上 `PCF / PCSS / None` 系の filter に制限されるため、Blur Exponential 系を使う場合は通常の `ShadowGenerator` へ切り替える必要があります。
-- 2026-05 時点では PCF、PCSS、Blur Exponential を実機で比較しましたが、標準 UI からは比較用の `影方式` / `影ブラー` を外し、`PCF + CascadedShadowGenerator` 固定に戻しています。
+- 現行の `CascadedShadowGenerator` は Babylon.js 実装上 `PCF / PCSS / None` 系の filter に制限されるため、Blur Exponential 系は通常の `ShadowGenerator` 時の実験項目として扱います。
+- 2026-06 時点では、照明/影品質設定に `影ぼかし` / `半影` / `半影サイズ` / `透過影` を実験用に追加しています。
 - `PCSS` は CSM を維持したまま `useContactHardeningShadow = true` を使う比較を行いましたが、半透明影の pattern は改善しませんでした。
 - `Blur Exponential` は `useBlurExponentialShadowMap = true` を使う比較を行いましたが、CSM ではなくなるため、遠景や広いステージの影安定性が PCF より落ちました。
+
+影フィルタ実験 UI:
+
+- `半影` ON:
+  - `filter = ShadowGenerator.FILTER_PCSS`
+  - `半影サイズ` を `contactHardeningLightSizeUVRatio` に反映する
+- `半影` OFF かつ `影ぼかし > 0`:
+  - `filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP`
+  - `useKernelBlur = true`
+  - `blurScale = 2`
+  - `blurKernel = 影ぼかし`
+- `半影` OFF かつ `影ぼかし = 0`:
+  - `filter = ShadowGenerator.FILTER_PCF`
+- `透過影` OFF:
+  - `transparencyShadow = false`
+  - `enableSoftTransparentShadow = false`
+  - `useOpacityTextureForTransparentShadow = false`
 
 `CascadedShadowGenerator` 使用時の設定:
 
@@ -93,9 +110,9 @@ PMX の材質フラグには、影に関するビットがあります。
 投影範囲の考え方:
 
 - 通常 `ShadowGenerator`:
-  - `dirLight.shadowFrustumSize = shadowFrustumSize`
+  - `dirLight.shadowFrustumSize = shadowMaxZ`
   - `dirLight.shadowMinZ = 1`
-  - `dirLight.shadowMaxZ = max(500, shadowFrustumSize * 6)`
+  - `dirLight.shadowMaxZ = shadowMaxZ`
 - `CascadedShadowGenerator`:
   - `dirLight.shadowFrustumSize = 960`
   - `dirLight.shadowMinZ = 1`
@@ -105,9 +122,9 @@ PMX の材質フラグには、影に関するビットがあります。
 補足:
 
 - 近景キャラと遠景背景で必要な影密度が異なるため、現行実装では `CascadedShadowGenerator` を優先します。
-- UI の `影範囲` は従来 UI 互換のため残しています。
+- 通常 `ShadowGenerator` では、UI の `影描画距離` が描画距離と投影範囲の両方を広げます。
 - ただし `CascadedShadowGenerator` 使用時は、現行仕様では `影範囲` フェーダーを無視します。
-- `影範囲` フェーダーが有効なのは、非対応環境で `ShadowGenerator` にフォールバックした場合のみです。
+- `shadowFrustumSize` は旧 project 互換の内部値として残していますが、標準 UI では直接操作しません。
 - `shadowMaxZ` を遠くしすぎると、近景の自己影や床影に使える精度が薄まります。
 - 描画限界まで影を出すより、「演出上ほしい距離まで」に絞る方が見た目は安定しやすいです。
 
@@ -320,13 +337,16 @@ UI:
 - 影の濃さ: `0.0`（UI非表示）
 - 影範囲: `220`
 - 影描画距離: `1000`
+- 影ぼかし: `0`
+- 半影: `OFF`
+- 半影サイズ: `0.035`
+- 透過影: `ON`
 - Shadow Bias: `0.0005`（UI非表示）
 - Normal Bias: `0.01`（UI非表示）
 
 照明欄の制約:
 
-- `shadowFrustumSize` の UI 上限は `6000`
-- `shadowMaxZ` の UI 範囲は `500..12000`
+- `shadowMaxZ` の UI 範囲は `500..100000`
 - 範囲を広げるほど影密度は下がるため、必要以上に大きくしない方が見た目は安定しやすい
 - 光方向は角度ではなく `X / Y / Z` ベクトルとして扱います
 - `setLightDirection(x, y, z)` ではベクトルを正規化して `DirectionalLight.direction` に適用します

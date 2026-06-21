@@ -37,12 +37,17 @@ function createHost() {
         getShadowColor: () => ({ r: 0.15, g: 0.15, b: 0.2 }),
         toonShadowInfluence: 1,
         shadowEnabled: true,
+        shadowMode: "cascaded" as const,
         shadowDarkness: 0,
         shadowFrustumSize: 220,
         shadowMaxZ: 4800,
         shadowBias: 0.0005,
         shadowNormalBias: 0.01,
         shadowFilteringQuality: 1,
+        shadowBlurKernel: 24,
+        shadowPenumbraEnabled: true,
+        shadowPenumbraSize: 0.06,
+        transparentShadowEnabled: false,
         softTransparentShadowEnabled: true,
         iblShadowsEnabled: false,
         iblShadowOpacity: 0.25,
@@ -162,6 +167,11 @@ describe("exportProjectState", () => {
         expect(project.lighting.x).toBe(-0.64);
         expect(project.lighting.y).toBe(-0.65);
         expect(project.lighting.z).toBe(-0.35);
+        expect(project.lighting.shadowMode).toBe("cascaded");
+        expect(project.lighting.shadowBlurKernel).toBe(24);
+        expect(project.lighting.shadowPenumbraEnabled).toBe(true);
+        expect(project.lighting.shadowPenumbraSize).toBe(0.06);
+        expect(project.lighting.transparentShadowEnabled).toBe(false);
         expect("_x" in project.lighting).toBe(false);
         expect("_y" in project.lighting).toBe(false);
         expect("_z" in project.lighting).toBe(false);

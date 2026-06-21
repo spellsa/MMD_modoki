@@ -165,10 +165,15 @@ export function canExecuteEditorAction(
         case "effect.setLightColor":
         case "effect.setLightFlatStrength":
         case "effect.setLightFlatColorInfluence":
+        case "effect.setShadowMode":
         case "effect.setShadowDarkness":
         case "effect.setShadowFrustumSize":
         case "effect.setShadowMaxZ":
         case "effect.setShadowFilteringQuality":
+        case "effect.setShadowBlurKernel":
+        case "effect.setShadowPenumbra":
+        case "effect.setShadowPenumbraSize":
+        case "effect.setTransparentShadow":
         case "effect.setSoftTransparentShadow":
         case "effect.setIblShadows":
         case "effect.setIblShadowOpacity":

@@ -42,6 +42,10 @@ type LightShadowHost = {
     shadowBiasValue: number;
     shadowNormalBiasValue: number;
     shadowFilteringQualityValue: number;
+    shadowBlurKernelValue: number;
+    shadowPenumbraEnabledValue: boolean;
+    shadowPenumbraSizeValue: number;
+    transparentShadowEnabledValue: boolean;
     softTransparentShadowEnabledValue: boolean;
     shadowDarknessValue: number;
     selfShadowEdgeSoftnessValue: number;
@@ -83,12 +87,12 @@ function clampShadowEdgeSoftness(v: number): number {
 }
 
 function clampShadowFrustumSize(v: number): number {
-    return Math.max(120, Math.min(6000, v));
+    return Math.max(120, Math.min(30000, v));
 }
 
 function clampShadowMaxZ(v: number): number {
     if (!Number.isFinite(v)) return DEFAULT_CSM_SHADOW_MAX_Z;
-    return Math.max(500, Math.min(12000, v));
+    return Math.max(500, Math.min(100000, v));
 }
 
 function clampShadowBias(v: number): number {
@@ -107,6 +111,16 @@ function clampShadowFilteringQuality(v: number): number {
     return Math.max(ShadowGenerator.QUALITY_HIGH, Math.min(ShadowGenerator.QUALITY_LOW, rounded));
 }
 
+function clampShadowBlurKernel(v: number): number {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(64, Math.round(v)));
+}
+
+function clampShadowPenumbraSize(v: number): number {
+    if (!Number.isFinite(v)) return 0.035;
+    return Math.max(0.001, Math.min(0.2, v));
+}
+
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
 const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
@@ -116,6 +130,36 @@ function applyShadowBiasSettings(host: LightShadowHost): void {
     if (!host.shadowGenerator) return;
     host.shadowGenerator.bias = clampShadowBias(host.shadowBiasValue);
     host.shadowGenerator.normalBias = clampShadowNormalBias(host.shadowNormalBiasValue);
+}
+
+function applyTransparentShadowSettings(host: LightShadowHost): void {
+    if (!host.shadowGenerator) return;
+    const enabled = host.transparentShadowEnabledValue !== false;
+    host.shadowGenerator.transparencyShadow = enabled;
+    host.shadowGenerator.enableSoftTransparentShadow = enabled && host.softTransparentShadowEnabledValue !== false;
+    host.shadowGenerator.useOpacityTextureForTransparentShadow = enabled;
+}
+
+function applyShadowFilterSettings(host: LightShadowHost): void {
+    if (!host.shadowGenerator) return;
+
+    const blurKernel = clampShadowBlurKernel(host.shadowBlurKernelValue);
+    const penumbraEnabled = Boolean(host.shadowPenumbraEnabledValue);
+    if (penumbraEnabled) {
+        host.shadowGenerator.filter = ShadowGenerator.FILTER_PCSS;
+    } else if (blurKernel > 0) {
+        host.shadowGenerator.filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP;
+        host.shadowGenerator.useKernelBlur = true;
+        host.shadowGenerator.blurScale = 2;
+        host.shadowGenerator.blurKernel = blurKernel;
+    } else {
+        host.shadowGenerator.filter = ShadowGenerator.FILTER_PCF;
+    }
+
+    host.shadowGenerator.filteringQuality = clampShadowFilteringQuality(host.shadowFilteringQualityValue);
+    host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
+        ? Math.max(0.001, Math.min(0.04, clampShadowPenumbraSize(host.shadowPenumbraSizeValue) * 0.25))
+        : clampShadowPenumbraSize(host.shadowPenumbraSizeValue);
 }
 
 function createShadowGenerator(host: LightShadowHost, dirLight: DirectionalLight): ShadowGenerator {
@@ -133,15 +177,11 @@ function createShadowGenerator(host: LightShadowHost, dirLight: DirectionalLight
         shadowGenerator.autoCalcDepthBounds = true;
         shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
     }
-    shadowGenerator.usePercentageCloserFiltering = true;
-    shadowGenerator.filteringQuality = clampShadowFilteringQuality(host.shadowFilteringQualityValue);
-    shadowGenerator.useContactHardeningShadow = false;
-    shadowGenerator.frustumEdgeFalloff = 0.26;
-    shadowGenerator.transparencyShadow = true;
-    shadowGenerator.enableSoftTransparentShadow = host.softTransparentShadowEnabledValue !== false;
-    shadowGenerator.useOpacityTextureForTransparentShadow = true;
-    shadowGenerator.darkness = host.shadowDarknessValue;
     host.shadowGenerator = shadowGenerator;
+    applyShadowFilterSettings(host);
+    shadowGenerator.frustumEdgeFalloff = 0.26;
+    applyTransparentShadowSettings(host);
+    shadowGenerator.darkness = host.shadowDarknessValue;
     applyShadowBiasSettings(host);
     return shadowGenerator;
 }
@@ -380,9 +420,49 @@ export function getShadowFilteringQuality(host: LightShadowHost): number {
 export function setShadowFilteringQuality(host: LightShadowHost, v: number): void {
     host.shadowFilteringQualityValue = clampShadowFilteringQuality(v);
     if (host.shadowGenerator) {
-        host.shadowGenerator.filteringQuality = host.shadowFilteringQualityValue;
+        applyShadowFilterSettings(host);
         host.engine?.releaseEffects?.();
     }
+}
+
+export function getShadowBlurKernel(host: LightShadowHost): number {
+    return clampShadowBlurKernel(host.shadowBlurKernelValue);
+}
+
+export function setShadowBlurKernel(host: LightShadowHost, v: number): void {
+    host.shadowBlurKernelValue = clampShadowBlurKernel(v);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getShadowPenumbraEnabled(host: LightShadowHost): boolean {
+    return Boolean(host.shadowPenumbraEnabledValue);
+}
+
+export function setShadowPenumbraEnabled(host: LightShadowHost, enabled: boolean): void {
+    host.shadowPenumbraEnabledValue = Boolean(enabled);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getShadowPenumbraSize(host: LightShadowHost): number {
+    return clampShadowPenumbraSize(host.shadowPenumbraSizeValue);
+}
+
+export function setShadowPenumbraSize(host: LightShadowHost, v: number): void {
+    host.shadowPenumbraSizeValue = clampShadowPenumbraSize(v);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getTransparentShadowEnabled(host: LightShadowHost): boolean {
+    return host.transparentShadowEnabledValue !== false;
+}
+
+export function setTransparentShadowEnabled(host: LightShadowHost, enabled: boolean): void {
+    host.transparentShadowEnabledValue = Boolean(enabled);
+    applyTransparentShadowSettings(host);
+    host.engine?.releaseEffects?.();
 }
 
 export function getSoftTransparentShadowEnabled(host: LightShadowHost): boolean {
@@ -391,12 +471,8 @@ export function getSoftTransparentShadowEnabled(host: LightShadowHost): boolean 
 
 export function setSoftTransparentShadowEnabled(host: LightShadowHost, enabled: boolean): void {
     host.softTransparentShadowEnabledValue = Boolean(enabled);
-    if (host.shadowGenerator) {
-        host.shadowGenerator.transparencyShadow = true;
-        host.shadowGenerator.enableSoftTransparentShadow = host.softTransparentShadowEnabledValue;
-        host.shadowGenerator.useOpacityTextureForTransparentShadow = true;
-        host.engine?.releaseEffects?.();
-    }
+    applyTransparentShadowSettings(host);
+    host.engine?.releaseEffects?.();
 }
 
 export function getShadowEnabled(host: LightShadowHost): boolean {
@@ -508,21 +584,18 @@ export function applyToonShadowInfluenceToMeshes(host: LightShadowHost, meshes: 
 export function applyShadowFrustumSize(host: LightShadowHost): void {
     if (!host.dirLight) return;
     const csmEnabled = host.shadowGenerator instanceof CascadedShadowGenerator;
-    host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : host.shadowFrustumSizeValue;
+    const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
+    host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : shadowMaxZ;
     host.dirLight.shadowMinZ = 1;
-    host.dirLight.shadowMaxZ = csmEnabled
-        ? clampShadowMaxZ(host.shadowMaxZValue)
-        : Math.max(500, host.shadowFrustumSizeValue * 6);
+    host.dirLight.shadowMaxZ = shadowMaxZ;
     if (csmEnabled) {
-        host.shadowGenerator.shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
+        host.shadowGenerator.shadowMaxZ = shadowMaxZ;
     }
 }
 
 export function applyShadowEdgeSoftness(host: LightShadowHost): void {
     if (!host.shadowGenerator) return;
-    host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
-        ? Math.max(0.003, Math.min(0.010, getEffectiveShadowEdgeSoftness(host) * 0.18))
-        : getEffectiveShadowEdgeSoftness(host);
+    applyShadowFilterSettings(host);
     const hostStatics = getLightShadowHostStatics(host);
     hostStatics.toonSelfShadowBoundarySoftness = host.selfShadowEdgeSoftnessValue;
     hostStatics.toonOcclusionShadowBoundarySoftness = host.occlusionShadowEdgeSoftnessValue;
@@ -546,9 +619,10 @@ export function setLightDirection(host: LightShadowHost, x: number, y: number, z
     const direction = rawDirection.clone();
     direction.normalize();
     host.dirLight.direction = direction;
+    const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
     const dist = host.shadowGenerator instanceof CascadedShadowGenerator
         ? DEFAULT_CSM_LIGHT_DISTANCE
-        : Math.max(90, host.shadowFrustumSizeValue * 0.35);
+        : Math.max(90, shadowMaxZ * 0.35);
     host.dirLight.position = new Vector3(
         -direction.x * dist,
         Math.abs(direction.y) * dist + 5,

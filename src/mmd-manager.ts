@@ -239,15 +239,23 @@ import {
     getShadowColor as getShadowColorImpl,
     getShadowEnabled as getShadowEnabledImpl,
     getShadowBias as getShadowBiasImpl,
+    getShadowBlurKernel as getShadowBlurKernelImpl,
     getShadowMaxZ as getShadowMaxZImpl,
     getShadowNormalBias as getShadowNormalBiasImpl,
+    getShadowPenumbraEnabled as getShadowPenumbraEnabledImpl,
+    getShadowPenumbraSize as getShadowPenumbraSizeImpl,
+    getTransparentShadowEnabled as getTransparentShadowEnabledImpl,
     setLightColor as setLightColorImpl,
     setLightDirection as setLightDirectionImpl,
     setShadowColor as setShadowColorImpl,
     setShadowEnabled as setShadowEnabledImpl,
     setShadowBias as setShadowBiasImpl,
+    setShadowBlurKernel as setShadowBlurKernelImpl,
     setShadowMaxZ as setShadowMaxZImpl,
     setShadowNormalBias as setShadowNormalBiasImpl,
+    setShadowPenumbraEnabled as setShadowPenumbraEnabledImpl,
+    setShadowPenumbraSize as setShadowPenumbraSizeImpl,
+    setTransparentShadowEnabled as setTransparentShadowEnabledImpl,
 } from "./scene/light-shadow-controller";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
 import {
@@ -702,6 +710,8 @@ type SceneModelEntry = {
     contactShadowMesh: Mesh | null;
     castShadow: boolean;
 };
+
+export type ShadowMode = "cascaded" | "standard";
 
 type ContactShadowBlobKind = "body" | "leftFoot" | "rightFoot";
 type ContactShadowBlobMeshes = Partial<Record<ContactShadowBlobKind, Mesh>>;
@@ -1486,11 +1496,16 @@ ${beforeFogAppendBlock}
     );
     private shadowEnabled = true;
     private shadowDarknessValue = 0.0;
+    private shadowModeValue: ShadowMode = "cascaded";
     private shadowFrustumSizeValue = 220;
     private shadowMaxZValue = 1000;
     private shadowBiasValue = 0.0005;
     private shadowNormalBiasValue = 0.01;
     private shadowFilteringQualityValue = ShadowGenerator.QUALITY_MEDIUM;
+    private shadowBlurKernelValue = 0;
+    private shadowPenumbraEnabledValue = false;
+    private shadowPenumbraSizeValue = 0.035;
+    private transparentShadowEnabledValue = true;
     private softTransparentShadowEnabledValue = true;
     private iblShadowsEnabledValue = false;
     private iblShadowOpacityValue = 0.6;
@@ -2163,7 +2178,8 @@ ${beforeFogAppendBlock}
     private createConfiguredShadowGenerator(dirLight: DirectionalLight): ShadowGenerator {
         const maxTextureSize = this.engine.getCaps().maxTextureSize ?? 4096;
         const shadowMapSize = Math.min(8192, maxTextureSize);
-        const shadowGenerator = CascadedShadowGenerator.IsSupported
+        const useCascaded = this.shadowModeValue === "cascaded" && CascadedShadowGenerator.IsSupported;
+        const shadowGenerator = useCascaded
             ? new CascadedShadowGenerator(shadowMapSize, dirLight, undefined, this.camera)
             : new ShadowGenerator(shadowMapSize, dirLight);
 
@@ -2178,18 +2194,64 @@ ${beforeFogAppendBlock}
             dirLight.shadowMaxZ = this.shadowMaxZValue;
         }
 
-        shadowGenerator.usePercentageCloserFiltering = true;
+        if (this.shadowPenumbraEnabledValue) {
+            shadowGenerator.filter = ShadowGenerator.FILTER_PCSS;
+        } else if (this.shadowBlurKernelValue > 0) {
+            shadowGenerator.filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP;
+            shadowGenerator.useKernelBlur = true;
+            shadowGenerator.blurScale = 2;
+            shadowGenerator.blurKernel = this.shadowBlurKernelValue;
+        } else {
+            shadowGenerator.filter = ShadowGenerator.FILTER_PCF;
+        }
         shadowGenerator.filteringQuality = this.shadowFilteringQualityValue;
-        shadowGenerator.useContactHardeningShadow = false;
+        shadowGenerator.contactHardeningLightSizeUVRatio = shadowGenerator instanceof CascadedShadowGenerator
+            ? Math.max(0.001, Math.min(0.04, this.shadowPenumbraSizeValue * 0.25))
+            : this.shadowPenumbraSizeValue;
 
         shadowGenerator.bias = this.shadowBiasValue;
         shadowGenerator.normalBias = this.shadowNormalBiasValue;
         shadowGenerator.frustumEdgeFalloff = 0.26;
-        shadowGenerator.transparencyShadow = true;
-        shadowGenerator.enableSoftTransparentShadow = this.softTransparentShadowEnabledValue;
-        shadowGenerator.useOpacityTextureForTransparentShadow = true;
+        shadowGenerator.transparencyShadow = this.transparentShadowEnabledValue;
+        shadowGenerator.enableSoftTransparentShadow = this.transparentShadowEnabledValue && this.softTransparentShadowEnabledValue;
+        shadowGenerator.useOpacityTextureForTransparentShadow = this.transparentShadowEnabledValue;
         shadowGenerator.darkness = this.shadowEnabled ? this.shadowDarknessValue : 0;
         return shadowGenerator;
+    }
+
+    public isCascadedShadowSupported(): boolean {
+        return CascadedShadowGenerator.IsSupported;
+    }
+
+    public getEffectiveShadowMode(): ShadowMode {
+        return this.shadowGenerator instanceof CascadedShadowGenerator ? "cascaded" : "standard";
+    }
+
+    public get shadowMode(): ShadowMode {
+        return this.shadowModeValue;
+    }
+
+    public set shadowMode(mode: ShadowMode) {
+        const requestedMode: ShadowMode = mode === "standard" ? "standard" : "cascaded";
+        const nextMode: ShadowMode = requestedMode === "cascaded" && !CascadedShadowGenerator.IsSupported
+            ? "standard"
+            : requestedMode;
+        if (this.shadowModeValue === nextMode && this.getEffectiveShadowMode() === nextMode) return;
+
+        this.shadowModeValue = nextMode;
+        if (!this.dirLight) return;
+
+        const previousGenerator = this.shadowGenerator;
+        this.shadowGenerator = this.createConfiguredShadowGenerator(this.dirLight);
+        previousGenerator?.dispose();
+        this.applyShadowFrustumSize();
+        this.applyShadowEdgeSoftness();
+        this.applyShadowCasterStateToAllModels();
+        if (this.dirLight) {
+            const direction = this.getSerializedLightDirection();
+            this.setLightDirection(direction.x, direction.y, direction.z);
+        }
+        this.engine.releaseEffects();
     }
 
     public getActiveModelVisibility(): boolean {
@@ -4048,6 +4110,7 @@ ${beforeFogAppendBlock}
         this.applyLightColorTemperature();
 
         this.shadowGenerator = this.createConfiguredShadowGenerator(dirLight);
+        this.applyShadowFrustumSize();
         this.applyShadowEdgeSoftness();
 
         // Ground
@@ -7773,17 +7836,40 @@ ${beforeFogAppendBlock}
         }
     }
 
+    get shadowBlurKernel(): number {
+        return getShadowBlurKernelImpl(this);
+    }
+    set shadowBlurKernel(v: number) {
+        setShadowBlurKernelImpl(this, v);
+    }
+
+    get shadowPenumbraEnabled(): boolean {
+        return getShadowPenumbraEnabledImpl(this);
+    }
+    set shadowPenumbraEnabled(v: boolean) {
+        setShadowPenumbraEnabledImpl(this, v);
+    }
+
+    get shadowPenumbraSize(): number {
+        return getShadowPenumbraSizeImpl(this);
+    }
+    set shadowPenumbraSize(v: number) {
+        setShadowPenumbraSizeImpl(this, v);
+    }
+
+    get transparentShadowEnabled(): boolean {
+        return getTransparentShadowEnabledImpl(this);
+    }
+    set transparentShadowEnabled(v: boolean) {
+        setTransparentShadowEnabledImpl(this, v);
+    }
+
     get softTransparentShadowEnabled(): boolean {
         return this.softTransparentShadowEnabledValue;
     }
     set softTransparentShadowEnabled(v: boolean) {
         this.softTransparentShadowEnabledValue = Boolean(v);
-        if (this.shadowGenerator) {
-            this.shadowGenerator.transparencyShadow = true;
-            this.shadowGenerator.enableSoftTransparentShadow = this.softTransparentShadowEnabledValue;
-            this.shadowGenerator.useOpacityTextureForTransparentShadow = true;
-            this.engine.releaseEffects();
-        }
+        setTransparentShadowEnabledImpl(this, this.transparentShadowEnabledValue);
     }
 
     get iblShadowsEnabled(): boolean {
@@ -7833,7 +7919,7 @@ ${beforeFogAppendBlock}
     }
 
     private clampShadowFrustumSize(v: number): number {
-        return Math.max(120, Math.min(6000, v));
+        return Math.max(120, Math.min(30000, v));
     }
 
     private getEffectiveShadowEdgeSoftness(): number {

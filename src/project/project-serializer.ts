@@ -44,12 +44,17 @@ type ProjectExportHost = {
     lightFlatColorInfluence: number;
     toonShadowInfluence: number;
     shadowEnabled: boolean;
+    shadowMode: "cascaded" | "standard";
     shadowDarkness: number;
     shadowFrustumSize: number;
     shadowMaxZ: number;
     shadowBias: number;
     shadowNormalBias: number;
     shadowFilteringQuality: number;
+    shadowBlurKernel: number;
+    shadowPenumbraEnabled: boolean;
+    shadowPenumbraSize: number;
+    transparentShadowEnabled: boolean;
     softTransparentShadowEnabled: boolean;
     iblShadowsEnabled: boolean;
     iblShadowOpacity: number;
@@ -266,12 +271,17 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             shadowColor: host.getShadowColor(),
             toonShadowInfluence: host.toonShadowInfluence,
             shadowEnabled: host.shadowEnabled,
+            shadowMode: host.shadowMode,
             shadowDarkness: host.shadowDarkness,
             shadowFrustumSize: host.shadowFrustumSize,
             shadowMaxZ: host.shadowMaxZ,
             shadowBias: host.shadowBias,
             shadowNormalBias: host.shadowNormalBias,
             shadowFilteringQuality: host.shadowFilteringQuality,
+            shadowBlurKernel: host.shadowBlurKernel,
+            shadowPenumbraEnabled: host.shadowPenumbraEnabled,
+            shadowPenumbraSize: host.shadowPenumbraSize,
+            transparentShadowEnabled: host.transparentShadowEnabled,
             softTransparentShadowEnabled: host.softTransparentShadowEnabled,
             iblShadowsEnabled: host.iblShadowsEnabled,
             iblShadowOpacity: host.iblShadowOpacity,

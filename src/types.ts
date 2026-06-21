@@ -280,12 +280,17 @@ export interface ProjectLightingState {
     shadowColor?: ProjectRgbColor;
     toonShadowInfluence?: number;
     shadowEnabled: boolean;
+    shadowMode?: "cascaded" | "standard";
     shadowDarkness: number;
     shadowFrustumSize?: number;
     shadowMaxZ?: number;
     shadowBias?: number;
     shadowNormalBias?: number;
     shadowFilteringQuality?: number;
+    shadowBlurKernel?: number;
+    shadowPenumbraEnabled?: boolean;
+    shadowPenumbraSize?: number;
+    transparentShadowEnabled?: boolean;
     softTransparentShadowEnabled?: boolean;
     iblShadowsEnabled?: boolean;
     iblShadowOpacity?: number;

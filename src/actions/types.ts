@@ -197,10 +197,15 @@ export type EffectAction =
     | { type: "effect.setLightColor"; source: ActionSource; r: number; g: number; b: number }
     | { type: "effect.setLightFlatStrength"; source: ActionSource; value: number }
     | { type: "effect.setLightFlatColorInfluence"; source: ActionSource; value: number }
+    | { type: "effect.setShadowMode"; source: ActionSource; mode: "cascaded" | "standard" }
     | { type: "effect.setShadowDarkness"; source: ActionSource; value: number }
     | { type: "effect.setShadowFrustumSize"; source: ActionSource; value: number }
     | { type: "effect.setShadowMaxZ"; source: ActionSource; value: number }
     | { type: "effect.setShadowFilteringQuality"; source: ActionSource; value: number }
+    | { type: "effect.setShadowBlurKernel"; source: ActionSource; value: number }
+    | { type: "effect.setShadowPenumbra"; source: ActionSource; enabled: boolean }
+    | { type: "effect.setShadowPenumbraSize"; source: ActionSource; value: number }
+    | { type: "effect.setTransparentShadow"; source: ActionSource; enabled: boolean }
     | { type: "effect.setSoftTransparentShadow"; source: ActionSource; enabled: boolean }
     | { type: "effect.setIblShadows"; source: ActionSource; enabled: boolean }
     | { type: "effect.setIblShadowOpacity"; source: ActionSource; value: number }

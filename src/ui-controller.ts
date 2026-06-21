@@ -2351,6 +2351,9 @@ export class UIController {
         this.actionDispatcher.register("effect.setLightFlatColorInfluence", (action) => {
             this.mmdManager.lightFlatColorInfluence = action.value;
         });
+        this.actionDispatcher.register("effect.setShadowMode", (action) => {
+            this.mmdManager.shadowMode = action.mode;
+        });
         this.actionDispatcher.register("effect.setShadowDarkness", (action) => {
             this.mmdManager.shadowDarkness = action.value;
         });
@@ -2362,6 +2365,18 @@ export class UIController {
         });
         this.actionDispatcher.register("effect.setShadowFilteringQuality", (action) => {
             this.mmdManager.shadowFilteringQuality = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowBlurKernel", (action) => {
+            this.mmdManager.shadowBlurKernel = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowPenumbra", (action) => {
+            this.mmdManager.shadowPenumbraEnabled = action.enabled;
+        });
+        this.actionDispatcher.register("effect.setShadowPenumbraSize", (action) => {
+            this.mmdManager.shadowPenumbraSize = action.value;
+        });
+        this.actionDispatcher.register("effect.setTransparentShadow", (action) => {
+            this.mmdManager.transparentShadowEnabled = action.enabled;
         });
         this.actionDispatcher.register("effect.setSoftTransparentShadow", (action) => {
             this.mmdManager.softTransparentShadowEnabled = action.enabled;
@@ -2713,6 +2728,9 @@ export class UIController {
         }
         if (typeof lighting.shadowMaxZ === "number" && Number.isFinite(lighting.shadowMaxZ)) {
             this.mmdManager.shadowMaxZ = lighting.shadowMaxZ;
+        }
+        if (lighting.shadowMode === "standard" || lighting.shadowMode === "cascaded") {
+            this.mmdManager.shadowMode = lighting.shadowMode;
         }
     }
 

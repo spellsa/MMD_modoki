@@ -84,6 +84,7 @@ type ProjectImportHost = {
     lightFlatColorInfluence: number;
     setShadowColor(r: number, g: number, b: number): void;
     toonShadowInfluence: number;
+    shadowMode: "cascaded" | "standard";
     shadowDarkness: number;
     shadowFrustumSize: number;
     shadowFrustumSizeValue: number;
@@ -94,6 +95,10 @@ type ProjectImportHost = {
     shadowNormalBias: number;
     shadowNormalBiasValue: number;
     shadowFilteringQuality: number;
+    shadowBlurKernel: number;
+    shadowPenumbraEnabled: boolean;
+    shadowPenumbraSize: number;
+    transparentShadowEnabled: boolean;
     softTransparentShadowEnabled: boolean;
     iblShadowOpacity: number;
     iblShadowDistanceScale: number;
@@ -631,9 +636,24 @@ export async function importProjectState(
     host.shadowFilteringQuality = typeof data.lighting.shadowFilteringQuality === "number" && Number.isFinite(data.lighting.shadowFilteringQuality)
         ? data.lighting.shadowFilteringQuality
         : 1;
+    host.shadowBlurKernel = typeof data.lighting.shadowBlurKernel === "number" && Number.isFinite(data.lighting.shadowBlurKernel)
+        ? data.lighting.shadowBlurKernel
+        : 0;
+    host.shadowPenumbraEnabled = typeof data.lighting.shadowPenumbraEnabled === "boolean"
+        ? data.lighting.shadowPenumbraEnabled
+        : false;
+    host.shadowPenumbraSize = typeof data.lighting.shadowPenumbraSize === "number" && Number.isFinite(data.lighting.shadowPenumbraSize)
+        ? data.lighting.shadowPenumbraSize
+        : 0.035;
+    host.transparentShadowEnabled = typeof data.lighting.transparentShadowEnabled === "boolean"
+        ? data.lighting.transparentShadowEnabled
+        : true;
     host.softTransparentShadowEnabled = typeof data.lighting.softTransparentShadowEnabled === "boolean"
         ? data.lighting.softTransparentShadowEnabled
         : true;
+    if (data.lighting.shadowMode === "standard" || data.lighting.shadowMode === "cascaded") {
+        host.shadowMode = data.lighting.shadowMode;
+    }
     host.iblShadowOpacity = typeof data.lighting.iblShadowOpacity === "number" && Number.isFinite(data.lighting.iblShadowOpacity)
         ? data.lighting.iblShadowOpacity
         : 0.25;
