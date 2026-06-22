@@ -8,6 +8,7 @@ import {
     WEBM_CAPTURE_MODE_OPTIONS,
     type WebmExportSettingsAdapter,
 } from "./export-ui-controller";
+import { installEnterCommitNumberInput } from "./panel-control-helpers";
 import type { PopupContentController } from "./popup-dialog-controller";
 import { createPopupFormButton, createPopupFormField, createPopupFormInline } from "./popup-form-helpers";
 
@@ -119,21 +120,19 @@ export class WebmExportDialogController implements PopupContentController {
             this.syncDimensionsFromOutputState();
         });
 
-        this.widthInput?.addEventListener("input", () => {
-            this.output.setWidth(this.parseNumberInput(this.widthInput, 1920));
-            if (!this.dispatchAction({ type: "output.syncDimension", source: "menu", dimension: "width" })) {
-                this.output.getState();
-            }
-            this.syncDimensionsFromOutputState();
-        });
+        if (this.widthInput) {
+            installEnterCommitNumberInput(this.widthInput, {
+                commit: () => this.commitDimensionInput("width"),
+                revert: () => this.syncDimensionsFromOutputState(),
+            });
+        }
 
-        this.heightInput?.addEventListener("input", () => {
-            this.output.setHeight(this.parseNumberInput(this.heightInput, 1080));
-            if (!this.dispatchAction({ type: "output.syncDimension", source: "menu", dimension: "height" })) {
-                this.output.getState();
-            }
-            this.syncDimensionsFromOutputState();
-        });
+        if (this.heightInput) {
+            installEnterCommitNumberInput(this.heightInput, {
+                commit: () => this.commitDimensionInput("height"),
+                revert: () => this.syncDimensionsFromOutputState(),
+            });
+        }
 
         this.fpsSelect?.addEventListener("change", () => {
             this.output.setFps(this.parseNumberInput(this.fpsSelect, 30));
@@ -145,24 +144,18 @@ export class WebmExportDialogController implements PopupContentController {
             this.output.setUsePlaybackRange(this.usePlaybackRangeInput?.checked ?? false);
             this.syncFrameRangeEnabledState();
         });
-        this.startFrameInput?.addEventListener("input", () => {
-            this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
-            this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" });
-        });
-        this.endFrameInput?.addEventListener("input", () => {
-            this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
-            this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" });
-        });
-        this.startFrameInput?.addEventListener("change", () => {
-            this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
-            this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "start" });
-            this.syncFrameRangeFromOutputState();
-        });
-        this.endFrameInput?.addEventListener("change", () => {
-            this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
-            this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" });
-            this.syncFrameRangeFromOutputState();
-        });
+        if (this.startFrameInput) {
+            installEnterCommitNumberInput(this.startFrameInput, {
+                commit: () => this.commitFrameRangeInput("start"),
+                revert: () => this.syncFrameRangeFromOutputState(),
+            });
+        }
+        if (this.endFrameInput) {
+            installEnterCommitNumberInput(this.endFrameInput, {
+                commit: () => this.commitFrameRangeInput("end"),
+                revert: () => this.syncFrameRangeFromOutputState(),
+            });
+        }
         this.captureModeSelect?.addEventListener("change", () => {
             this.output.setCaptureMode(this.normalizeCaptureMode(this.captureModeSelect?.value));
         });
@@ -254,6 +247,29 @@ export class WebmExportDialogController implements PopupContentController {
         if (this.endFrameInput) this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
         if (this.captureModeSelect) this.output.setCaptureMode(this.normalizeCaptureMode(this.captureModeSelect.value));
         this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" });
+    }
+
+    private commitDimensionInput(dimension: "width" | "height"): void {
+        if (dimension === "width") {
+            this.output.setWidth(this.parseNumberInput(this.widthInput, 1920));
+        } else {
+            this.output.setHeight(this.parseNumberInput(this.heightInput, 1080));
+        }
+        if (!this.dispatchAction({ type: "output.syncDimension", source: "menu", dimension })) {
+            this.output.getState();
+        }
+        this.syncDimensionsFromOutputState();
+    }
+
+    private commitFrameRangeInput(boundary: "start" | "end"): void {
+        if (boundary === "start") {
+            this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
+        } else {
+            this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
+        }
+        this.dispatchAction({ type: "output.markFrameRangeCustomized", source: "menu" });
+        this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary });
+        this.syncFrameRangeFromOutputState();
     }
 
     private parseNumberInput(input: HTMLInputElement | HTMLSelectElement | null, fallback: number): number {

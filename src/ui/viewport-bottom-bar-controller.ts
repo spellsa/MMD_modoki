@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { TimelineSeekPhase } from "../actions/types";
+import { installEnterCommitNumberInput } from "./panel-control-helpers";
 
 type PlaybackRangeState = {
     startFrame: number;
@@ -184,20 +185,12 @@ export class ViewportSeekBarController {
         this.btnToggleUi?.addEventListener("click", () => this.onToggleUi());
 
         this.currentFrameInput?.addEventListener("focus", () => this.currentFrameInput?.select());
-        this.currentFrameInput?.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                this.commitCurrentFrameInput();
-                this.currentFrameInput?.blur();
-                return;
-            }
-            if (event.key === "Escape") {
-                event.preventDefault();
-                this.restoreCurrentFrameInput();
-                this.currentFrameInput?.blur();
-            }
-        });
-        this.currentFrameInput?.addEventListener("blur", () => this.commitCurrentFrameInput());
+        if (this.currentFrameInput) {
+            installEnterCommitNumberInput(this.currentFrameInput, {
+                commit: () => this.commitCurrentFrameInput(),
+                revert: () => this.restoreCurrentFrameInput(),
+            });
+        }
 
         this.installRangeInputHandlers(this.rangeStartInput, "start");
         this.installRangeInputHandlers(this.rangeEndInput, "end");
@@ -220,26 +213,14 @@ export class ViewportSeekBarController {
     }
 
     private installRangeInputHandlers(input: HTMLInputElement | null, boundary: "start" | "end"): void {
-        input?.addEventListener("focus", () => input.select());
-        input?.addEventListener("input", () => {
-            const frame = this.parseFrameInput(input);
-            if (frame === null) return;
-            this.onRangeFrameChange(boundary, frame, "input");
-        });
-        input?.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                this.commitRangeInput(input, boundary);
-                input.blur();
-                return;
-            }
-            if (event.key === "Escape") {
-                event.preventDefault();
+        if (!input) return;
+        input.addEventListener("focus", () => input.select());
+        installEnterCommitNumberInput(input, {
+            commit: () => this.commitRangeInput(input, boundary),
+            revert: () => {
                 input.value = String(boundary === "start" ? this.state.playbackRange.startFrame : this.state.playbackRange.endFrame);
-                input.blur();
-            }
+            },
         });
-        input?.addEventListener("blur", () => this.commitRangeInput(input, boundary));
     }
 
     private beginSeekDrag(event: PointerEvent): void {

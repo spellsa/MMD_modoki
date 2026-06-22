@@ -901,21 +901,11 @@ export class UIController {
         this.currentFrameEl.addEventListener("focus", () => {
             this.currentFrameEl.select();
         });
-        this.currentFrameEl.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                this.commitCurrentFrameInput();
-                this.currentFrameEl.blur();
-                return;
-            }
-            if (event.key === "Escape") {
-                event.preventDefault();
+        installEnterCommitNumberInput(this.currentFrameEl, {
+            commit: () => this.commitCurrentFrameInput(),
+            revert: () => {
                 this.currentFrameEl.value = String(this.mmdManager.currentFrame);
-                this.currentFrameEl.blur();
-            }
-        });
-        this.currentFrameEl.addEventListener("blur", () => {
-            this.commitCurrentFrameInput();
+            },
         });
 
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
@@ -3361,7 +3351,7 @@ export class UIController {
 
     private installRangeNumberInputs(root: ParentNode = document): void {
         const sliders = root.querySelectorAll<HTMLInputElement>(
-            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].effect-slider',
+            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].effect-slider, input[type="range"].effect-layer-control-slider',
         );
 
         for (const slider of sliders) {
@@ -3384,7 +3374,7 @@ export class UIController {
             numberInput.step = this.formatRangeDisplayValue(slider, slider.step && slider.step !== "any" ? Number(slider.step) : 1);
             numberInput.disabled = slider.disabled;
 
-            const labelText = parent.querySelector("label, .light-label, .effect-label, .accessory-label")?.textContent?.trim();
+            const labelText = parent.querySelector("label, .light-label, .effect-label, .effect-layer-control-label, .accessory-label")?.textContent?.trim();
             if (labelText) {
                 numberInput.setAttribute("aria-label", `${labelText} value`);
             }
@@ -4299,6 +4289,9 @@ export class UIController {
         });
 
         this.renderFrameGraphPostStack(frameGraphReady);
+        if (this.postEffectStackList) {
+            this.installRangeNumberInputs(this.postEffectStackList);
+        }
     }
 
     private isFrameGraphPostEffectActive(effectId: FrameGraphPostAddEffectId): boolean {

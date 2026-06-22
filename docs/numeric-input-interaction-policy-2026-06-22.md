@@ -21,4 +21,4 @@ MMD_modoki の数値入力欄は、MMD 本家に近い操作感として次を�
 
 共通挙動は `src/ui/panel-control-helpers.ts` の `installEnterCommitNumberInput()` に寄せる。
 
-既存のスライダー横数値欄、ボーン数値欄、アクセサリ数値欄はこの方針に合わせる。
+既存のスライダー横数値欄、ボーン数値欄、アクセサリ数値欄、モーフ数値欄、FrameGraph / エフェクト数値欄、現在フレーム入力、WebM 出力設定の数値欄はこの方針に合わせる。
