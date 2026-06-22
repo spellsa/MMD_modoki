@@ -338,16 +338,19 @@
           </div>
           <div id="timeline-action-toolbar" aria-label="キー操作" data-i18n-aria-label="timeline.keyDock.title">
             <span id="timeline-selection-label" hidden data-i18n="empty.trackNotSelected">トラック未選択</span>
-            <div class="timeline-key-dock-command-row">
-              <button id="btn-kf-copy" class="timeline-edit-btn" type="button" disabled data-i18n="button.copy">コピー</button>
-              <button id="btn-kf-paste" class="timeline-edit-btn" type="button" disabled data-i18n="button.paste">ペースト</button>
-              <button class="timeline-edit-btn" type="button" disabled data-i18n="button.flipPaste">反転P</button>
+            <div class="timeline-key-dock-button-grid">
+              <div class="timeline-key-dock-command-row">
+                <button id="btn-kf-copy" class="timeline-edit-btn" type="button" disabled data-i18n="button.copy">コピー</button>
+                <button id="btn-kf-paste" class="timeline-edit-btn" type="button" disabled data-i18n="button.paste">ペースト</button>
+                <button class="timeline-edit-btn" type="button" disabled data-i18n="button.flipPaste">反転P</button>
+              </div>
+              <div class="timeline-key-dock-register-row">
+                <button id="btn-kf-add" class="timeline-edit-btn timeline-edit-btn--strong" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
+                <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
+                <button class="timeline-edit-btn timeline-edit-btn--physics-toggle" type="button" disabled aria-pressed="false" data-i18n="timeline.keyDock.physicsToggle">物理OFF</button>
+              </div>
             </div>
-            <div class="timeline-key-dock-register-row">
-              <button id="btn-kf-add" class="timeline-edit-btn timeline-edit-btn--strong" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
-              <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
-              <button class="timeline-edit-btn timeline-edit-btn--physics-toggle" type="button" disabled aria-pressed="false" data-i18n="timeline.keyDock.physicsToggle">物理OFF</button>
-            </div>
+            <button id="btn-auto-key" class="timeline-edit-btn timeline-edit-btn--toggle timeline-edit-btn--auto" type="button" aria-pressed="false" title="Autoキー登録" data-i18n-title="timeline.key.autoKey.title" data-i18n="timeline.keyDock.auto">Auto</button>
           </div>
         </section>
 

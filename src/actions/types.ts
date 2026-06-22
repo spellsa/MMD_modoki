@@ -30,6 +30,7 @@ export type KeyframeAction =
     | { type: "keyframe.paste"; source: ActionSource }
     | { type: "keyframe.deleteSelected"; source: ActionSource }
     | { type: "keyframe.nudgeSelected"; source: ActionSource; deltaFrames: -1 | 1 }
+    | { type: "keyframe.toggleAutoKey"; source: ActionSource }
     | { type: "keyframe.registerInfo"; source: ActionSource }
     | { type: "keyframe.registerBone"; source: ActionSource }
     | { type: "keyframe.registerMorph"; source: ActionSource }

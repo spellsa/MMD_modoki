@@ -66,6 +66,7 @@
     "playback.frameStop.title":  "停止時に現在フレームへ留まる",
     "timeline.key.add.title":  "現在フレームにキーフレーム登録 (Enter / I / K / +)",
     "timeline.key.delete.title":  "選択キーフレームを削除 (Delete)",
+    "timeline.key.autoKey.title":  "ボーン/モーフ操作確定時に現在フレームへキー登録",
     "timeline.keyDock.title":  "キー操作",
     "timeline.keyDock.physics":  "物理",
     "timeline.keyDock.physicsToggle":  "物理OFF",

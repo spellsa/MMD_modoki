@@ -40,6 +40,8 @@ export function canExecuteEditorAction(
             return snapshot.hasSelectedMorphFrame ?? true;
         case "keyframe.registerAccessoryTransform":
             return snapshot.hasSelectedAccessory ?? true;
+        case "keyframe.toggleAutoKey":
+            return true;
         case "history.undo":
             return snapshot.canUndo ?? true;
         case "history.redo":

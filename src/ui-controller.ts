@@ -319,6 +319,7 @@ export class UIController {
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 120;
     private static readonly TIMELINE_WAVEFORM_FPS = 30;
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
+    private static readonly AUTO_KEY_STORAGE_KEY = "mmd_modoki.autoKey.enabled";
     private mmdManager: MmdManager;
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
@@ -350,6 +351,7 @@ export class UIController {
     private btnKeyframeCopy: HTMLButtonElement;
     private btnKeyframePaste: HTMLButtonElement;
     private btnKeyframeDelete: HTMLButtonElement;
+    private btnAutoKey: HTMLButtonElement;
     private btnKeyframeNudgeLeft: HTMLButtonElement;
     private btnKeyframeNudgeRight: HTMLButtonElement;
     private btnFrameStepLeft: HTMLButtonElement;
@@ -424,6 +426,7 @@ export class UIController {
     private readonly actionDispatcher = new ActionDispatcher();
     private readonly commandHistory = new HistoryManager();
     private pendingBoneTransformCommand: PendingBoneTransformCommand | null = null;
+    private autoKeyEnabled = false;
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
     private currentProjectFilePath: string | null = null;
@@ -475,6 +478,7 @@ export class UIController {
         this.btnKeyframeCopy = document.getElementById("btn-kf-copy") as HTMLButtonElement;
         this.btnKeyframePaste = document.getElementById("btn-kf-paste") as HTMLButtonElement;
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
+        this.btnAutoKey = document.getElementById("btn-auto-key") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
         this.btnKeyframeNudgeRight = document.getElementById("btn-kf-nudge-right") as HTMLButtonElement;
         this.btnFrameStepLeft = document.getElementById("btn-frame-step-left") as HTMLButtonElement;
@@ -606,6 +610,7 @@ export class UIController {
             },
         });
         this.setupEventListeners();
+        this.setAutoKeyEnabled(this.readAutoKeyEnabled(), { persist: false, toast: false });
         this.setupCallbacks();
         this.setupKeyboard();
         this.setupFileDrop();
@@ -975,6 +980,9 @@ export class UIController {
         this.bottomPanel.onMorphValueEdited = (frameIndex) => {
             this.actionDispatcher.dispatch({ type: "edit.morphValueChanged", source: "panel", frameIndex });
         };
+        this.bottomPanel.onMorphValueEditCommitted = (morph) => {
+            this.registerAutoKeyForEditedMorph(morph);
+        };
         this.bottomPanel.onMorphKeyframeRequested = (morph) => {
             this.registerSingleMorphKeyframeAtCurrentFrame(morph);
         };
@@ -990,6 +998,9 @@ export class UIController {
         });
         this.btnKeyframeDelete.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.deleteSelected", source: "button" });
+        });
+        this.btnAutoKey.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.toggleAutoKey", source: "button" });
         });
         this.btnKeyframeNudgeLeft.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "playback.seekAdjacentKeyframe", source: "button", direction: -1 });
@@ -1998,6 +2009,9 @@ export class UIController {
         this.actionDispatcher.register("keyframe.deleteSelected", (action) => this.deleteSelectedKeyframe(action.source));
         this.actionDispatcher.register("keyframe.nudgeSelected", (action) => {
             this.nudgeSelectedKeyframe(action.deltaFrames);
+        });
+        this.actionDispatcher.register("keyframe.toggleAutoKey", () => {
+            this.setAutoKeyEnabled(!this.autoKeyEnabled, { persist: true, toast: true });
         });
         this.actionDispatcher.register("history.undo", () => this.undoLastCommand());
         this.actionDispatcher.register("history.redo", () => this.redoLastCommand());
@@ -5494,6 +5508,42 @@ export class UIController {
         if (!command) return;
 
         this.commandHistory.push(command);
+        this.registerAutoKeyForEditedBone(boneName);
+    }
+
+    private registerAutoKeyForEditedBone(boneName: string): void {
+        if (!this.autoKeyEnabled || boneName === "Camera") return;
+        this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "system");
+    }
+
+    private registerAutoKeyForEditedMorph(morph: { frameIndex: number; name: string; value: number }): void {
+        if (!this.autoKeyEnabled) return;
+        this.registerSingleMorphKeyframeAtCurrentFrame(morph, { toast: false });
+    }
+
+    private readAutoKeyEnabled(): boolean {
+        try {
+            const value = localStorage.getItem(UIController.AUTO_KEY_STORAGE_KEY);
+            return value === "1" || value === "true";
+        } catch {
+            return false;
+        }
+    }
+
+    private setAutoKeyEnabled(enabled: boolean, options: { persist: boolean; toast: boolean }): void {
+        this.autoKeyEnabled = enabled;
+        this.btnAutoKey.setAttribute("aria-pressed", enabled ? "true" : "false");
+        this.btnAutoKey.classList.toggle("is-active", enabled);
+        if (options.persist) {
+            try {
+                localStorage.setItem(UIController.AUTO_KEY_STORAGE_KEY, enabled ? "1" : "0");
+            } catch {
+                // localStorage can be unavailable in restricted test/browser contexts.
+            }
+        }
+        if (options.toast) {
+            this.showToast(enabled ? "Auto Key: ON" : "Auto Key: OFF", "info");
+        }
     }
 
     private applyBottomBarBoneTransform(
@@ -7644,6 +7694,10 @@ export class UIController {
             return;
         }
 
+        this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "button");
+    }
+
+    private registerBoneKeyframeForBoneAtCurrentFrame(boneName: string, source: ActionSource): void {
         const poseSnapshot = this.captureCurrentBonePoseSnapshot(boneName);
 
         const preferredCategories: TrackCategory[] = boneName === "Camera"
@@ -7672,7 +7726,7 @@ export class UIController {
                 return;
             }
         }
-        this.addKeyframeAtCurrentFrame(poseSnapshot, "button");
+        this.addKeyframeAtCurrentFrame(poseSnapshot, source);
     }
 
     private tryRegisterEditorCameraKeyframe(
@@ -7817,7 +7871,7 @@ export class UIController {
         this.showToast("No morphs in the selected frame", "error");
     }
 
-    private registerSingleMorphKeyframeAtCurrentFrame(morph: { frameIndex: number; name: string; value: number }): void {
+    private registerSingleMorphKeyframeAtCurrentFrame(morph: { frameIndex: number; name: string; value: number }, options: { toast: boolean } = { toast: true }): void {
         const frame = this.mmdManager.currentFrame;
         const touched = this.mmdManager.applyTimelineKeyframePayload(
             { name: morph.name, category: "morph" },
@@ -7836,10 +7890,12 @@ export class UIController {
         this.bottomPanel.updateMorphKeyframeButtonStates(frame);
         this.timeline.setSelectedFrame(null);
         this.updateTimelineEditState();
-        this.showToast(
-            touched ? `Frame ${frame}: ${morph.name} morph keyframe added` : `Frame ${frame}: ${morph.name} morph keyframe already registered`,
-            "success",
-        );
+        if (options.toast) {
+            this.showToast(
+                touched ? `Frame ${frame}: ${morph.name} morph keyframe added` : `Frame ${frame}: ${morph.name} morph keyframe already registered`,
+                "success",
+            );
+        }
     }
 
     private registerAccessoryTransformKeyframe(): void {

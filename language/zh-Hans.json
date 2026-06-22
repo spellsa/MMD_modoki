@@ -66,6 +66,7 @@
     "playback.frameStop.title":  "停止时停留在当前帧",
     "timeline.key.add.title":  "Add keyframe at current frame (Enter / I / K / +)",
     "timeline.key.delete.title":  "Delete selected keyframe (Delete)",
+    "timeline.key.autoKey.title":  "骨骼/变形操作确定时在当前帧注册关键帧",
     "timeline.keyDock.title":  "关键帧操作",
     "timeline.keyDock.physics":  "物理",
     "timeline.keyDock.physicsToggle":  "物理OFF",

@@ -41,6 +41,7 @@ export class BottomPanel {
     public onBoneTransformEdited: ((boneName: string | null) => void) | null = null;
     public onBoneTransformEditCommitted: ((boneName: string | null) => void) | null = null;
     public onMorphValueEdited: ((frameIndex: number | null) => void) | null = null;
+    public onMorphValueEditCommitted: ((morph: { frameIndex: number; index: number; name: string; value: number }) => void) | null = null;
     public onMorphKeyframeRequested: ((morph: { frameIndex: number; index: number; name: string; value: number }) => void) | null = null;
     public onRangeInputsRendered: ((root: ParentNode) => void) | null = null;
     public onRangeSliderSynced: ((slider: HTMLInputElement) => void) | null = null;
@@ -661,6 +662,18 @@ export class BottomPanel {
             this.setMorphKeyframeButtonState(keyframeButton, "dirty");
             this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
             this.onMorphValueEdited?.(this.currentMorphFrameIndex);
+        });
+        slider.addEventListener("change", () => {
+            const rawValue = Number.parseFloat(slider.value);
+            const value = Number.isFinite(rawValue) ? rawValue : 0;
+            this.currentMorphFrameIndex = morphInfo.frameIndex;
+            this.onMorphFrameSelectionChanged?.(this.currentMorphFrameIndex);
+            this.onMorphValueEditCommitted?.({
+                frameIndex: morphInfo.frameIndex,
+                index: morphIndex,
+                name: morphName,
+                value,
+            });
         });
         keyframeButton.addEventListener("click", () => {
             const rawValue = Number.parseFloat(slider.value);
