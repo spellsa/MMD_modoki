@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
 import type { EditorAction } from "../actions/types";
-import { createPanelNumberGrid } from "./panel-control-helpers";
+import { createPanelNumberGrid, installEnterCommitNumberInput } from "./panel-control-helpers";
 
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type ToastType = "success" | "error" | "info";
@@ -217,12 +217,12 @@ export class AccessoryPanelController {
         if (!container) return;
 
         const grid = createPanelNumberGrid([
-            { key: "px", id: "accessory-pos-x", label: "X", min: -100, max: 100, step: 0.1, value: "0.0" },
-            { key: "py", id: "accessory-pos-y", label: "Y", min: -100, max: 100, step: 0.1, value: "0.0" },
-            { key: "pz", id: "accessory-pos-z", label: "Z", min: -100, max: 100, step: 0.1, value: "0.0" },
-            { key: "rx", id: "accessory-rot-x", label: "Rx", min: -180, max: 180, step: 0.1, value: "0.0" },
-            { key: "ry", id: "accessory-rot-y", label: "Ry", min: -180, max: 180, step: 0.1, value: "0.0" },
-            { key: "rz", id: "accessory-rot-z", label: "Rz", min: -180, max: 180, step: 0.1, value: "0.0" },
+            { key: "px", id: "accessory-pos-x", label: "X", min: -100, max: 100, step: 1, value: "0.0" },
+            { key: "py", id: "accessory-pos-y", label: "Y", min: -100, max: 100, step: 1, value: "0.0" },
+            { key: "pz", id: "accessory-pos-z", label: "Z", min: -100, max: 100, step: 1, value: "0.0" },
+            { key: "rx", id: "accessory-rot-x", label: "Rx", min: -180, max: 180, step: 1, value: "0.0" },
+            { key: "ry", id: "accessory-rot-y", label: "Ry", min: -180, max: 180, step: 1, value: "0.0" },
+            { key: "rz", id: "accessory-rot-z", label: "Rz", min: -180, max: 180, step: 1, value: "0.0" },
             { key: "s", id: "accessory-scale", label: "Si", min: 1, max: 5000, step: 1, value: "100" },
             { key: "tr", id: "accessory-tr", label: "Tr", min: 0, max: 1, step: 0.01, value: "0.00", disabled: true },
         ], "accessory-transform");
@@ -266,12 +266,9 @@ export class AccessoryPanelController {
             this.onAccessoryTransformChanged(selectedIndex);
         };
 
-        input.addEventListener("change", apply);
-        input.addEventListener("blur", apply);
-        input.addEventListener("keydown", (event) => {
-            if (event.key !== "Enter") return;
-            event.preventDefault();
-            input.blur();
+        installEnterCommitNumberInput(input, {
+            commit: apply,
+            revert: () => this.syncTransformSlidersFromSelection(),
         });
     }
 

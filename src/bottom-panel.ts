@@ -7,6 +7,7 @@ import {
     createPanelMorphCategory,
     createPanelNumberGrid,
     createPanelSliderValueRow,
+    installEnterCommitNumberInput,
     setPanelEmptyState,
 } from "./ui/panel-control-helpers";
 
@@ -308,17 +309,18 @@ export class BottomPanel {
             min: number;
             max: number;
             step: number;
+            displayStep?: number;
             value: number;
             disabled?: boolean;
         }[] = [];
 
         controlDefs.push(
-            { key: "tx", label: "X", min: -30, max: 30, step: 0.01, value: transform.position.x, disabled: !boneControlInfo.movable },
-            { key: "ty", label: "Y", min: -30, max: 30, step: 0.01, value: transform.position.y, disabled: !boneControlInfo.movable },
-            { key: "tz", label: "Z", min: -30, max: 30, step: 0.01, value: transform.position.z, disabled: !boneControlInfo.movable },
-            { key: "rx", label: "Rx", min: -180, max: 180, step: 0.1, value: transform.rotation.x, disabled: !boneControlInfo.rotatable },
-            { key: "ry", label: "Ry", min: -180, max: 180, step: 0.1, value: transform.rotation.y, disabled: !boneControlInfo.rotatable },
-            { key: "rz", label: "Rz", min: -180, max: 180, step: 0.1, value: transform.rotation.z, disabled: !boneControlInfo.rotatable },
+            { key: "tx", label: "X", min: -30, max: 30, step: 1, displayStep: 0.01, value: transform.position.x, disabled: !boneControlInfo.movable },
+            { key: "ty", label: "Y", min: -30, max: 30, step: 1, displayStep: 0.01, value: transform.position.y, disabled: !boneControlInfo.movable },
+            { key: "tz", label: "Z", min: -30, max: 30, step: 1, displayStep: 0.01, value: transform.position.z, disabled: !boneControlInfo.movable },
+            { key: "rx", label: "Rx", min: -180, max: 180, step: 1, displayStep: 0.1, value: transform.rotation.x, disabled: !boneControlInfo.rotatable },
+            { key: "ry", label: "Ry", min: -180, max: 180, step: 1, displayStep: 0.1, value: transform.rotation.y, disabled: !boneControlInfo.rotatable },
+            { key: "rz", label: "Rz", min: -180, max: 180, step: 1, displayStep: 0.1, value: transform.rotation.z, disabled: !boneControlInfo.rotatable },
         );
 
         if (isCameraControl) {
@@ -339,8 +341,7 @@ export class BottomPanel {
             min: def.min,
             max: def.max,
             step: def.step,
-            value: this.formatPanelNumberValue(this.clamp(def.value, def.min, def.max), def.step),
-            disabled: def.disabled,
+            value: this.formatPanelNumberValue(this.clamp(def.value, def.min, def.max), def.displayStep ?? def.step),
             legacyRowClass: "bone-number-row",
             legacyLabelClass: "bone-number-label",
             legacyInputClass: "bone-number-input",
@@ -348,7 +349,10 @@ export class BottomPanel {
         for (const def of controlDefs) {
             const input = grid.inputs.get(def.key);
             if (!input) continue;
+            input.dataset.displayStep = String(def.displayStep ?? def.step);
             this.configureBoneNumberInput(input, def);
+            input.classList.toggle("is-channel-unavailable", def.disabled === true);
+            input.setAttribute("aria-disabled", def.disabled === true ? "true" : "false");
         }
         this.boneContainer.appendChild(grid.element);
     }
@@ -359,6 +363,7 @@ export class BottomPanel {
         min: number;
         max: number;
         step: number;
+        displayStep?: number;
         value: number;
         disabled?: boolean;
     }): void {
@@ -373,14 +378,14 @@ export class BottomPanel {
             this.onBoneTransformEditCommitted?.(this.currentBoneName);
         };
         const applyInputValue = (): void => {
-            const parsed = Number(input.value);
+            const parsed = input.valueAsNumber;
             if (!Number.isFinite(parsed)) {
                 this.syncSelectedBoneSlidersFromRuntime(true);
                 return;
             }
             const clamped = this.clamp(parsed, def.min, def.max);
             if (clamped !== parsed) {
-                input.value = this.formatSliderValue(clamped, def.step);
+                input.value = this.formatSliderValue(clamped, def.displayStep ?? def.step);
             }
             this.applyBoneTransformFromSliders();
             if (this.currentBoneName) {
@@ -388,26 +393,11 @@ export class BottomPanel {
             }
         };
 
-        input.addEventListener("focus", beginInputInteraction);
-        input.addEventListener("pointerdown", beginInputInteraction);
-        input.addEventListener("input", applyInputValue);
-        input.addEventListener("change", () => {
-            applyInputValue();
-            endInputInteraction();
-        });
-        input.addEventListener("blur", endInputInteraction);
-        input.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                applyInputValue();
-                input.blur();
-                return;
-            }
-            if (event.key === "Escape") {
-                event.preventDefault();
-                this.syncSelectedBoneSlidersFromRuntime(true);
-                input.blur();
-            }
+        installEnterCommitNumberInput(input, {
+            commit: applyInputValue,
+            revert: () => this.syncSelectedBoneSlidersFromRuntime(true),
+            onBegin: beginInputInteraction,
+            onEnd: endInputInteraction,
         });
 
         this.boneSliders.set(def.key, input);
@@ -456,7 +446,7 @@ export class BottomPanel {
 
             const min = Number.parseFloat(slider.min);
             const max = Number.parseFloat(slider.max);
-            const step = Number.parseFloat(slider.step || "1");
+            const step = Number.parseFloat(slider.dataset.displayStep ?? (slider.step || "1"));
             const safeValue = this.clamp(
                 rawValue,
                 Number.isFinite(min) ? min : rawValue,
@@ -508,25 +498,15 @@ export class BottomPanel {
             return;
         }
 
-        const boneControlInfo = this.boneControlMap.get(this.currentBoneName) ?? {
-            name: this.currentBoneName,
-            movable: true,
-            rotatable: true,
-        };
+        const tx = this.getBoneSliderNumber("tx");
+        const ty = this.getBoneSliderNumber("ty");
+        const tz = this.getBoneSliderNumber("tz");
+        this.mmdManager.setBoneTranslation(this.currentBoneName, tx, ty, tz, false);
 
-        if (boneControlInfo.movable) {
-            const tx = this.getBoneSliderNumber("tx");
-            const ty = this.getBoneSliderNumber("ty");
-            const tz = this.getBoneSliderNumber("tz");
-            this.mmdManager.setBoneTranslation(this.currentBoneName, tx, ty, tz);
-        }
-
-        if (boneControlInfo.rotatable) {
-            const rx = this.getBoneSliderNumber("rx");
-            const ry = this.getBoneSliderNumber("ry");
-            const rz = this.getBoneSliderNumber("rz");
-            this.mmdManager.setBoneRotation(this.currentBoneName, rx, ry, rz);
-        }
+        const rx = this.getBoneSliderNumber("rx");
+        const ry = this.getBoneSliderNumber("ry");
+        const rz = this.getBoneSliderNumber("rz");
+        this.mmdManager.setBoneRotation(this.currentBoneName, rx, ry, rz, false);
     }
 
     private getBoneSliderNumber(key: BoneSliderKey): number {

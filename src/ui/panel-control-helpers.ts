@@ -23,6 +23,13 @@ export type PanelNumberGrid = {
     inputs: Map<string, HTMLInputElement>;
 };
 
+export type EnterCommitNumberInputOptions = {
+    commit: () => void;
+    revert: () => void;
+    onBegin?: () => void;
+    onEnd?: () => void;
+};
+
 const panelClasses = {
     emptyState: [
         "flex",
@@ -268,6 +275,46 @@ export function createPanelNumberField(options: PanelNumberFieldOptions): PanelN
 
     row.append(label, input);
     return { row, label, input };
+}
+
+export function installEnterCommitNumberInput(input: HTMLInputElement, options: EnterCommitNumberInputOptions): void {
+    let editing = false;
+    let settled = false;
+
+    const begin = (): void => {
+        if (editing) return;
+        editing = true;
+        settled = false;
+        options.onBegin?.();
+    };
+
+    const end = (): void => {
+        if (!editing) return;
+        if (!settled) {
+            options.revert();
+        }
+        editing = false;
+        options.onEnd?.();
+    };
+
+    input.addEventListener("focus", begin);
+    input.addEventListener("pointerdown", begin);
+    input.addEventListener("blur", end);
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            options.commit();
+            settled = true;
+            input.blur();
+            return;
+        }
+        if (event.key === "Escape") {
+            event.preventDefault();
+            options.revert();
+            settled = true;
+            input.blur();
+        }
+    });
 }
 
 export function createPanelMorphCategoryGrid(legacyClass = ""): HTMLDivElement {

@@ -33,6 +33,7 @@ import { LensEffectController } from "./ui/lens-effect-controller";
 import { LutPanelController } from "./ui/lut-panel-controller";
 import { ModelInfoPanelController, MODEL_INFO_CAMERA_SELECT_VALUE, type ModelInfoSelectState } from "./ui/model-info-panel-controller";
 import { ModelEdgeController } from "./ui/model-edge-controller";
+import { installEnterCommitNumberInput } from "./ui/panel-control-helpers";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
@@ -3414,12 +3415,9 @@ export class UIController {
 
             slider.addEventListener("input", () => this.syncRangeNumberInput(slider));
             slider.addEventListener("change", () => this.syncRangeNumberInput(slider));
-            numberInput.addEventListener("change", commit);
-            numberInput.addEventListener("blur", commit);
-            numberInput.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                numberInput.blur();
+            installEnterCommitNumberInput(numberInput, {
+                commit,
+                revert: () => this.syncRangeNumberInput(slider),
             });
 
             this.syncRangeNumberInput(slider);
@@ -5472,7 +5470,7 @@ export class UIController {
                 : null;
         this.rememberEditedBonePoseSnapshot(boneName, poseSnapshot);
         this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
-        this.syncBottomPanelBoneFromEditedPose(boneName);
+        this.syncBottomPanelBoneFromEditedPose(boneName, source !== "panel");
         this.refreshCameraUiFromRuntime();
         this.refreshViewportBottomBar();
         this.updateSectionKeyframeButtons();
@@ -6173,16 +6171,16 @@ export class UIController {
         return entry.snapshot;
     }
 
-    private syncBottomPanelBoneFromEditedPose(boneName: string | null): void {
+    private syncBottomPanelBoneFromEditedPose(boneName: string | null, force = true): void {
         if (!boneName) return;
         const snapshot = this.getPendingBonePoseSnapshot(boneName);
         if (snapshot) {
             this.debugKeyframeFlow("sync bottom panel from edited pose", { boneName, snapshot });
-            this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(snapshot, true);
+            this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(snapshot, force);
             return;
         }
         this.debugKeyframeFlow("sync bottom panel from runtime pose", { boneName });
-        this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
+        this.bottomPanel.syncSelectedBoneSlidersFromRuntime(force);
     }
 
     private formatBonePoseSnapshotForLog(snapshot: SelectedBonePoseSnapshot): {

@@ -5656,6 +5656,12 @@ body.bottom-panel-resizing {
   cursor: not-allowed;
 }
 
+#bottom-panel .bone-number-input.is-channel-unavailable {
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.075);
+}
+
 /* ============================================
    Effect Controls
    ============================================ */
