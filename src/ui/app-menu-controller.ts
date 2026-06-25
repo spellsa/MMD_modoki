@@ -33,6 +33,7 @@ type AppMenuElements = {
     root: HTMLElement | null;
     groups: HTMLElement[];
     triggers: HTMLButtonElement[];
+    commandItems: HTMLButtonElement[];
     checkItems: HTMLButtonElement[];
 };
 
@@ -42,6 +43,7 @@ function resolveElements(): AppMenuElements {
         root,
         groups: root ? Array.from(root.querySelectorAll<HTMLElement>(".app-menu-group")) : [],
         triggers: root ? Array.from(root.querySelectorAll<HTMLButtonElement>(".app-menu-trigger")) : [],
+        commandItems: root ? Array.from(root.querySelectorAll<HTMLButtonElement>(".app-menu-item[data-menu-command]")) : [],
         checkItems: root ? Array.from(root.querySelectorAll<HTMLButtonElement>(".app-menu-item--check[data-menu-command]")) : [],
     };
 }
@@ -102,7 +104,7 @@ export class AppMenuController {
             const command = item.dataset.menuCommand;
             if (!command) return;
             this.executeCommand(command, item);
-            this.refreshCheckItems();
+            this.refreshMenuItems();
             this.setOpenGroup(null);
         });
 
@@ -168,12 +170,26 @@ export class AppMenuController {
 
     private setOpenGroup(group: HTMLElement | null): void {
         if (group) {
-            this.refreshCheckItems();
+            this.refreshMenuItems();
         }
         this.elements.groups.forEach((item) => {
             item.classList.toggle("menu-open", item === group);
         });
         this.openGroup = group;
+    }
+
+    private refreshMenuItems(): void {
+        this.refreshCommandItems();
+        this.refreshCheckItems();
+    }
+
+    private refreshCommandItems(): void {
+        this.elements.commandItems.forEach((item) => {
+            const command = item.dataset.menuCommand ?? "";
+            const disabled = this.resolveCommandDisabled(command);
+            if (disabled === null) return;
+            item.disabled = disabled;
+        });
     }
 
     private refreshCheckItems(): void {
@@ -184,6 +200,24 @@ export class AppMenuController {
             item.setAttribute("aria-checked", state.checked ? "true" : "false");
             item.disabled = state.disabled;
         });
+    }
+
+    private resolveCommandDisabled(command: string): boolean | null {
+        const timelineTarget = this.mmdManager.getTimelineTarget();
+        switch (command) {
+            case "edit.selectAllCameraKeys":
+            case "edit.selectAllLightKeys":
+            case "edit.selectAllSelfShadowKeys":
+            case "edit.selectAllGravityKeys":
+            case "edit.selectAllAccessoryKeys":
+                return timelineTarget !== "camera";
+            case "edit.selectAllBoneKeys":
+            case "edit.selectAllMorphKeys":
+            case "edit.selectAllDisplayIkParentKeys":
+                return timelineTarget !== "model";
+            default:
+                return null;
+        }
     }
 
     private resolveCheckState(command: string): { checked: boolean; disabled: boolean } | null {
@@ -278,6 +312,16 @@ export class AppMenuController {
                 return;
             case "edit.nextKeyframe":
                 this.dispatchAction({ type: "playback.seekAdjacentKeyframe", source: "menu", direction: 1 });
+                return;
+            case "edit.selectAllCameraKeys":
+            case "edit.selectAllLightKeys":
+            case "edit.selectAllSelfShadowKeys":
+            case "edit.selectAllGravityKeys":
+            case "edit.selectAllAccessoryKeys":
+            case "edit.selectAllBoneKeys":
+            case "edit.selectAllMorphKeys":
+            case "edit.selectAllDisplayIkParentKeys":
+                this.showToast(t("menu.toast.unhandled"), "info");
                 return;
             case "edit.deleteActiveModel":
                 this.dispatchAction({ type: "model.deleteActive", source: "menu" });
