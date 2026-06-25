@@ -47,6 +47,7 @@ const CURRENT_FRAME_COLOR = "#ff4fa3";
 const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
 const SELECTION_KEY_SEPARATOR = "\u001f";
+const RECT_SELECTION_THRESHOLD_PX = 4;
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -147,6 +148,20 @@ export class Timeline {
     private selectedFrame: number | null = null;
     private selectedKeySet = new Set<string>();
     private selectionAnchor: TimelineKeySelectionRef | null = null;
+    private pendingPointerSelection: {
+        startX: number;
+        startY: number;
+        additive: boolean;
+        event: MouseEvent;
+    } | null = null;
+    private rectangleSelection: {
+        startX: number;
+        startY: number;
+        currentX: number;
+        currentY: number;
+        baseSelection: Set<string>;
+        additive: boolean;
+    } | null = null;
     private waveformPeaks: Float32Array | null = null;
     private rotationOverlay: TimelineRotationOverlay | null = null;
 
@@ -196,8 +211,10 @@ export class Timeline {
         // Seek and select: static layer
         this.staticCanvas.style.pointerEvents = "auto";
         this.staticCanvas.addEventListener("mousedown", (e) => {
-            this.selectTrackFromStaticEvent(e);
+            this.beginStaticPointerSelection(e);
         });
+        window.addEventListener("mousemove", (e) => this.updateStaticPointerSelection(e));
+        window.addEventListener("mouseup", (e) => this.endStaticPointerSelection(e));
 
         // Seek only: overlay layer
         this.overlayCanvas.style.pointerEvents = "auto";
@@ -206,6 +223,9 @@ export class Timeline {
         this.labelCanvas.style.pointerEvents = "auto";
         this.labelCanvas.addEventListener("mousedown", (e) => {
             this.selectTrackFromLabelEvent(e);
+        });
+        this.labelCanvas.addEventListener("dblclick", (e) => {
+            this.selectAllKeysFromLabelEvent(e);
         });
 
         // ── Bidirectional scroll sync ──────────────────────────────
@@ -648,6 +668,8 @@ export class Timeline {
         ctx.lineTo(playheadX, h);
         ctx.stroke();
         ctx.restore();
+
+        this.drawRectangleSelection(ctx);
     }
 
     // ── Label column ─────────────────────────────────────────────────
@@ -713,6 +735,73 @@ export class Timeline {
         }
     }
 
+    private beginStaticPointerSelection(e: MouseEvent): void {
+        if (e.button !== 0) return;
+
+        const rect = this.staticCanvas.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        const row = this.getRowIndexAtOffset(localY);
+        if (row < 0 || row >= this.tracks.length) return;
+
+        e.preventDefault();
+        this.pendingPointerSelection = {
+            startX: localX,
+            startY: localY,
+            additive: e.ctrlKey || e.metaKey,
+            event: e,
+        };
+    }
+
+    private updateStaticPointerSelection(e: MouseEvent): void {
+        const pending = this.pendingPointerSelection;
+        if (!pending) return;
+
+        const point = this.getStaticCanvasPoint(e);
+        const dragDistance = Math.max(
+            Math.abs(point.x - pending.startX),
+            Math.abs(point.y - pending.startY),
+        );
+
+        if (!this.rectangleSelection && dragDistance < RECT_SELECTION_THRESHOLD_PX) return;
+        if (!this.rectangleSelection) {
+            this.rectangleSelection = {
+                startX: pending.startX,
+                startY: pending.startY,
+                currentX: point.x,
+                currentY: point.y,
+                baseSelection: pending.additive ? new Set(this.selectedKeySet) : new Set<string>(),
+                additive: pending.additive,
+            };
+        } else {
+            this.rectangleSelection.currentX = point.x;
+            this.rectangleSelection.currentY = point.y;
+        }
+
+        this.applyRectangleSelection();
+        this.scheduleStatic();
+    }
+
+    private endStaticPointerSelection(e: MouseEvent): void {
+        const pending = this.pendingPointerSelection;
+        if (!pending) return;
+
+        if (this.rectangleSelection) {
+            this.rectangleSelection.currentX = this.getStaticCanvasPoint(e).x;
+            this.rectangleSelection.currentY = this.getStaticCanvasPoint(e).y;
+            this.applyRectangleSelection();
+            this.rectangleSelection = null;
+            this.pendingPointerSelection = null;
+            this.scheduleStatic();
+            this.scheduleLabel();
+            this.emitSelectionChanged();
+            return;
+        }
+
+        this.pendingPointerSelection = null;
+        this.selectTrackFromStaticEvent(pending.event);
+    }
+
     private selectTrackFromStaticEvent(e: MouseEvent): void {
         const rect = this.staticCanvas.getBoundingClientRect();
         const localX = e.clientX - rect.left;
@@ -732,7 +821,27 @@ export class Timeline {
         this.emitSelectionChanged();
     }
 
+    private selectAllKeysFromLabelEvent(e: MouseEvent): void {
+        const rect = this.labelCanvas.getBoundingClientRect();
+        const localY = e.clientY - rect.top;
+        const row = this.getRowIndexAtOffset(localY - RULER_H);
+        if (row < 0 || row >= this.tracks.length) return;
+
+        const track = this.tracks[row];
+        const selectionChanged = this.selectedTrackIndex !== row;
+        this.selectedTrackIndex = row;
+        this.selectAllKeysOnTrack(track, e.ctrlKey || e.metaKey);
+        if (selectionChanged) this.resize();
+        else {
+            this.scheduleStatic();
+            this.scheduleLabel();
+        }
+        this.emitSelectionChanged();
+    }
+
     private selectTrackFromLabelEvent(e: MouseEvent): void {
+        if (e.detail > 1) return;
+
         const rect = this.labelCanvas.getBoundingClientRect();
         const localY = e.clientY - rect.top;
         const row = this.getRowIndexAtOffset(localY - RULER_H);
@@ -741,14 +850,149 @@ export class Timeline {
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         this.selectedFrame = null;
-        this.selectedKeySet.clear();
-        this.selectionAnchor = null;
+        if (!(e.ctrlKey || e.metaKey)) {
+            this.selectedKeySet.clear();
+            this.selectionAnchor = null;
+        }
         if (selectionChanged) this.resize();
         else {
             this.scheduleStatic();
             this.scheduleLabel();
         }
         this.emitSelectionChanged();
+    }
+
+    private getStaticCanvasPoint(e: MouseEvent): { x: number; y: number } {
+        const rect = this.staticCanvas.getBoundingClientRect();
+        return {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+        };
+    }
+
+    private drawRectangleSelection(ctx: CanvasRenderingContext2D): void {
+        const selection = this.rectangleSelection;
+        if (!selection) return;
+
+        const bounds = this.getRectangleSelectionBounds(selection);
+        const width = Math.max(1, bounds.right - bounds.left);
+        const height = Math.max(1, bounds.bottom - bounds.top);
+        ctx.save();
+        ctx.fillStyle = "rgba(96,165,250,0.14)";
+        ctx.strokeStyle = "rgba(147,197,253,0.82)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.fillRect(bounds.left, bounds.top, width, height);
+        ctx.strokeRect(bounds.left + 0.5, bounds.top + 0.5, width, height);
+        ctx.restore();
+    }
+
+    private applyRectangleSelection(): void {
+        const selection = this.rectangleSelection;
+        if (!selection) return;
+
+        const refs = this.getKeyRefsInRectangle(selection);
+        const nextSelection = new Set(selection.baseSelection);
+        for (const ref of refs) {
+            nextSelection.add(createSelectionKey(ref));
+        }
+
+        this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeyRefsFromSet(nextSelection));
+        const active = refs[refs.length - 1] ?? this.getSelectedKeys()[0] ?? null;
+        if (active) {
+            this.applyActiveSelection(active);
+            this.selectionAnchor = active;
+        } else if (!selection.additive) {
+            this.selectedTrackIndex = this.getRowIndexAtOffset(selection.startY, true);
+            this.selectedFrame = null;
+            this.selectionAnchor = null;
+        }
+    }
+
+    private getKeyRefsInRectangle(selection: {
+        startX: number;
+        startY: number;
+        currentX: number;
+        currentY: number;
+    }): TimelineKeySelectionRef[] {
+        const bounds = this.getRectangleSelectionBounds(selection);
+        const firstRow = this.getRowIndexAtOffset(bounds.top, true);
+        const lastRow = this.getRowIndexAtOffset(bounds.bottom, true);
+        if (firstRow < 0 || lastRow < 0) return [];
+
+        const playheadX = this.getPlayheadX();
+        const leftFrame = this.frameFromCanvasX(bounds.left);
+        const rightFrame = this.frameFromCanvasX(bounds.right);
+        const minFrame = Math.max(0, Math.floor(Math.min(leftFrame, rightFrame)) - 1);
+        const maxFrame = Math.max(0, Math.ceil(Math.max(leftFrame, rightFrame)) + 1);
+        const refs: TimelineKeySelectionRef[] = [];
+
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            const track = this.tracks[row];
+            const midY = this.getRowTop(row) + this.getRowHeight(row) / 2;
+            if (midY < bounds.top || midY > bounds.bottom) continue;
+
+            const lo = lowerBound(track.frames, minFrame);
+            const hi = upperBound(track.frames, maxFrame);
+            for (let i = lo; i <= hi && i < track.frames.length; i += 1) {
+                const frame = track.frames[i];
+                const sx = frame * PX_PER_F - this.viewOffset + playheadX;
+                if (sx < bounds.left || sx > bounds.right) continue;
+                refs.push(this.createSelectionRef(track, frame));
+            }
+        }
+
+        return refs;
+    }
+
+    private getRectangleSelectionBounds(selection: {
+        startX: number;
+        startY: number;
+        currentX: number;
+        currentY: number;
+    }): { left: number; right: number; top: number; bottom: number } {
+        return {
+            left: Math.min(selection.startX, selection.currentX),
+            right: Math.max(selection.startX, selection.currentX),
+            top: Math.min(selection.startY, selection.currentY),
+            bottom: Math.max(selection.startY, selection.currentY),
+        };
+    }
+
+    private frameFromCanvasX(x: number): number {
+        return this.currentFrame + (x - this.getPlayheadX()) / PX_PER_F;
+    }
+
+    private selectAllKeysOnTrack(track: KeyframeTrack, additive: boolean): void {
+        const refs = Array.from(track.frames, (frame) => this.createSelectionRef(track, frame));
+        if (refs.length === 0) {
+            if (!additive) {
+                this.selectedFrame = null;
+                this.selectedKeySet.clear();
+                this.selectionAnchor = null;
+            }
+            return;
+        }
+
+        if (!additive) {
+            this.selectedKeySet = this.createNormalizedSelectionSet(refs);
+            const active = refs[0] ?? null;
+            this.applyActiveSelection(active);
+            this.selectionAnchor = active;
+            return;
+        }
+
+        const nextSelection = new Set(this.selectedKeySet);
+        const allSelected = refs.every((ref) => nextSelection.has(createSelectionKey(ref)));
+        for (const ref of refs) {
+            const key = createSelectionKey(ref);
+            if (allSelected) nextSelection.delete(key);
+            else nextSelection.add(key);
+        }
+        this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeyRefsFromSet(nextSelection));
+        const active = allSelected ? this.getSelectedKeys()[0] ?? null : refs[0] ?? null;
+        this.applyActiveSelection(active);
+        this.selectionAnchor = active;
     }
 
     private pickFrameOnTrackFromX(track: KeyframeTrack, localX: number): number | null {

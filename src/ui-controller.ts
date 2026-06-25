@@ -5815,9 +5815,32 @@ export class UIController {
 
     private createCommandExecutionContext(options: { seekToFrame?: boolean } = {}): CommandExecutionContext {
         const seekToFrame = options.seekToFrame ?? true;
+        let timelineEditBatchDepth = 0;
+        let pendingRuntimeRefresh = false;
+        const refreshAfterPayloadEdit = (): void => {
+            if (timelineEditBatchDepth > 0) {
+                pendingRuntimeRefresh = true;
+                return;
+            }
+            this.refreshRuntimeAnimationForTrack();
+        };
         return {
+            beginTimelineEditBatch: () => {
+                timelineEditBatchDepth += 1;
+                this.mmdManager.beginTimelineEditBatch();
+            },
+            endTimelineEditBatch: () => {
+                timelineEditBatchDepth = Math.max(0, timelineEditBatchDepth - 1);
+                this.mmdManager.endTimelineEditBatch();
+                if (timelineEditBatchDepth === 0 && pendingRuntimeRefresh) {
+                    pendingRuntimeRefresh = false;
+                    this.refreshRuntimeAnimationForTrack();
+                }
+            },
             addTimelineKeyframe: (track, frame) => this.mmdManager.addTimelineKeyframe(track, frame),
             removeTimelineKeyframe: (track, frame) => this.mmdManager.removeTimelineKeyframe(track, frame),
+            removeTimelineKeyframePayloads: (track, frames) =>
+                this.mmdManager.removeTimelineKeyframePayloads(track, frames),
             moveTimelineKeyframe: (track, fromFrame, toFrame) => this.mmdManager.moveTimelineKeyframe(
                 track,
                 fromFrame,
@@ -5826,7 +5849,7 @@ export class UIController {
             applyTimelineKeyframePayload: (track, frame, payload) => {
                 const applied = this.mmdManager.applyTimelineKeyframePayload(track, frame, payload);
                 if (applied) {
-                    this.refreshRuntimeAnimationForTrack();
+                    refreshAfterPayloadEdit();
                 }
                 return applied;
             },

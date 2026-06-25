@@ -8,6 +8,7 @@ const track: CommandTrackRef = { category: "bone", name: "センター" };
 type Call =
     | ["add", CommandTrackRef, number]
     | ["remove", CommandTrackRef, number]
+    | ["batchRemove", CommandTrackRef, number[]]
     | ["move", CommandTrackRef, number, number]
     | ["paste", CommandTrackRef, number, "payload" | null]
     | ["boneTransform", string, BoneTransformCommandSnapshot]
@@ -16,7 +17,7 @@ type Call =
     | ["seek", number]
     | ["refresh"];
 
-function createContext(result = true): { context: CommandExecutionContext; calls: Call[] } {
+function createContext(result = true, options: { batchRemove?: boolean } = {}): { context: CommandExecutionContext; calls: Call[] } {
     const calls: Call[] = [];
     return {
         calls,
@@ -29,6 +30,12 @@ function createContext(result = true): { context: CommandExecutionContext; calls
                 calls.push(["remove", targetTrack, frame]);
                 return result;
             },
+            removeTimelineKeyframePayloads: options.batchRemove
+                ? (targetTrack, frames) => {
+                    calls.push(["batchRemove", targetTrack, [...frames]]);
+                    return result;
+                }
+                : undefined,
             moveTimelineKeyframe: (targetTrack, fromFrame, toFrame) => {
                 calls.push(["move", targetTrack, fromFrame, toFrame]);
                 return result;
@@ -273,6 +280,27 @@ describe("executeCommand", () => {
             ["paste", track, 10, "payload"],
             ["select", 10],
             ["selectKeys", [10, 20]],
+            ["seek", 10],
+            ["refresh"],
+        ]);
+    });
+
+    it("uses the batch remove path when applying batch delete commands", () => {
+        const payload = { kind: "morph" as const, weights: [0.5] };
+        const command = createCommand({
+            type: "keyframe.batchDelete",
+            items: [
+                { track, frame: 10, before: payload },
+                { track, frame: 20, before: payload },
+            ],
+        });
+
+        const applyContext = createContext(true, { batchRemove: true });
+        expect(executeCommand(command, "apply", applyContext.context)).toBe(true);
+        expect(applyContext.calls).toEqual([
+            ["batchRemove", track, [10, 20]],
+            ["select", null],
+            ["selectKeys", []],
             ["seek", 10],
             ["refresh"],
         ]);

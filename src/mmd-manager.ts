@@ -261,9 +261,11 @@ import { GlobalIlluminationController } from "./render/global-illumination-contr
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
     applyTimelineKeyframePayload as applyTimelineKeyframePayloadImpl,
+    beginTimelineEditBatch as beginTimelineEditBatchImpl,
     buildModelTrackFrameMapFromAnimation as buildModelTrackFrameMapFromAnimationImpl,
     addInfoKeyframe as addInfoKeyframeImpl,
     emitMergedKeyframeTracks as emitMergedKeyframeTracksImpl,
+    endTimelineEditBatch as endTimelineEditBatchImpl,
     createOffsetModelAnimation as createOffsetModelAnimationImpl,
     ensureCameraAnimationForEditing as ensureCameraAnimationForEditingImpl,
     ensureModelAnimationForEditing as ensureModelAnimationForEditingImpl,
@@ -278,6 +280,7 @@ import {
     readTimelineKeyframePayload as readTimelineKeyframePayloadImpl,
     refreshTotalFramesFromContent as refreshTotalFramesFromContentImpl,
     removeTimelineKeyframe as removeTimelineKeyframeImpl,
+    removeTimelineKeyframePayloads as removeTimelineKeyframePayloadsImpl,
     type TimelineKeyframePayload,
 } from "./editor/timeline-edit-service";
 import {
@@ -3311,6 +3314,13 @@ ${beforeFogAppendBlock}
         return removeTimelineKeyframeImpl(this, track, frame);
     }
 
+    public removeTimelineKeyframePayloads(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        frames: readonly number[],
+    ): boolean {
+        return removeTimelineKeyframePayloadsImpl(this, track, frames);
+    }
+
     public moveTimelineKeyframe(
         track: Pick<KeyframeTrack, "name" | "category">,
         fromFrame: number,
@@ -3332,6 +3342,14 @@ ${beforeFogAppendBlock}
         payload: TimelineKeyframePayload | null,
     ): boolean {
         return applyTimelineKeyframePayloadImpl(this, track, frame, payload);
+    }
+
+    public beginTimelineEditBatch(): void {
+        beginTimelineEditBatchImpl(this);
+    }
+
+    public endTimelineEditBatch(): void {
+        endTimelineEditBatchImpl(this);
     }
 
     public registerEditorBoneKeyframe(

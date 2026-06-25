@@ -15,8 +15,11 @@ export type CommandSelectedKeyRef = {
 };
 
 export type CommandExecutionContext = {
+    beginTimelineEditBatch?(): void;
+    endTimelineEditBatch?(): void;
     addTimelineKeyframe(track: CommandTrackRef, frame: number): boolean;
     removeTimelineKeyframe(track: CommandTrackRef, frame: number): boolean;
+    removeTimelineKeyframePayloads?(track: CommandTrackRef, frames: readonly number[]): boolean;
     moveTimelineKeyframe(track: CommandTrackRef, fromFrame: number, toFrame: number): boolean;
     applyTimelineKeyframePayload?(track: CommandTrackRef, frame: number, payload: TimelineKeyframePayload | null): boolean;
     applyBoneTransform?(boneName: string, snapshot: BoneTransformCommandSnapshot): boolean;
@@ -69,10 +72,21 @@ function executeKeyframeBatchDelete(
     context: CommandExecutionContext,
 ): boolean {
     if (!context.applyTimelineKeyframePayload) return false;
-    const items = direction === "apply" ? diff.items : [...diff.items].reverse();
-    for (const item of items) {
-        const payload = direction === "apply" ? null : item.before;
-        if (!applyKeyframePayload(context, item.track, item.frame, payload)) return false;
+    context.beginTimelineEditBatch?.();
+    try {
+        if (direction === "apply" && context.removeTimelineKeyframePayloads) {
+            for (const group of groupBatchDeleteItemsByTrack(diff.items)) {
+                if (!context.removeTimelineKeyframePayloads(group.track, group.frames)) return false;
+            }
+        } else {
+            const items = direction === "apply" ? diff.items : [...diff.items].reverse();
+            for (const item of items) {
+                const payload = direction === "apply" ? null : item.before;
+                if (!applyKeyframePayload(context, item.track, item.frame, payload)) return false;
+            }
+        }
+    } finally {
+        context.endTimelineEditBatch?.();
     }
 
     if (direction === "apply") {
@@ -88,6 +102,22 @@ function executeKeyframeBatchDelete(
     return true;
 }
 
+function groupBatchDeleteItemsByTrack(
+    items: Extract<KeyframeCommandDiff, { type: "keyframe.batchDelete" }>["items"],
+): { track: CommandTrackRef; frames: number[] }[] {
+    const groups = new Map<string, { track: CommandTrackRef; frames: number[] }>();
+    for (const item of items) {
+        const key = `${item.track.category}\u001f${item.track.name}`;
+        let group = groups.get(key);
+        if (!group) {
+            group = { track: item.track, frames: [] };
+            groups.set(key, group);
+        }
+        group.frames.push(item.frame);
+    }
+    return Array.from(groups.values());
+}
+
 function executeKeyframeBatchMove(
     diff: Extract<KeyframeCommandDiff, { type: "keyframe.batchMove" }>,
     direction: CommandDirection,
@@ -95,33 +125,38 @@ function executeKeyframeBatchMove(
 ): boolean {
     if (!context.applyTimelineKeyframePayload) return false;
 
-    if (direction === "apply") {
-        for (const item of diff.items) {
-            if (!applyKeyframePayload(context, item.track, item.fromFrame, null)) return false;
-        }
-        for (const item of diff.items) {
-            if (!applyKeyframePayload(context, item.track, item.toFrame, item.before)) return false;
-        }
-        const moved = diff.items.map((item) => ({ track: item.track, frame: item.toFrame }));
-        context.setSelectedFrame(moved[0]?.frame ?? null);
-        context.setSelectedKeys?.(moved);
-        context.seekToBoundary(moved[0]?.frame ?? 0);
-    } else {
-        for (const item of [...diff.items].reverse()) {
-            if (!applyKeyframePayload(context, item.track, item.toFrame, null)) return false;
-        }
-        for (const item of diff.items) {
-            if (item.overwritten && !applyKeyframePayload(context, item.track, item.toFrame, item.overwritten)) {
-                return false;
+    context.beginTimelineEditBatch?.();
+    try {
+        if (direction === "apply") {
+            for (const item of diff.items) {
+                if (!applyKeyframePayload(context, item.track, item.fromFrame, null)) return false;
             }
+            for (const item of diff.items) {
+                if (!applyKeyframePayload(context, item.track, item.toFrame, item.before)) return false;
+            }
+            const moved = diff.items.map((item) => ({ track: item.track, frame: item.toFrame }));
+            context.setSelectedFrame(moved[0]?.frame ?? null);
+            context.setSelectedKeys?.(moved);
+            context.seekToBoundary(moved[0]?.frame ?? 0);
+        } else {
+            for (const item of [...diff.items].reverse()) {
+                if (!applyKeyframePayload(context, item.track, item.toFrame, null)) return false;
+            }
+            for (const item of diff.items) {
+                if (item.overwritten && !applyKeyframePayload(context, item.track, item.toFrame, item.overwritten)) {
+                    return false;
+                }
+            }
+            for (const item of diff.items) {
+                if (!applyKeyframePayload(context, item.track, item.fromFrame, item.before)) return false;
+            }
+            const restored = diff.items.map((item) => ({ track: item.track, frame: item.fromFrame }));
+            context.setSelectedFrame(restored[0]?.frame ?? null);
+            context.setSelectedKeys?.(restored);
+            context.seekToBoundary(restored[0]?.frame ?? 0);
         }
-        for (const item of diff.items) {
-            if (!applyKeyframePayload(context, item.track, item.fromFrame, item.before)) return false;
-        }
-        const restored = diff.items.map((item) => ({ track: item.track, frame: item.fromFrame }));
-        context.setSelectedFrame(restored[0]?.frame ?? null);
-        context.setSelectedKeys?.(restored);
-        context.seekToBoundary(restored[0]?.frame ?? 0);
+    } finally {
+        context.endTimelineEditBatch?.();
     }
 
     context.refreshAfterKeyframeEdit();
@@ -134,10 +169,15 @@ function executeKeyframeBatchPaste(
     context: CommandExecutionContext,
 ): boolean {
     if (!context.applyTimelineKeyframePayload) return false;
-    const items = direction === "apply" ? diff.items : [...diff.items].reverse();
-    for (const item of items) {
-        const payload = direction === "apply" ? item.after : item.before;
-        if (!applyKeyframePayload(context, item.track, item.targetFrame, payload)) return false;
+    context.beginTimelineEditBatch?.();
+    try {
+        const items = direction === "apply" ? diff.items : [...diff.items].reverse();
+        for (const item of items) {
+            const payload = direction === "apply" ? item.after : item.before;
+            if (!applyKeyframePayload(context, item.track, item.targetFrame, payload)) return false;
+        }
+    } finally {
+        context.endTimelineEditBatch?.();
     }
 
     if (direction === "apply") {
