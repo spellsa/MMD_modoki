@@ -1572,8 +1572,13 @@ export class UIController {
             this.runtimeFeatureUiController?.refreshGi();
         };
 
-        this.mmdManager.onBoneVisualizerBonePicked = (boneName: string) => {
-            this.actionDispatcher.dispatch({ type: "selection.pickBone", source: "viewport", boneName });
+        this.mmdManager.onBoneVisualizerBonePicked = (pick) => {
+            this.actionDispatcher.dispatch({
+                type: "selection.pickBone",
+                source: "viewport",
+                boneName: pick.boneName,
+                additive: pick.additive,
+            });
         };
 
         this.mmdManager.onMaterialShaderStateChanged = () => {
@@ -2063,6 +2068,16 @@ export class UIController {
         });
         this.actionDispatcher.register("selection.pickBone", (action) => {
             if (this.mmdManager.getTimelineTarget() !== "model") return;
+            if (action.additive === true) {
+                if (!this.timeline.selectBoneTrackByName(action.boneName, { additive: true })) return;
+                this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
+                this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
+                this.refreshSelectedTrackRotationOverlay();
+                this.updateTimelineEditState();
+                this.updateSectionKeyframeButtons();
+                return;
+            }
+
             const selected = this.bottomPanel.setSelectedBone(action.boneName);
             if (!selected) return;
             this.syncTimelineBoneSelectionFromBottomPanel(action.boneName);
@@ -5904,9 +5919,7 @@ export class UIController {
             if (selectedBoneTracks.length > 1) {
                 this.selectedBoneTrackCategory = null;
                 this.bottomPanel.setMultipleSelectedBones(selectedBoneTracks.map((selectedTrack) => selectedTrack.trackName));
-                return;
-            }
-            if (this.isBoneTrackForEditor(track)) {
+            } else if (this.isBoneTrackForEditor(track)) {
                 this.selectedBoneTrackCategory = track.category;
                 this.bottomPanel.setSelectedBone(track.name);
             } else {
@@ -5954,7 +5967,9 @@ export class UIController {
 
         if (this.timeline.hasMultipleSelectedBoneTracks()) {
             this.selectedBoneTrackCategory = null;
-            this.mmdManager.setBoneVisualizerSelectedBone(null);
+            this.mmdManager.setBoneVisualizerSelectedBones(
+                this.timeline.getSelectedBoneTracks().map((selectedTrack) => selectedTrack.trackName),
+            );
             return;
         }
 

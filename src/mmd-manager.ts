@@ -1446,6 +1446,7 @@ ${beforeFogAppendBlock}
     private readonly boneOverlayParentScreen = new Vector3();
     private readonly boneOverlayIdentity = Matrix.Identity();
     private boneVisualizerSelectedBoneName: string | null = null;
+    private boneVisualizerSelectedBoneNames: ReadonlySet<string> = new Set<string>();
     private boneVisualizerPickPoints: { boneName: string; x: number; y: number }[] = [];
     private bonePickPointerDown: { pointerId: number; clientX: number; clientY: number } | null = null;
     private captureEditorOverlaysSuppressed = false;
@@ -1737,7 +1738,7 @@ ${beforeFogAppendBlock}
             const movedDistance = Math.hypot(event.clientX - pointerDown.clientX, event.clientY - pointerDown.clientY);
             if (movedDistance > 6) return;
 
-            this.tryPickBoneVisualizerAtClientPosition(event.clientX, event.clientY);
+            this.tryPickBoneVisualizerAtClientPosition(event.clientX, event.clientY, { additive: event.shiftKey });
             return;
         }
 
@@ -1897,7 +1898,7 @@ ${beforeFogAppendBlock}
     public onError: ((message: string) => void) | null = null;
     public onAudioLoaded: ((name: string) => void) | null = null;
     public onPhysicsStateChanged: ((enabled: boolean, available: boolean) => void) | null = null;
-    public onBoneVisualizerBonePicked: ((boneName: string) => void) | null = null;
+    public onBoneVisualizerBonePicked: ((pick: { boneName: string; additive: boolean }) => void) | null = null;
     public onBoneTransformEditStarted: ((boneName: string) => void) | null = null;
     public onBoneTransformEdited: ((boneName: string) => void) | null = null;
     public onBoneTransformEditCommitted: ((boneName: string) => void) | null = null;
@@ -3109,6 +3110,16 @@ ${beforeFogAppendBlock}
 
     public setBoneVisualizerSelectedBone(boneName: string | null): void {
         this.boneVisualizerSelectedBoneName = boneName && boneName.length > 0 ? boneName : null;
+        this.boneVisualizerSelectedBoneNames = this.boneVisualizerSelectedBoneName
+            ? new Set([this.boneVisualizerSelectedBoneName])
+            : new Set<string>();
+        this.updateBoneGizmoTarget();
+    }
+
+    public setBoneVisualizerSelectedBones(boneNames: readonly string[]): void {
+        const normalizedNames = Array.from(new Set(boneNames.filter((boneName) => boneName.length > 0)));
+        this.boneVisualizerSelectedBoneNames = new Set(normalizedNames);
+        this.boneVisualizerSelectedBoneName = normalizedNames.length === 1 ? normalizedNames[0] : null;
         this.updateBoneGizmoTarget();
     }
 
@@ -3162,8 +3173,12 @@ ${beforeFogAppendBlock}
         return disposeRigidBodyVisualizerImpl(this);
     }
 
-    private tryPickBoneVisualizerAtClientPosition(clientX: number, clientY: number): void {
-        return tryPickBoneVisualizerAtClientPositionImpl(this, clientX, clientY);
+    private tryPickBoneVisualizerAtClientPosition(
+        clientX: number,
+        clientY: number,
+        options: { additive?: boolean } = {},
+    ): void {
+        return tryPickBoneVisualizerAtClientPositionImpl(this, clientX, clientY, options);
     }
     private resolveBoneVisualizerStyle(
         boneInfo: BoneControlInfo | undefined,

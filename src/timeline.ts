@@ -409,6 +409,35 @@ export class Timeline {
         return true;
     }
 
+    selectBoneTrackByName(name: string, options: { additive?: boolean } = {}): boolean {
+        const targetIndex = this.findBoneTrackIndexByName(name);
+        if (targetIndex < 0) return false;
+
+        const previousSelectedTrackIndex = this.selectedTrackIndex;
+        const track = this.tracks[targetIndex];
+        this.selectedFrame = null;
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
+
+        if (options.additive === true) {
+            const activeRef = this.toggleBoneTrackSelection(track);
+            this.selectedTrackIndex = activeRef
+                ? this.findTrackIndexByBoneTrackRef(activeRef)
+                : targetIndex;
+        } else {
+            this.selectedTrackIndex = targetIndex;
+            this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(track);
+        }
+
+        if (this.selectedTrackIndex !== previousSelectedTrackIndex) this.resize();
+        else {
+            this.scheduleStatic();
+            this.scheduleLabel();
+        }
+        this.emitSelectionChanged();
+        return true;
+    }
+
     // ── Resize ───────────────────────────────────────────────────────
 
     resize(): void {
@@ -1431,6 +1460,17 @@ export class Timeline {
 
     private createTrackSelectionKey(track: Pick<KeyframeTrack, "category" | "name">): string {
         return `${track.category}${SELECTION_KEY_SEPARATOR}${track.name}`;
+    }
+
+    private findBoneTrackIndexByName(name: string): number {
+        const categories: TrackCategory[] = ["bone", "semi-standard", "root"];
+        for (const category of categories) {
+            const index = this.tracks.findIndex((track) =>
+                track.name === name && track.category === category && this.isMultiSelectableBoneTrack(track)
+            );
+            if (index >= 0) return index;
+        }
+        return -1;
     }
 
     private isMultiSelectableBoneTrack(track: Pick<KeyframeTrack, "category" | "name">): boolean {
