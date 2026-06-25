@@ -1,5 +1,5 @@
 import type { MmdManager } from "./mmd-manager";
-import type { Timeline, TimelineKeySelectionRef } from "./timeline";
+import type { Timeline, TimelineBoneTrackSelectionRef, TimelineKeySelectionRef } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
 import { applyI18nToDom, getLocale, setLocale, t } from "./i18n";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -52,7 +52,7 @@ import {
 import { buildBoneTransformCommand } from "./actions/bone-transform-command-builder";
 import { buildCameraTransformCommand } from "./actions/camera-transform-command-builder";
 import type { BoneTransformCommandSnapshot, BuiltCommand, CameraTransformCommandSnapshot, CommandTrackRef } from "./actions/command-types";
-import type { CameraKeyframePayload, TimelineKeyframePayload } from "./editor/timeline-edit-service";
+import type { BoneKeyframePayload, CameraKeyframePayload, MovableBoneKeyframePayload, TimelineKeyframePayload } from "./editor/timeline-edit-service";
 import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     normalizePostEffectBackend,
@@ -5796,6 +5796,10 @@ export class UIController {
         return { category: ref.trackCategory, name: ref.trackName };
     }
 
+    private boneTrackSelectionRefToCommandTrack(ref: TimelineBoneTrackSelectionRef): CommandTrackRef {
+        return { category: ref.trackCategory, name: ref.trackName };
+    }
+
     private collectKeyframeCommandSnapshot(): KeyframeCommandSnapshot {
         const selectedTrack = this.getSelectedTimelineTrack();
         const framesByTrackKey: Record<string, number[]> = {};
@@ -5896,6 +5900,12 @@ export class UIController {
 
         this.syncingBoneSelection = true;
         try {
+            const selectedBoneTracks = this.timeline.getSelectedBoneTracks();
+            if (selectedBoneTracks.length > 1) {
+                this.selectedBoneTrackCategory = null;
+                this.bottomPanel.setMultipleSelectedBones(selectedBoneTracks.map((selectedTrack) => selectedTrack.trackName));
+                return;
+            }
             if (this.isBoneTrackForEditor(track)) {
                 this.selectedBoneTrackCategory = track.category;
                 this.bottomPanel.setSelectedBone(track.name);
@@ -5937,6 +5947,12 @@ export class UIController {
 
     private syncBoneVisualizerSelection(track: KeyframeTrack | null): void {
         if (this.mmdManager.getTimelineTarget() !== "model") {
+            this.selectedBoneTrackCategory = null;
+            this.mmdManager.setBoneVisualizerSelectedBone(null);
+            return;
+        }
+
+        if (this.timeline.hasMultipleSelectedBoneTracks()) {
             this.selectedBoneTrackCategory = null;
             this.mmdManager.setBoneVisualizerSelectedBone(null);
             return;
@@ -6063,6 +6079,7 @@ export class UIController {
         const track = this.getSelectedTimelineTrack();
         const selectedFrame = this.timeline.getSelectedFrame();
         const selectedKeys = this.timeline.getSelectedKeys();
+        const selectedBoneTracks = this.timeline.getSelectedBoneTracks();
         const currentFrame = this.mmdManager.currentFrame;
 
         if (!track) {
@@ -6091,12 +6108,22 @@ export class UIController {
             : selectedFrame !== null ? ` @${selectedFrame}` : "";
         const trackTypeLabel = this.getTrackTypeLabel(track);
         if (this.timelineSelectionLabel) {
-            this.timelineSelectionLabel.textContent = `[${trackTypeLabel}] ${track.name}${frameLabel}`;
+            this.timelineSelectionLabel.textContent = selectedBoneTracks.length > 1
+                ? `[Bone] ${selectedBoneTracks.length} bones selected`
+                : `[${trackTypeLabel}] ${track.name}${frameLabel}`;
         }
         const interpolationFrame = selectedKeys.length > 1 ? currentFrame : selectedFrame ?? currentFrame;
-        this.interpolationTrackNameLabel.textContent = `${trackTypeLabel}: ${track.name}`;
+        this.interpolationTrackNameLabel.textContent = selectedBoneTracks.length > 1
+            ? `Bone: ${selectedBoneTracks.length} selected`
+            : `${trackTypeLabel}: ${track.name}`;
         this.interpolationFrameLabel.textContent = String(interpolationFrame);
-        if (this.hasMultiTrackKeySelection(selectedKeys)) {
+        if (selectedBoneTracks.length > 1) {
+            this.resetInterpolationTypeSelect();
+            this.interpolationStatusLabel.textContent = "Multiple bones selected";
+            this.currentInterpolationPreview = null;
+            this.renderInterpolationCurves(null);
+            this.updateInterpolationActionButtons();
+        } else if (this.hasMultiTrackKeySelection(selectedKeys)) {
             this.resetInterpolationTypeSelect();
             this.interpolationStatusLabel.textContent = "Multiple tracks selected";
             this.currentInterpolationPreview = null;
@@ -6392,7 +6419,7 @@ export class UIController {
         return `${this.getSectionKeyframeContextPrefix("info")}:${modelKey}:frame:${this.mmdManager.currentFrame}`;
     }
 
-    private getInterpolationKeyframeContextKey(track: KeyframeTrack | null = null): string | null {
+    private getInterpolationKeyframeContextKey(track: Pick<KeyframeTrack, "name" | "category"> | null = null): string | null {
         const selectedTrack = track ?? this.getSelectedTimelineTrack();
         if (!selectedTrack) return null;
         if (selectedTrack.category === "morph") return null;
@@ -7770,6 +7797,12 @@ export class UIController {
     }
 
     private registerBoneKeyframeAtCurrentFrame(): void {
+        const selectedBoneTracks = this.timeline.getSelectedBoneTracks();
+        if (selectedBoneTracks.length > 1) {
+            this.registerSelectedBoneTracksKeyframesAtCurrentFrame(selectedBoneTracks);
+            return;
+        }
+
         const boneName = this.bottomPanel.getSelectedBone();
         if (!boneName) {
             this.showToast("Please select a bone", "error");
@@ -7809,6 +7842,66 @@ export class UIController {
             }
         }
         this.addKeyframeAtCurrentFrame(poseSnapshot, source);
+    }
+
+    private registerSelectedBoneTracksKeyframesAtCurrentFrame(
+        selectedBoneTracks: readonly TimelineBoneTrackSelectionRef[],
+    ): void {
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const items = selectedBoneTracks
+            .map((selectedTrack) => {
+                const track = this.boneTrackSelectionRefToCommandTrack(selectedTrack);
+                const poseSnapshot = this.captureCurrentBonePoseSnapshot(track.name);
+                if (!poseSnapshot) return null;
+                const interpolationSnapshot = this.captureInterpolationCurveSnapshot({
+                    name: track.name,
+                    category: track.category,
+                    frames: new Uint32Array(),
+                }, frame);
+                const after = this.createBoneKeyframePayload(track, poseSnapshot, interpolationSnapshot);
+                return {
+                    track,
+                    sourceFrame: frame,
+                    targetFrame: frame,
+                    before: this.mmdManager.readTimelineKeyframePayload(track, frame),
+                    after,
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (items.length === 0) {
+            this.showToast("No compatible bones selected", "error");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.boneBatch:${items.length}:${frame}:${nowMs}`,
+            label: `Register ${items.length} bone keyframes at frame ${frame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchPaste",
+                pasteBaseFrame: frame,
+                items,
+            },
+        };
+
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) {
+            this.showToast(`Frame ${frame}: bone keyframe registration failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        for (const item of items) {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(item.track.name));
+            this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(item.track));
+        }
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`Frame ${frame}: ${items.length} bone keyframes registered`, "success");
     }
 
     private tryRegisterEditorCameraKeyframe(
@@ -7886,6 +7979,35 @@ export class UIController {
             distanceInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-dist")),
             fovs: [fov],
             fovInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-fov")),
+        };
+    }
+
+    private createBoneKeyframePayload(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        poseSnapshot: SelectedBonePoseSnapshot,
+        curves: ReadonlyMap<string, InterpolationCurve>,
+    ): BoneKeyframePayload | MovableBoneKeyframePayload {
+        const rotations = this.rotationDegreesToQuaternionBlock(
+            poseSnapshot.rotation.x,
+            poseSnapshot.rotation.y,
+            poseSnapshot.rotation.z,
+        );
+        const rotationInterpolations = this.curveToBlock(this.getCurveFromSnapshot(curves, "bone-rot"));
+        if (this.shouldUseMovableBoneTrack(track)) {
+            return {
+                kind: "movableBone",
+                positions: [poseSnapshot.position.x, poseSnapshot.position.y, poseSnapshot.position.z],
+                positionInterpolations: this.composePositionInterpolationBlock(curves, "bone-x", "bone-y", "bone-z"),
+                rotations,
+                rotationInterpolations,
+                physicsToggles: [1],
+            };
+        }
+        return {
+            kind: "bone",
+            rotations,
+            rotationInterpolations,
+            physicsToggles: [1],
         };
     }
 

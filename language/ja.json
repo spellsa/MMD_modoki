@@ -209,6 +209,7 @@
     "empty.noBoneSelected":  "ボーン未選択",
     "empty.noEditableChannels":  "編集できるチャンネルがありません",
     "empty.noFrame":  "フレームがありません",
+    "bottomPanel.multipleBonesSelected":  "複数ボーン選択中 ({count})",
     "empty.modelNotLoaded":  "モデル未読込",
     "empty.selectTrackToShow":  "トラックを選択すると表示されます",
     "empty.accessoryNotLoaded":  "アクセサリー未読込",

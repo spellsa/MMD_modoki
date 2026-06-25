@@ -209,6 +209,7 @@
     "empty.noBoneSelected":  "선택된 본 없음",
     "empty.noEditableChannels":  "편집 가능한 채널 없음",
     "empty.noFrame":  "프레임 없음",
+    "bottomPanel.multipleBonesSelected":  "여러 본 선택 중 ({count})",
     "empty.modelNotLoaded":  "모델이 로드되지 않았습니다",
     "empty.selectTrackToShow":  "표시할 트랙을 선택하세요",
     "empty.accessoryNotLoaded":  "액세서리가 로드되지 않았습니다",

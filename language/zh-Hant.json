@@ -209,6 +209,7 @@
     "empty.noBoneSelected":  "未選擇骨骼",
     "empty.noEditableChannels":  "無可編輯通道",
     "empty.noFrame":  "無影格",
+    "bottomPanel.multipleBonesSelected":  "已選擇多個骨骼 ({count})",
     "empty.modelNotLoaded":  "模型未讀取",
     "empty.selectTrackToShow":  "請選擇要顯示的軌道",
     "empty.accessoryNotLoaded":  "未讀取配件",

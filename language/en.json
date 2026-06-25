@@ -209,6 +209,7 @@
     "empty.noBoneSelected":  "No bone selected",
     "empty.noEditableChannels":  "No editable channels",
     "empty.noFrame":  "No frame",
+    "bottomPanel.multipleBonesSelected":  "Multiple bones selected ({count})",
     "empty.modelNotLoaded":  "Model not loaded",
     "empty.selectTrackToShow":  "Select a track to show it",
     "empty.accessoryNotLoaded":  "No accessory loaded",

@@ -209,6 +209,7 @@
     "empty.noBoneSelected":  "未选择骨骼",
     "empty.noEditableChannels":  "无可编辑通道",
     "empty.noFrame":  "无帧",
+    "bottomPanel.multipleBonesSelected":  "已选择多个骨骼 ({count})",
     "empty.modelNotLoaded":  "模型未读取",
     "empty.selectTrackToShow":  "请选择要显示的轨道",
     "empty.accessoryNotLoaded":  "未读取配件",

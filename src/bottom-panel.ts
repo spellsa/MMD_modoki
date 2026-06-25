@@ -34,6 +34,7 @@ export class BottomPanel {
     private boneNames: Set<string> = new Set();
     private activeSliderInteractions: WeakSet<HTMLInputElement> = new WeakSet();
     private currentBoneName: string | null = null;
+    private multipleBoneSelectionNames: string[] = [];
     private currentMorphFrameIndex: number | null = null;
     private mmdManager: MmdManager | null = null;
     public onBoneSelectionChanged: ((boneName: string | null) => void) | null = null;
@@ -70,6 +71,7 @@ export class BottomPanel {
 
         if (info.boneNames.length === 0) {
             this.currentBoneName = null;
+            this.multipleBoneSelectionNames = [];
             this.updateBoneSelectionSummary();
             setPanelEmptyState(this.boneContainer, t("empty.noBones"));
             return;
@@ -119,6 +121,7 @@ export class BottomPanel {
 
     clearBoneControls(): void {
         this.currentBoneName = null;
+        this.multipleBoneSelectionNames = [];
         this.boneSliders.clear();
         this.boneSliderValues.clear();
         this.boneControlMap.clear();
@@ -138,6 +141,10 @@ export class BottomPanel {
 
     getSelectedBone(): string | null {
         return this.currentBoneName;
+    }
+
+    isMultipleBoneSelectionActive(): boolean {
+        return this.multipleBoneSelectionNames.length > 1;
     }
 
     getSelectedMorphFrameIndex(): number | null {
@@ -247,8 +254,9 @@ export class BottomPanel {
     }
 
     clearSelectedBone(forceRender = false): boolean {
-        const selectionChanged = this.currentBoneName !== null;
+        const selectionChanged = this.currentBoneName !== null || this.multipleBoneSelectionNames.length > 0;
         this.currentBoneName = null;
+        this.multipleBoneSelectionNames = [];
         this.updateBoneSelectionSummary();
         if (forceRender || selectionChanged) {
             this.renderSelectedBone();
@@ -262,8 +270,27 @@ export class BottomPanel {
         }
         if (!this.boneNames.has(boneName)) return false;
 
-        const selectionChanged = this.currentBoneName !== boneName;
+        const selectionChanged = this.currentBoneName !== boneName || this.multipleBoneSelectionNames.length > 0;
         this.currentBoneName = boneName;
+        this.multipleBoneSelectionNames = [];
+        this.updateBoneSelectionSummary();
+        if (forceRender || selectionChanged) {
+            this.renderSelectedBone();
+        }
+        return true;
+    }
+
+    setMultipleSelectedBones(boneNames: readonly string[], forceRender = false): boolean {
+        const validNames = Array.from(new Set(boneNames.filter((boneName) => this.boneNames.has(boneName))));
+        if (validNames.length <= 1) {
+            return this.setSelectedBone(validNames[0] ?? null, forceRender);
+        }
+
+        const previousKey = this.multipleBoneSelectionNames.join("\u001f");
+        const nextKey = validNames.join("\u001f");
+        const selectionChanged = this.currentBoneName !== null || previousKey !== nextKey;
+        this.currentBoneName = null;
+        this.multipleBoneSelectionNames = validNames;
         this.updateBoneSelectionSummary();
         if (forceRender || selectionChanged) {
             this.renderSelectedBone();
@@ -275,6 +302,11 @@ export class BottomPanel {
         this.boneContainer.innerHTML = "";
         this.boneSliders.clear();
         this.boneSliderValues.clear();
+
+        if (this.isMultipleBoneSelectionActive()) {
+            this.renderMultipleSelectedBones();
+            return;
+        }
 
         if (!this.currentBoneName) {
             setPanelEmptyState(this.boneContainer, t("empty.noBoneSelected"));
@@ -351,8 +383,50 @@ export class BottomPanel {
             if (!input) continue;
             input.dataset.displayStep = String(def.displayStep ?? def.step);
             this.configureBoneNumberInput(input, def);
+            input.disabled = def.disabled === true;
             input.classList.toggle("is-channel-unavailable", def.disabled === true);
             input.setAttribute("aria-disabled", def.disabled === true ? "true" : "false");
+        }
+        this.boneContainer.appendChild(grid.element);
+    }
+
+    private renderMultipleSelectedBones(): void {
+        const controlDefs: {
+            key: BoneSliderKey;
+            label: string;
+            min: number;
+            max: number;
+            step: number;
+            displayStep?: number;
+            value: number;
+            disabled?: boolean;
+        }[] = [
+            { key: "tx", label: "X", min: -30, max: 30, step: 1, displayStep: 0.01, value: 0, disabled: true },
+            { key: "ty", label: "Y", min: -30, max: 30, step: 1, displayStep: 0.01, value: 0, disabled: true },
+            { key: "tz", label: "Z", min: -30, max: 30, step: 1, displayStep: 0.01, value: 0, disabled: true },
+            { key: "rx", label: "Rx", min: -180, max: 180, step: 1, displayStep: 0.1, value: 0, disabled: true },
+            { key: "ry", label: "Ry", min: -180, max: 180, step: 1, displayStep: 0.1, value: 0, disabled: true },
+            { key: "rz", label: "Rz", min: -180, max: 180, step: 1, displayStep: 0.1, value: 0, disabled: true },
+        ];
+        const grid = createPanelNumberGrid(controlDefs.map((def) => ({
+            key: def.key,
+            label: def.label,
+            min: def.min,
+            max: def.max,
+            step: def.step,
+            value: this.formatPanelNumberValue(def.value, def.displayStep ?? def.step),
+            legacyRowClass: "bone-number-row",
+            legacyLabelClass: "bone-number-label",
+            legacyInputClass: "bone-number-input",
+        })));
+        for (const def of controlDefs) {
+            const input = grid.inputs.get(def.key);
+            if (!input) continue;
+            input.dataset.displayStep = String(def.displayStep ?? def.step);
+            input.disabled = true;
+            input.classList.add("is-channel-unavailable");
+            input.setAttribute("aria-disabled", "true");
+            this.boneSliders.set(def.key, input);
         }
         this.boneContainer.appendChild(grid.element);
     }
@@ -405,11 +479,18 @@ export class BottomPanel {
 
     private updateBoneSelectionSummary(): void {
         if (!this.boneSelectionSummary) return;
+        if (this.isMultipleBoneSelectionActive()) {
+            const label = t("bottomPanel.multipleBonesSelected", { count: this.multipleBoneSelectionNames.length });
+            this.boneSelectionSummary.textContent = label;
+            this.boneSelectionSummary.title = this.multipleBoneSelectionNames.join(", ");
+            return;
+        }
         this.boneSelectionSummary.textContent = this.currentBoneName ?? "-";
         this.boneSelectionSummary.title = this.currentBoneName ?? "";
     }
 
     syncSelectedBoneSlidersFromRuntime(force = false): void {
+        if (this.isMultipleBoneSelectionActive()) return;
         if (!this.mmdManager || !this.currentBoneName) return;
         if (this.boneSliders.size === 0) return;
 
@@ -432,6 +513,7 @@ export class BottomPanel {
     }
 
     syncSelectedBoneSlidersFromSnapshot(snapshot: BonePoseSnapshot | null, force = false): void {
+        if (this.isMultipleBoneSelectionActive()) return;
         if (!this.mmdManager || !this.currentBoneName) return;
         if (this.boneSliders.size === 0) return;
         if (!snapshot) return;
@@ -481,6 +563,7 @@ export class BottomPanel {
     }
 
     private applyBoneTransformFromSliders(): void {
+        if (this.isMultipleBoneSelectionActive()) return;
         if (!this.mmdManager || !this.currentBoneName) return;
         if (this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME) {
             const tx = this.getBoneSliderNumber("tx");

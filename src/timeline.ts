@@ -24,10 +24,16 @@ export type TimelineKeySelectionRef = {
     frame: number;
 };
 
+export type TimelineBoneTrackSelectionRef = {
+    trackCategory: TrackCategory;
+    trackName: string;
+};
+
 export type TimelineSelectionChange = {
     activeTrack: KeyframeTrack | null;
     activeFrame: number | null;
     selectedKeys: TimelineKeySelectionRef[];
+    selectedBoneTracks: TimelineBoneTrackSelectionRef[];
 };
 
 // ── Layout ─────────────────────────────────────────────────────────
@@ -48,6 +54,8 @@ const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
 const SELECTION_KEY_SEPARATOR = "\u001f";
 const RECT_SELECTION_THRESHOLD_PX = 4;
+const MULTI_BONE_TRACK_ROW_BG = "rgba(57,197,187,0.12)";
+const MULTI_BONE_LABEL_BG = "rgba(57,197,187,0.16)";
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -77,6 +85,14 @@ function hasFrame(a: Uint32Array, v: number): boolean {
 
 function createSelectionKey(ref: TimelineKeySelectionRef): string {
     return `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}${SELECTION_KEY_SEPARATOR}${ref.frame}`;
+}
+
+function createBoneTrackSelectionKey(ref: TimelineBoneTrackSelectionRef): string {
+    return `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}`;
+}
+
+function isMultiSelectableBoneCategory(category: TrackCategory): boolean {
+    return category === "root" || category === "semi-standard" || category === "bone";
 }
 
 function drawDiamondMarker(
@@ -147,6 +163,7 @@ export class Timeline {
     private selectedTrackIndex = -1;
     private selectedFrame: number | null = null;
     private selectedKeySet = new Set<string>();
+    private selectedBoneTrackSet = new Set<string>();
     private selectionAnchor: TimelineKeySelectionRef | null = null;
     private pendingPointerSelection: {
         startX: number;
@@ -305,12 +322,21 @@ export class Timeline {
         return this.getSelectedKeyRefsFromSet(this.selectedKeySet);
     }
 
+    getSelectedBoneTracks(): TimelineBoneTrackSelectionRef[] {
+        return this.getSelectedBoneTrackRefsFromSet(this.selectedBoneTrackSet);
+    }
+
     hasMultipleSelectedKeys(): boolean {
         return this.selectedKeySet.size > 1;
     }
 
+    hasMultipleSelectedBoneTracks(): boolean {
+        return this.selectedBoneTrackSet.size > 1;
+    }
+
     setSelectedKeys(keys: readonly TimelineKeySelectionRef[], activeKey: TimelineKeySelectionRef | null = null): void {
         this.selectedKeySet = this.createNormalizedSelectionSet(keys);
+        this.selectedBoneTrackSet.clear();
         const active = activeKey && this.hasSelectionRef(activeKey)
             ? activeKey
             : this.getSelectedKeys()[0] ?? null;
@@ -337,6 +363,7 @@ export class Timeline {
         if (!track) {
             this.selectedFrame = null;
             this.selectedKeySet.clear();
+            this.selectedBoneTrackSet.clear();
             this.selectionAnchor = null;
             this.emitSelectionChanged();
             return;
@@ -346,11 +373,13 @@ export class Timeline {
         if (normalizedFrame === null || !hasFrame(track.frames, normalizedFrame)) {
             this.selectedFrame = null;
             this.selectedKeySet.clear();
+            this.selectedBoneTrackSet.clear();
             this.selectionAnchor = null;
         } else {
             this.selectedFrame = normalizedFrame;
             const ref = this.createSelectionRef(track, normalizedFrame);
             this.selectedKeySet = new Set([createSelectionKey(ref)]);
+            this.selectedBoneTrackSet.clear();
             this.selectionAnchor = ref;
         }
         this.scheduleStatic();
@@ -371,6 +400,7 @@ export class Timeline {
         this.selectedTrackIndex = targetIndex;
         this.selectedFrame = null;
         this.selectedKeySet.clear();
+        this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(this.tracks[targetIndex]);
         this.selectionAnchor = null;
         this.resize();
         if (changed) {
@@ -491,9 +521,15 @@ export class Timeline {
             const rowH = this.getRowHeight(i);
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
+            const isSelectedBoneTrack = this.selectedBoneTrackSet.has(this.createTrackSelectionKey(track));
 
             ctx.fillStyle = TRACK_ROW_BG;
             ctx.fillRect(0, ry, w, rowH);
+
+            if (isSelectedBoneTrack) {
+                ctx.fillStyle = MULTI_BONE_TRACK_ROW_BG;
+                ctx.fillRect(0, ry, w, rowH);
+            }
 
             if (isSelectedRow) {
                 ctx.fillStyle = TRACK_ROW_BG_SELECTED;
@@ -703,9 +739,15 @@ export class Timeline {
             const y = RULER_H + this.getRowTop(i);
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
+            const isSelectedBoneTrack = this.selectedBoneTrackSet.has(this.createTrackSelectionKey(track));
 
             ctx.fillStyle = col.bg;
             ctx.fillRect(0, y, w, rowH);
+
+            if (isSelectedBoneTrack) {
+                ctx.fillStyle = MULTI_BONE_LABEL_BG;
+                ctx.fillRect(0, y, w, rowH);
+            }
 
             if (isSelectedRow) {
                 ctx.fillStyle = "rgba(99,102,241,0.18)";
@@ -812,6 +854,9 @@ export class Timeline {
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         const pickedFrame = this.pickFrameOnTrackFromX(this.tracks[row], localX);
+        if (pickedFrame === null) {
+            this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(this.tracks[row]);
+        }
         this.applyKeySelectionFromPointer(this.tracks[row], pickedFrame, e);
         if (selectionChanged) this.resize();
         else {
@@ -830,6 +875,7 @@ export class Timeline {
         const track = this.tracks[row];
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
+        this.selectedBoneTrackSet.clear();
         this.selectAllKeysOnTrack(track, e.ctrlKey || e.metaKey);
         if (selectionChanged) this.resize();
         else {
@@ -847,13 +893,21 @@ export class Timeline {
         const row = this.getRowIndexAtOffset(localY - RULER_H);
         if (row < 0 || row >= this.tracks.length) return;
 
-        const selectionChanged = this.selectedTrackIndex !== row;
-        this.selectedTrackIndex = row;
+        const previousSelectedTrackIndex = this.selectedTrackIndex;
         this.selectedFrame = null;
-        if (!(e.ctrlKey || e.metaKey)) {
-            this.selectedKeySet.clear();
-            this.selectionAnchor = null;
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
+        const track = this.tracks[row];
+        if (e.shiftKey && this.isMultiSelectableBoneTrack(track)) {
+            const activeRef = this.toggleBoneTrackSelection(track);
+            this.selectedTrackIndex = activeRef
+                ? this.findTrackIndexByBoneTrackRef(activeRef)
+                : row;
+        } else {
+            this.selectedTrackIndex = row;
+            this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(track);
         }
+        const selectionChanged = this.selectedTrackIndex !== previousSelectedTrackIndex;
         if (selectionChanged) this.resize();
         else {
             this.scheduleStatic();
@@ -898,6 +952,9 @@ export class Timeline {
         }
 
         this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeyRefsFromSet(nextSelection));
+        if (this.selectedKeySet.size > 0 || !selection.additive) {
+            this.selectedBoneTrackSet.clear();
+        }
         const active = refs[refs.length - 1] ?? this.getSelectedKeys()[0] ?? null;
         if (active) {
             this.applyActiveSelection(active);
@@ -1026,6 +1083,7 @@ export class Timeline {
             this.selectedTrackIndex = -1;
             this.selectedFrame = null;
             this.selectedKeySet.clear();
+            this.selectedBoneTrackSet.clear();
             this.selectionAnchor = null;
             this.emitSelectionChanged();
             return;
@@ -1041,6 +1099,7 @@ export class Timeline {
                 this.selectedTrackIndex = -1;
                 this.selectedFrame = null;
                 this.selectedKeySet.clear();
+                this.selectedBoneTrackSet.clear();
                 this.selectionAnchor = null;
                 this.emitSelectionChanged();
                 return;
@@ -1054,6 +1113,7 @@ export class Timeline {
             this.selectedFrame = null;
         }
         this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeys());
+        this.selectedBoneTrackSet = this.createNormalizedBoneTrackSelectionSet(this.getSelectedBoneTracks());
         if (this.selectionAnchor && !this.hasSelectionRef(this.selectionAnchor)) {
             this.selectionAnchor = null;
         }
@@ -1266,6 +1326,7 @@ export class Timeline {
             return;
         }
 
+        this.selectedBoneTrackSet.clear();
         const ref = this.createSelectionRef(track, pickedFrame);
         if (event.shiftKey) {
             this.applyRangeSelection(track, ref);
@@ -1372,6 +1433,72 @@ export class Timeline {
         return `${track.category}${SELECTION_KEY_SEPARATOR}${track.name}`;
     }
 
+    private isMultiSelectableBoneTrack(track: Pick<KeyframeTrack, "category" | "name">): boolean {
+        return track.name !== "Camera" && isMultiSelectableBoneCategory(track.category);
+    }
+
+    private createBoneTrackSelectionRef(track: Pick<KeyframeTrack, "category" | "name">): TimelineBoneTrackSelectionRef {
+        return {
+            trackCategory: track.category,
+            trackName: track.name,
+        };
+    }
+
+    private hasBoneTrackSelectionRef(ref: TimelineBoneTrackSelectionRef): boolean {
+        return this.tracks.some((track) =>
+            track.category === ref.trackCategory
+            && track.name === ref.trackName
+            && this.isMultiSelectableBoneTrack(track)
+        );
+    }
+
+    private createNormalizedBoneTrackSelectionSet(
+        refs: readonly TimelineBoneTrackSelectionRef[],
+    ): Set<string> {
+        const normalized = new Set<string>();
+        for (const ref of refs) {
+            if (!this.hasBoneTrackSelectionRef(ref)) continue;
+            normalized.add(createBoneTrackSelectionKey(ref));
+        }
+        return normalized;
+    }
+
+    private createSingleBoneTrackSelectionSet(track: Pick<KeyframeTrack, "category" | "name">): Set<string> {
+        if (!this.isMultiSelectableBoneTrack(track)) return new Set<string>();
+        return new Set([createBoneTrackSelectionKey(this.createBoneTrackSelectionRef(track))]);
+    }
+
+    private getSelectedBoneTrackRefsFromSet(source: ReadonlySet<string>): TimelineBoneTrackSelectionRef[] {
+        const refs: TimelineBoneTrackSelectionRef[] = [];
+        for (const track of this.tracks) {
+            if (!this.isMultiSelectableBoneTrack(track)) continue;
+            const ref = this.createBoneTrackSelectionRef(track);
+            if (source.has(createBoneTrackSelectionKey(ref))) refs.push(ref);
+        }
+        return refs;
+    }
+
+    private findTrackIndexByBoneTrackRef(ref: TimelineBoneTrackSelectionRef): number {
+        return this.tracks.findIndex((track) => track.category === ref.trackCategory && track.name === ref.trackName);
+    }
+
+    private toggleBoneTrackSelection(track: KeyframeTrack): TimelineBoneTrackSelectionRef | null {
+        const ref = this.createBoneTrackSelectionRef(track);
+        const key = createBoneTrackSelectionKey(ref);
+        const nextSelection = new Set(this.selectedBoneTrackSet);
+        const wasSelected = nextSelection.has(key);
+        if (nextSelection.has(key)) {
+            nextSelection.delete(key);
+        } else {
+            nextSelection.add(key);
+        }
+        this.selectedBoneTrackSet = this.createNormalizedBoneTrackSelectionSet(
+            this.getSelectedBoneTrackRefsFromSet(nextSelection),
+        );
+        if (!wasSelected) return ref;
+        return this.getSelectedBoneTracks()[0] ?? null;
+    }
+
     private getSelectedFramesByTrackKey(): Map<string, Set<number>> {
         const result = new Map<string, Set<number>>();
         for (const ref of this.getSelectedKeys()) {
@@ -1393,6 +1520,7 @@ export class Timeline {
             activeTrack,
             activeFrame: this.selectedFrame,
             selectedKeys: this.getSelectedKeys(),
+            selectedBoneTracks: this.getSelectedBoneTracks(),
         });
     }
 }
