@@ -140,15 +140,18 @@ function createCommand(options: {
 }
 
 function createCommandId(diff: KeyframeCommandDiff, nowMs: number): string {
-    const trackKey = createCommandTrackKey(diff.track);
     switch (diff.type) {
         case "keyframe.add":
         case "keyframe.delete":
-            return `${diff.type}:${trackKey}:${diff.frame}:${nowMs}`;
+            return `${diff.type}:${createCommandTrackKey(diff.track)}:${diff.frame}:${nowMs}`;
         case "keyframe.move":
-            return `${diff.type}:${trackKey}:${diff.fromFrame}:${diff.toFrame}:${nowMs}`;
+            return `${diff.type}:${createCommandTrackKey(diff.track)}:${diff.fromFrame}:${diff.toFrame}:${nowMs}`;
         case "keyframe.paste":
-            return `${diff.type}:${trackKey}:${diff.frame}:${nowMs}`;
+            return `${diff.type}:${createCommandTrackKey(diff.track)}:${diff.frame}:${nowMs}`;
+        case "keyframe.batchDelete":
+        case "keyframe.batchMove":
+        case "keyframe.batchPaste":
+            return `${diff.type}:${diff.items.length}:${nowMs}`;
     }
 }
 

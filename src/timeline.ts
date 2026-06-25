@@ -18,6 +18,17 @@
 import type { KeyframeTrack, TimelineRotationOverlay, TrackCategory } from "./types";
 
 export type TimelineSeekPhase = "jump" | "dragStart" | "dragMove" | "dragEnd";
+export type TimelineKeySelectionRef = {
+    trackCategory: TrackCategory;
+    trackName: string;
+    frame: number;
+};
+
+export type TimelineSelectionChange = {
+    activeTrack: KeyframeTrack | null;
+    activeFrame: number | null;
+    selectedKeys: TimelineKeySelectionRef[];
+};
 
 // ── Layout ─────────────────────────────────────────────────────────
 const RULER_H = 20;
@@ -35,6 +46,7 @@ const TRACK_ROW_BG_SELECTED = "rgba(255,255,255,0.07)";
 const CURRENT_FRAME_COLOR = "#ff4fa3";
 const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
+const SELECTION_KEY_SEPARATOR = "\u001f";
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -60,6 +72,10 @@ function upperBound(a: Uint32Array, v: number): number {
 function hasFrame(a: Uint32Array, v: number): boolean {
     const i = lowerBound(a, v);
     return i < a.length && a[i] === v;
+}
+
+function createSelectionKey(ref: TimelineKeySelectionRef): string {
+    return `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}${SELECTION_KEY_SEPARATOR}${ref.frame}`;
 }
 
 function drawDiamondMarker(
@@ -129,6 +145,8 @@ export class Timeline {
     private viewOffset = 0;   // currentFrame * PX_PER_F
     private selectedTrackIndex = -1;
     private selectedFrame: number | null = null;
+    private selectedKeySet = new Set<string>();
+    private selectionAnchor: TimelineKeySelectionRef | null = null;
     private waveformPeaks: Float32Array | null = null;
     private rotationOverlay: TimelineRotationOverlay | null = null;
 
@@ -142,6 +160,7 @@ export class Timeline {
     private syncingScroll = false;
 
     public onSelectionChanged: ((track: KeyframeTrack | null, frame: number | null) => void) | null = null;
+    public onKeySelectionChanged: ((change: TimelineSelectionChange) => void) | null = null;
 
     // ── Constructor ─────────────────────────────────────────────────
 
@@ -262,10 +281,43 @@ export class Timeline {
         return this.selectedFrame;
     }
 
+    getSelectedKeys(): TimelineKeySelectionRef[] {
+        return this.getSelectedKeyRefsFromSet(this.selectedKeySet);
+    }
+
+    hasMultipleSelectedKeys(): boolean {
+        return this.selectedKeySet.size > 1;
+    }
+
+    setSelectedKeys(keys: readonly TimelineKeySelectionRef[], activeKey: TimelineKeySelectionRef | null = null): void {
+        this.selectedKeySet = this.createNormalizedSelectionSet(keys);
+        const active = activeKey && this.hasSelectionRef(activeKey)
+            ? activeKey
+            : this.getSelectedKeys()[0] ?? null;
+        this.applyActiveSelection(active);
+        this.selectionAnchor = active;
+        this.scheduleStatic();
+        this.scheduleLabel();
+        this.emitSelectionChanged();
+    }
+
+    clearSelectedKeys(options: { keepActiveTrack?: boolean } = {}): void {
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
+        if (!options.keepActiveTrack) {
+            this.selectedFrame = null;
+        }
+        this.scheduleStatic();
+        this.scheduleLabel();
+        this.emitSelectionChanged();
+    }
+
     setSelectedFrame(frame: number | null): void {
         const track = this.getSelectedTrack();
         if (!track) {
             this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectionAnchor = null;
             this.emitSelectionChanged();
             return;
         }
@@ -273,8 +325,13 @@ export class Timeline {
         const normalizedFrame = frame === null ? null : Math.max(0, Math.floor(frame));
         if (normalizedFrame === null || !hasFrame(track.frames, normalizedFrame)) {
             this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectionAnchor = null;
         } else {
             this.selectedFrame = normalizedFrame;
+            const ref = this.createSelectionRef(track, normalizedFrame);
+            this.selectedKeySet = new Set([createSelectionKey(ref)]);
+            this.selectionAnchor = ref;
         }
         this.scheduleStatic();
         this.emitSelectionChanged();
@@ -293,6 +350,8 @@ export class Timeline {
         const changed = this.selectedTrackIndex !== targetIndex || this.selectedFrame !== null;
         this.selectedTrackIndex = targetIndex;
         this.selectedFrame = null;
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
         this.resize();
         if (changed) {
             this.emitSelectionChanged();
@@ -398,6 +457,7 @@ export class Timeline {
 
         const visStart = Math.max(0, Math.floor((this.viewOffset - playheadX) / PX_PER_F));
         const visEnd = Math.min(this.totalFrames, visStart + Math.ceil(w / PX_PER_F) + 2);
+        const selectedFramesByTrack = this.getSelectedFramesByTrackKey();
 
         // Vertical culling: only draw rows visible in the scroll viewport
         const scrollTop = this.trackScrollEl.scrollTop;
@@ -434,14 +494,19 @@ export class Timeline {
             const hi = upperBound(frames, visEnd);
             const markerSize = track.category === "root" ? 9 : track.category === "camera" ? 8 : 6;
             const midY = ry + rowH / 2;
+            const selectedFrames = selectedFramesByTrack.get(this.createTrackSelectionKey(track));
 
             for (let k = lo; k <= hi && k < frames.length; k++) {
                 const sx = frames[k] * PX_PER_F - this.viewOffset + playheadX;
                 if (sx < -markerSize || sx > w + markerSize) continue;
                 drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
 
-                if (isSelectedRow && this.selectedFrame !== null && frames[k] === this.selectedFrame) {
-                    drawDiamondMarker(ctx, sx, midY, markerSize + 4, "rgba(255,255,255,0.12)", "#ffffff", 1.5);
+                const isSelectedKey = selectedFrames?.has(frames[k]) ?? false;
+                const isActiveKey = isSelectedRow && this.selectedFrame !== null && frames[k] === this.selectedFrame;
+                if (isSelectedKey || isActiveKey) {
+                    const fill = isActiveKey ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.09)";
+                    const stroke = isActiveKey ? "#ffffff" : "rgba(255,255,255,0.72)";
+                    drawDiamondMarker(ctx, sx, midY, markerSize + 4, fill, stroke, isActiveKey ? 1.5 : 1);
                     drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
                 }
             }
@@ -658,7 +723,7 @@ export class Timeline {
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         const pickedFrame = this.pickFrameOnTrackFromX(this.tracks[row], localX);
-        this.selectedFrame = pickedFrame;
+        this.applyKeySelectionFromPointer(this.tracks[row], pickedFrame, e);
         if (selectionChanged) this.resize();
         else {
             this.scheduleStatic();
@@ -676,6 +741,8 @@ export class Timeline {
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         this.selectedFrame = null;
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
         if (selectionChanged) this.resize();
         else {
             this.scheduleStatic();
@@ -714,6 +781,8 @@ export class Timeline {
         if (this.tracks.length === 0) {
             this.selectedTrackIndex = -1;
             this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectionAnchor = null;
             this.emitSelectionChanged();
             return;
         }
@@ -727,6 +796,8 @@ export class Timeline {
             } else {
                 this.selectedTrackIndex = -1;
                 this.selectedFrame = null;
+                this.selectedKeySet.clear();
+                this.selectionAnchor = null;
                 this.emitSelectionChanged();
                 return;
             }
@@ -737,6 +808,10 @@ export class Timeline {
         const track = this.getSelectedTrack();
         if (!track || this.selectedFrame === null || !hasFrame(track.frames, this.selectedFrame)) {
             this.selectedFrame = null;
+        }
+        this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeys());
+        if (this.selectionAnchor && !this.hasSelectionRef(this.selectionAnchor)) {
+            this.selectionAnchor = null;
         }
 
         this.emitSelectionChanged();
@@ -939,8 +1014,142 @@ export class Timeline {
         return clampToRange ? this.tracks.length - 1 : -1;
     }
 
+    private applyKeySelectionFromPointer(track: KeyframeTrack, pickedFrame: number | null, event: MouseEvent): void {
+        if (pickedFrame === null) {
+            this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectionAnchor = null;
+            return;
+        }
+
+        const ref = this.createSelectionRef(track, pickedFrame);
+        if (event.shiftKey) {
+            this.applyRangeSelection(track, ref);
+            return;
+        }
+
+        if (event.ctrlKey || event.metaKey) {
+            const key = createSelectionKey(ref);
+            if (this.selectedKeySet.has(key)) {
+                this.selectedKeySet.delete(key);
+                const fallback = this.getSelectedKeys()[this.selectedKeySet.size - 1] ?? null;
+                this.applyActiveSelection(fallback);
+                this.selectionAnchor = fallback;
+            } else {
+                this.selectedKeySet.add(key);
+                this.applyActiveSelection(ref);
+                this.selectionAnchor = ref;
+            }
+            return;
+        }
+
+        this.selectedKeySet = new Set([createSelectionKey(ref)]);
+        this.applyActiveSelection(ref);
+        this.selectionAnchor = ref;
+    }
+
+    private applyRangeSelection(track: KeyframeTrack, clickedRef: TimelineKeySelectionRef): void {
+        const anchor = this.selectionAnchor;
+        if (!anchor || anchor.trackCategory !== clickedRef.trackCategory || anchor.trackName !== clickedRef.trackName) {
+            this.selectedKeySet = new Set([createSelectionKey(clickedRef)]);
+            this.applyActiveSelection(clickedRef);
+            this.selectionAnchor = clickedRef;
+            return;
+        }
+
+        const start = Math.min(anchor.frame, clickedRef.frame);
+        const end = Math.max(anchor.frame, clickedRef.frame);
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const frame of track.frames) {
+            if (frame < start || frame > end) continue;
+            refs.push(this.createSelectionRef(track, frame));
+        }
+        this.selectedKeySet = this.createNormalizedSelectionSet(refs);
+        this.applyActiveSelection(clickedRef);
+    }
+
+    private applyActiveSelection(ref: TimelineKeySelectionRef | null): void {
+        if (!ref) {
+            this.selectedFrame = null;
+            return;
+        }
+        const index = this.tracks.findIndex((track) =>
+            track.category === ref.trackCategory && track.name === ref.trackName
+        );
+        if (index < 0) {
+            this.selectedFrame = null;
+            return;
+        }
+        this.selectedTrackIndex = index;
+        this.selectedFrame = ref.frame;
+    }
+
+    private createSelectionRef(track: KeyframeTrack, frame: number): TimelineKeySelectionRef {
+        return {
+            trackCategory: track.category,
+            trackName: track.name,
+            frame: Math.max(0, Math.floor(frame)),
+        };
+    }
+
+    private hasSelectionRef(ref: TimelineKeySelectionRef): boolean {
+        const track = this.tracks.find((candidate) =>
+            candidate.category === ref.trackCategory && candidate.name === ref.trackName
+        );
+        return !!track && hasFrame(track.frames, ref.frame);
+    }
+
+    private createNormalizedSelectionSet(keys: readonly TimelineKeySelectionRef[]): Set<string> {
+        const normalized = new Set<string>();
+        for (const key of keys) {
+            const ref = {
+                trackCategory: key.trackCategory,
+                trackName: key.trackName,
+                frame: Math.max(0, Math.floor(key.frame)),
+            };
+            if (!this.hasSelectionRef(ref)) continue;
+            normalized.add(createSelectionKey(ref));
+        }
+        return normalized;
+    }
+
+    private getSelectedKeyRefsFromSet(source: ReadonlySet<string>): TimelineKeySelectionRef[] {
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const track of this.tracks) {
+            for (const frame of track.frames) {
+                const ref = this.createSelectionRef(track, frame);
+                if (source.has(createSelectionKey(ref))) refs.push(ref);
+            }
+        }
+        return refs;
+    }
+
+    private createTrackSelectionKey(track: Pick<KeyframeTrack, "category" | "name">): string {
+        return `${track.category}${SELECTION_KEY_SEPARATOR}${track.name}`;
+    }
+
+    private getSelectedFramesByTrackKey(): Map<string, Set<number>> {
+        const result = new Map<string, Set<number>>();
+        for (const ref of this.getSelectedKeys()) {
+            const trackKey = `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}`;
+            let frames = result.get(trackKey);
+            if (!frames) {
+                frames = new Set<number>();
+                result.set(trackKey, frames);
+            }
+            frames.add(ref.frame);
+        }
+        return result;
+    }
+
     private emitSelectionChanged(): void {
-        this.onSelectionChanged?.(this.getSelectedTrack(), this.selectedFrame);
+        const activeTrack = this.getSelectedTrack();
+        this.onSelectionChanged?.(activeTrack, this.selectedFrame);
+        this.onKeySelectionChanged?.({
+            activeTrack,
+            activeFrame: this.selectedFrame,
+            selectedKeys: this.getSelectedKeys(),
+        });
     }
 }
 

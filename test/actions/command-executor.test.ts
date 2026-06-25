@@ -12,6 +12,7 @@ type Call =
     | ["paste", CommandTrackRef, number, "payload" | null]
     | ["boneTransform", string, BoneTransformCommandSnapshot]
     | ["select", number | null]
+    | ["selectKeys", number[]]
     | ["seek", number]
     | ["refresh"];
 
@@ -42,6 +43,9 @@ function createContext(result = true): { context: CommandExecutionContext; calls
             },
             setSelectedFrame: (frame) => {
                 calls.push(["select", frame]);
+            },
+            setSelectedKeys: (keys) => {
+                calls.push(["selectKeys", keys.map((key) => key.frame)]);
             },
             seekToBoundary: (frame) => {
                 calls.push(["seek", frame]);
@@ -237,6 +241,113 @@ describe("executeCommand", () => {
             ["paste", track, 12, null],
             ["select", null],
             ["seek", 12],
+            ["refresh"],
+        ]);
+    });
+
+    it("applies and reverts batch delete commands with payloads", () => {
+        const payload = { kind: "morph" as const, weights: [0.5] };
+        const command = createCommand({
+            type: "keyframe.batchDelete",
+            items: [
+                { track, frame: 10, before: payload },
+                { track, frame: 20, before: payload },
+            ],
+        });
+
+        const applyContext = createContext();
+        expect(executeCommand(command, "apply", applyContext.context)).toBe(true);
+        expect(applyContext.calls).toEqual([
+            ["paste", track, 10, null],
+            ["paste", track, 20, null],
+            ["select", null],
+            ["selectKeys", []],
+            ["seek", 10],
+            ["refresh"],
+        ]);
+
+        const revertContext = createContext();
+        expect(executeCommand(command, "revert", revertContext.context)).toBe(true);
+        expect(revertContext.calls).toEqual([
+            ["paste", track, 20, "payload"],
+            ["paste", track, 10, "payload"],
+            ["select", 10],
+            ["selectKeys", [10, 20]],
+            ["seek", 10],
+            ["refresh"],
+        ]);
+    });
+
+    it("applies and reverts batch move commands while restoring overwritten keys", () => {
+        const payload = { kind: "morph" as const, weights: [0.5] };
+        const overwritten = { kind: "morph" as const, weights: [1] };
+        const command = createCommand({
+            type: "keyframe.batchMove",
+            deltaFrames: 1,
+            items: [
+                { track, fromFrame: 10, toFrame: 11, before: payload, overwritten: null },
+                { track, fromFrame: 20, toFrame: 21, before: payload, overwritten },
+            ],
+        });
+
+        const applyContext = createContext();
+        expect(executeCommand(command, "apply", applyContext.context)).toBe(true);
+        expect(applyContext.calls).toEqual([
+            ["paste", track, 10, null],
+            ["paste", track, 20, null],
+            ["paste", track, 11, "payload"],
+            ["paste", track, 21, "payload"],
+            ["select", 11],
+            ["selectKeys", [11, 21]],
+            ["seek", 11],
+            ["refresh"],
+        ]);
+
+        const revertContext = createContext();
+        expect(executeCommand(command, "revert", revertContext.context)).toBe(true);
+        expect(revertContext.calls).toEqual([
+            ["paste", track, 21, null],
+            ["paste", track, 11, null],
+            ["paste", track, 21, "payload"],
+            ["paste", track, 10, "payload"],
+            ["paste", track, 20, "payload"],
+            ["select", 10],
+            ["selectKeys", [10, 20]],
+            ["seek", 10],
+            ["refresh"],
+        ]);
+    });
+
+    it("applies and reverts batch paste commands relative to the paste base frame", () => {
+        const payload = { kind: "morph" as const, weights: [0.5] };
+        const command = createCommand({
+            type: "keyframe.batchPaste",
+            pasteBaseFrame: 30,
+            items: [
+                { track, sourceFrame: 10, targetFrame: 30, before: null, after: payload },
+                { track, sourceFrame: 20, targetFrame: 40, before: payload, after: payload },
+            ],
+        });
+
+        const applyContext = createContext();
+        expect(executeCommand(command, "apply", applyContext.context)).toBe(true);
+        expect(applyContext.calls).toEqual([
+            ["paste", track, 30, "payload"],
+            ["paste", track, 40, "payload"],
+            ["select", 30],
+            ["selectKeys", [30, 40]],
+            ["seek", 30],
+            ["refresh"],
+        ]);
+
+        const revertContext = createContext();
+        expect(executeCommand(command, "revert", revertContext.context)).toBe(true);
+        expect(revertContext.calls).toEqual([
+            ["paste", track, 40, "payload"],
+            ["paste", track, 30, null],
+            ["select", null],
+            ["selectKeys", []],
+            ["seek", 30],
             ["refresh"],
         ]);
     });

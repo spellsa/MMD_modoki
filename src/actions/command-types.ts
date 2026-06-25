@@ -44,6 +44,36 @@ export type KeyframeCommandDiff =
         frame: number;
         before: TimelineKeyframePayload | null;
         after: TimelineKeyframePayload;
+    }
+    | {
+        type: "keyframe.batchDelete";
+        items: {
+            track: CommandTrackRef;
+            frame: number;
+            before: TimelineKeyframePayload;
+        }[];
+    }
+    | {
+        type: "keyframe.batchMove";
+        deltaFrames: -1 | 1;
+        items: {
+            track: CommandTrackRef;
+            fromFrame: number;
+            toFrame: number;
+            before: TimelineKeyframePayload;
+            overwritten: TimelineKeyframePayload | null;
+        }[];
+    }
+    | {
+        type: "keyframe.batchPaste";
+        pasteBaseFrame: number;
+        items: {
+            track: CommandTrackRef;
+            sourceFrame: number;
+            targetFrame: number;
+            before: TimelineKeyframePayload | null;
+            after: TimelineKeyframePayload;
+        }[];
     };
 
 export type BoneTransformCommandSnapshot = {

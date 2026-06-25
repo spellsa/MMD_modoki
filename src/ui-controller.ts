@@ -1,5 +1,5 @@
 import type { MmdManager } from "./mmd-manager";
-import type { Timeline } from "./timeline";
+import type { Timeline, TimelineKeySelectionRef } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
 import { applyI18nToDom, getLocale, setLocale, t } from "./i18n";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -81,13 +81,29 @@ type PendingBoneTransformCommand = {
     before: BoneTransformCommandSnapshot;
 };
 
-type KeyframeClipboard = {
+type SingleKeyframeClipboard = {
     version: 1;
+    mode: "single";
     sourceTarget: "model" | "camera";
     sourceFrame: number;
     track: CommandTrackRef;
     payload: TimelineKeyframePayload;
 };
+
+type BatchKeyframeClipboard = {
+    version: 2;
+    mode: "batch";
+    sourceTarget: "model" | "camera";
+    sourceBaseFrame: number;
+    items: {
+        track: CommandTrackRef;
+        sourceFrame: number;
+        frameOffset: number;
+        payload: TimelineKeyframePayload;
+    }[];
+};
+
+type KeyframeClipboard = SingleKeyframeClipboard | BatchKeyframeClipboard;
 
 type RuntimeMovableBoneTrackLike = {
     name: string;
@@ -1430,8 +1446,8 @@ export class UIController {
             });
             if (frameChanged) {
                 this.clearTransientEditingStateForFrameChange();
-                if (this.timeline.getSelectedFrame() !== null) {
-                    this.timeline.setSelectedFrame(null);
+                if (this.timeline.getSelectedKeys().length > 0) {
+                    this.timeline.clearSelectedKeys({ keepActiveTrack: true });
                 }
             }
             this.updateTimelineEditState();
@@ -1778,6 +1794,13 @@ export class UIController {
             const lowerKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
             const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
 
+            if (!hasModifier && e.key === "Escape" && this.timeline.getSelectedKeys().length > 0) {
+                e.preventDefault();
+                this.timeline.clearSelectedKeys({ keepActiveTrack: true });
+                this.updateTimelineEditState();
+                return;
+            }
+
             // Alt+Enter: MMD-like fullscreen toggle (mapped to UI fullscreen mode).
             if (!e.ctrlKey && !e.metaKey && e.altKey && e.key === "Enter") {
                 e.preventDefault();
@@ -1795,6 +1818,18 @@ export class UIController {
             if (!e.metaKey && !e.altKey && e.ctrlKey && !e.shiftKey && lowerKey === "z") {
                 e.preventDefault();
                 this.actionDispatcher.dispatch({ type: "history.undo", source: "shortcut" });
+                return;
+            }
+
+            if (!e.altKey && (e.ctrlKey || e.metaKey) && !e.shiftKey && lowerKey === "c") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "keyframe.copySelected", source: "shortcut" });
+                return;
+            }
+
+            if (!e.altKey && (e.ctrlKey || e.metaKey) && !e.shiftKey && lowerKey === "v") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "keyframe.paste", source: "shortcut" });
                 return;
             }
 
@@ -5749,6 +5784,18 @@ export class UIController {
         return track;
     }
 
+    private hasMultiTrackKeySelection(selectedKeys: readonly TimelineKeySelectionRef[]): boolean {
+        if (selectedKeys.length <= 1) return false;
+        const first = selectedKeys[0];
+        return selectedKeys.some((key) =>
+            key.trackCategory !== first.trackCategory || key.trackName !== first.trackName
+        );
+    }
+
+    private selectionRefToCommandTrack(ref: TimelineKeySelectionRef): CommandTrackRef {
+        return { category: ref.trackCategory, name: ref.trackName };
+    }
+
     private collectKeyframeCommandSnapshot(): KeyframeCommandSnapshot {
         const selectedTrack = this.getSelectedTimelineTrack();
         const framesByTrackKey: Record<string, number[]> = {};
@@ -5786,6 +5833,13 @@ export class UIController {
             applyBoneTransform: (boneName, snapshot) => this.applyBoneTransformSnapshotFromCommand(boneName, snapshot),
             applyCameraTransform: (snapshot) => this.applyCameraTransformSnapshotFromCommand(snapshot),
             setSelectedFrame: (frame) => this.timeline.setSelectedFrame(frame),
+            setSelectedKeys: (keys) => {
+                this.timeline.setSelectedKeys(keys.map((key) => ({
+                    trackCategory: key.track.category,
+                    trackName: key.track.name,
+                    frame: key.frame,
+                })));
+            },
             seekToBoundary: (frame) => {
                 if (seekToFrame) this.mmdManager.seekToBoundary(frame);
             },
@@ -5985,6 +6039,7 @@ export class UIController {
     private updateTimelineEditState(): void {
         const track = this.getSelectedTimelineTrack();
         const selectedFrame = this.timeline.getSelectedFrame();
+        const selectedKeys = this.timeline.getSelectedKeys();
         const currentFrame = this.mmdManager.currentFrame;
 
         if (!track) {
@@ -6008,23 +6063,33 @@ export class UIController {
             return;
         }
 
-        const frameLabel = selectedFrame !== null ? ` @${selectedFrame}` : "";
+        const frameLabel = selectedKeys.length > 1
+            ? ` (${selectedKeys.length} keys)`
+            : selectedFrame !== null ? ` @${selectedFrame}` : "";
         const trackTypeLabel = this.getTrackTypeLabel(track);
         if (this.timelineSelectionLabel) {
             this.timelineSelectionLabel.textContent = `[${trackTypeLabel}] ${track.name}${frameLabel}`;
         }
-        const interpolationFrame = selectedFrame ?? currentFrame;
+        const interpolationFrame = selectedKeys.length > 1 ? currentFrame : selectedFrame ?? currentFrame;
         this.interpolationTrackNameLabel.textContent = `${trackTypeLabel}: ${track.name}`;
         this.interpolationFrameLabel.textContent = String(interpolationFrame);
-        this.updateInterpolationPreview(track, interpolationFrame);
+        if (this.hasMultiTrackKeySelection(selectedKeys)) {
+            this.resetInterpolationTypeSelect();
+            this.interpolationStatusLabel.textContent = "Multiple tracks selected";
+            this.currentInterpolationPreview = null;
+            this.renderInterpolationCurves(null);
+            this.updateInterpolationActionButtons();
+        } else {
+            this.updateInterpolationPreview(track, interpolationFrame);
+        }
         this.btnKeyframeAdd.disabled = false;
 
         const hasCurrentFrameKey = this.mmdManager.hasTimelineKeyframe(track, currentFrame);
         const canDelete = selectedFrame !== null || hasCurrentFrameKey;
         const copyFrame = selectedFrame ?? currentFrame;
         const canCopy = this.mmdManager.hasTimelineKeyframe(track, copyFrame);
-        this.btnKeyframeDelete.disabled = !canDelete;
-        this.btnKeyframeCopy.disabled = !canCopy;
+        this.btnKeyframeDelete.disabled = selectedKeys.length > 0 ? false : !canDelete;
+        this.btnKeyframeCopy.disabled = selectedKeys.length > 0 ? false : !canCopy;
         this.btnKeyframePaste.disabled = !this.canPasteKeyframeClipboardToCurrentSelection();
 
         this.btnKeyframeNudgeLeft.disabled = false;
@@ -6035,6 +6100,9 @@ export class UIController {
     private canPasteKeyframeClipboardToCurrentSelection(): boolean {
         const clipboard = this.keyframeClipboard;
         if (!clipboard) return false;
+        if (clipboard.mode === "batch") {
+            return this.mmdManager.getTimelineTarget() === clipboard.sourceTarget && clipboard.items.length > 0;
+        }
         return this.resolveKeyframePasteTarget(clipboard) !== null;
     }
 
@@ -8395,6 +8463,12 @@ export class UIController {
     }
 
     private copySelectedKeyframe(): void {
+        const selectedKeys = this.timeline.getSelectedKeys();
+        if (selectedKeys.length > 1) {
+            this.copySelectedKeyframes(selectedKeys);
+            return;
+        }
+
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
@@ -8410,6 +8484,7 @@ export class UIController {
 
         this.keyframeClipboard = {
             version: 1,
+            mode: "single",
             sourceTarget: this.mmdManager.getTimelineTarget(),
             sourceFrame: Math.max(0, Math.floor(frame)),
             track: { category: track.category, name: track.name },
@@ -8419,10 +8494,49 @@ export class UIController {
         this.showToast(`Frame ${frame}: keyframe copied`, "success");
     }
 
+    private copySelectedKeyframes(selectedKeys: readonly TimelineKeySelectionRef[]): void {
+        const items: BatchKeyframeClipboard["items"] = [];
+        let sourceBaseFrame = Number.MAX_SAFE_INTEGER;
+        for (const selectedKey of selectedKeys) {
+            const track = this.selectionRefToCommandTrack(selectedKey);
+            const payload = this.mmdManager.readTimelineKeyframePayload(track, selectedKey.frame);
+            if (!payload) continue;
+            sourceBaseFrame = Math.min(sourceBaseFrame, selectedKey.frame);
+            items.push({
+                track,
+                sourceFrame: selectedKey.frame,
+                frameOffset: 0,
+                payload: this.cloneKeyframePayload(payload),
+            });
+        }
+
+        if (items.length === 0 || sourceBaseFrame === Number.MAX_SAFE_INTEGER) {
+            this.showToast("No selected keyframes to copy", "info");
+            return;
+        }
+
+        this.keyframeClipboard = {
+            version: 2,
+            mode: "batch",
+            sourceTarget: this.mmdManager.getTimelineTarget(),
+            sourceBaseFrame,
+            items: items.map((item) => ({
+                ...item,
+                frameOffset: item.sourceFrame - sourceBaseFrame,
+            })),
+        };
+        this.updateTimelineEditState();
+        this.showToast(`${items.length} keyframes copied`, "success");
+    }
+
     private pasteKeyframeClipboard(): void {
         const clipboard = this.keyframeClipboard;
         if (!clipboard) {
             this.showToast("No keyframe to paste", "info");
+            return;
+        }
+        if (clipboard.mode === "batch") {
+            this.pasteKeyframeBatchClipboard(clipboard);
             return;
         }
 
@@ -8464,7 +8578,59 @@ export class UIController {
         this.showToast(`Frame ${frame}: keyframe pasted`, "success");
     }
 
-    private resolveKeyframePasteTarget(clipboard: KeyframeClipboard): { track: CommandTrackRef } | null {
+    private pasteKeyframeBatchClipboard(clipboard: BatchKeyframeClipboard): void {
+        if (this.mmdManager.getTimelineTarget() !== clipboard.sourceTarget) {
+            this.showToast("No compatible paste target", "error");
+            return;
+        }
+
+        const pasteBaseFrame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const items = clipboard.items
+            .map((item) => {
+                const targetFrame = pasteBaseFrame + item.frameOffset;
+                if (targetFrame < 0) return null;
+                return {
+                    track: item.track,
+                    sourceFrame: item.sourceFrame,
+                    targetFrame,
+                    before: this.mmdManager.readTimelineKeyframePayload(item.track, targetFrame),
+                    after: this.cloneKeyframePayload(item.payload),
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (items.length === 0) {
+            this.showToast("No keyframes to paste", "info");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.batchPaste:${items.length}:${pasteBaseFrame}:${nowMs}`,
+            label: `Paste ${items.length} keyframes at frame ${pasteBaseFrame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchPaste",
+                pasteBaseFrame,
+                items,
+            },
+        };
+
+        const pasted = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!pasted) {
+            this.showToast(`Frame ${pasteBaseFrame}: keyframe paste failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`${items.length} keyframes pasted`, "success");
+    }
+
+    private resolveKeyframePasteTarget(clipboard: SingleKeyframeClipboard): { track: CommandTrackRef } | null {
         const currentTarget = this.mmdManager.getTimelineTarget();
         if (currentTarget !== clipboard.sourceTarget) return null;
 
@@ -8529,6 +8695,12 @@ export class UIController {
     }
 
     private deleteSelectedKeyframe(source: ActionSource = "system"): void {
+        const selectedKeys = this.timeline.getSelectedKeys();
+        if (selectedKeys.length > 1) {
+            this.deleteSelectedKeyframes(selectedKeys);
+            return;
+        }
+
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
@@ -8551,6 +8723,42 @@ export class UIController {
         this.updateTimelineEditState();
         this.commandHistory.push(command);
         this.showToast(`Frame ${frame}: keyframe deleted`, "success");
+    }
+
+    private deleteSelectedKeyframes(selectedKeys: readonly TimelineKeySelectionRef[]): void {
+        const items = selectedKeys
+            .map((selectedKey) => {
+                const track = this.selectionRefToCommandTrack(selectedKey);
+                const before = this.mmdManager.readTimelineKeyframePayload(track, selectedKey.frame);
+                return before ? { track, frame: selectedKey.frame, before: this.cloneKeyframePayload(before) } : null;
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (items.length === 0) {
+            this.showToast("No selected keyframes to delete", "info");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.batchDelete:${items.length}:${nowMs}`,
+            label: `Delete ${items.length} keyframes`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchDelete",
+                items,
+            },
+        };
+        const removed = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!removed) {
+            this.showToast("Selected keyframes delete failed", "error");
+            return;
+        }
+
+        this.updateTimelineEditState();
+        this.commandHistory.push(command);
+        this.showToast(`${items.length} keyframes deleted`, "success");
     }
 
     private undoLastCommand(): void {
@@ -8602,6 +8810,17 @@ export class UIController {
             this.updateTimelineEditState();
         };
 
+        const selectedKeys = this.timeline.getSelectedKeys();
+        if (selectedKeys.length > 1) {
+            if (deltaFrame !== -1 && deltaFrame !== 1) {
+                seekByDelta();
+                return;
+            }
+            if (this.nudgeSelectedKeyframes(selectedKeys, deltaFrame)) return;
+            seekByDelta();
+            return;
+        }
+
         const track = this.getSelectedTimelineTrack();
         const fromFrame = this.timeline.getSelectedFrame();
         if (!track || fromFrame === null) {
@@ -8631,6 +8850,82 @@ export class UIController {
 
         this.commandHistory.push(command);
         this.showToast(`Key moved: ${command.diff.fromFrame} -> ${command.diff.toFrame}`, "success");
+    }
+
+    private nudgeSelectedKeyframes(selectedKeys: readonly TimelineKeySelectionRef[], deltaFrame: -1 | 1): boolean {
+        const selectedKeySet = new Set(selectedKeys.map((key) =>
+            `${key.trackCategory}\u001f${key.trackName}\u001f${key.frame}`
+        ));
+        const items = selectedKeys.map((selectedKey) => {
+            const toFrame = selectedKey.frame + deltaFrame;
+            if (toFrame < 0) return null;
+            const track = this.selectionRefToCommandTrack(selectedKey);
+            const before = this.mmdManager.readTimelineKeyframePayload(track, selectedKey.frame);
+            if (!before) return null;
+            const targetKey = `${selectedKey.trackCategory}\u001f${selectedKey.trackName}\u001f${toFrame}`;
+            const overwritten = selectedKeySet.has(targetKey)
+                ? null
+                : this.mmdManager.readTimelineKeyframePayload(track, toFrame);
+            return {
+                track,
+                fromFrame: selectedKey.frame,
+                toFrame,
+                before: this.cloneKeyframePayload(before),
+                overwritten: overwritten ? this.cloneKeyframePayload(overwritten) : null,
+            };
+        });
+
+        if (items.some((item) => item === null)) {
+            this.showToast("Selected keyframes move failed", "error");
+            return false;
+        }
+        const moveItems = items.filter((item): item is NonNullable<typeof item> => item !== null);
+        if (this.hasDuplicateBatchMoveTarget(moveItems)) {
+            this.showToast("Selected keyframes move would collide", "error");
+            return false;
+        }
+
+        const orderedItems = [...moveItems].sort((a, b) => {
+            if (a.track.category !== b.track.category) return a.track.category.localeCompare(b.track.category);
+            if (a.track.name !== b.track.name) return a.track.name.localeCompare(b.track.name);
+            return deltaFrame > 0 ? b.fromFrame - a.fromFrame : a.fromFrame - b.fromFrame;
+        });
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.batchMove:${orderedItems.length}:${deltaFrame}:${nowMs}`,
+            label: `Move ${orderedItems.length} keyframes ${deltaFrame > 0 ? "right" : "left"}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            mergeKey: "keyframe.batchMove",
+            diff: {
+                type: "keyframe.batchMove",
+                deltaFrames: deltaFrame,
+                items: orderedItems,
+            },
+        };
+
+        const moved = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!moved) {
+            this.showToast("Selected keyframes move failed", "error");
+            return false;
+        }
+
+        this.commandHistory.push(command);
+        this.showToast(`${orderedItems.length} keyframes moved`, "success");
+        return true;
+    }
+
+    private hasDuplicateBatchMoveTarget(items: readonly {
+        track: CommandTrackRef;
+        toFrame: number;
+    }[]): boolean {
+        const targets = new Set<string>();
+        for (const item of items) {
+            const key = `${createCommandTrackKey(item.track)}\u001f${item.toFrame}`;
+            if (targets.has(key)) return true;
+            targets.add(key);
+        }
+        return false;
     }
 
     private getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
