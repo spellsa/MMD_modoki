@@ -235,6 +235,9 @@ export class Timeline {
 
         // Seek only: overlay layer
         this.overlayCanvas.style.pointerEvents = "auto";
+        this.overlayCanvas.addEventListener("dblclick", (e) => {
+            this.selectAllKeysAtFrameFromRulerEvent(e);
+        });
 
         // Select from labels
         this.labelCanvas.style.pointerEvents = "auto";
@@ -898,6 +901,11 @@ export class Timeline {
     private selectAllKeysFromLabelEvent(e: MouseEvent): void {
         const rect = this.labelCanvas.getBoundingClientRect();
         const localY = e.clientY - rect.top;
+        if (localY >= 0 && localY < RULER_H) {
+            this.selectAllKeysFromAllTracks();
+            return;
+        }
+
         const row = this.getRowIndexAtOffset(localY - RULER_H);
         if (row < 0 || row >= this.tracks.length) return;
 
@@ -912,6 +920,18 @@ export class Timeline {
             this.scheduleLabel();
         }
         this.emitSelectionChanged();
+    }
+
+    private selectAllKeysAtFrameFromRulerEvent(e: MouseEvent): void {
+        if (e.button !== 0) return;
+
+        const rect = this.overlayCanvas.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) return;
+
+        const frame = Math.max(0, Math.round(this.frameFromCanvasX(localX)));
+        this.selectAllKeysAtFrame(frame);
     }
 
     private selectTrackFromLabelEvent(e: MouseEvent): void {
@@ -1079,6 +1099,38 @@ export class Timeline {
         const active = allSelected ? this.getSelectedKeys()[0] ?? null : refs[0] ?? null;
         this.applyActiveSelection(active);
         this.selectionAnchor = active;
+    }
+
+    private selectAllKeysAtFrame(frame: number): void {
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const track of this.tracks) {
+            if (!hasFrame(track.frames, frame)) continue;
+            refs.push(this.createSelectionRef(track, frame));
+        }
+        this.applyKeySelectionRefs(refs);
+    }
+
+    private selectAllKeysFromAllTracks(): void {
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const track of this.tracks) {
+            for (const frame of track.frames) {
+                refs.push(this.createSelectionRef(track, frame));
+            }
+        }
+        this.applyKeySelectionRefs(refs);
+    }
+
+    private applyKeySelectionRefs(refs: readonly TimelineKeySelectionRef[]): void {
+        this.selectedBoneTrackSet.clear();
+        this.selectedKeySet = this.createNormalizedSelectionSet(refs);
+        const active = refs[0] && this.hasSelectionRef(refs[0])
+            ? refs[0]
+            : this.getSelectedKeys()[0] ?? null;
+        this.applyActiveSelection(active);
+        this.selectionAnchor = active;
+        this.scheduleStatic();
+        this.scheduleLabel();
+        this.emitSelectionChanged();
     }
 
     private pickFrameOnTrackFromX(track: KeyframeTrack, localX: number): number | null {
