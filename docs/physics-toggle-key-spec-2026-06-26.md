@@ -92,12 +92,12 @@ babylon-mmd は MMD 向け physics として Bullet / Ammo.js / Havok を選べ�
 - `project-codec.ts`
   - project save/load で bone/movable bone track の `physicsToggles` を pack/copy している。
 - `ui-controller.ts`
-  - 通常の選択ボーン keyframe 登録では、現状 `physicsToggles: [1]` を作っている。
+  - `物理` ボタンを入力モード切替として扱い、通常のボーン keyframe 登録時に `physicsToggle` を決定する。
   - interpolation 保存系には既存 track から physics toggle を引き継ぐ処理がある。
 - `index.html`
-  - timeline dock に `物理OFF` ボタンが存在するが、現在は disabled で未接続。
+  - timeline dock に `物理` 入力モードボタンがある。
 
-つまり、足りないのは主に「表示/操作として明示的に physicsToggle を編集する導線」と「runtime 反映の確認」であり、データ構造を新設する必要は薄い。
+つまり、データ構造は既存の bone / movable bone keyframe payload を使い、足りない部分を UI の入力モード、タイムライン表示、runtime 反映確認で補う方針でよい。
 
 ## v0.2 初期仕様案
 
@@ -118,20 +118,20 @@ babylon-mmd は MMD 向け physics として Bullet / Ammo.js / Havok を選べ�
 
 現在フレームにキーがない場合は、現在姿勢の bone key を upsert し、その payload の `physicsToggles[0]` に指定値を入れる。position / rotation / interpolation は通常のボーンキー登録と同じ取得経路を使う。
 
-既定値は `1`。既存 track の直近 key が読める場合は、表示上の現在値として直近 key の値を参照する。
+`物理` ボタンは即時登録ではなく入力モード切替として扱う。モード ON で通常のボーンキー登録を行った場合は `physicsToggle === 1`、モード OFF で登録した場合は `physicsToggle === 0` とする。既存 track の直近 key が読める場合は、表示上の現在値として直近 key の値を参照する。
 
-0 フレーム目は、物理関連ボーンに必ず物理 ON key が入るものとして扱う。MMD 本家同様、物理ボーン表示 ON 時は 0f に `×` marker が並ぶ状態をデフォルトとする。
+0 フレーム目は、明示 key がない物理関連ボーンだけ物理 ON の仮想 marker を表示する。MMD 本家同様、物理ボーン表示 ON 時は 0f に `×` marker が並ぶ状態をデフォルトとするが、0f に `physicsToggle === 0` の明示 key がある場合は通常ダイヤを優先する。
 
 ### UI
 
-最小実装では、既存の timeline dock の `物理OFF` ボタンを使う。
+最小実装では、timeline dock の `物理` ボタンを入力モード切替として使う。
 
 推奨挙動:
 
-- `物理` ボタンは、選択ボーンを現在フレームで物理 ON として登録する操作にする。
-- 登録される値は `physicsToggle === 1`。
-- 複数ボーン選択時は、選択中の各ボーンへ同じ物理 ON key を一括登録する。
-- 対象ボーンなし、モデルなし、編集可能 animation なしでは disabled。
+- `物理` ボタンは、次回のボーンキー登録で使う `physicsToggle` 入力モードを切り替える操作にする。
+- 入力モード ON で登録される値は `physicsToggle === 1`、入力モード OFF で登録される値は `physicsToggle === 0`。
+- 複数ボーン選択時は、選択中の各ボーンへ同じ入力モードの物理 ON/OFF key を一括登録する。
+- モデル編集モード外または再生中は disabled。対象ボーンなしでもモード自体は切り替え可能でよい。
 
 物理 OFF key は、通常のボーン位置/角度 key と同じく、現在姿勢を登録する操作で `physicsToggle === 0` になったものとして扱う。初期実装では、物理 OFF 専用ボタンを増やすより、通常登録で現在姿勢を打つ経路と `physicsToggles` の値決定を babylon-mmd / VMD の解釈に合わせる。
 
@@ -184,7 +184,7 @@ MMD_modoki の初期表示案:
 
 この項目は timeline の表示フィルタであり、物理 runtime の ON/OFF ではない。チェック ON のときだけ、選択モデルの物理関連ボーンを timeline 行に含める。チェック OFF のときでも、既存 motion に含まれる `physicsToggles` は保持し、copy / paste / delete / project save/load で消さない。
 
-表示 ON 時は、MMD 本家のように物理関連ボーン行を展開し、現在 frame に明示 key があるものを `×` marker で表示する。スクリーンショット上の `スカート_0_0` などの行のように、物理有効なボーンが一覧に出て、0f に `×` が並ぶイメージを暫定目標にする。
+表示 ON 時は、MMD 本家のように物理関連ボーン行を展開し、`physicsToggle === 1` の key を `×` marker で表示する。スクリーンショット上の `スカート_0_0` などの行のように、物理有効なボーンが一覧に出て、0f に `×` が並ぶイメージを暫定目標にする。ただし 0f に明示 OFF key がある場合は、仮想 `×` より OFF key の通常ダイヤを優先する。
 
 初期の「物理関連ボーン」判定は、保守的に次の優先順でよい。
 
@@ -208,13 +208,13 @@ VMD 書き出しでは Bone keyframe の `PhysicsToggle` として出す必要�
 - 既存キーありの場合は `physicsToggles` だけ変わることを確認する。
 - 既存キーなしの場合は現在姿勢 payload を作り、`physicsToggles` が指定値になることを確認する。
 - 複数ボーン選択で batch payload が作れることを確認する。
-- default は `1`、明示 OFF は `0` とする。
+- `物理` ボタンは入力モードのみを切り替え、登録自体は通常のボーンキー登録操作で行う。
 
 ### Phase 2: UI 接続
 
 - `timeline-edit-btn--physics-toggle` を有効化する条件を追加する。
-- 現在 sample から `物理OFF` / `物理ON` 表示を更新する。
-- click で `keyframe.paste` / `keyframe.batchPaste` へ流す。
+- 入力モード ON/OFF を `物理` ボタンの見た目へ反映する。ON 状態はブルーグリーン表示にする。
+- click では key を登録せず、入力モードだけを切り替える。登録時に `keyframe.paste` / `keyframe.batchPaste` へ流す。
 - 複数ボーン選択時は数値欄と同じく詳細表示はグレーアウトのままでよい。
 
 ### Phase 3: runtime 確認
@@ -226,27 +226,45 @@ VMD 書き出しでは Bone keyframe の `PhysicsToggle` として出す必要�
 
 ### Phase 4: 表示拡張と VMD export
 
-- `physicsToggle === 0` のキーに timeline marker を追加する。
+- `physicsToggle === 1` のキーは `×` marker、`physicsToggle === 0` のキーは通常ダイヤ marker として描画する。
 - VMD writer 実装時に Bone keyframe の physics toggle を出す。
 - 不要キー削除で OFF key を消さない条件を入れる。
 
 ## 受け入れ条件
 
-- 選択ボーンの現在フレームへ物理 OFF key を登録できる。
-- もう一度操作して物理 ON key を登録できる。
-- 複数選択ボーンへ同じ ON/OFF key を一括登録できる。
+- 選択ボーンの現在フレームへ通常ボーンキーとして物理 OFF key を登録できる。
+- `物理` 入力モード ON で通常登録すると物理 ON key を登録できる。
+- 複数選択ボーンへ同じ入力モードの物理 ON/OFF key を一括登録できる。
 - Undo / Redo で physics toggle とキー存在状態が戻る。
 - project save/load 後も `physicsToggles` が維持される。
-- 既存の通常ボーンキー登録は default `1` を維持し、勝手に OFF にならない。
+- 物理入力モード OFF の通常ボーンキー登録は `physicsToggle === 0` として扱い、物理 OFF key を明示できる。
 - 物理 OFF key のみ意味を持つ default pose key が、空トラック扱いで削除されない。
 
 ## 未決 / 注意点
 
-- MMD 本家の `物理OFF` ボタンが「現在値を反転」なのか「OFF を明示登録」なのかは実機で再確認したい。v0.2 初期案では、表示された操作を現在フレームへ登録する。
+- タイムライン下の `物理` ボタンは、登録時の物理 ON/OFF 入力モードを切り替える。物理 OFF は入力モード OFF で通常のボーンキー登録を行い、角度/位置を持つダイヤ key として扱う。
 - 剛体を持たないボーンにも key を打てるようにするか、UI 上 disabled にするかは運用で決める。データ互換性を優先するなら登録可能でよい。
 - WASM runtime では JS 側 `MmdAnimation` mutation だけでは不十分な可能性がある。既存の key registration rebind 経路に必ず乗せる。
 - 物理 ON 復帰時の剛体初期化/姿勢合わせは、単なる key edit 以上に難しい。まずは MMD/VMD 互換の state toggle として扱い、必要なら後続で seek 安定化と分けて検討する。
 - 物理焼き込みとは別機能。焼き込みは runtime の結果を通常ボーンキーへ変換する処理で、今回の `physicsToggles` 編集とは分ける。
+
+## 2026-06-26 実装メモ
+
+v0.2 初期対応として、次を実装した。
+
+- PMX metadata の剛体情報から `physicsBoneNames` を保持する。
+- `表示 > タイムラインに物理ボーンを表示` を追加し、初期 OFF の表示フィルタとして扱う。
+- 表示 ON 時は物理関連ボーン行を追加し、明示 0f key がない場合だけ 0f の仮想物理 ON key を `×` marker として表示する。
+- `physicsToggle === 1` の key は `×` marker、`physicsToggle === 0` の key は通常ダイヤ marker として描画する。
+- 0f の仮想物理 ON marker は表示専用で、選択/コピー/削除対象の実体 key には含めない。0f 以外に打った物理 ON/OFF key は通常の bone key と同じく選択/コピー/削除できる。
+- ビューポートの通常ボーン表示では物理ボーンを基本非表示のままにし、現在フレーム時点で直近の物理 key が `physicsToggle === 0` の物理ボーンだけ追加表示する。
+- タイムライン下の `物理` ボタンは入力モード切替として扱い、ON 状態はブルーグリーンで表示する。
+- 物理入力モードは起動時 ON、Auto キー登録は起動時 OFF とする。
+- 入力モード ON/OFF に応じた通常ボーンキー登録は `keyframe.paste` / `keyframe.batchPaste` の Command 経路に乗せ、Undo/Redo 対象にする。
+- 物理入力モード OFF のボーンキー登録は `physicsToggle === 0`、ON の登録は `physicsToggle === 1` として扱う。
+- 登録後はキー選択だけを外し、ボーン/トラック選択は維持する。
+
+0f の物理 ON key は、初期対応では表示上のデフォルト marker として扱う。表示トグルだけで project 内へ大量の物理 key を自動追加しない。0f に `physicsToggle === 0` の明示 key がある場合は、物理 OFF で固める意図を優先し、仮想 `×` は出さない。
 
 ## 参考リンク
 

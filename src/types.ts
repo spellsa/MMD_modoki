@@ -141,6 +141,7 @@ export interface ModelInfo {
     vertexCount: number;
     boneCount: number;
     boneNames: string[];
+    physicsBoneNames?: string[];
     boneControlInfos?: BoneControlInfo[];
     morphCount: number;
     morphNames: string[];
@@ -182,6 +183,12 @@ export interface KeyframeTrack {
     category: TrackCategory;
     /** Frame numbers that have keyframes (sorted ascending) */
     frames: Uint32Array;
+    /** Bone keyframes whose physics toggle is ON. Drawn as MMD-style x markers. */
+    physicsOnFrames?: Uint32Array;
+    /** Non-editable physics ON markers shown only as timeline defaults. */
+    virtualPhysicsOnFrames?: Uint32Array;
+    /** True when the row is included by the physics-bone timeline display filter. */
+    physicsBone?: boolean;
 }
 
 export interface TimelineRotationOverlay {

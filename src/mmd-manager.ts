@@ -288,6 +288,7 @@ import {
     createEditorModelMotionFromMmdAnimation,
     resolveBoneTrackKind,
 } from "./editor/mmd-animation-builder";
+import { getPhysicsOffBoneNamesAtFrame } from "./editor/physics-bone-visibility";
 import { upsertBoneKey, type EditorBoneTrackKind } from "./editor/motion-document";
 import { bindModelAnimationToRuntime } from "./editor/runtime-animation-binder";
 import {
@@ -1451,6 +1452,7 @@ ${beforeFogAppendBlock}
     private bonePickPointerDown: { pointerId: number; clientX: number; clientY: number } | null = null;
     private captureEditorOverlaysSuppressed = false;
     private rigidBodyVisualizerEnabled = false;
+    private showPhysicsBonesInTimeline = false;
     private rigidBodyVisualizerTargets: {
         sceneModel: SceneModelEntry;
         backend: "ammo" | "bullet";
@@ -3123,6 +3125,27 @@ ${beforeFogAppendBlock}
         this.updateBoneGizmoTarget();
     }
 
+    public getBoneVisualizerVisibleBoneNames(): ReadonlySet<string> | null {
+        if (!this.activeModelInfo) return null;
+
+        const visibleBoneNames = new Set(this.activeModelInfo.boneNames);
+        if (!this.currentModel || !this.activeModelInfo.physicsBoneNames || this.activeModelInfo.physicsBoneNames.length === 0) {
+            return visibleBoneNames;
+        }
+
+        const animation = this.modelSourceAnimationsByModel.get(this.currentModel) ?? null;
+        const physicsOffBoneNames = getPhysicsOffBoneNamesAtFrame(
+            animation,
+            this.activeModelInfo.physicsBoneNames,
+            this._currentFrame,
+        );
+        for (const boneName of physicsOffBoneNames) {
+            visibleBoneNames.add(boneName);
+        }
+
+        return visibleBoneNames;
+    }
+
     public setCaptureEditorOverlaysSuppressed(suppressed: boolean): void {
         if (this.captureEditorOverlaysSuppressed === suppressed) return;
         this.captureEditorOverlaysSuppressed = suppressed;
@@ -3359,6 +3382,22 @@ ${beforeFogAppendBlock}
         return applyTimelineKeyframePayloadImpl(this, track, frame, payload);
     }
 
+    public getShowPhysicsBonesInTimeline(): boolean {
+        return this.showPhysicsBonesInTimeline;
+    }
+
+    public setShowPhysicsBonesInTimeline(visible: boolean): boolean {
+        const next = Boolean(visible);
+        if (this.showPhysicsBonesInTimeline === next) return next;
+        this.showPhysicsBonesInTimeline = next;
+        emitMergedKeyframeTracksImpl(this);
+        return next;
+    }
+
+    public toggleShowPhysicsBonesInTimeline(): boolean {
+        return this.setShowPhysicsBonesInTimeline(!this.showPhysicsBonesInTimeline);
+    }
+
     public beginTimelineEditBatch(): void {
         beginTimelineEditBatchImpl(this);
     }
@@ -3371,6 +3410,7 @@ ${beforeFogAppendBlock}
         track: Pick<KeyframeTrack, "name" | "category">,
         frame: number,
         pose: BoneKeyframePoseInput,
+        physicsToggle: 0 | 1 = 0,
     ): { created: boolean } | null {
         if (!this.currentModel || !this.activeModelInfo) return null;
         if (track.category !== "root" && track.category !== "semi-standard" && track.category !== "bone") {
@@ -3395,7 +3435,7 @@ ${beforeFogAppendBlock}
                 : undefined,
             rotation: this.rotationDegreesToQuaternionBlock(pose.rotation.x, pose.rotation.y, pose.rotation.z),
             rotationInterpolation: this.createDefaultInterpolationBlock(),
-            physicsToggle: 1,
+            physicsToggle,
         });
         const animation = buildMmdAnimationFromEditorMotion(
             upsert.motion.name,

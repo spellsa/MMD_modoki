@@ -74,6 +74,7 @@ type TimelineEditHost = {
     cameraSourceAnimation: MmdAnimation | null;
     cameraMotionPath: string | null;
     timelineTarget: "model" | "camera";
+    showPhysicsBonesInTimeline?: boolean;
     mmdRuntime: {
         animationFrameTimeDuration: number;
         seekAnimation(frame: number, forceEvaluate: boolean): void;
@@ -293,6 +294,66 @@ function createNormalizedFrameSet(frames: readonly number[]): Set<number> {
     return normalizedFrames;
 }
 
+function mergeFrameArrays(...sources: Array<ArrayLike<number> | null | undefined>): Uint32Array {
+    const frames = new Set<number>();
+    for (const source of sources) {
+        if (!source) continue;
+        for (let i = 0; i < source.length; i += 1) {
+            const value = source[i];
+            if (!Number.isFinite(value)) continue;
+            frames.add(Math.max(0, Math.floor(value)));
+        }
+    }
+    return new Uint32Array([...frames].sort((a, b) => a - b));
+}
+
+function getBoneKeyframeFrames(animation: MmdAnimation | null, boneName: string): Uint32Array {
+    if (!animation) return EMPTY_KEYFRAME_FRAMES;
+
+    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === boneName);
+    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === boneName);
+    return mergeFrameArrays(boneTrack?.frameNumbers, movableTrack?.frameNumbers);
+}
+
+function hasExplicitBoneKeyframe(animation: MmdAnimation | null, boneName: string, frame: number): boolean {
+    const normalizedFrame = Math.max(0, Math.floor(frame));
+    const frames = getBoneKeyframeFrames(animation, boneName);
+    for (let i = 0; i < frames.length; i += 1) {
+        if (frames[i] === normalizedFrame) return true;
+    }
+    return false;
+}
+
+function getDefaultPhysicsOnFrames(animation: MmdAnimation | null, boneName: string, showPhysicsBones: boolean): number[] | null {
+    if (!showPhysicsBones) return null;
+    return hasExplicitBoneKeyframe(animation, boneName, 0) ? null : [0];
+}
+
+function getBonePhysicsOnFrames(animation: MmdAnimation | null, boneName: string): Uint32Array {
+    if (!animation) return EMPTY_KEYFRAME_FRAMES;
+
+    const collect = (
+        frameNumbers: ArrayLike<number> | undefined,
+        physicsToggles: ArrayLike<number> | undefined,
+    ): number[] => {
+        if (!frameNumbers || !physicsToggles) return [];
+        const result: number[] = [];
+        const length = Math.min(frameNumbers.length, physicsToggles.length);
+        for (let i = 0; i < length; i += 1) {
+            if (Math.round(physicsToggles[i] ?? 0) !== 1) continue;
+            result.push(Math.max(0, Math.floor(frameNumbers[i] ?? 0)));
+        }
+        return result;
+    };
+
+    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === boneName);
+    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === boneName);
+    return mergeFrameArrays(
+        boneTrack ? collect(boneTrack.frameNumbers, boneTrack.physicsToggles) : null,
+        movableTrack ? collect(movableTrack.frameNumbers, movableTrack.physicsToggles) : null,
+    );
+}
+
 function removeFrameNumbersForPayloads(
     frames: ArrayLike<number>,
     framesToRemove: ReadonlySet<number>,
@@ -400,6 +461,9 @@ export function getActiveModelTimelineTracks(host: TimelineEditHost): KeyframeTr
     if (!host.currentModel || !host.activeModelInfo) return [];
 
     const visibleBoneNameSet = new Set(host.activeModelInfo.boneNames);
+    const physicsBoneNameSet = new Set(host.activeModelInfo.physicsBoneNames ?? []);
+    const showPhysicsBones = host.showPhysicsBonesInTimeline === true;
+    const animation = getCurrentModelAnimation(host);
     const isVisibleBoneCategory = (category: TrackCategory): boolean => {
         return category === "root" || category === "semi-standard" || category === "bone";
     };
@@ -411,12 +475,23 @@ export function getActiveModelTimelineTracks(host: TimelineEditHost): KeyframeTr
         const parsed = parseTrackKey(key);
         if (!parsed) continue;
         if (isVisibleBoneCategory(parsed.category) && !visibleBoneNameSet.has(parsed.name)) {
-            continue;
+            if (!showPhysicsBones || !physicsBoneNameSet.has(parsed.name)) continue;
         }
+        const isPhysicsBone = physicsBoneNameSet.has(parsed.name);
+        const defaultPhysicsOnFrames = getDefaultPhysicsOnFrames(animation, parsed.name, showPhysicsBones);
         trackMap.set(key, {
             name: parsed.name,
             category: parsed.category,
-            frames,
+            frames: isPhysicsBone && showPhysicsBones
+                ? mergeFrameArrays(frames, getBoneKeyframeFrames(animation, parsed.name))
+                : frames,
+            physicsOnFrames: isPhysicsBone
+                ? getBonePhysicsOnFrames(animation, parsed.name)
+                : undefined,
+            virtualPhysicsOnFrames: isPhysicsBone && defaultPhysicsOnFrames
+                ? mergeFrameArrays(defaultPhysicsOnFrames)
+                : undefined,
+            physicsBone: isPhysicsBone,
         });
     }
 
@@ -428,6 +503,38 @@ export function getActiveModelTimelineTracks(host: TimelineEditHost): KeyframeTr
                 name: boneName,
                 category,
                 frames: EMPTY_KEYFRAME_FRAMES,
+            });
+        }
+    }
+
+    if (showPhysicsBones) {
+        for (const boneName of physicsBoneNameSet) {
+            const category = classifyBone(boneName);
+            const key = createTrackKey(category, boneName);
+            const existing = trackMap.get(key);
+            const defaultPhysicsOnFrames = getDefaultPhysicsOnFrames(animation, boneName, true);
+            const physicsOnFrames = getBonePhysicsOnFrames(animation, boneName);
+            const displayFrames = mergeFrameArrays(existing?.frames, getBoneKeyframeFrames(animation, boneName));
+            const virtualPhysicsOnFrames = defaultPhysicsOnFrames
+                ? mergeFrameArrays(defaultPhysicsOnFrames)
+                : undefined;
+            if (existing) {
+                trackMap.set(key, {
+                    ...existing,
+                    frames: displayFrames,
+                    physicsOnFrames,
+                    virtualPhysicsOnFrames,
+                    physicsBone: true,
+                });
+                continue;
+            }
+            trackMap.set(key, {
+                name: boneName,
+                category,
+                frames: displayFrames,
+                physicsOnFrames,
+                virtualPhysicsOnFrames,
+                physicsBone: true,
             });
         }
     }
@@ -458,6 +565,12 @@ export function getActiveModelTimelineTracks(host: TimelineEditHost): KeyframeTr
     // the model's bone order instead of grouping roots/bones separately.
     for (const boneName of host.activeModelInfo.boneNames) {
         appendByKey(createTrackKey(classifyBone(boneName), boneName));
+    }
+
+    if (showPhysicsBones) {
+        for (const boneName of physicsBoneNameSet) {
+            appendByKey(createTrackKey(classifyBone(boneName), boneName));
+        }
     }
 
     for (const morphName of host.activeModelInfo.morphNames) {

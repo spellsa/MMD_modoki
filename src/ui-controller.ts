@@ -406,6 +406,8 @@ export class UIController {
     private btnInfoKeyframe: HTMLButtonElement | null = null;
     private btnInterpolationKeyframe: HTMLButtonElement | null = null;
     private btnBoneKeyframe: HTMLButtonElement | null = null;
+    private btnPhysicsKeyframe: HTMLButtonElement | null = null;
+    private physicsKeyframeInputMode: 0 | 1 = 1;
     private btnMorphKeyframe: HTMLButtonElement | null = null;
     private btnAccessoryKeyframe: HTMLButtonElement | null = null;
     private shortcutEdgeWidthRestore = 1;
@@ -633,7 +635,7 @@ export class UIController {
             },
         });
         this.setupEventListeners();
-        this.setAutoKeyEnabled(this.readAutoKeyEnabled(), { persist: false, toast: false });
+        this.setAutoKeyEnabled(false, { persist: false, toast: false });
         this.setupCallbacks();
         this.setupKeyboard();
         this.setupFileDrop();
@@ -933,6 +935,7 @@ export class UIController {
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
         this.btnInterpolationKeyframe = document.getElementById("btn-interpolation-keyframe") as HTMLButtonElement | null;
         this.btnBoneKeyframe = document.getElementById("btn-bone-keyframe") as HTMLButtonElement | null;
+        this.btnPhysicsKeyframe = document.querySelector(".timeline-edit-btn--physics-toggle") as HTMLButtonElement | null;
         this.btnMorphKeyframe = document.getElementById("btn-morph-keyframe") as HTMLButtonElement | null;
         this.btnAccessoryKeyframe = document.getElementById("btn-accessory-keyframe") as HTMLButtonElement | null;
         this.btnInfoKeyframe?.addEventListener("click", () => {
@@ -943,6 +946,9 @@ export class UIController {
         });
         this.btnBoneKeyframe?.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.registerBone", source: "button" });
+        });
+        this.btnPhysicsKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.togglePhysicsInputMode", source: "button" });
         });
         this.btnMorphKeyframe?.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.registerMorph", source: "button" });
@@ -2054,6 +2060,10 @@ export class UIController {
         this.actionDispatcher.register("keyframe.toggleAutoKey", () => {
             this.setAutoKeyEnabled(!this.autoKeyEnabled, { persist: true, toast: true });
         });
+        this.actionDispatcher.register("keyframe.togglePhysicsInputMode", () => {
+            this.physicsKeyframeInputMode = this.physicsKeyframeInputMode === 1 ? 0 : 1;
+            this.updatePhysicsKeyframeButtonState();
+        });
         this.actionDispatcher.register("history.undo", () => this.undoLastCommand());
         this.actionDispatcher.register("history.redo", () => this.redoLastCommand());
         this.actionDispatcher.register("keyframe.registerInfo", () => this.registerInfoKeyframe());
@@ -2111,6 +2121,12 @@ export class UIController {
         });
         this.actionDispatcher.register("viewport.toggleSkydome", () => {
             this.sceneEnvironmentUiController?.toggleSkydome();
+        });
+        this.actionDispatcher.register("timeline.togglePhysicsBones", () => {
+            const visible = this.mmdManager.toggleShowPhysicsBonesInTimeline();
+            this.showToast(visible ? "Physics bones shown in timeline" : "Physics bones hidden in timeline", "info");
+            this.updateTimelineEditState();
+            this.appMenuController?.refresh();
         });
         this.actionDispatcher.register("project.openFile", () => {
             void this.loadFileFromDialog();
@@ -5572,15 +5588,6 @@ export class UIController {
         this.registerSingleMorphKeyframeAtCurrentFrame(morph, { toast: false });
     }
 
-    private readAutoKeyEnabled(): boolean {
-        try {
-            const value = localStorage.getItem(UIController.AUTO_KEY_STORAGE_KEY);
-            return value === "1" || value === "true";
-        } catch {
-            return false;
-        }
-    }
-
     private setAutoKeyEnabled(enabled: boolean, options: { persist: boolean; toast: boolean }): void {
         this.autoKeyEnabled = enabled;
         this.btnAutoKey.setAttribute("aria-pressed", enabled ? "true" : "false");
@@ -6193,8 +6200,25 @@ export class UIController {
         this.setSectionKeyframeButtonState(this.btnInfoKeyframe, this.getInfoKeyframeButtonState());
         this.setSectionKeyframeButtonState(this.btnInterpolationKeyframe, this.getInterpolationKeyframeButtonState());
         this.setSectionKeyframeButtonState(this.btnBoneKeyframe, this.getBoneKeyframeButtonState());
+        this.updatePhysicsKeyframeButtonState();
         this.setSectionKeyframeButtonState(this.btnMorphKeyframe, this.getMorphKeyframeButtonState());
         this.setSectionKeyframeButtonState(this.btnAccessoryKeyframe, this.getAccessoryKeyframeButtonState());
+    }
+
+    private updatePhysicsKeyframeButtonState(): void {
+        if (!this.btnPhysicsKeyframe) return;
+        this.btnPhysicsKeyframe.hidden = this.mmdManager.isPlaying;
+        this.btnPhysicsKeyframe.setAttribute("aria-pressed", this.physicsKeyframeInputMode === 1 ? "true" : "false");
+        if (this.mmdManager.isPlaying) {
+            this.btnPhysicsKeyframe.disabled = true;
+            return;
+        }
+        this.btnPhysicsKeyframe.disabled = this.mmdManager.getTimelineTarget() !== "model";
+    }
+
+    private clearRegisteredKeySelection(): void {
+        this.timeline.clearSelectedKeys({ keepActiveTrack: true, clearActiveFrame: true });
+        this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
     }
 
     private setSectionKeyframeButtonState(button: HTMLButtonElement | null, state: SectionKeyframeButtonState): void {
@@ -7783,7 +7807,7 @@ export class UIController {
             if (overwritten) {
                 this.refreshRuntimeAnimationForTrack();
                 this.applyRegisteredKeyframePoseToViewport(track, poseSnapshot);
-                this.timeline.setSelectedFrame(null);
+                this.clearRegisteredKeySelection();
                 this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
                 if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
                     this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
@@ -7804,7 +7828,7 @@ export class UIController {
             this.applyRegisteredKeyframePoseToViewport(track, poseSnapshot);
         }
 
-        this.timeline.setSelectedFrame(null);
+        this.clearRegisteredKeySelection();
         this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
         if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
             this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
@@ -7845,6 +7869,29 @@ export class UIController {
         this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "button");
     }
 
+    private resolveBottomPanelBoneCommandTrack(): { category: TrackCategory; name: string } | null {
+        const boneName = this.bottomPanel.getSelectedBone();
+        if (!boneName || boneName === "Camera") return null;
+        const preferredCategories: TrackCategory[] = this.selectedBoneTrackCategory
+            ? [
+                this.selectedBoneTrackCategory,
+                ...(["bone", "semi-standard", "root"] as TrackCategory[]).filter(
+                    (category) => category !== this.selectedBoneTrackCategory,
+                ),
+            ]
+            : ["bone", "semi-standard", "root"];
+        if (this.timeline.selectTrackByNameAndCategory(boneName, preferredCategories)) {
+            const track = this.timeline.getSelectedTrack();
+            if (track && this.isBoneTrackForEditor(track) && track.name !== "Camera") {
+                return { category: track.category, name: track.name };
+            }
+        }
+        return {
+            category: this.selectedBoneTrackCategory ?? "bone",
+            name: boneName,
+        };
+    }
+
     private registerBoneKeyframeForBoneAtCurrentFrame(boneName: string, source: ActionSource): void {
         const poseSnapshot = this.captureCurrentBonePoseSnapshot(boneName);
 
@@ -7881,6 +7928,7 @@ export class UIController {
         selectedBoneTracks: readonly TimelineBoneTrackSelectionRef[],
     ): void {
         const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const physicsToggle = this.physicsKeyframeInputMode;
         const items = selectedBoneTracks
             .map((selectedTrack) => {
                 const track = this.boneTrackSelectionRefToCommandTrack(selectedTrack);
@@ -7891,7 +7939,7 @@ export class UIController {
                     category: track.category,
                     frames: new Uint32Array(),
                 }, frame);
-                const after = this.createBoneKeyframePayload(track, poseSnapshot, interpolationSnapshot);
+                const after = this.createBoneKeyframePayload(track, poseSnapshot, interpolationSnapshot, physicsToggle);
                 return {
                     track,
                     sourceFrame: frame,
@@ -7971,7 +8019,7 @@ export class UIController {
         }
 
         this.commandHistory.push(command);
-        this.timeline.setSelectedFrame(null);
+        this.clearRegisteredKeySelection();
         this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
         if (this.bottomPanel.getSelectedBone() === "Camera") {
             this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
@@ -8019,6 +8067,7 @@ export class UIController {
         track: Pick<KeyframeTrack, "name" | "category">,
         poseSnapshot: SelectedBonePoseSnapshot,
         curves: ReadonlyMap<string, InterpolationCurve>,
+        physicsToggle: 0 | 1,
     ): BoneKeyframePayload | MovableBoneKeyframePayload {
         const rotations = this.rotationDegreesToQuaternionBlock(
             poseSnapshot.rotation.x,
@@ -8033,14 +8082,14 @@ export class UIController {
                 positionInterpolations: this.composePositionInterpolationBlock(curves, "bone-x", "bone-y", "bone-z"),
                 rotations,
                 rotationInterpolations,
-                physicsToggles: [1],
+                physicsToggles: [physicsToggle],
             };
         }
         return {
             kind: "bone",
             rotations,
             rotationInterpolations,
-            physicsToggles: [1],
+            physicsToggles: [physicsToggle],
         };
     }
 
@@ -8052,12 +8101,17 @@ export class UIController {
             return false;
         }
 
-        const result = this.mmdManager.registerEditorBoneKeyframe(track, this.mmdManager.currentFrame, poseSnapshot);
+        const result = this.mmdManager.registerEditorBoneKeyframe(
+            track,
+            this.mmdManager.currentFrame,
+            poseSnapshot,
+            this.physicsKeyframeInputMode,
+        );
         if (!result) {
             return false;
         }
 
-        this.timeline.setSelectedFrame(null);
+        this.clearRegisteredKeySelection();
         this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
         if (this.bottomPanel.getSelectedBone() === track.name) {
             this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
@@ -8096,7 +8150,7 @@ export class UIController {
             this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(snapshot.frameIndex));
             this.updateSectionKeyframeButtons();
             this.bottomPanel.updateMorphKeyframeButtonStates(frame);
-            this.timeline.setSelectedFrame(null);
+            this.clearRegisteredKeySelection();
             this.updateTimelineEditState();
             this.showToast(
                 touched ? `Frame ${frame}: morph keyframes added` : `Frame ${frame}: morph keyframes already registered`,
@@ -8125,7 +8179,7 @@ export class UIController {
         }
         this.updateSectionKeyframeButtons();
         this.bottomPanel.updateMorphKeyframeButtonStates(frame);
-        this.timeline.setSelectedFrame(null);
+        this.clearRegisteredKeySelection();
         this.updateTimelineEditState();
         if (options.toast) {
             this.showToast(
@@ -8359,7 +8413,7 @@ export class UIController {
         const transform = poseSnapshot ?? this.getPendingBonePoseSnapshot(boneName, frame) ?? this.mmdManager.getBoneTransform(boneName);
         const fallbackPosition = this.readFloatBlock(track.positions, referenceIndex, 3, [0, 0, 0]);
         const fallbackRotation = this.readFloatBlock(track.rotations, referenceIndex, 4, [0, 0, 0, 1]);
-        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [1]);
+        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [0]);
         const positionBlock = transform
             ? [transform.position.x, transform.position.y, transform.position.z]
             : fallbackPosition;
@@ -8425,7 +8479,7 @@ export class UIController {
 
         const transform = poseSnapshot ?? this.getPendingBonePoseSnapshot(boneName, frame) ?? this.mmdManager.getBoneTransform(boneName);
         const fallbackRotation = this.readFloatBlock(track.rotations, referenceIndex, 4, [0, 0, 0, 1]);
-        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [1]);
+        const fallbackPhysicsToggle = this.readUint8Block(track.physicsToggles, referenceIndex, 1, [0]);
         const rotationBlock = transform
             ? this.rotationDegreesToQuaternionBlock(transform.rotation.x, transform.rotation.y, transform.rotation.z)
             : fallbackRotation;

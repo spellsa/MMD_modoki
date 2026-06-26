@@ -56,6 +56,7 @@ const SELECTION_KEY_SEPARATOR = "\u001f";
 const RECT_SELECTION_THRESHOLD_PX = 4;
 const MULTI_BONE_TRACK_ROW_BG = "rgba(57,197,187,0.12)";
 const MULTI_BONE_LABEL_BG = "rgba(57,197,187,0.16)";
+const EMPTY_FRAMES = new Uint32Array(0);
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -124,6 +125,28 @@ function drawDiamondMarker(
     ctx.lineTo(x, y + half);
     ctx.lineTo(x - half, y);
     ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawXMarker(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    strokeStyle: string,
+    lineWidth = 2,
+): void {
+    const half = size / 2;
+    ctx.save();
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - half, y - half);
+    ctx.lineTo(x + half, y + half);
+    ctx.moveTo(x + half, y - half);
+    ctx.lineTo(x - half, y + half);
     ctx.stroke();
     ctx.restore();
 }
@@ -350,10 +373,10 @@ export class Timeline {
         this.emitSelectionChanged();
     }
 
-    clearSelectedKeys(options: { keepActiveTrack?: boolean } = {}): void {
+    clearSelectedKeys(options: { keepActiveTrack?: boolean; clearActiveFrame?: boolean } = {}): void {
         this.selectedKeySet.clear();
         this.selectionAnchor = null;
-        if (!options.keepActiveTrack) {
+        if (options.clearActiveFrame || !options.keepActiveTrack) {
             this.selectedFrame = null;
         }
         this.scheduleStatic();
@@ -583,11 +606,18 @@ export class Timeline {
             const markerSize = track.category === "root" ? 9 : track.category === "camera" ? 8 : 6;
             const midY = ry + rowH / 2;
             const selectedFrames = selectedFramesByTrack.get(this.createTrackSelectionKey(track));
+            const physicsOnFrames = track.physicsOnFrames ?? EMPTY_FRAMES;
+            const virtualPhysicsOnFrames = track.virtualPhysicsOnFrames ?? EMPTY_FRAMES;
 
             for (let k = lo; k <= hi && k < frames.length; k++) {
                 const sx = frames[k] * PX_PER_F - this.viewOffset + playheadX;
                 if (sx < -markerSize || sx > w + markerSize) continue;
-                drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
+                const isPhysicsOnKey = hasFrame(physicsOnFrames, frames[k]);
+                if (isPhysicsOnKey) {
+                    drawXMarker(ctx, sx, midY, markerSize + 2, col.kf);
+                } else {
+                    drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
+                }
 
                 const isSelectedKey = selectedFrames?.has(frames[k]) ?? false;
                 const isActiveKey = isSelectedRow && this.selectedFrame !== null && frames[k] === this.selectedFrame;
@@ -595,8 +625,22 @@ export class Timeline {
                     const fill = isActiveKey ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.09)";
                     const stroke = isActiveKey ? "#ffffff" : "rgba(255,255,255,0.72)";
                     drawDiamondMarker(ctx, sx, midY, markerSize + 4, fill, stroke, isActiveKey ? 1.5 : 1);
-                    drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
+                    if (isPhysicsOnKey) {
+                        drawXMarker(ctx, sx, midY, markerSize + 2, col.kf);
+                    } else {
+                        drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
+                    }
                 }
+            }
+
+            const virtualLo = lowerBound(virtualPhysicsOnFrames, visStart);
+            const virtualHi = upperBound(virtualPhysicsOnFrames, visEnd);
+            for (let k = virtualLo; k <= virtualHi && k < virtualPhysicsOnFrames.length; k++) {
+                const frame = virtualPhysicsOnFrames[k];
+                if (hasFrame(frames, frame)) continue;
+                const sx = frame * PX_PER_F - this.viewOffset + playheadX;
+                if (sx < -markerSize || sx > w + markerSize) continue;
+                drawXMarker(ctx, sx, midY, markerSize + 2, col.kf);
             }
         }
 

@@ -27,7 +27,7 @@ type BoneVisualizerPickPoint = {
 type BoneVisualizerHost = {
     currentMesh: Mesh | null;
     currentModel: { runtimeBones?: readonly IMmdRuntimeBone[] } | null;
-    activeModelInfo: { boneNames: string[]; boneControlInfos?: BoneControlInfo[] } | null;
+    activeModelInfo: { boneNames: string[]; physicsBoneNames?: string[]; boneControlInfos?: BoneControlInfo[] } | null;
     boneVisualizerTarget: BoneVisualizerTarget;
     boneOverlayCanvas: HTMLCanvasElement | null;
     boneOverlayCtx: CanvasRenderingContext2D | null;
@@ -47,9 +47,20 @@ type BoneVisualizerHost = {
     _isPlaying: boolean;
     captureEditorOverlaysSuppressed: boolean;
     getActiveModelVisibility: () => boolean;
+    getBoneVisualizerVisibleBoneNames?: () => ReadonlySet<string> | null;
     setBoneVisualizerSelectedBone: (boneName: string | null) => void;
     onBoneVisualizerBonePicked?: (pick: { boneName: string; additive: boolean }) => void;
 };
+
+function createBoneVisualizerPotentialBoneNameSet(
+    modelInfo: BoneVisualizerHost["activeModelInfo"],
+): Set<string> | null {
+    if (!modelInfo) return null;
+    return new Set([
+        ...modelInfo.boneNames,
+        ...(modelInfo.physicsBoneNames ?? []),
+    ]);
+}
 
 export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
     disposeBoneVisualizer(host);
@@ -57,9 +68,7 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
     const sourceMesh = host.currentMesh;
     if (!sourceMesh) return;
 
-    const visibleBoneNameSet = host.activeModelInfo
-        ? new Set(host.activeModelInfo.boneNames)
-        : null;
+    const potentialBoneNameSet = createBoneVisualizerPotentialBoneNameSet(host.activeModelInfo);
     const boneControlInfoByName = new Map<string, BoneControlInfo>(
         (host.activeModelInfo?.boneControlInfos ?? []).map((info) => [info.name, info] as const)
     );
@@ -70,11 +79,10 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
         const runtimePairs: Array<[number, number]> = [];
         for (let i = 0; i < runtimeBones.length; ++i) {
             const childName = runtimeBones[i].name;
-            if (visibleBoneNameSet && !visibleBoneNameSet.has(childName)) continue;
+            if (potentialBoneNameSet && !potentialBoneNameSet.has(childName)) continue;
 
             const parent = runtimeBones[i].parentBone;
             if (!parent) continue;
-            if (visibleBoneNameSet && !visibleBoneNameSet.has(parent.name)) continue;
 
             const parentIndex = runtimeBoneIndexMap.get(parent);
             if (parentIndex === undefined) continue;
@@ -96,7 +104,7 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
                 mode: "runtime",
                 mesh: sourceMesh.name,
                 bones: runtimeBones.length,
-                visibleBones: visibleBoneNameSet?.size ?? runtimeBones.length,
+                visibleBones: potentialBoneNameSet?.size ?? runtimeBones.length,
                 pairs: runtimePairs.length,
                 runtimeUseMeshWorldMatrix,
             });
@@ -129,11 +137,10 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
     const pairs: Array<[number, number]> = [];
     for (let i = 0; i < bones.length; ++i) {
         const childName = bones[i].name;
-        if (visibleBoneNameSet && !visibleBoneNameSet.has(childName)) continue;
+        if (potentialBoneNameSet && !potentialBoneNameSet.has(childName)) continue;
 
         const parent = bones[i].getParent();
         if (!parent) continue;
-        if (visibleBoneNameSet && !visibleBoneNameSet.has(parent.name)) continue;
 
         const parentIndex = boneIndexMap.get(parent);
         if (parentIndex === undefined) continue;
@@ -171,7 +178,7 @@ export function refreshBoneVisualizerTarget(host: BoneVisualizerHost): void {
         mode: "skeleton",
         mesh: skeletonHost.name,
         bones: bones.length,
-        visibleBones: visibleBoneNameSet?.size ?? bones.length,
+        visibleBones: potentialBoneNameSet?.size ?? bones.length,
         pairs: pairs.length,
         positionMesh: positionMesh.name,
         positionMeshVertices,
@@ -208,6 +215,7 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
     const transformMatrix = host.scene.getTransformMatrix();
     const selectedBoneName = host.boneVisualizerSelectedBoneName;
     const selectedBoneNames = host.boneVisualizerSelectedBoneNames;
+    const visibleBoneNameSet = host.getBoneVisualizerVisibleBoneNames?.() ?? null;
 
     mesh.computeWorldMatrix(true);
     const meshWorldMatrix = mesh.getWorldMatrix();
@@ -226,7 +234,7 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
 
     if (runtimeBones && runtimeBones.length > 0) {
         const projectedPositions = new Map<number, { x: number; y: number }>();
-        const segmentCommands: Array<{ fromX: number; fromY: number; toX: number; toY: number; selected: boolean; lineColor: string; lineWidth: number }> = [];
+        const segmentCommands: Array<{ parentName: string; childName: string; fromX: number; fromY: number; toX: number; toY: number; selected: boolean; lineColor: string; lineWidth: number }> = [];
 
         for (const [childIndex, parentIndex] of pairs) {
             runtimeBones[childIndex].getWorldTranslationToRef(host.boneOverlayChildWorld);
@@ -246,10 +254,14 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
             projectedPositions.set(childIndex, { x: host.boneOverlayChildScreen.x, y: host.boneOverlayChildScreen.y });
             projectedPositions.set(parentIndex, { x: host.boneOverlayParentScreen.x, y: host.boneOverlayParentScreen.y });
             const parentName = runtimeBones[parentIndex].name;
-            const selected = selectedBoneName === parentName || selectedBoneNames.has(parentName);
-            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(parentName), selected);
+            const childName = runtimeBones[childIndex].name;
+            const selected = selectedBoneName === parentName || selectedBoneNames.has(parentName)
+                || selectedBoneName === childName || selectedBoneNames.has(childName);
+            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(parentName) ?? boneControlInfoByName.get(childName), selected);
 
             segmentCommands.push({
+                parentName,
+                childName,
                 fromX: host.boneOverlayParentScreen.x,
                 fromY: host.boneOverlayParentScreen.y,
                 toX: host.boneOverlayChildScreen.x,
@@ -262,16 +274,19 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
 
         for (const command of segmentCommands) {
             if (command.selected) continue;
+            if (visibleBoneNameSet && (!visibleBoneNameSet.has(command.parentName) || !visibleBoneNameSet.has(command.childName))) continue;
             drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
         for (const command of segmentCommands) {
             if (!command.selected) continue;
+            if (visibleBoneNameSet && (!visibleBoneNameSet.has(command.parentName) || !visibleBoneNameSet.has(command.childName))) continue;
             drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
 
         const markerCommands: Array<{ boneName: string; x: number; y: number; selected: boolean; markerShape: "circle" | "square"; markerColor: string }> = [];
         for (const [boneIndex, projected] of projectedPositions) {
             const boneName = runtimeBones[boneIndex].name;
+            if (visibleBoneNameSet && !visibleBoneNameSet.has(boneName)) continue;
             const selected = selectedBoneName === boneName || selectedBoneNames.has(boneName);
             const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(boneName), selected);
             markerCommands.push({
@@ -301,7 +316,7 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
     if (skeleton) {
         const bones = skeleton.bones;
         const projectedPositions = new Map<number, { x: number; y: number }>();
-        const segmentCommands: Array<{ fromX: number; fromY: number; toX: number; toY: number; selected: boolean; lineColor: string; lineWidth: number }> = [];
+        const segmentCommands: Array<{ parentName: string; childName: string; fromX: number; fromY: number; toX: number; toY: number; selected: boolean; lineColor: string; lineWidth: number }> = [];
 
         for (const [childIndex, parentIndex] of pairs) {
             getBoneWorldPositionToRef(bones[childIndex], positionMesh, host.boneOverlayChildWorld);
@@ -316,10 +331,14 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
             projectedPositions.set(childIndex, { x: host.boneOverlayChildScreen.x, y: host.boneOverlayChildScreen.y });
             projectedPositions.set(parentIndex, { x: host.boneOverlayParentScreen.x, y: host.boneOverlayParentScreen.y });
             const parentName = bones[parentIndex].name;
-            const selected = selectedBoneName === parentName || selectedBoneNames.has(parentName);
-            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(parentName), selected);
+            const childName = bones[childIndex].name;
+            const selected = selectedBoneName === parentName || selectedBoneNames.has(parentName)
+                || selectedBoneName === childName || selectedBoneNames.has(childName);
+            const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(parentName) ?? boneControlInfoByName.get(childName), selected);
 
             segmentCommands.push({
+                parentName,
+                childName,
                 fromX: host.boneOverlayParentScreen.x,
                 fromY: host.boneOverlayParentScreen.y,
                 toX: host.boneOverlayChildScreen.x,
@@ -332,16 +351,19 @@ export function updateBoneVisualizer(host: BoneVisualizerHost): void {
 
         for (const command of segmentCommands) {
             if (command.selected) continue;
+            if (visibleBoneNameSet && (!visibleBoneNameSet.has(command.parentName) || !visibleBoneNameSet.has(command.childName))) continue;
             drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
         for (const command of segmentCommands) {
             if (!command.selected) continue;
+            if (visibleBoneNameSet && (!visibleBoneNameSet.has(command.parentName) || !visibleBoneNameSet.has(command.childName))) continue;
             drawBoneVisualizerSegment(ctx, { x: command.fromX, y: command.fromY }, { x: command.toX, y: command.toY }, command.lineColor, command.lineWidth);
         }
 
         const markerCommands: Array<{ boneName: string; x: number; y: number; selected: boolean; markerShape: "circle" | "square"; markerColor: string }> = [];
         for (const [boneIndex, projected] of projectedPositions) {
             const boneName = bones[boneIndex].name;
+            if (visibleBoneNameSet && !visibleBoneNameSet.has(boneName)) continue;
             const selected = selectedBoneName === boneName || selectedBoneNames.has(boneName);
             const style = resolveBoneVisualizerStyle(boneControlInfoByName.get(boneName), selected);
             markerCommands.push({

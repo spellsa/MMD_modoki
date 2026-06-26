@@ -32,6 +32,7 @@ export type KeyframeAction =
     | { type: "keyframe.deleteSelected"; source: ActionSource }
     | { type: "keyframe.nudgeSelected"; source: ActionSource; deltaFrames: -1 | 1 }
     | { type: "keyframe.toggleAutoKey"; source: ActionSource }
+    | { type: "keyframe.togglePhysicsInputMode"; source: ActionSource }
     | { type: "keyframe.registerInfo"; source: ActionSource }
     | { type: "keyframe.registerBone"; source: ActionSource }
     | { type: "keyframe.registerMorph"; source: ActionSource }
@@ -59,7 +60,8 @@ export type ViewportAction =
     | { type: "viewport.toggleEdge"; source: ActionSource }
     | { type: "viewport.toggleBackgroundMedia"; source: ActionSource }
     | { type: "viewport.toggleBackgroundBlack"; source: ActionSource }
-    | { type: "viewport.toggleSkydome"; source: ActionSource };
+    | { type: "viewport.toggleSkydome"; source: ActionSource }
+    | { type: "timeline.togglePhysicsBones"; source: ActionSource };
 
 export type ProjectAction =
     | { type: "project.openFile"; source: ActionSource }

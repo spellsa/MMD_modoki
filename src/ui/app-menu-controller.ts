@@ -84,6 +84,10 @@ export class AppMenuController {
         this.popupDialogController.close();
     }
 
+    public refresh(): void {
+        this.refreshMenuItems();
+    }
+
     private setupMenuEvents(): void {
         if (!this.elements.root) return;
 
@@ -240,6 +244,11 @@ export class AppMenuController {
                 return { checked: this.mmdManager.isGlobalIlluminationEnabled(), disabled: this.mmdManager.isGlobalIlluminationPending() };
             case "view.toggleFxPanel":
                 return { checked: this.isShaderPanelVisible(), disabled: false };
+            case "view.toggleTimelinePhysicsBones":
+                return {
+                    checked: this.mmdManager.getShowPhysicsBonesInTimeline(),
+                    disabled: this.mmdManager.getTimelineTarget() !== "model",
+                };
             case "view.toggleActiveModel":
                 return { checked: this.isActiveModelVisible(), disabled: !this.hasActiveModel() };
             case "background.toggleMedia":
@@ -373,6 +382,9 @@ export class AppMenuController {
                 return;
             case "view.toggleFxPanel":
                 this.dispatchAction({ type: "layout.shaderPanel.toggle", source: "menu" });
+                return;
+            case "view.toggleTimelinePhysicsBones":
+                this.dispatchAction({ type: "timeline.togglePhysicsBones", source: "menu" });
                 return;
             case "view.contactShadowSettings":
                 this.openContactShadowSettingsDialog(invoker ?? null);

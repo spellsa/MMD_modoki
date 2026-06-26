@@ -1390,6 +1390,25 @@ body.shader-resizing #shader-resizer::before {
   padding-inline: 6px;
 }
 
+.timeline-edit-btn--physics-toggle[aria-pressed="true"] {
+  border-color: rgba(45, 212, 191, 0.68);
+  background:
+    linear-gradient(180deg, rgba(45, 212, 191, 0.36), rgba(20, 184, 166, 0.18)),
+    rgba(8, 47, 73, 0.34);
+  color: #dffef9;
+  box-shadow:
+    0 0 0 1px rgba(45, 212, 191, 0.12),
+    0 0 10px rgba(45, 212, 191, 0.22);
+}
+
+.timeline-edit-btn--physics-toggle[aria-pressed="true"]:hover {
+  border-color: rgba(94, 234, 212, 0.82);
+  background:
+    linear-gradient(180deg, rgba(94, 234, 212, 0.42), rgba(20, 184, 166, 0.24)),
+    rgba(8, 47, 73, 0.42);
+  color: #ffffff;
+}
+
 .timeline-edit-btn--auto {
   display: inline-flex;
   align-items: center;

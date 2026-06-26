@@ -375,18 +375,35 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         }
 
         const seenBoneNames = new Set<string>();
+        const physicsBoneNames: string[] = [];
         for (let boneIndex = 0; boneIndex < metadataBones.length; boneIndex += 1) {
             const bone = metadataBones[boneIndex];
             if (!bone) continue;
 
             const isVisible = (bone.flag & PMX_BONE_FLAG_VISIBLE) !== 0;
-            if (!isVisible) continue;
-            if (physicsBoneIndices.has(boneIndex)) continue;
-
             const isRotatable = (bone.flag & PMX_BONE_FLAG_ROTATABLE) !== 0;
             const isMovable = (bone.flag & PMX_BONE_FLAG_MOVABLE) !== 0;
             const isIk = ikBoneIndices.has(boneIndex);
             const isIkAffected = ikAffectedBoneIndices.has(boneIndex);
+            const isPhysicsBone = physicsBoneIndices.has(boneIndex);
+
+            if (isPhysicsBone) {
+                if (!physicsBoneNames.includes(bone.name)) {
+                    physicsBoneNames.push(bone.name);
+                }
+                if (!boneControlInfos.some((info) => info.name === bone.name)) {
+                    boneControlInfos.push({
+                        name: bone.name,
+                        movable: isMovable,
+                        rotatable: isRotatable,
+                        isIk,
+                        isIkAffected,
+                    });
+                }
+                continue;
+            }
+
+            if (!isVisible) continue;
 
             if (!seenBoneNames.has(bone.name)) {
                 seenBoneNames.add(bone.name);
@@ -441,6 +458,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             vertexCount,
             boneCount,
             boneNames,
+            physicsBoneNames,
             boneControlInfos,
             morphCount: morphEntries.length,
             morphNames,

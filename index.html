@@ -77,6 +77,7 @@
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.mirrorFloorSettings"><span data-i18n="menu.view.mirrorFloorSettings">Mirror床設定...</span></button>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleGi"><span data-i18n="menu.view.toggleGi">グローバルイルミネーション</span></button>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleFxPanel"><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleTimelinePhysicsBones"><span data-i18n="menu.view.toggleTimelinePhysicsBones">タイムラインに物理ボーンを表示</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.front"><span data-i18n="menu.view.camera.front">正面</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.back"><span data-i18n="menu.view.camera.back">背面</span></button>
@@ -357,7 +358,7 @@
               <div class="timeline-key-dock-register-row">
                 <button id="btn-kf-add" class="timeline-edit-btn timeline-edit-btn--strong" type="button" title="現在フレームにキーフレームを登録 (Enter / I / K / +)" data-i18n-title="timeline.key.add.title" data-i18n="button.register">登録</button>
                 <button id="btn-kf-delete" class="timeline-edit-btn" type="button" title="選択キーフレームを削除 (Delete)" data-i18n-title="timeline.key.delete.title" data-i18n="button.delete">削除</button>
-                <button class="timeline-edit-btn timeline-edit-btn--physics-toggle" type="button" disabled aria-pressed="false" data-i18n="timeline.keyDock.physicsToggle">物理OFF</button>
+                <button class="timeline-edit-btn timeline-edit-btn--physics-toggle" type="button" disabled aria-pressed="false" data-i18n="timeline.keyDock.physicsToggle">物理</button>
               </div>
             </div>
             <button id="btn-auto-key" class="timeline-edit-btn timeline-edit-btn--toggle timeline-edit-btn--auto" type="button" aria-pressed="false" title="Autoキー登録" data-i18n-title="timeline.key.autoKey.title" data-i18n="timeline.keyDock.auto">Auto</button>
