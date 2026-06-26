@@ -14,6 +14,7 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { MmdManager } from "./mmd-manager";
 import { isDebugLogEnabled, logDebugIfEnabled, logError, logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { applyWgslShaderPresetToMaterials } from "./scene/material-shader-service";
+import { stabilizeLargeThinLoadedMesh } from "./scene/mesh-render-stability";
 import { loadXIntoScene } from "./x-file-loader";
 import type { ProjectSerializedAccessoryTransformTrack } from "./types";
 import { copyProjectArrayToFloat32, copyProjectArrayToUint32, packFloat32Array, packFrameNumbers } from "./project/project-codec";
@@ -383,8 +384,7 @@ function createGlbReplacementMeshes(scene: Scene, offset: TransformNode, meshes:
         replacement.skeleton = null;
 
         vertexData.applyToMesh(replacement, false);
-        replacement.computeWorldMatrix(true);
-        replacement.refreshBoundingInfo(true, true);
+        stabilizeLargeThinLoadedMesh(replacement);
         replacements.push(replacement);
     }
 
@@ -443,8 +443,7 @@ function prepareManagedAccessoryMeshes(host: XLoadHost, meshes: AbstractMesh[], 
         mesh.alwaysSelectAsActiveMesh = true;
         mesh.receiveShadows = true;
         mesh.showBoundingBox = GLB_DEBUG_SHOW_BOUNDING_BOX;
-        mesh.computeWorldMatrix(true);
-        mesh.refreshBoundingInfo(true, true);
+        stabilizeLargeThinLoadedMesh(mesh);
         normalizeAccessoryMaterialVisibility(mesh.material);
         if (GLB_DEBUG_SHOW_EDGES && mesh instanceof Mesh) {
             mesh.enableEdgesRendering();

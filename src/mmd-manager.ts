@@ -257,6 +257,10 @@ import {
     setShadowPenumbraSize as setShadowPenumbraSizeImpl,
     setTransparentShadowEnabled as setTransparentShadowEnabledImpl,
 } from "./scene/light-shadow-controller";
+import {
+    refreshMeshBoundingInfoForRenderStability,
+    stabilizeAppGeneratedPlanarMesh,
+} from "./scene/mesh-render-stability";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
@@ -1379,6 +1383,7 @@ ${beforeFogAppendBlock}
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
     private renderFpsLimit = 0;
+    private nextRenderStabilityDiagnosticMs = 0;
     private nextFramePerformanceLogMs = performance.now() + MmdManager.FRAME_PERFORMANCE_LOG_INTERVAL_MS;
     private readonly framePerformanceProfiler = new PerformanceProfiler(FRAME_PERFORMANCE_SECTIONS);
     private readonly framePerformancePhaseStartMs = new Map<FramePerformanceSection, number>();
@@ -2855,6 +2860,7 @@ ${beforeFogAppendBlock}
         mesh.doNotSyncBoundingInfo = true;
         mesh.alwaysSelectAsActiveMesh = true;
         mesh.alphaIndex = 10;
+        stabilizeAppGeneratedPlanarMesh(mesh, { zOffset: -1, zOffsetUnits: -4 });
         mesh.setEnabled(false);
         if (kind === "body") {
             entry.contactShadowMesh = mesh;
@@ -2969,6 +2975,7 @@ ${beforeFogAppendBlock}
                 const mesh = this.ensureContactShadowMesh(entry, target.kind);
                 mesh.position.set(target.position.x, groundY + liftAboveFloor, target.position.z);
                 mesh.scaling.set(target.width, 1, target.depth);
+                refreshMeshBoundingInfoForRenderStability(mesh);
                 mesh.visibility = opacity;
                 mesh.setEnabled(opacity > 0.001);
                 visibleKinds.add(target.kind);
@@ -3026,6 +3033,7 @@ ${beforeFogAppendBlock}
         floor.isPickable = false;
         floor.receiveShadows = false;
         floor.alphaIndex = 8;
+        stabilizeAppGeneratedPlanarMesh(floor, { zOffset: -2, zOffsetUnits: -8 });
 
         this.mirroringFloorTexture = mirrorTexture;
         this.mirroringFloorMaterial = material;
@@ -3042,6 +3050,7 @@ ${beforeFogAppendBlock}
         const size = this.mirroringFloorSizeValue;
         this.mirroringFloor.position.set(0, this.mirroringFloorHeightValue + 0.006, 0);
         this.mirroringFloor.scaling.set(size, 1, size);
+        refreshMeshBoundingInfoForRenderStability(this.mirroringFloor);
     }
 
     private applyMirroringFloorMirrorPlane(): void {
@@ -4236,6 +4245,7 @@ ${beforeFogAppendBlock}
         groundMat.diffuseTexture = groundGridTexture;
         this.ground.material = groundMat;
         this.ground.receiveShadows = true;
+        stabilizeAppGeneratedPlanarMesh(this.ground);
         this.configureIblTestEnvironmentTexture();
 
         this.skydome = CreateSphere("skydome", {
@@ -4255,6 +4265,7 @@ ${beforeFogAppendBlock}
         this.skydome.infiniteDistance = true;
         this.skydome.isPickable = false;
         this.skydome.receiveShadows = false;
+        refreshMeshBoundingInfoForRenderStability(this.skydome);
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
         this.installMmdRuntimePerformanceHooks(this.mmdRuntime);
@@ -4306,6 +4317,7 @@ ${beforeFogAppendBlock}
                 this.updateCharacterContactShadows();
                 this.updateMirroringFloorRenderList();
                 this.updateEditorDofFocusAndFStop();
+                this.maybeLogRenderStabilityDiagnostics();
                 return;
             }
 
@@ -4333,6 +4345,7 @@ ${beforeFogAppendBlock}
             sectionStartMs = performance.now();
             this.updateEditorDofFocusAndFStop();
             this.recordFramePerformanceSection("editorDof", performance.now() - sectionStartMs);
+            this.maybeLogRenderStabilityDiagnostics();
         });
 
         // Start render loop
@@ -4960,6 +4973,120 @@ ${beforeFogAppendBlock}
         };
     }
 
+    private maybeLogRenderStabilityDiagnostics(): void {
+        if (!isDebugLogEnabled("renderStability")) return;
+        const nowMs = performance.now();
+        if (nowMs < this.nextRenderStabilityDiagnosticMs) return;
+        this.nextRenderStabilityDiagnosticMs = nowMs + 1000;
+
+        try {
+            logDebugIfEnabled("renderStability", "render", "render stability diagnostics", this.createRenderStabilityDiagnostics());
+        } catch (err) {
+            logWarn("render", "render stability diagnostics failed", toLogErrorData(err));
+        }
+    }
+
+    private createRenderStabilityDiagnostics(): Record<string, unknown> {
+        const sceneMeshes = this.scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh);
+        const accessoryMeshes = ((this as unknown as { getAccessoryMeshes?: () => unknown[] }).getAccessoryMeshes?.() ?? [])
+            .filter((mesh): mesh is Mesh => mesh instanceof Mesh);
+        const activeMeshes = this.scene.getActiveMeshes();
+        const activeMeshSet = new Set<unknown>(Array.from({ length: activeMeshes.length }, (_, index) => activeMeshes.data[index]));
+        const cameraForward = this.camera.getForwardRay(1).direction;
+
+        const sceneMeshSamples = sceneMeshes
+            .filter((mesh) => !mesh.isDisposed())
+            .map((mesh) => this.createRenderStabilityMeshSample(mesh, activeMeshSet, cameraForward))
+            .sort((a, b) => {
+                const aScore = (typeof a.sizeMax === "number" ? a.sizeMax : 0) + (a.active === false ? 1000 : 0);
+                const bScore = (typeof b.sizeMax === "number" ? b.sizeMax : 0) + (b.active === false ? 1000 : 0);
+                return bScore - aScore;
+            })
+            .slice(0, 48);
+
+        const accessoryMeshSamples = accessoryMeshes
+            .filter((mesh) => !mesh.isDisposed())
+            .map((mesh) => this.createRenderStabilityMeshSample(mesh, activeMeshSet, cameraForward))
+            .slice(0, 24);
+
+        return {
+            frame: this.currentFrame,
+            mode: this.timelineTarget,
+            camera: {
+                position: MmdManager.vectorToRoundedLabel(this.camera.position),
+                target: MmdManager.vectorToRoundedLabel(this.camera.target),
+                radius: this.camera.radius,
+                minZ: this.camera.minZ,
+                maxZ: this.camera.maxZ,
+                fovDeg: (this.camera.fov * 180) / Math.PI,
+            },
+            scene: {
+                meshCount: this.scene.meshes.length,
+                activeMeshCount: activeMeshes.length,
+                accessoryMeshCount: accessoryMeshes.length,
+            },
+            appMeshes: [
+                this.ground ? this.createRenderStabilityMeshSample(this.ground, activeMeshSet, cameraForward) : null,
+                this.mirroringFloor ? this.createRenderStabilityMeshSample(this.mirroringFloor, activeMeshSet, cameraForward) : null,
+                this.skydome ? this.createRenderStabilityMeshSample(this.skydome, activeMeshSet, cameraForward) : null,
+            ].filter(Boolean),
+            sceneMeshes: sceneMeshSamples,
+            accessoryMeshes: accessoryMeshSamples,
+        };
+    }
+
+    private createRenderStabilityMeshSample(
+        mesh: Mesh,
+        activeMeshSet: ReadonlySet<unknown>,
+        cameraForward: Vector3,
+    ): Record<string, unknown> {
+        mesh.computeWorldMatrix(true);
+        const boundingBox = mesh.getBoundingInfo().boundingBox;
+        const center = boundingBox.centerWorld;
+        const size = boundingBox.extendSizeWorld.scale(2);
+        const cameraToCenter = center.subtract(this.camera.position);
+        const forwardDistance = Vector3.Dot(cameraToCenter, cameraForward);
+        const material = mesh.material as Material | null;
+        const sizeMax = Math.max(size.x, size.y, size.z);
+        const sizeMin = Math.min(size.x, size.y, size.z);
+        const sizeMid = size.x + size.y + size.z - sizeMax - sizeMin;
+
+        return {
+            name: mesh.name,
+            enabled: mesh.isEnabled(),
+            visible: mesh.isVisible,
+            visibility: mesh.visibility,
+            active: activeMeshSet.has(mesh),
+            alwaysSelectAsActiveMesh: mesh.alwaysSelectAsActiveMesh,
+            doNotSyncBoundingInfo: mesh.doNotSyncBoundingInfo,
+            receiveShadows: mesh.receiveShadows,
+            renderingGroupId: mesh.renderingGroupId,
+            alphaIndex: mesh.alphaIndex,
+            vertices: mesh.getTotalVertices(),
+            indices: mesh.getTotalIndices(),
+            center: MmdManager.vectorToRoundedLabel(center),
+            size: MmdManager.vectorToRoundedLabel(size),
+            sizeMax: Number(sizeMax.toFixed(3)),
+            sizeMid: Number(sizeMid.toFixed(3)),
+            sizeMin: Number(sizeMin.toFixed(3)),
+            cameraDistance: Number(Vector3.Distance(this.camera.position, center).toFixed(3)),
+            forwardDistance: Number(forwardDistance.toFixed(3)),
+            nearClipRisk: forwardDistance < this.camera.minZ + Math.max(0.1, Math.min(size.x, size.y, size.z) * 0.5),
+            materialName: material?.name ?? null,
+            materialClassName: material?.getClassName() ?? null,
+            zOffset: material?.zOffset ?? null,
+            zOffsetUnits: material?.zOffsetUnits ?? null,
+            disableDepthWrite: material?.disableDepthWrite ?? null,
+            needDepthPrePass: material?.needDepthPrePass ?? null,
+            backFaceCulling: material ? (material as Material & { backFaceCulling?: unknown }).backFaceCulling : null,
+            useLogarithmicDepth: material ? (material as Material & { useLogarithmicDepth?: unknown }).useLogarithmicDepth : null,
+        };
+    }
+
+    private static vectorToRoundedLabel(value: Vector3): string {
+        return `${value.x.toFixed(3)},${value.y.toFixed(3)},${value.z.toFixed(3)}`;
+    }
+
     private applyPhysicsStateToModel(model: RuntimeModel): void {
         this.physicsModelController.applyPhysicsStateToModel(model);
     }
@@ -5075,10 +5202,11 @@ ${beforeFogAppendBlock}
         material.zOffset = 0;
         material.zOffsetUnits = 0;
 
-        // Logarithmic depth keeps close-up models stable without forcing the
-        // near plane to stay overly small for the whole scene.
+        // Avoid forcing logarithmic depth on PMX materials globally. It helps
+        // some close-up precision cases, but large low-poly stages/backgrounds
+        // can lose broad polygons around shallow camera angles on WebGPU.
         if ("useLogarithmicDepth" in material) {
-            material.useLogarithmicDepth = true;
+            material.useLogarithmicDepth = false;
         }
 
         // Preserve the loader's culling decision. Forcing double-sided rendering on

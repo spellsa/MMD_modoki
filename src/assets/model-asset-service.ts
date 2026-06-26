@@ -162,6 +162,32 @@ function collectSceneModelMaterials(host: ModelAssetHost, meshes: Mesh[]): Scene
     return Array.from(materialMap.values());
 }
 
+function useParentMeshBoundsForSubMeshes(meshes: readonly Mesh[]): void {
+    let patchedMeshCount = 0;
+    let patchedSubMeshCount = 0;
+
+    for (const mesh of meshes) {
+        if ((mesh.subMeshes?.length ?? 0) <= 1) continue;
+
+        mesh.computeWorldMatrix(true);
+        mesh.refreshBoundingInfo();
+        const boundingInfo = mesh.getBoundingInfo();
+        for (const subMesh of mesh.subMeshes) {
+            if (subMesh.IsGlobal) continue;
+            subMesh.setBoundingInfo(boundingInfo);
+            patchedSubMeshCount += 1;
+        }
+        patchedMeshCount += 1;
+    }
+
+    if (patchedSubMeshCount > 0) {
+        logDebugIfEnabled("renderStability", "asset", "PMX submesh bounds unified to parent mesh bounds", {
+            meshCount: patchedMeshCount,
+            subMeshCount: patchedSubMeshCount,
+        });
+    }
+}
+
 export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<ModelInfo | null> {
     let renderingSuspended = false;
     try {
@@ -180,7 +206,10 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
                 mmdmodel: {
                     materialBuilder: MmdModelLoader.SharedMaterialBuilder,
                     useSdef: true,
-                    alwaysSetSubMeshesBoundingInfo: true,
+                    // Large, thin stage/background PMX meshes can be split into many
+                    // submeshes whose per-material bounds are too fragile at shallow
+                    // camera angles. Keep culling at the mesh bounds level for v0.2.
+                    alwaysSetSubMeshesBoundingInfo: false,
                     optimizeSubmeshes: true,
                     optimizeSingleMaterialModel: true,
                     preserveSerializationData: true,
@@ -281,6 +310,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.applyModelEdgeToMeshes(result.meshes as Mesh[]);
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
         host.applyAnisotropicFilteringToMeshes?.(result.meshes as Mesh[]);
+        useParentMeshBoundsForSubMeshes(result.meshes as Mesh[]);
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {

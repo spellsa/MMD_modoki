@@ -8,7 +8,8 @@ export type AppDebugLogKey =
     | "keyframeFlow"
     | "performance"
     | "shaderTrace"
-    | "postfx";
+    | "postfx"
+    | "renderStability";
 
 export function toLogErrorData(err: unknown): AppLogData {
     if (err instanceof Error) {
