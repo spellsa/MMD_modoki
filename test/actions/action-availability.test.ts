@@ -36,6 +36,17 @@ describe("canExecuteEditorAction", () => {
         )).toBe(false);
     });
 
+    it("allows mirror paste when a keyframe clipboard exists", () => {
+        expect(canExecuteEditorAction(
+            { type: "keyframe.mirrorPaste", source: "button" },
+            { ...readySnapshot, hasSelectedTimelineTrack: false, hasKeyframeClipboard: true },
+        )).toBe(true);
+        expect(canExecuteEditorAction(
+            { type: "keyframe.mirrorPaste", source: "button" },
+            { ...readySnapshot, hasKeyframeClipboard: false },
+        )).toBe(false);
+    });
+
     it("uses history availability for undo and redo", () => {
         expect(canExecuteEditorAction(
             { type: "history.undo", source: "shortcut" },

@@ -1,0 +1,113 @@
+# 選択系実装反映メモ 2026-06-25
+
+## 目的
+
+2026-06-25 に進めた、複数キー選択と複数ボーン選択の実装結果を記録する。
+
+関連メモ:
+
+- [複数キー選択 設計メモ 2026-06-25](./multi-key-selection-design-2026-06-25.md)
+- [複数ボーン選択 設計メモ 2026-06-25](./multi-bone-selection-design-2026-06-25.md)
+- [キー登録 v0.2 リリース前集中メモ 2026-06-25](./key-registration-v0.2-release-focus-2026-06-25.md)
+
+## 複数キー選択
+
+現在の実装では、複数キー選択は `Timeline` の `selectedKeys` として扱う。
+これはボーン選択やフレーム選択ではなく、矩形選択と同じ「キー編集対象の集合」である。
+
+実装済みの選択操作:
+
+- キー点クリック: 単一キー選択。
+- Ctrl / Cmd + キー点クリック: キー選択の追加 / 解除。
+- Shift + キー点クリック: 同一 track 内で anchor から clicked key までの範囲選択。
+- タイムライン本体ドラッグ: 矩形キー選択。
+- Ctrl / Cmd + ドラッグ: 既存キー選択への追加矩形選択。
+- トラック名ダブルクリック: その track の全キー選択。
+- Frame ルーラーダブルクリック: その frame に存在する全 track のキーを列選択。
+- 左上セルダブルクリック: 現在 timeline に出ている全 track の全キーを選択。
+
+実装済みの編集操作:
+
+- 複数キー削除。
+- 複数キーの 1 frame nudge。
+- 複数キー copy。
+- 現在 frame 基準の batch paste。
+- overwrite を含む batch paste / move / delete の undo / redo。
+
+Command は `keyframe.batchDelete`、`keyframe.batchMove`、`keyframe.batchPaste` を使う。
+payload を command diff に保持することで、上書きされた key も undo で復元する。
+
+補間 UI:
+
+- 複数 track をまたぐキー選択では補間 UI をグレーアウトする。
+- 複数キー選択中でも、単一 track として扱える場合は現在 frame / active key を基準に表示する。
+- 複数キーへの補間曲線一括適用は未実装。別タスクとして扱う。
+
+## 複数ボーン選択
+
+現在の実装では、複数ボーン選択は `Timeline` 側の `selectedBoneTracks` として扱う。
+これは `selectedKeys` とは別系統であり、ボーン集合を対象にしたキー登録や将来の操作のための選択である。
+
+実装済みの選択操作:
+
+- タイムラインのボーン名/トラック名 通常クリック: 単一ボーン選択。
+- タイムラインのボーン名/トラック名 Shift + クリック: 複数ボーンへ追加 / 解除。
+- ビューポート上のボーン 通常クリック: 単一ボーン選択。
+- ビューポート上のボーン Shift + クリック: 複数ボーンへ追加 / 解除。
+
+UI 連動:
+
+- タイムライン選択とビューポート上の赤表示を同期する。
+- ビューポート複数選択中のボーンは赤系で複数表示する。
+- 下パネルのボーン欄は `複数ボーン選択中 (N)` 表示にし、数値欄は 0.0 の disabled 表示にする。
+- 補間 UI は複数ボーン選択時にグレーアウトする。
+- 複数ボーン選択時、gizmo 操作はまだ行わない。
+
+実装済みのキー登録:
+
+- 複数ボーン選択中にボーンキー登録を押すと、選択ボーンすべてを現在 frame に登録する。
+- 登録は `keyframe.batchPaste` 経由で行い、上書きも undo / redo 可能にする。
+
+## キー選択とボーン選択の切り分け
+
+キー選択とボーン選択は混ぜない。
+
+- キー選択操作に入った場合、複数ボーン選択はクリアする。
+- 複数ボーン選択操作に入った場合、キー選択はクリアする。
+- トラック名ダブルクリック、Frame ルーラーダブルクリック、左上セルダブルクリックはキー選択であり、ボーン選択ではない。
+- Shift + ボーン名クリック、Shift + ビューポートボーンクリックはボーン選択であり、キー選択ではない。
+
+この分離により、コピー / 削除 / nudge / paste の対象と、現在 frame へのボーンキー登録対象を明確に分ける。
+
+## 反転ペースト
+
+2026-06-26 時点では、反転ペーストはボーンキー限定で実装済み。
+
+- コピー済み keyframe clipboard を入力にする。
+- 単一キーコピー、複数キーコピーの両方を current frame 基準の `keyframe.batchPaste` に変換する。
+- `左` / `右`、`Ｌ` / `Ｒ`、境界つき `L` / `R`、`Left` / `Right` の左右名を解決し、対応ボーンが存在する場合は相手側 track へ貼り付ける。
+- 対応ボーンが見つからない場合は同じ track に貼り付ける。
+- movable bone は position X を反転し、rotation quaternion は Y / Z 成分を反転する。
+- rotation-only bone は rotation quaternion の Y / Z 成分だけを反転する。
+- interpolation と physics toggle はコピー元の値を維持する。
+- morph / camera key は初期実装では対象外にする。
+- command は `keyframe.batchPaste` を使うため、上書きと undo / redo は既存経路で扱う。
+
+## 残タスク
+
+- 複数キーへの補間曲線一括適用。
+- 複数ボーンの IK 限定同時操作。
+  - 選択ボーンがすべて IK の場合だけ、active IK の gizmo delta を選択 IK 全体へ適用する。
+  - IK 以外が混在する場合は、選択・コピー・削除・キー登録対象に留め、gizmo 操作は無効にする。
+  - undo / redo は複数ボーン transform batch command として扱う。
+- ビューポート BOX ボーン選択。
+- 大量キー選択時の描画・操作パフォーマンス確認。
+- scene/property 系 key 追加時の selection ref 拡張。
+
+## 確認済み
+
+各実装時に次を確認済み。
+
+- `npm.cmd run lint`
+- `npm.cmd run test:unit`
+- ビューポート選択やタイムライン UI イベントを触った変更では `npm.cmd run smoke:launch`

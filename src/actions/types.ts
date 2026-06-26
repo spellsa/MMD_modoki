@@ -28,6 +28,7 @@ export type KeyframeAction =
     | { type: "keyframe.addCurrent"; source: ActionSource }
     | { type: "keyframe.copySelected"; source: ActionSource }
     | { type: "keyframe.paste"; source: ActionSource }
+    | { type: "keyframe.mirrorPaste"; source: ActionSource }
     | { type: "keyframe.deleteSelected"; source: ActionSource }
     | { type: "keyframe.nudgeSelected"; source: ActionSource; deltaFrames: -1 | 1 }
     | { type: "keyframe.toggleAutoKey"; source: ActionSource }

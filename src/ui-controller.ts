@@ -54,6 +54,10 @@ import { buildCameraTransformCommand } from "./actions/camera-transform-command-
 import type { BoneTransformCommandSnapshot, BuiltCommand, CameraTransformCommandSnapshot, CommandTrackRef } from "./actions/command-types";
 import type { BoneKeyframePayload, CameraKeyframePayload, MovableBoneKeyframePayload, TimelineKeyframePayload } from "./editor/timeline-edit-service";
 import {
+    buildMirrorPasteItems,
+    type MirrorPasteClipboardItem,
+} from "./editor/mirror-paste-service";
+import {
     POST_EFFECT_BACKEND_STORAGE_KEY,
     normalizePostEffectBackend,
     type PostEffectBackend,
@@ -367,6 +371,7 @@ export class UIController {
     private btnKeyframeAdd: HTMLButtonElement;
     private btnKeyframeCopy: HTMLButtonElement;
     private btnKeyframePaste: HTMLButtonElement;
+    private btnKeyframeMirrorPaste: HTMLButtonElement;
     private btnKeyframeDelete: HTMLButtonElement;
     private btnAutoKey: HTMLButtonElement;
     private btnKeyframeNudgeLeft: HTMLButtonElement;
@@ -494,6 +499,7 @@ export class UIController {
         this.btnKeyframeAdd = document.getElementById("btn-kf-add") as HTMLButtonElement;
         this.btnKeyframeCopy = document.getElementById("btn-kf-copy") as HTMLButtonElement;
         this.btnKeyframePaste = document.getElementById("btn-kf-paste") as HTMLButtonElement;
+        this.btnKeyframeMirrorPaste = document.getElementById("btn-kf-mirror-paste") as HTMLButtonElement;
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
         this.btnAutoKey = document.getElementById("btn-auto-key") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
@@ -1002,6 +1008,9 @@ export class UIController {
         });
         this.btnKeyframePaste.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.paste", source: "button" });
+        });
+        this.btnKeyframeMirrorPaste.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.mirrorPaste", source: "button" });
         });
         this.btnKeyframeDelete.addEventListener("click", () => {
             this.actionDispatcher.dispatch({ type: "keyframe.deleteSelected", source: "button" });
@@ -2037,6 +2046,7 @@ export class UIController {
         this.actionDispatcher.register("keyframe.addCurrent", (action) => this.addKeyframeAtCurrentFrame(null, action.source));
         this.actionDispatcher.register("keyframe.copySelected", () => this.copySelectedKeyframe());
         this.actionDispatcher.register("keyframe.paste", () => this.pasteKeyframeClipboard());
+        this.actionDispatcher.register("keyframe.mirrorPaste", () => this.pasteMirroredKeyframeClipboard());
         this.actionDispatcher.register("keyframe.deleteSelected", (action) => this.deleteSelectedKeyframe(action.source));
         this.actionDispatcher.register("keyframe.nudgeSelected", (action) => {
             this.nudgeSelectedKeyframe(action.deltaFrames);
@@ -6111,6 +6121,7 @@ export class UIController {
             this.btnKeyframeAdd.disabled = true;
             this.btnKeyframeCopy.disabled = true;
             this.btnKeyframePaste.disabled = true;
+            this.btnKeyframeMirrorPaste.disabled = !this.canMirrorPasteKeyframeClipboard();
             this.btnKeyframeDelete.disabled = true;
             this.btnKeyframeNudgeLeft.disabled = false;
             this.btnKeyframeNudgeRight.disabled = false;
@@ -6156,6 +6167,7 @@ export class UIController {
         this.btnKeyframeDelete.disabled = selectedKeys.length > 0 ? false : !canDelete;
         this.btnKeyframeCopy.disabled = selectedKeys.length > 0 ? false : !canCopy;
         this.btnKeyframePaste.disabled = !this.canPasteKeyframeClipboardToCurrentSelection();
+        this.btnKeyframeMirrorPaste.disabled = !this.canMirrorPasteKeyframeClipboard();
 
         this.btnKeyframeNudgeLeft.disabled = false;
         this.btnKeyframeNudgeRight.disabled = false;
@@ -6169,6 +6181,12 @@ export class UIController {
             return this.mmdManager.getTimelineTarget() === clipboard.sourceTarget && clipboard.items.length > 0;
         }
         return this.resolveKeyframePasteTarget(clipboard) !== null;
+    }
+
+    private canMirrorPasteKeyframeClipboard(): boolean {
+        if (this.mmdManager.getTimelineTarget() !== "model") return false;
+        const clipboardItems = this.getMirrorPasteClipboardItems();
+        return clipboardItems.some((item) => item.payload.kind === "bone" || item.payload.kind === "movableBone");
     }
 
     private updateSectionKeyframeButtons(): void {
@@ -8788,6 +8806,85 @@ export class UIController {
         this.updateTimelineEditState();
         this.updateSectionKeyframeButtons();
         this.showToast(`${items.length} keyframes pasted`, "success");
+    }
+
+    private pasteMirroredKeyframeClipboard(): void {
+        if (this.mmdManager.getTimelineTarget() !== "model") {
+            this.showToast("Mirror paste is available for model bone keyframes only", "info");
+            return;
+        }
+
+        const clipboardItems = this.getMirrorPasteClipboardItems();
+        if (clipboardItems.length === 0) {
+            this.showToast("No bone keyframes to mirror paste", "info");
+            return;
+        }
+
+        const activeModelInfo = this.mmdManager.getActiveModelInfo();
+        const availableBoneNames = new Set(activeModelInfo?.boneNames ?? []);
+        const pasteBaseFrame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const mirroredItems = buildMirrorPasteItems(clipboardItems, pasteBaseFrame, availableBoneNames)
+            .map((item) => ({
+                ...item,
+                before: this.mmdManager.readTimelineKeyframePayload(item.track, item.targetFrame),
+            }));
+
+        if (mirroredItems.length === 0) {
+            this.showToast("No bone keyframes to mirror paste", "info");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.mirrorPaste:${mirroredItems.length}:${pasteBaseFrame}:${nowMs}`,
+            label: `Mirror paste ${mirroredItems.length} keyframes at frame ${pasteBaseFrame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchPaste",
+                pasteBaseFrame,
+                items: mirroredItems,
+            },
+        };
+
+        const pasted = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!pasted) {
+            this.showToast(`Frame ${pasteBaseFrame}: mirror paste failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`${mirroredItems.length} bone keyframes mirror pasted`, "success");
+    }
+
+    private getMirrorPasteClipboardItems(): MirrorPasteClipboardItem[] {
+        const clipboard = this.keyframeClipboard;
+        if (!clipboard || clipboard.sourceTarget !== "model") return [];
+
+        if (clipboard.mode === "batch") {
+            return clipboard.items
+                .filter((item) => item.payload.kind === "bone" || item.payload.kind === "movableBone")
+                .map((item) => ({
+                    track: item.track,
+                    sourceFrame: item.sourceFrame,
+                    frameOffset: item.frameOffset,
+                    payload: this.cloneKeyframePayload(item.payload),
+                }));
+        }
+
+        if (clipboard.payload.kind !== "bone" && clipboard.payload.kind !== "movableBone") {
+            return [];
+        }
+
+        return [{
+            track: clipboard.track,
+            sourceFrame: clipboard.sourceFrame,
+            frameOffset: 0,
+            payload: this.cloneKeyframePayload(clipboard.payload),
+        }];
     }
 
     private resolveKeyframePasteTarget(clipboard: SingleKeyframeClipboard): { track: CommandTrackRef } | null {

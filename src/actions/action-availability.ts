@@ -30,6 +30,8 @@ export function canExecuteEditorAction(
             return snapshot.hasSelectedTimelineTrack;
         case "keyframe.paste":
             return snapshot.hasSelectedTimelineTrack && (snapshot.hasKeyframeClipboard ?? false);
+        case "keyframe.mirrorPaste":
+            return snapshot.hasKeyframeClipboard ?? false;
         case "keyframe.nudgeSelected":
             return snapshot.hasSelectedTimelineTrack && snapshot.hasSelectedFrame;
         case "keyframe.registerInfo":
