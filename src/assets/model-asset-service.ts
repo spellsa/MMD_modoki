@@ -2,9 +2,12 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
 import type { Scene } from "@babylonjs/core/scene";
 import type { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import { Material } from "@babylonjs/core/Materials/material";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import type { BoneControlInfo, ModelInfo } from "../types";
 import { MmdModelLoader } from "babylon-mmd/esm/Loader/mmdModelLoader";
+import { MmdStandardMaterialBuilder } from "babylon-mmd/esm/Loader/mmdStandardMaterialBuilder";
+import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderBase";
 import { MmdStandardMaterialProxy } from "babylon-mmd/esm/Runtime/mmdStandardMaterialProxy";
 import type { MmdMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import { logDebugIfEnabled, logError, logInfo, logWarn, toLogErrorData } from "../app-logger";
@@ -38,7 +41,63 @@ type SceneModelMaterialEntry = {
 type ModelAssetMaterial = object & {
     name?: unknown;
     subMaterials?: Array<ModelAssetMaterial | null | undefined>;
+    alpha?: number;
+    transparencyMode?: number;
+    useAlphaFromDiffuseTexture?: boolean;
+    backFaceCulling?: boolean;
+    disableColorWrite?: boolean;
+    disableDepthWrite?: boolean;
+    forceDepthWrite?: boolean;
+    needDepthPrePass?: boolean;
+    diffuseTexture?: {
+        name?: string;
+        hasAlpha?: boolean;
+        metadata?: Record<string, unknown> | null;
+        isReady?: () => boolean;
+    } | null;
+    getClassName?: () => string;
+    _pluginMaterial?: {
+        isMock?: boolean;
+        constructor?: { name?: string };
+    };
+    onCompiled?: (effect: unknown) => void;
+    onError?: (effect: unknown, errors: string) => void;
+    isReadyForSubMesh?: (mesh: Mesh, subMesh: unknown, useInstances?: boolean) => boolean;
+    markAsDirty?: (flag?: number) => void;
 };
+
+type ModelAssetSceneWithDirtyBlock = Scene & {
+    blockMaterialDirtyMechanism?: boolean;
+    _forceBlockMaterialDirtyMechanism?: (value: boolean) => void;
+};
+
+function getConstructorName(value: unknown): string | null {
+    return typeof value === "object" && value !== null
+        ? ((value as { constructor?: { name?: string } }).constructor?.name ?? null)
+        : null;
+}
+
+function ensureSharedMmdMaterialBuilder(fileName: string): MmdStandardMaterialBuilder {
+    const currentBuilder = MmdModelLoader.SharedMaterialBuilder;
+    if (currentBuilder instanceof MmdStandardMaterialBuilder) {
+        currentBuilder.renderMethod = MmdMaterialRenderMethod.DepthWriteAlphaBlendingWithEvaluation;
+        logInfo("asset", "MMD material builder ready", {
+            fileName,
+            builder: getConstructorName(currentBuilder),
+        });
+        return currentBuilder;
+    }
+
+    const builder = new MmdStandardMaterialBuilder();
+    builder.renderMethod = MmdMaterialRenderMethod.DepthWriteAlphaBlendingWithEvaluation;
+    MmdModelLoader.SharedMaterialBuilder = builder;
+    logWarn("asset", "MMD material builder replaced before model import", {
+        fileName,
+        previousBuilder: getConstructorName(currentBuilder),
+        builder: getConstructorName(builder),
+    });
+    return builder;
+}
 
 type ModelAssetRuntimeModel = object;
 
@@ -61,6 +120,7 @@ type ModelAssetHost = {
     applyModelEdgeToMeshes(meshes: Mesh[]): void;
     applyCelShadingToMeshes(meshes: Mesh[]): void;
     applyAnisotropicFilteringToMeshes?: (meshes: Mesh[]) => void;
+    applyDebugMaterialOverrideToMeshes?: (fileName: string, meshes: Mesh[]) => void;
     mmdRuntime: {
         createMmdModel(mesh: MmdMesh, options: object): ModelAssetRuntimeModel;
     };
@@ -108,11 +168,32 @@ type ModelAssetHost = {
     onError?: (message: string) => void;
 };
 
+function visitModelMaterials(
+    mesh: Mesh,
+    visitor: (material: ModelAssetMaterial, fallbackName: string, meshName: string) => void,
+): void {
+    const meshName = mesh.name || "mesh";
+    const material = mesh.material as ModelAssetMaterial | null;
+    if (!material) return;
+
+    if (Array.isArray(material.subMaterials)) {
+        for (let subIndex = 0; subIndex < material.subMaterials.length; subIndex += 1) {
+            const subMaterial = material.subMaterials[subIndex];
+            if (subMaterial && typeof subMaterial === "object") {
+                visitor(subMaterial, `${meshName}#${String(subIndex + 1)}`, meshName);
+            }
+        }
+        return;
+    }
+
+    visitor(material, meshName, meshName);
+}
+
 function collectSceneModelMaterials(host: ModelAssetHost, meshes: Mesh[]): SceneModelMaterialEntry[] {
     const materialMap = new Map<object, SceneModelMaterialEntry>();
     let materialIndex = 0;
 
-    const registerMaterial = (material: ModelAssetMaterial | null | undefined, fallbackName: string, meshName: string): void => {
+    const registerMaterial = (material: ModelAssetMaterial, fallbackName: string, meshName: string): void => {
         if (!material || typeof material !== "object") return;
         const materialName = typeof material.name === "string" && material.name.trim().length > 0
             ? material.name
@@ -146,20 +227,144 @@ function collectSceneModelMaterials(host: ModelAssetHost, meshes: Mesh[]): Scene
     };
 
     for (const mesh of meshes) {
-        const material = mesh.material as ModelAssetMaterial | null;
-        if (!material) continue;
-
-        if (Array.isArray(material.subMaterials)) {
-            for (let subIndex = 0; subIndex < material.subMaterials.length; subIndex += 1) {
-                const subMaterial = material.subMaterials[subIndex];
-                registerMaterial(subMaterial, (mesh.name || "mesh") + "#" + String(subIndex + 1), mesh.name || "mesh");
-            }
-        } else {
-            registerMaterial(material, mesh.name || ("material_" + String(materialIndex)), mesh.name || "mesh");
-        }
+        visitModelMaterials(mesh, registerMaterial);
     }
 
     return Array.from(materialMap.values());
+}
+
+function markModelMaterialDirty(material: ModelAssetMaterial): void {
+    if (typeof material.markAsDirty !== "function") return;
+    try {
+        material.markAsDirty(Material.AllDirtyFlag);
+    } catch {
+        try {
+            material.markAsDirty();
+        } catch {
+            // Some Babylon internals can reject dirty marks during disposal.
+        }
+    }
+}
+
+function delayMs(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+    });
+}
+
+function collectUniqueModelMaterials(meshes: readonly Mesh[]): ModelAssetMaterial[] {
+    const materials = new Set<ModelAssetMaterial>();
+    for (const mesh of meshes) {
+        visitModelMaterials(mesh, (material) => {
+            materials.add(material);
+        });
+    }
+    return Array.from(materials);
+}
+
+function countPendingMmdMaterialPlugins(materials: readonly ModelAssetMaterial[]): number {
+    return materials.filter((material) => material._pluginMaterial?.isMock === true).length;
+}
+
+function roundUvForLog(value: number): number {
+    return Math.round(value * 100000) / 100000;
+}
+
+function summarizeMeshUv(mesh: Mesh): {
+    min: [number, number];
+    max: [number, number];
+    outside01: number;
+    samples: Array<[number, number]>;
+} | null {
+    const uvData = mesh.getVerticesData("uv") as ArrayLike<number> | null;
+    if (!uvData || uvData.length < 2) return null;
+
+    let minU = Number.POSITIVE_INFINITY;
+    let minV = Number.POSITIVE_INFINITY;
+    let maxU = Number.NEGATIVE_INFINITY;
+    let maxV = Number.NEGATIVE_INFINITY;
+    let outside01 = 0;
+    const samples: Array<[number, number]> = [];
+
+    for (let index = 0; index + 1 < uvData.length; index += 2) {
+        const u = Number(uvData[index]);
+        const v = Number(uvData[index + 1]);
+        if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+
+        minU = Math.min(minU, u);
+        minV = Math.min(minV, v);
+        maxU = Math.max(maxU, u);
+        maxV = Math.max(maxV, v);
+        if (u < 0 || u > 1 || v < 0 || v > 1) outside01 += 1;
+        if (samples.length < 8) samples.push([roundUvForLog(u), roundUvForLog(v)]);
+    }
+
+    if (!Number.isFinite(minU) || !Number.isFinite(minV) || !Number.isFinite(maxU) || !Number.isFinite(maxV)) {
+        return null;
+    }
+
+    return {
+        min: [roundUvForLog(minU), roundUvForLog(minV)],
+        max: [roundUvForLog(maxU), roundUvForLog(maxV)],
+        outside01,
+        samples,
+    };
+}
+
+function shouldLogDetailedMaterialUv(name: string | null): boolean {
+    if (!name) return false;
+    const normalized = name.toLowerCase();
+    return normalized.includes("eye")
+        || name.includes("目")
+        || name.includes("顔")
+        || normalized.includes("hair")
+        || name.includes("髪");
+}
+
+async function waitForMmdMaterialPluginsReady(fileName: string, meshes: readonly Mesh[]): Promise<void> {
+    const materials = collectUniqueModelMaterials(meshes);
+    const initialPending = countPendingMmdMaterialPlugins(materials);
+    if (initialPending === 0) return;
+
+    const timeoutMs = 2500;
+    const startedAt = performance.now();
+    let pending = initialPending;
+    while (performance.now() - startedAt < timeoutMs) {
+        await delayMs(16);
+        pending = countPendingMmdMaterialPlugins(materials);
+        if (pending === 0) break;
+    }
+
+    for (const material of materials) {
+        markModelMaterialDirty(material);
+    }
+
+    logWarn("asset", "waited for MMD material shader plugin initialization", {
+        fileName,
+        materialCount: materials.length,
+        initialPending,
+        remainingPending: pending,
+        waitedMs: Math.round(performance.now() - startedAt),
+        pluginSamples: materials.slice(0, 8).map((material) => ({
+            name: typeof material.name === "string" ? material.name : null,
+            plugin: material._pluginMaterial?.constructor?.name ?? null,
+            isMock: material._pluginMaterial?.isMock ?? null,
+        })),
+    });
+}
+
+function restoreMaterialDirtyMechanismAfterImport(scene: Scene, meshes: readonly Mesh[]): void {
+    const dirtyScene = scene as ModelAssetSceneWithDirtyBlock;
+    if (dirtyScene.blockMaterialDirtyMechanism === true) {
+        dirtyScene._forceBlockMaterialDirtyMechanism?.(false);
+        logWarn("asset", "material dirty mechanism was still blocked after model import; forced restore", {
+            meshCount: meshes.length,
+        });
+    }
+
+    for (const material of collectUniqueModelMaterials(meshes)) {
+        markModelMaterialDirty(material);
+    }
 }
 
 function useParentMeshBoundsForSubMeshes(meshes: readonly Mesh[]): void {
@@ -188,6 +393,149 @@ function useParentMeshBoundsForSubMeshes(meshes: readonly Mesh[]): void {
     }
 }
 
+function logModelMaterialVisibilitySummary(fileName: string, meshes: readonly Mesh[], reason: string): void {
+    const summary: Array<{
+        mesh: string;
+        visible: boolean;
+        enabled: boolean;
+        visibility: number;
+        vertices: number;
+        subMeshCount: number;
+        material: string | null;
+        materialClass: string | null;
+        materialConstructor: string | null;
+        alpha: number | null;
+        transparencyMode: number | null;
+        useAlphaFromDiffuseTexture: boolean | null;
+        backFaceCulling: boolean | null;
+        disableColorWrite: boolean | null;
+        disableDepthWrite: boolean | null;
+        forceDepthWrite: boolean | null;
+        needDepthPrePass: boolean | null;
+        materialReady: boolean | null;
+        effectReady: boolean | null;
+        effectName: string | null;
+        pluginName: string | null;
+        pluginIsMock: boolean | null;
+        diffuseTexture: string | null;
+        diffuseHasAlpha: boolean | null;
+        diffuseReady: boolean | null;
+        decodedDds: boolean;
+        uv: ReturnType<typeof summarizeMeshUv>;
+    }> = [];
+
+    for (const mesh of meshes) {
+        visitModelMaterials(mesh, (modelMaterial, fallbackName, meshName) => {
+            const material = mesh.material as ModelAssetMaterial;
+            const subMaterial = modelMaterial;
+            const subMesh = mesh.subMeshes?.find((candidate) => candidate.getMaterial() === subMaterial)
+                ?? mesh.subMeshes?.[0]
+                ?? null;
+            let materialReady: boolean | null = null;
+            try {
+                materialReady = subMesh && typeof subMaterial.isReadyForSubMesh === "function"
+                    ? subMaterial.isReadyForSubMesh(mesh, subMesh, false)
+                    : null;
+            } catch {
+                materialReady = false;
+            }
+            const effect = subMesh ? (subMesh as unknown as {
+                effect?: {
+                    isReady?: () => boolean;
+                    name?: string;
+                    _key?: string;
+                } | null;
+            }).effect : null;
+            const materialName = subMaterial.name ?? fallbackName ?? material.name ?? null;
+            summary.push({
+                mesh: meshName,
+                visible: mesh.isVisible,
+                enabled: mesh.isEnabled(),
+                visibility: mesh.visibility,
+                vertices: mesh.getTotalVertices?.() ?? 0,
+                subMeshCount: mesh.subMeshes?.length ?? 0,
+                material: typeof materialName === "string" ? materialName : null,
+                materialClass: subMaterial.getClassName?.() ?? null,
+                materialConstructor: getConstructorName(subMaterial),
+                alpha: subMaterial.alpha ?? null,
+                transparencyMode: subMaterial.transparencyMode ?? null,
+                useAlphaFromDiffuseTexture: subMaterial.useAlphaFromDiffuseTexture ?? null,
+                backFaceCulling: subMaterial.backFaceCulling ?? null,
+                disableColorWrite: subMaterial.disableColorWrite ?? null,
+                disableDepthWrite: subMaterial.disableDepthWrite ?? null,
+                forceDepthWrite: subMaterial.forceDepthWrite ?? null,
+                needDepthPrePass: subMaterial.needDepthPrePass ?? null,
+                materialReady,
+                effectReady: effect?.isReady?.() ?? null,
+                effectName: effect?.name ?? effect?._key ?? null,
+                pluginName: subMaterial._pluginMaterial?.constructor?.name ?? null,
+                pluginIsMock: subMaterial._pluginMaterial?.isMock ?? null,
+                diffuseTexture: subMaterial.diffuseTexture?.name ?? null,
+                diffuseHasAlpha: subMaterial.diffuseTexture?.hasAlpha ?? null,
+                diffuseReady: subMaterial.diffuseTexture?.isReady?.() ?? null,
+                decodedDds: subMaterial.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback === true,
+                uv: shouldLogDetailedMaterialUv(typeof materialName === "string" ? materialName : null)
+                    ? summarizeMeshUv(mesh)
+                    : null,
+            });
+        });
+        if (summary.length >= 40) break;
+    }
+
+    if (summary.some((item) => item.decodedDds || item.alpha === 0 || item.transparencyMode !== 0)) {
+        logInfo("asset", "model material visibility summary", {
+            fileName,
+            reason,
+            materialCount: summary.length,
+            materials: summary,
+        });
+    }
+}
+
+function attachMaterialCompileDiagnostics(fileName: string, meshes: readonly Mesh[]): void {
+    for (const material of collectUniqueModelMaterials(meshes)) {
+        const previousOnCompiled = material.onCompiled;
+        const previousOnError = material.onError;
+        material.onCompiled = (effect: unknown) => {
+            previousOnCompiled?.(effect);
+            logInfo("asset", "model material effect compiled", {
+                fileName,
+                materialName: typeof material.name === "string" ? material.name : null,
+                pluginName: material._pluginMaterial?.constructor?.name ?? null,
+                pluginIsMock: material._pluginMaterial?.isMock ?? null,
+            });
+        };
+        material.onError = (effect: unknown, errors: string) => {
+            previousOnError?.(effect, errors);
+            logError("asset", "model material effect compile failed", {
+                fileName,
+                materialName: typeof material.name === "string" ? material.name : null,
+                pluginName: material._pluginMaterial?.constructor?.name ?? null,
+                pluginIsMock: material._pluginMaterial?.isMock ?? null,
+                errors,
+            });
+        };
+    }
+}
+
+function schedulePostRenderMaterialDiagnostics(fileName: string, scene: Scene, meshes: readonly Mesh[]): void {
+    let remainingFrames = 8;
+    const observer = scene.onAfterRenderObservable.add(() => {
+        remainingFrames -= 1;
+        if (remainingFrames > 0) return;
+        if (observer) {
+            scene.onAfterRenderObservable.remove(observer);
+        }
+        logModelMaterialVisibilitySummary(fileName, meshes, "after-render-frames");
+    });
+    window.setTimeout(() => {
+        if (observer) {
+            scene.onAfterRenderObservable.remove(observer);
+        }
+        logModelMaterialVisibilitySummary(fileName, meshes, "after-timeout");
+    }, 1500);
+}
+
 export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<ModelInfo | null> {
     let renderingSuspended = false;
     try {
@@ -197,6 +545,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         const fileUrl = `file:///${dir}`;
 
         logInfo("asset", "model load started", { filePath, fileName });
+        const materialBuilder = ensureSharedMmdMaterialBuilder(fileName);
         host.suspendSceneRendering();
         renderingSuspended = true;
 
@@ -204,7 +553,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             rootUrl: fileUrl,
             pluginOptions: {
                 mmdmodel: {
-                    materialBuilder: MmdModelLoader.SharedMaterialBuilder,
+                    materialBuilder,
                     useSdef: true,
                     // Large, thin stage/background PMX meshes can be split into many
                     // submeshes whose per-material bounds are too fragile at shallow
@@ -288,6 +637,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             }[];
         };
         const materialFlagMap = host.buildPmxMaterialFlagMap(mmdMetadata);
+        attachMaterialCompileDiagnostics(fileName, result.meshes as Mesh[]);
         let materialOrder = 0;
         const shadowCasterMeshes: Mesh[] = [];
         for (const mesh of result.meshes) {
@@ -301,7 +651,9 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             }
 
             if (mesh.material) {
-                host.applyMmdMaterialCompatibilityFixes(mesh.material as ModelAssetMaterial);
+                visitModelMaterials(mesh, (material) => {
+                    host.applyMmdMaterialCompatibilityFixes(material);
+                });
                 mesh.alphaIndex = materialOrder;
                 materialOrder += 1;
             }
@@ -310,7 +662,11 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.applyModelEdgeToMeshes(result.meshes as Mesh[]);
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
         host.applyAnisotropicFilteringToMeshes?.(result.meshes as Mesh[]);
+        host.applyDebugMaterialOverrideToMeshes?.(fileName, result.meshes as Mesh[]);
         useParentMeshBoundsForSubMeshes(result.meshes as Mesh[]);
+        await waitForMmdMaterialPluginsReady(fileName, result.meshes as Mesh[]);
+        restoreMaterialDirtyMechanismAfterImport(host.scene, result.meshes as Mesh[]);
+        logModelMaterialVisibilitySummary(fileName, result.meshes as Mesh[], "after-material-setup");
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
@@ -323,6 +679,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
         host.patchModelAfterPhysicsForPausedState?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);
+        logModelMaterialVisibilitySummary(fileName, result.meshes as Mesh[], "after-runtime-model-created");
         host.modelKeyframeTracksByModel.set(mmdModel, new Map());
         host.modelSourceAnimationsByModel.delete(mmdModel);
         host.setModelMotionImports(mmdModel, []);
@@ -543,6 +900,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         });
         host.resumeSceneRendering();
         renderingSuspended = false;
+        schedulePostRenderMaterialDiagnostics(fileName, host.scene, result.meshes as Mesh[]);
         return modelInfo;
     } catch (err: unknown) {
         if (renderingSuspended) {

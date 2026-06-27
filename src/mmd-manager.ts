@@ -261,6 +261,11 @@ import {
     refreshMeshBoundingInfoForRenderStability,
     stabilizeAppGeneratedPlanarMesh,
 } from "./scene/mesh-render-stability";
+import {
+    decodeDdsTextureToRgba,
+    isDdsTexturePath,
+    shouldSkipDdsTextureForWebGpu,
+} from "./scene/dds-texture-compat";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
@@ -575,6 +580,7 @@ import { VpdLoader } from "babylon-mmd/esm/Loader/vpdLoader";
 import { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import { MmdBoneAnimationTrack, MmdMorphAnimationTrack, MmdMovableBoneAnimationTrack, MmdPropertyAnimationTrack } from "babylon-mmd/esm/Loader/Animation/mmdAnimationTrack";
 import { MmdStandardMaterialBuilder } from "babylon-mmd/esm/Loader/mmdStandardMaterialBuilder";
+import { MmdStandardMaterial } from "babylon-mmd/esm/Loader/mmdStandardMaterial";
 import { MmdMaterialRenderMethod } from "babylon-mmd/esm/Loader/materialBuilderBase";
 import { MmdPluginMaterial as MmdStandardShaderPluginGLSL } from "babylon-mmd/esm/Loader/Shaders/mmdStandard";
 import { MmdPluginMaterial as MmdStandardShaderPluginWGSL } from "babylon-mmd/esm/Loader/ShadersWGSL/mmdStandard";
@@ -680,11 +686,13 @@ type SceneModelMaterialEntry = {
 type MmdManagerMaterialLike = object & {
     name?: unknown;
     alpha?: unknown;
-    diffuseTexture?: { hasAlpha?: unknown } | null;
-    albedoTexture?: { hasAlpha?: unknown } | null;
+    diffuseTexture?: { hasAlpha?: unknown; metadata?: Record<string, unknown> | null } | null;
+    albedoTexture?: { hasAlpha?: unknown; metadata?: Record<string, unknown> | null } | null;
     opacityTexture?: unknown;
     useAlphaFromDiffuseTexture?: unknown;
     useAlphaFromAlbedoTexture?: unknown;
+    alphaCutOff?: unknown;
+    backFaceCulling?: unknown;
     transparencyMode?: unknown;
     zOffset?: number;
     zOffsetUnits?: number;
@@ -760,6 +768,7 @@ export class MmdManager {
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
+    private static readonly FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY = "mmd_modoki.debug.forceModelDebugMaterial";
     private static readonly FRAME_PERFORMANCE_LOG_INTERVAL_MS = 10_000;
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
@@ -901,6 +910,7 @@ export class MmdManager {
         "teal-orange": tealOrangeLutText,
     };
     private static toonLightSeparationShaderPatched = false;
+    private static mmdStandardMaterialPluginInitPatched = false;
     private static toonSelfShadowBoundarySoftness = 0.055;
     private static toonOcclusionShadowBoundarySoftness = 0.075;
     private static toonFlatLightColorInfluence = 0.35;
@@ -1351,10 +1361,39 @@ ${beforeFogAppendBlock}
         patchBindForSubMesh(MmdStandardShaderPluginWGSL as unknown as { prototype: { bindForSubMesh?: (...args: unknown[]) => void } });
         MmdManager.toonLightSeparationShaderPatched = true;
     }
+
+    private static patchMmdStandardMaterialPluginInitDirty(): void {
+        if (MmdManager.mmdStandardMaterialPluginInitPatched) return;
+
+        type MmdStandardMaterialInternal = MmdStandardMaterial & {
+            _initPluginShaderSourceAsync?: (shaderLanguage: ShaderLanguage) => Promise<void>;
+            markAsDirty?: (flag?: number) => void;
+        };
+        const prototype = MmdStandardMaterial.prototype as MmdStandardMaterialInternal;
+        const originalInit = prototype._initPluginShaderSourceAsync;
+        if (typeof originalInit !== "function") {
+            return;
+        }
+
+        prototype._initPluginShaderSourceAsync = async function patchedInitPluginShaderSourceAsync(shaderLanguage: ShaderLanguage): Promise<void> {
+            await originalInit.call(this, shaderLanguage);
+            try {
+                this.markAsDirty?.(Material.AllDirtyFlag);
+            } catch {
+                try {
+                    this.markAsDirty?.();
+                } catch {
+                    // Keep babylon-mmd startup resilient if a material is already disposed.
+                }
+            }
+        };
+        MmdManager.mmdStandardMaterialPluginInitPatched = true;
+    }
     private readonly renderingCanvas: HTMLCanvasElement;
     private engine: Engine | WebGPUEngine;
     private readonly runtimeDiagnostics = new Set<string>();
     private readonly webGpuTextureMipmapDecisionCache = new Map<string, Promise<boolean>>();
+    private readonly webGpuDdsTextureFallbackCache = new Map<string, Promise<Texture | null>>();
     private scene: Scene;
     private readonly framePerformanceLogMode = MmdManager.readPerformanceLogModeLocalStorage();
     private readonly framePerformanceLogEnabled = this.framePerformanceLogMode !== "off";
@@ -2827,7 +2866,7 @@ ${beforeFogAppendBlock}
         material.disableLighting = true;
         material.backFaceCulling = false;
         material.transparencyMode = Material.MATERIAL_ALPHABLEND;
-        material.useLogarithmicDepth = true;
+        material.useLogarithmicDepth = false;
         material.disableDepthWrite = true;
         material.zOffset = -1;
         material.zOffsetUnits = -4;
@@ -3019,7 +3058,7 @@ ${beforeFogAppendBlock}
         material.specularColor = new Color3(0, 0, 0);
         material.backFaceCulling = false;
         material.transparencyMode = Material.MATERIAL_ALPHABLEND;
-        material.useLogarithmicDepth = true;
+        material.useLogarithmicDepth = false;
         material.disableDepthWrite = true;
         material.zOffset = -2;
         material.zOffsetUnits = -8;
@@ -4080,10 +4119,13 @@ ${beforeFogAppendBlock}
             this.runtimeDiagnostics.add(diagnostic);
         }
 
+        MmdManager.patchMmdStandardMaterialPluginInitDirty();
         MmdManager.patchMmdToonLightSeparationShader();
 
-        // Register default material builder explicitly (avoids Vite tree-shaking side-effect imports)
-        if (MmdModelLoader.SharedMaterialBuilder === null) {
+        // Register default material builder explicitly (avoids Vite tree-shaking side-effect imports).
+        // Some loader paths can initialize a non-MMD material builder first; PMX/PMD imports must
+        // still use MmdStandardMaterial so babylon-mmd shader plugins are attached.
+        if (!(MmdModelLoader.SharedMaterialBuilder instanceof MmdStandardMaterialBuilder)) {
             MmdModelLoader.SharedMaterialBuilder = new MmdStandardMaterialBuilder();
         }
         if (MmdModelLoader.SharedMaterialBuilder instanceof MmdStandardMaterialBuilder) {
@@ -4208,7 +4250,7 @@ ${beforeFogAppendBlock}
         groundMat.ambientColor = new Color3(1, 1, 1);
         groundMat.specularColor = new Color3(0, 0, 0);
         groundMat.alpha = 1.0;
-        groundMat.useLogarithmicDepth = true;
+        groundMat.useLogarithmicDepth = false;
 
         const gridTextureSize = 512;
         const gridCell = 64;
@@ -4260,7 +4302,8 @@ ${beforeFogAppendBlock}
         skydomeMat.specularColor = new Color3(0, 0, 0);
         skydomeMat.disableLighting = true;
         skydomeMat.backFaceCulling = false;
-        skydomeMat.useLogarithmicDepth = true;
+        skydomeMat.disableDepthWrite = true;
+        skydomeMat.useLogarithmicDepth = false;
         this.skydome.material = skydomeMat;
         this.skydome.infiniteDistance = true;
         this.skydome.isPickable = false;
@@ -4990,6 +5033,11 @@ ${beforeFogAppendBlock}
         const sceneMeshes = this.scene.meshes.filter((mesh): mesh is Mesh => mesh instanceof Mesh);
         const accessoryMeshes = ((this as unknown as { getAccessoryMeshes?: () => unknown[] }).getAccessoryMeshes?.() ?? [])
             .filter((mesh): mesh is Mesh => mesh instanceof Mesh);
+        const currentSceneModel = this.sceneModels.find((sceneModel) => sceneModel.model === this.currentModel) ?? null;
+        const modelMeshes = currentSceneModel
+            ? [currentSceneModel.mesh, ...currentSceneModel.mesh.getChildMeshes()]
+                .filter((mesh): mesh is Mesh => mesh instanceof Mesh && !mesh.isDisposed())
+            : [];
         const activeMeshes = this.scene.getActiveMeshes();
         const activeMeshSet = new Set<unknown>(Array.from({ length: activeMeshes.length }, (_, index) => activeMeshes.data[index]));
         const cameraForward = this.camera.getForwardRay(1).direction;
@@ -5030,6 +5078,9 @@ ${beforeFogAppendBlock}
                 this.mirroringFloor ? this.createRenderStabilityMeshSample(this.mirroringFloor, activeMeshSet, cameraForward) : null,
                 this.skydome ? this.createRenderStabilityMeshSample(this.skydome, activeMeshSet, cameraForward) : null,
             ].filter(Boolean),
+            modelMeshes: modelMeshes
+                .map((mesh) => this.createRenderStabilityMeshSample(mesh, activeMeshSet, cameraForward))
+                .slice(0, 32),
             sceneMeshes: sceneMeshSamples,
             accessoryMeshes: accessoryMeshSamples,
         };
@@ -5047,9 +5098,22 @@ ${beforeFogAppendBlock}
         const cameraToCenter = center.subtract(this.camera.position);
         const forwardDistance = Vector3.Dot(cameraToCenter, cameraForward);
         const material = mesh.material as Material | null;
+        const materialLike = material as (Material & {
+            alpha?: unknown;
+            isReadyForSubMesh?: (mesh: Mesh, subMesh: unknown, useInstances?: boolean) => boolean;
+        }) | null;
+        const subMesh = mesh.subMeshes?.[0] ?? null;
         const sizeMax = Math.max(size.x, size.y, size.z);
         const sizeMin = Math.min(size.x, size.y, size.z);
         const sizeMid = size.x + size.y + size.z - sizeMax - sizeMin;
+        let materialReady: boolean | null = null;
+        try {
+            materialReady = subMesh && typeof materialLike?.isReadyForSubMesh === "function"
+                ? materialLike.isReadyForSubMesh(mesh, subMesh, false)
+                : null;
+        } catch {
+            materialReady = false;
+        }
 
         return {
             name: mesh.name,
@@ -5057,6 +5121,9 @@ ${beforeFogAppendBlock}
             visible: mesh.isVisible,
             visibility: mesh.visibility,
             active: activeMeshSet.has(mesh),
+            layerMask: mesh.layerMask,
+            cameraLayerMask: this.camera.layerMask,
+            layerMaskMatchesCamera: (mesh.layerMask & this.camera.layerMask) !== 0,
             alwaysSelectAsActiveMesh: mesh.alwaysSelectAsActiveMesh,
             doNotSyncBoundingInfo: mesh.doNotSyncBoundingInfo,
             receiveShadows: mesh.receiveShadows,
@@ -5074,12 +5141,18 @@ ${beforeFogAppendBlock}
             nearClipRisk: forwardDistance < this.camera.minZ + Math.max(0.1, Math.min(size.x, size.y, size.z) * 0.5),
             materialName: material?.name ?? null,
             materialClassName: material?.getClassName() ?? null,
+            materialAlpha: materialLike?.alpha ?? null,
+            materialReady,
             zOffset: material?.zOffset ?? null,
             zOffsetUnits: material?.zOffsetUnits ?? null,
             disableDepthWrite: material?.disableDepthWrite ?? null,
             needDepthPrePass: material?.needDepthPrePass ?? null,
             backFaceCulling: material ? (material as Material & { backFaceCulling?: unknown }).backFaceCulling : null,
             useLogarithmicDepth: material ? (material as Material & { useLogarithmicDepth?: unknown }).useLogarithmicDepth : null,
+            hasPositionData: mesh.isVerticesDataPresent("position"),
+            hasNormalData: mesh.isVerticesDataPresent("normal"),
+            hasUvData: mesh.isVerticesDataPresent("uv"),
+            hasColorData: mesh.isVerticesDataPresent("color"),
         };
     }
 
@@ -5176,11 +5249,17 @@ ${beforeFogAppendBlock}
         if (!material || typeof material !== "object") {
             return false;
         }
+        let materialChanged = false;
+        const materialName = typeof material.name === "string" ? material.name : "";
 
         // Some loaders leave opaque materials at alpha=0, but restoring alpha on
         // texture-driven transparent materials can break face/eyelash draw order.
         const diffuseTextureHasAlpha = Boolean(material.diffuseTexture?.hasAlpha);
         const albedoTextureHasAlpha = Boolean(material.albedoTexture?.hasAlpha);
+        const hasDecodedDdsFallbackTexture = Boolean(material.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback)
+            || Boolean(material.albedoTexture?.metadata?.mmdModokiDecodedDdsFallback);
+        const hasOpaqueDecodedDdsFallbackTexture = (material.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback === true && material.diffuseTexture?.hasAlpha !== true)
+            || (material.albedoTexture?.metadata?.mmdModokiDecodedDdsFallback === true && material.albedoTexture?.hasAlpha !== true);
         const hasOpacityTexture = Boolean(material.opacityTexture);
         const usesTextureAlpha = Boolean(material.useAlphaFromDiffuseTexture || material.useAlphaFromAlbedoTexture);
         const isTransparencyModeEnabled = typeof material.transparencyMode === "number" && material.transparencyMode !== 0;
@@ -5191,27 +5270,99 @@ ${beforeFogAppendBlock}
         const hasTransparentTexturePath = diffuseTextureHasAlpha || albedoTextureHasAlpha || hasOpacityTexture || usesTextureAlpha || isTransparencyModeEnabled;
 
         if (material.alpha === 0) {
-            if (!hasTransparentTexturePath && !isTransparencyModeEnabled && (material.diffuseTexture || material.albedoTexture)) {
+            if (hasDecodedDdsFallbackTexture || (!hasTransparentTexturePath && !isTransparencyModeEnabled && (material.diffuseTexture || material.albedoTexture))) {
                 material.alpha = 1;
+                materialChanged = true;
             }
+        }
+        if (hasOpaqueDecodedDdsFallbackTexture) {
+            if (material.alpha !== 1) {
+                material.alpha = 1;
+                materialChanged = true;
+            }
+            if (material.useAlphaFromDiffuseTexture !== false) {
+                material.useAlphaFromDiffuseTexture = false;
+                materialChanged = true;
+            }
+            if (material.useAlphaFromAlbedoTexture !== false) {
+                material.useAlphaFromAlbedoTexture = false;
+                materialChanged = true;
+            }
+            if ("transparencyMode" in material) {
+                if (material.transparencyMode !== Material.MATERIAL_OPAQUE) {
+                    material.transparencyMode = Material.MATERIAL_OPAQUE;
+                    materialChanged = true;
+                }
+            }
+        }
+        const shouldUseDecodedDdsAlpha = hasDecodedDdsFallbackTexture
+            && (diffuseTextureHasAlpha || albedoTextureHasAlpha)
+            && this.shouldUseDecodedDdsTextureAlphaForMaterial(materialName);
+        if (shouldUseDecodedDdsAlpha) {
+            if (material.alpha !== 1) {
+                material.alpha = 1;
+                materialChanged = true;
+            }
+            if (material.diffuseTexture && material.useAlphaFromDiffuseTexture !== true) {
+                material.useAlphaFromDiffuseTexture = true;
+                materialChanged = true;
+            }
+            if (material.albedoTexture && material.useAlphaFromAlbedoTexture !== true) {
+                material.useAlphaFromAlbedoTexture = true;
+                materialChanged = true;
+            }
+            if ("alphaCutOff" in material && Number(material.alphaCutOff) !== 0.5) {
+                material.alphaCutOff = 0.5;
+                materialChanged = true;
+            }
+            if ("transparencyMode" in material && material.transparencyMode !== Material.MATERIAL_ALPHATEST) {
+                material.transparencyMode = Material.MATERIAL_ALPHATEST;
+                materialChanged = true;
+            }
+        }
+        if (hasDecodedDdsFallbackTexture && material.backFaceCulling !== false) {
+            material.backFaceCulling = false;
+            materialChanged = true;
         }
 
         // Preserve the loader/runtime depth setup for transparent materials.
         // The forced zOffset helped some face-layer cases, but it breaks normal
         // half-transparent rendering and sphere-material ordering on other models.
-        material.zOffset = 0;
-        material.zOffsetUnits = 0;
+        if (material.zOffset !== 0) {
+            material.zOffset = 0;
+            materialChanged = true;
+        }
+        if (material.zOffsetUnits !== 0) {
+            material.zOffsetUnits = 0;
+            materialChanged = true;
+        }
 
         // Avoid forcing logarithmic depth on PMX materials globally. It helps
         // some close-up precision cases, but large low-poly stages/backgrounds
         // can lose broad polygons around shallow camera angles on WebGPU.
         if ("useLogarithmicDepth" in material) {
-            material.useLogarithmicDepth = false;
+            if (material.useLogarithmicDepth !== false) {
+                material.useLogarithmicDepth = false;
+                materialChanged = true;
+            }
+        }
+
+        if (materialChanged || hasDecodedDdsFallbackTexture) {
+            this.markMaterialShaderDirty(material);
         }
 
         // Preserve the loader's culling decision. Forcing double-sided rendering on
         // every PMX material tends to reveal inner mouth/face polygons on some models.
         return hasTransparentTexturePath;
+    }
+
+    private shouldUseDecodedDdsTextureAlphaForMaterial(materialName: string): boolean {
+        const normalized = materialName.toLowerCase();
+        return normalized.includes("eye_hi")
+            || normalized.includes("hair")
+            || materialName.includes("髪")
+            || materialName.includes("ドリル")
+            || materialName.includes("HS");
     }
 
     private buildPmxMaterialFlagMap(metadata: {
@@ -5627,6 +5778,54 @@ ${beforeFogAppendBlock}
         for (const texture of textures) {
             texture.anisotropicFilteringLevel = maxAnisotropy;
         }
+    }
+
+    private applyDebugMaterialOverrideToMeshes(modelLabel: string, meshes: readonly Mesh[]): void {
+        let enabled = false;
+        try {
+            enabled = globalThis.localStorage?.getItem(MmdManager.FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY) === "1";
+        } catch {
+            enabled = false;
+        }
+        if (!enabled) return;
+
+        const material = new StandardMaterial(`debug-visible-${modelLabel}`, this.scene);
+        material.diffuseColor = new Color3(1, 0.12, 0.72);
+        material.emissiveColor = new Color3(0.85, 0.08, 0.48);
+        material.specularColor = new Color3(0, 0, 0);
+        material.disableLighting = true;
+        material.backFaceCulling = false;
+        material.alpha = 1;
+        material.transparencyMode = Material.MATERIAL_OPAQUE;
+        material.forceDepthWrite = true;
+
+        const renderingGroupId = 2;
+        const previousAutoClearDepthStencil = this.scene.getAutoClearDepthStencilSetup(renderingGroupId);
+        this.scene.setRenderingAutoClearDepthStencil(renderingGroupId, true, true, true);
+
+        let affectedMeshCount = 0;
+        for (const mesh of meshes) {
+            if ((mesh.getTotalVertices?.() ?? 0) <= 0) continue;
+            mesh.material = material;
+            mesh.isVisible = true;
+            mesh.visibility = 1;
+            mesh.renderingGroupId = renderingGroupId;
+            mesh.alwaysSelectAsActiveMesh = true;
+            mesh.setEnabled(true);
+            mesh.computeWorldMatrix(true);
+            mesh.refreshBoundingInfo();
+            affectedMeshCount += 1;
+        }
+
+        logWarn("asset", "debug material override applied to model meshes", {
+            modelLabel,
+            affectedMeshCount,
+            storageKey: MmdManager.FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY,
+            autoTargeted: false,
+            renderingGroupId,
+            previousAutoClearDepthStencil,
+            nextAutoClearDepthStencil: this.scene.getAutoClearDepthStencilSetup(renderingGroupId),
+        });
     }
 
     async loadVMD(filePath: string): Promise<MotionInfo | null> {
@@ -6213,7 +6412,41 @@ ${beforeFogAppendBlock}
         return value > 0 && (value & (value - 1)) === 0;
     }
 
+    private isBrowserInspectableImageTexturePath(path: string): boolean {
+        const normalizedPath = path.split(/[?#]/, 1)[0]?.toLowerCase() ?? path.toLowerCase();
+        return normalizedPath.endsWith(".bmp")
+            || normalizedPath.endsWith(".png")
+            || normalizedPath.endsWith(".jpg")
+            || normalizedPath.endsWith(".jpeg")
+            || normalizedPath.endsWith(".gif")
+            || normalizedPath.endsWith(".webp");
+    }
+
+    private fileUrlToLocalPath(url: string): string | null {
+        let parsed: URL;
+        try {
+            parsed = new URL(url);
+        } catch {
+            return null;
+        }
+        if (parsed.protocol !== "file:") return null;
+        let pathname = decodeURIComponent(parsed.pathname);
+        if (/^\/[A-Za-z]:\//.test(pathname)) {
+            pathname = pathname.slice(1);
+        }
+        return pathname.replace(/\//g, "\\");
+    }
+
+    private async localFileExistsForUrl(url: string): Promise<boolean | null> {
+        const localPath = this.fileUrlToLocalPath(url);
+        if (!localPath) return null;
+        return await window.electronAPI.fileExists(localPath);
+    }
+
     private async inspectImageDimensionsFromUrl(url: string): Promise<{ width: number; height: number } | null> {
+        const exists = await this.localFileExistsForUrl(url);
+        if (exists === false) return null;
+
         return await new Promise((resolve) => {
             const image = new Image();
             image.onload = () => {
@@ -6287,6 +6520,111 @@ ${beforeFogAppendBlock}
         return await promise;
     }
 
+    private supportsS3tcCompressedTextures(): boolean {
+        return Boolean(this.engine.getCaps().s3tc);
+    }
+
+    private shouldSkipDdsTextureUrlForWebGpu(textureUrl: string): boolean {
+        return isDdsTexturePath(textureUrl) && !this.supportsS3tcCompressedTextures();
+    }
+
+    private async loadArrayBufferFromUrl(url: string): Promise<ArrayBuffer> {
+        const localPath = this.fileUrlToLocalPath(url);
+        if (localPath) {
+            const buffer = await window.electronAPI.readBinaryFile(localPath);
+            if (!buffer) throw new Error("file read failed");
+            return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        }
+
+        return await new Promise((resolve, reject) => {
+            const request = new XMLHttpRequest();
+            request.open("GET", url, true);
+            request.responseType = "arraybuffer";
+            request.onload = () => {
+                if (request.status === 0 || (request.status >= 200 && request.status < 300)) {
+                    resolve(request.response as ArrayBuffer);
+                } else {
+                    reject(new Error(`${request.status} ${request.statusText}`));
+                }
+            };
+            request.onerror = () => reject(new Error("request failed"));
+            request.send();
+        });
+    }
+
+    private addTextureToAssetContainer(texture: Texture, assetContainer: unknown): void {
+        const maybeContainer = assetContainer as { textures?: unknown[] } | null | undefined;
+        if (Array.isArray(maybeContainer?.textures) && !maybeContainer.textures.includes(texture)) {
+            maybeContainer.textures.push(texture);
+        }
+    }
+
+    private async createWebGpuDdsFallbackTexture(
+        textureName: string,
+        arrayBufferOrBlob: ArrayBuffer | Blob,
+        scene: unknown,
+        assetContainer: unknown,
+        options: { invertY?: boolean; samplingMode?: number },
+    ): Promise<Texture | null> {
+        const invertY = options.invertY ?? true;
+        const cacheKey = `${textureName}|${invertY}|${options.samplingMode ?? Texture.TRILINEAR_SAMPLINGMODE}`;
+        const cached = this.webGpuDdsTextureFallbackCache.get(cacheKey);
+        if (cached) {
+            const texture = await cached;
+            if (texture) this.addTextureToAssetContainer(texture, assetContainer);
+            return texture;
+        }
+
+        const arrayBuffer = arrayBufferOrBlob instanceof Blob ? await arrayBufferOrBlob.arrayBuffer() : arrayBufferOrBlob;
+        if (!shouldSkipDdsTextureForWebGpu(arrayBuffer, this.supportsS3tcCompressedTextures())) {
+            return null;
+        }
+
+        const promise = Promise.resolve().then(() => {
+            const decoded = decodeDdsTextureToRgba(arrayBuffer);
+            if (!decoded) {
+                logWarn("asset", "compressed DDS texture decode failed", { textureName });
+                return null;
+            }
+
+            const texture = RawTexture.CreateRGBATexture(
+                decoded.rgba,
+                decoded.width,
+                decoded.height,
+                scene as Scene,
+                false,
+                invertY,
+                options.samplingMode ?? Texture.TRILINEAR_SAMPLINGMODE,
+            );
+            texture.name = textureName;
+            texture.hasAlpha = decoded.hasAlpha;
+            texture.metadata = {
+                ...(texture.metadata as Record<string, unknown> | null ?? {}),
+                mmdModokiDecodedDdsFallback: true,
+            };
+            texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+            texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+            texture.onDisposeObservable.addOnce(() => {
+                this.webGpuDdsTextureFallbackCache.delete(cacheKey);
+            });
+
+            logWarn("asset", "compressed DDS texture decoded on CPU for WebGPU", {
+                textureName,
+                width: decoded.width,
+                height: decoded.height,
+                fourCc: decoded.fourCc ?? undefined,
+                invertY,
+                wrap: "clamp",
+            });
+            return texture;
+        });
+        this.webGpuDdsTextureFallbackCache.set(cacheKey, promise);
+
+        const texture = await promise;
+        if (texture) this.addTextureToAssetContainer(texture, assetContainer);
+        return texture;
+    }
+
     private configureMmdTextureLoaderForWebGpu(): void {
         if (!this.isWebGpuEngine()) {
             return;
@@ -6297,7 +6635,11 @@ ${beforeFogAppendBlock}
             return;
         }
 
-        type TextureLoaderOptions = { noMipmap?: boolean };
+        type TextureLoaderOptions = {
+            noMipmap?: boolean;
+            invertY?: boolean;
+            samplingMode?: number;
+        };
         const textureLoader = ((sharedBuilder as unknown as { [key: string]: unknown })._textureLoader as {
             loadTextureAsync?: (
                 uniqueId: unknown,
@@ -6325,12 +6667,35 @@ ${beforeFogAppendBlock}
         if (originalLoadTextureAsync) {
             textureLoader.loadTextureAsync = (async (uniqueId, rootUrl, relativeTexturePathOrIndex, scene, assetContainer, options) => {
                 const textureOptions = { ...options };
+                if (typeof relativeTexturePathOrIndex === "string") {
+                    const textureUrl = PathNormalize(rootUrl + relativeTexturePathOrIndex);
+                    if (this.shouldSkipDdsTextureUrlForWebGpu(textureUrl)) {
+                        try {
+                            const arrayBuffer = await this.loadArrayBufferFromUrl(textureUrl);
+                            return await this.createWebGpuDdsFallbackTexture(textureUrl, arrayBuffer, scene, assetContainer, textureOptions);
+                        } catch (err) {
+                            logWarn("asset", "DDS texture fallback load failed", {
+                                textureUrl,
+                                ...toLogErrorData(err),
+                            });
+                            return null;
+                        }
+                    }
+                }
                 if (!textureOptions.noMipmap) {
                     if (typeof relativeTexturePathOrIndex === "number") {
                         textureOptions.noMipmap = true;
                     } else {
                         const textureUrl = PathNormalize(rootUrl + relativeTexturePathOrIndex);
-                        textureOptions.noMipmap = !(await this.shouldGenerateMipmapsForWebGpuTextureUrl(textureUrl));
+                        const dimensions = await this.inspectImageDimensionsFromUrl(textureUrl);
+                        if (!dimensions && this.isBrowserInspectableImageTexturePath(textureUrl)) {
+                            logWarn("asset", "texture file missing or unreadable; skipped for model load", {
+                                textureUrl,
+                            });
+                            return null;
+                        }
+                        textureOptions.noMipmap = !dimensions
+                            || !(this.isPowerOfTwo(dimensions.width) && this.isPowerOfTwo(dimensions.height));
                     }
                 }
 
@@ -6349,6 +6714,16 @@ ${beforeFogAppendBlock}
         if (originalLoadTextureFromBufferAsync) {
             textureLoader.loadTextureFromBufferAsync = (async (uniqueId, textureName, arrayBufferOrBlob, scene, assetContainer, options, applyPathNormalization = true) => {
                 const textureOptions = { ...options };
+                const ddsFallbackTexture = await this.createWebGpuDdsFallbackTexture(
+                    textureName,
+                    arrayBufferOrBlob,
+                    scene,
+                    assetContainer,
+                    textureOptions,
+                );
+                if (ddsFallbackTexture) {
+                    return ddsFallbackTexture;
+                }
                 if (!textureOptions.noMipmap) {
                     const cacheKey = applyPathNormalization ? PathNormalize(textureName) : textureName;
                     textureOptions.noMipmap = !(await this.shouldGenerateMipmapsForWebGpuTextureBuffer(cacheKey, arrayBufferOrBlob));

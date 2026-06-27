@@ -914,6 +914,14 @@ ipcMain.handle('file:getInfo', async (_event, filePath: string) => {
   }
 });
 
+ipcMain.handle('file:exists', async (_event, filePath: string): Promise<boolean> => {
+  try {
+    return fs.existsSync(filePath);
+  } catch {
+    return false;
+  }
+});
+
 function findNearbyFileSync(baseDirectoryPath: string, targetPath: string, maxDepth = 2): string | null {
   const safeBaseDirectoryPath = path.resolve(baseDirectoryPath);
   if (!fs.existsSync(safeBaseDirectoryPath) || !fs.statSync(safeBaseDirectoryPath).isDirectory()) {

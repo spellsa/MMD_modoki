@@ -9,6 +9,7 @@ export interface ElectronAPI {
     readBinaryFile: (filePath: string) => Promise<Buffer | null>;
     readTextFile: (filePath: string) => Promise<string | null>;
     getFileInfo: (filePath: string) => Promise<{ name: string; path: string; size: number; extension: string } | null>;
+    fileExists: (filePath: string) => Promise<boolean>;
     findNearbyFile: (baseDirectoryPath: string, targetPath: string) => Promise<string | null>;
     saveTextFile: (
         content: string,

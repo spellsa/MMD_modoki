@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('file:readText', filePath),
     getFileInfo: (filePath: string) =>
         ipcRenderer.invoke('file:getInfo', filePath),
+    fileExists: (filePath: string) =>
+        ipcRenderer.invoke('file:exists', filePath),
     findNearbyFile: (baseDirectoryPath: string, targetPath: string) =>
         ipcRenderer.invoke('file:findNearby', baseDirectoryPath, targetPath),
     saveTextFile: (
