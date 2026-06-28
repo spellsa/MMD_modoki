@@ -40,6 +40,7 @@ type SceneModelMaterialEntry = {
 
 type ModelAssetMaterial = object & {
     name?: unknown;
+    metadata?: Record<string, unknown> | null;
     subMaterials?: Array<ModelAssetMaterial | null | undefined>;
     alpha?: number;
     transparencyMode?: number;
@@ -64,12 +65,39 @@ type ModelAssetMaterial = object & {
     onError?: (effect: unknown, errors: string) => void;
     isReadyForSubMesh?: (mesh: Mesh, subMesh: unknown, useInstances?: boolean) => boolean;
     markAsDirty?: (flag?: number) => void;
+    needAlphaBlending?: () => boolean;
+    needAlphaTesting?: () => boolean;
+    needAlphaBlendingForMesh?: (mesh: Mesh) => boolean;
+    needAlphaTestingForMesh?: (mesh: Mesh) => boolean;
+    getAlphaTestTexture?: () => { name?: unknown } | null;
 };
 
 type ModelAssetSceneWithDirtyBlock = Scene & {
     blockMaterialDirtyMechanism?: boolean;
     _forceBlockMaterialDirtyMechanism?: (value: boolean) => void;
 };
+
+type CapturedPmxMaterialInfo = {
+    index: number;
+    name: string | null;
+    englishName: string | null;
+    diffuseAlpha: number | null;
+    flag: number | null;
+    isDoubleSided: boolean | null;
+    textureIndex: number | null;
+    texturePath: unknown | null;
+    sphereTextureIndex: number | null;
+    sphereTexturePath: unknown | null;
+    sphereTextureMode: number | null;
+    toonTextureIndex: number | null;
+    toonTexturePath: unknown | null;
+    evaluatedTransparency: number | null;
+};
+
+const PMX_MATERIAL_FLAG_IS_DOUBLE_SIDED = 0x01;
+const PMX_MATERIAL_DIAGNOSTIC_METADATA_KEY = "mmdModokiPmxMaterialInfo";
+const MMD_MATERIAL_BUILDER_DIAGNOSTIC_PATCH_KEY = "__mmdModokiMaterialBuilderDiagnosticsInstalled";
+const MMD_MATERIAL_BUILDER_DIAGNOSTIC_FILE_KEY = "__mmdModokiMaterialBuilderDiagnosticFileName";
 
 function getConstructorName(value: unknown): string | null {
     return typeof value === "object" && value !== null
@@ -81,15 +109,22 @@ function ensureSharedMmdMaterialBuilder(fileName: string): MmdStandardMaterialBu
     const currentBuilder = MmdModelLoader.SharedMaterialBuilder;
     if (currentBuilder instanceof MmdStandardMaterialBuilder) {
         currentBuilder.renderMethod = MmdMaterialRenderMethod.DepthWriteAlphaBlendingWithEvaluation;
+        installMmdMaterialBuilderDecisionDiagnostics(currentBuilder, fileName);
         logInfo("asset", "MMD material builder ready", {
             fileName,
             builder: getConstructorName(currentBuilder),
+            renderMethod: formatMmdMaterialRenderMethod(currentBuilder.renderMethod),
+            forceDisableAlphaEvaluation: currentBuilder.forceDisableAlphaEvaluation,
+            alphaThreshold: currentBuilder.alphaThreshold,
+            alphaBlendThreshold: currentBuilder.alphaBlendThreshold,
+            alphaEvaluationResolution: currentBuilder.alphaEvaluationResolution,
         });
         return currentBuilder;
     }
 
     const builder = new MmdStandardMaterialBuilder();
     builder.renderMethod = MmdMaterialRenderMethod.DepthWriteAlphaBlendingWithEvaluation;
+    installMmdMaterialBuilderDecisionDiagnostics(builder, fileName);
     MmdModelLoader.SharedMaterialBuilder = builder;
     logWarn("asset", "MMD material builder replaced before model import", {
         fileName,
@@ -97,6 +132,307 @@ function ensureSharedMmdMaterialBuilder(fileName: string): MmdStandardMaterialBu
         builder: getConstructorName(builder),
     });
     return builder;
+}
+
+type DiagnosticMaterialBuilder = MmdStandardMaterialBuilder & {
+    [MMD_MATERIAL_BUILDER_DIAGNOSTIC_PATCH_KEY]?: true;
+    [MMD_MATERIAL_BUILDER_DIAGNOSTIC_FILE_KEY]?: string;
+    _evaluateDiffuseTextureTransparencyModeAsync?: (...args: unknown[]) => unknown;
+};
+
+function installMmdMaterialBuilderDecisionDiagnostics(builder: MmdStandardMaterialBuilder, fileName: string): void {
+    const diagnosticBuilder = builder as DiagnosticMaterialBuilder;
+    diagnosticBuilder[MMD_MATERIAL_BUILDER_DIAGNOSTIC_FILE_KEY] = fileName;
+    if (diagnosticBuilder[MMD_MATERIAL_BUILDER_DIAGNOSTIC_PATCH_KEY]) return;
+
+    const originalSetAlphaBlendMode = diagnosticBuilder.setAlphaBlendMode.bind(diagnosticBuilder);
+    diagnosticBuilder.setAlphaBlendMode = async (...args): Promise<void> => {
+        const material = args[0] as ModelAssetMaterial;
+        const materialInfo = args[1];
+        const referencedMeshes = Array.isArray(args[2]) ? args[2] as readonly unknown[] : [];
+        const beforeState = captureMaterialBuilderDecisionState(material);
+
+        await originalSetAlphaBlendMode(...args);
+
+        if (shouldLogMaterialBuilderDecision(material, materialInfo, referencedMeshes)) {
+            const currentFileName = diagnosticBuilder[MMD_MATERIAL_BUILDER_DIAGNOSTIC_FILE_KEY] ?? fileName;
+            logInfo("asset", "MMD material builder alpha decision", {
+                fileName: currentFileName,
+                builder: getConstructorName(diagnosticBuilder),
+                renderMethod: formatMmdMaterialRenderMethod(diagnosticBuilder.renderMethod),
+                forceDisableAlphaEvaluation: diagnosticBuilder.forceDisableAlphaEvaluation,
+                alphaThreshold: diagnosticBuilder.alphaThreshold,
+                alphaBlendThreshold: diagnosticBuilder.alphaBlendThreshold,
+                alphaEvaluationResolution: diagnosticBuilder.alphaEvaluationResolution,
+                materialName: readStringProperty(materialInfo, "name") ?? (typeof material.name === "string" ? material.name : null),
+                materialEnglishName: readStringProperty(materialInfo, "englishName"),
+                diffuseAlpha: readNumberTupleValue(materialInfo, "diffuse", 3),
+                evaluatedTransparency: formatEvaluatedTransparency(readNumberProperty(materialInfo, "evaluatedTransparency")),
+                referencedMeshes: formatReferencedMeshes(referencedMeshes),
+                before: beforeState,
+                after: captureMaterialBuilderDecisionState(material),
+            });
+        }
+    };
+
+    const originalEvaluate = diagnosticBuilder._evaluateDiffuseTextureTransparencyModeAsync;
+    if (typeof originalEvaluate === "function") {
+        diagnosticBuilder._evaluateDiffuseTextureTransparencyModeAsync = async (...args): Promise<unknown> => {
+            const diffuseTexture = args[0] as ModelAssetMaterial["diffuseTexture"];
+            const evaluatedTransparency = Number(args[1]);
+            const referencedMeshes = Array.isArray(args[2]) ? args[2] as readonly unknown[] : [];
+            const result = await originalEvaluate.apply(diagnosticBuilder, args);
+
+            if (shouldLogTextureAlphaEvaluation(diffuseTexture, referencedMeshes, evaluatedTransparency, result)) {
+                const currentFileName = diagnosticBuilder[MMD_MATERIAL_BUILDER_DIAGNOSTIC_FILE_KEY] ?? fileName;
+                logInfo("asset", "MMD texture alpha evaluation result", {
+                    fileName: currentFileName,
+                    renderMethod: formatMmdMaterialRenderMethod(diagnosticBuilder.renderMethod),
+                    forceDisableAlphaEvaluation: diagnosticBuilder.forceDisableAlphaEvaluation,
+                    alphaThreshold: diagnosticBuilder.alphaThreshold,
+                    alphaBlendThreshold: diagnosticBuilder.alphaBlendThreshold,
+                    alphaEvaluationResolution: diagnosticBuilder.alphaEvaluationResolution,
+                    texture: formatTextureDiagnostic(diffuseTexture),
+                    evaluatedTransparency: formatEvaluatedTransparency(Number.isFinite(evaluatedTransparency) ? evaluatedTransparency : null),
+                    referencedMeshes: formatReferencedMeshes(referencedMeshes),
+                    result,
+                    resultName: typeof result === "number" ? formatTransparencyMode(result) : null,
+                });
+            }
+
+            return result;
+        };
+    }
+
+    diagnosticBuilder[MMD_MATERIAL_BUILDER_DIAGNOSTIC_PATCH_KEY] = true;
+}
+
+function formatMmdMaterialRenderMethod(value: number): string {
+    if (value === MmdMaterialRenderMethod.DepthWriteAlphaBlendingWithEvaluation) {
+        return "DepthWriteAlphaBlendingWithEvaluation";
+    }
+    if (value === MmdMaterialRenderMethod.DepthWriteAlphaBlending) {
+        return "DepthWriteAlphaBlending";
+    }
+    if (value === MmdMaterialRenderMethod.AlphaEvaluation) {
+        return "AlphaEvaluation";
+    }
+    return String(value);
+}
+
+function formatEvaluatedTransparency(value: number | null): Record<string, unknown> | null {
+    if (value === null || !Number.isFinite(value)) return null;
+    const normalized = value & 0xff;
+    const depthWriteIsNotOpaqueBits = (normalized >> 4) & 0x03;
+    const alphaEvaluateBits = normalized & 0x0f;
+    return {
+        raw: value,
+        normalized,
+        depthWriteIsNotOpaqueBits,
+        depthWriteIsNotOpaque: depthWriteIsNotOpaqueBits === 0x03
+            ? "not-evaluated"
+            : depthWriteIsNotOpaqueBits === 0
+                ? "opaque"
+                : "not-opaque",
+        alphaEvaluateBits,
+        alphaEvaluateMode: alphaEvaluateBits === 0x0f
+            ? "not-evaluated"
+            : formatTransparencyMode(alphaEvaluateBits),
+    };
+}
+
+function captureMaterialBuilderDecisionState(material: ModelAssetMaterial): Record<string, unknown> {
+    return {
+        alpha: material.alpha ?? null,
+        transparencyMode: material.transparencyMode ?? null,
+        transparencyModeName: formatTransparencyMode(material.transparencyMode),
+        useAlphaFromDiffuseTexture: material.useAlphaFromDiffuseTexture ?? null,
+        diffuseTexture: formatTextureDiagnostic(material.diffuseTexture),
+        alphaCutOff: material.alphaCutOff ?? null,
+        backFaceCulling: material.backFaceCulling ?? null,
+        forceDepthWrite: material.forceDepthWrite ?? null,
+        needDepthPrePass: material.needDepthPrePass ?? null,
+        disableDepthWrite: material.disableDepthWrite ?? null,
+        needAlphaBlending: safeMaterialBooleanCall(material.needAlphaBlending?.bind(material)),
+        needAlphaTesting: safeMaterialBooleanCall(material.needAlphaTesting?.bind(material)),
+        alphaTestTexture: material.getAlphaTestTexture?.()?.name ?? null,
+    };
+}
+
+function formatTextureDiagnostic(texture: ModelAssetMaterial["diffuseTexture"]): Record<string, unknown> | null {
+    if (!texture) return null;
+    return {
+        name: texture.name ?? null,
+        hasAlpha: texture.hasAlpha ?? null,
+        isReady: safeBooleanCall(texture.isReady?.bind(texture)),
+        decodedDds: texture.metadata?.mmdModokiDecodedDdsFallback === true,
+        decodedDdsHasAlpha: texture.metadata?.mmdModokiDecodedDdsHasAlpha ?? null,
+        decodedBmp: texture.metadata?.mmdModokiDecodedBmpAlphaFallback === true,
+        decodedBmpHasAlpha: texture.metadata?.mmdModokiDecodedBmpHasAlpha ?? null,
+        minAlpha: texture.metadata?.mmdModokiDecodedTextureMinAlpha ?? null,
+        maxAlpha: texture.metadata?.mmdModokiDecodedTextureMaxAlpha ?? null,
+    };
+}
+
+function safeBooleanCall(call: (() => boolean) | undefined): boolean | null {
+    if (!call) return null;
+    try {
+        return Boolean(call());
+    } catch {
+        return null;
+    }
+}
+
+function formatReferencedMeshes(referencedMeshes: readonly unknown[]): Array<Record<string, unknown>> {
+    return referencedMeshes.slice(0, 12).map((entry) => {
+        const record = entry && typeof entry === "object" ? entry as Record<string, unknown> : null;
+        const mesh = record && "mesh" in record ? record.mesh : entry;
+        const meshRecord = mesh && typeof mesh === "object" ? mesh as Mesh : null;
+        return {
+            meshName: meshRecord?.name ?? null,
+            subMeshIndex: record && Number.isFinite(Number(record.subMeshIndex)) ? Number(record.subMeshIndex) : null,
+            alphaIndex: meshRecord?.alphaIndex ?? null,
+            renderingGroupId: meshRecord?.renderingGroupId ?? null,
+            vertices: meshRecord?.getTotalVertices?.() ?? null,
+        };
+    });
+}
+
+function shouldLogMaterialBuilderDecision(
+    material: ModelAssetMaterial,
+    materialInfo: unknown,
+    referencedMeshes: readonly unknown[],
+): boolean {
+    const searchText = [
+        readStringProperty(materialInfo, "name"),
+        readStringProperty(materialInfo, "englishName"),
+        typeof material.name === "string" ? material.name : "",
+        material.diffuseTexture?.name ?? "",
+        ...formatReferencedMeshes(referencedMeshes).map((entry) => String(entry.meshName ?? "")),
+    ].join(" ").toLowerCase();
+
+    return isLikelyFaceAlphaDiagnosticText(searchText)
+        || material.diffuseTexture?.hasAlpha === true
+        || material.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback === true
+        || material.diffuseTexture?.metadata?.mmdModokiDecodedBmpAlphaFallback === true
+        || Number(material.alpha ?? 1) < 0.999
+        || material.useAlphaFromDiffuseTexture === true
+        || (typeof material.transparencyMode === "number" && material.transparencyMode !== Material.MATERIAL_OPAQUE)
+        || readNumberTupleValue(materialInfo, "diffuse", 3) !== 1
+        || readNumberProperty(materialInfo, "evaluatedTransparency") !== null;
+}
+
+function shouldLogTextureAlphaEvaluation(
+    texture: ModelAssetMaterial["diffuseTexture"],
+    referencedMeshes: readonly unknown[],
+    evaluatedTransparency: number,
+    result: unknown,
+): boolean {
+    const meshText = formatReferencedMeshes(referencedMeshes).map((entry) => String(entry.meshName ?? "")).join(" ").toLowerCase();
+    const textureName = String(texture?.name ?? "").toLowerCase();
+
+    return isLikelyFaceAlphaDiagnosticText(`${textureName} ${meshText}`)
+        || texture?.metadata?.mmdModokiDecodedDdsFallback === true
+        || texture?.metadata?.mmdModokiDecodedBmpAlphaFallback === true
+        || texture?.hasAlpha === true
+        || (Number.isFinite(evaluatedTransparency) && evaluatedTransparency !== -1)
+        || (typeof result === "number" && result !== Material.MATERIAL_OPAQUE);
+}
+
+function isLikelyFaceAlphaDiagnosticText(searchText: string): boolean {
+    return searchText.includes("eye")
+        || searchText.includes("face")
+        || searchText.includes("hair")
+        || searchText.includes("lash")
+        || searchText.includes("shadow")
+        || searchText.includes("highlight")
+        || searchText.includes("hs")
+        || searchText.includes("アイシャドウ")
+        || searchText.includes("頬紅")
+        || searchText.includes("口紅")
+        || searchText.includes("まつげ");
+}
+
+function installPmxMaterialDiagnosticCapture(builder: MmdStandardMaterialBuilder): void {
+    builder.afterBuildSingleMaterial = (
+        material: ModelAssetMaterial,
+        materialIndex: number,
+        materialInfo: unknown,
+        imagePathTable: readonly string[],
+        texturesInfo: readonly unknown[],
+    ): void => {
+        material.metadata = {
+            ...(material.metadata ?? {}),
+            [PMX_MATERIAL_DIAGNOSTIC_METADATA_KEY]: capturePmxMaterialInfo(
+                materialIndex,
+                materialInfo,
+                imagePathTable,
+                texturesInfo,
+            ),
+        };
+    };
+}
+
+function capturePmxMaterialInfo(
+    materialIndex: number,
+    materialInfo: unknown,
+    imagePathTable: readonly string[],
+    texturesInfo: readonly unknown[],
+): CapturedPmxMaterialInfo {
+    const flag = readNumberProperty(materialInfo, "flag");
+    const textureIndex = readNumberProperty(materialInfo, "textureIndex");
+    const sphereTextureIndex = readNumberProperty(materialInfo, "sphereTextureIndex");
+    const toonTextureIndex = readNumberProperty(materialInfo, "toonTextureIndex");
+
+    return {
+        index: materialIndex,
+        name: readStringProperty(materialInfo, "name"),
+        englishName: readStringProperty(materialInfo, "englishName"),
+        diffuseAlpha: readNumberTupleValue(materialInfo, "diffuse", 3),
+        flag,
+        isDoubleSided: flag === null ? null : (flag & PMX_MATERIAL_FLAG_IS_DOUBLE_SIDED) !== 0,
+        textureIndex,
+        texturePath: resolveTexturePath(textureIndex, imagePathTable, texturesInfo),
+        sphereTextureIndex,
+        sphereTexturePath: resolveTexturePath(sphereTextureIndex, imagePathTable, texturesInfo),
+        sphereTextureMode: readNumberProperty(materialInfo, "sphereTextureMode"),
+        toonTextureIndex,
+        toonTexturePath: resolveTexturePath(toonTextureIndex, imagePathTable, texturesInfo),
+        evaluatedTransparency: readNumberProperty(materialInfo, "evaluatedTransparency"),
+    };
+}
+
+function resolveTexturePath(
+    textureIndex: number | null,
+    imagePathTable: readonly string[],
+    texturesInfo: readonly unknown[],
+): unknown | null {
+    if (textureIndex === null || textureIndex < 0 || textureIndex >= texturesInfo.length) return null;
+    const textureInfo = texturesInfo[textureIndex];
+    const imagePathIndex = readNumberProperty(textureInfo, "imagePathIndex");
+    if (imagePathIndex === null || imagePathIndex < 0 || imagePathIndex >= imagePathTable.length) return null;
+    return imagePathTable[imagePathIndex] ?? null;
+}
+
+function readStringProperty(value: unknown, property: string): string | null {
+    if (!value || typeof value !== "object") return null;
+    const raw = (value as Record<string, unknown>)[property];
+    return typeof raw === "string" ? raw : null;
+}
+
+function readNumberProperty(value: unknown, property: string): number | null {
+    if (!value || typeof value !== "object") return null;
+    const raw = (value as Record<string, unknown>)[property];
+    return Number.isFinite(Number(raw)) ? Number(raw) : null;
+}
+
+function readNumberTupleValue(value: unknown, property: string, index: number): number | null {
+    if (!value || typeof value !== "object") return null;
+    const raw = (value as Record<string, unknown>)[property];
+    if (!Array.isArray(raw) && !(ArrayBuffer.isView(raw) && typeof raw.length === "number")) return null;
+    const tuple = raw as ArrayLike<unknown>;
+    const tupleValue = tuple[index];
+    return Number.isFinite(Number(tupleValue)) ? Number(tupleValue) : null;
 }
 
 type ModelAssetRuntimeModel = object;
@@ -120,6 +456,7 @@ type ModelAssetHost = {
     applyModelEdgeToMeshes(meshes: Mesh[]): void;
     applyCelShadingToMeshes(meshes: Mesh[]): void;
     applyAnisotropicFilteringToMeshes?: (meshes: Mesh[]) => void;
+    applyAlphaTextureDebugToMeshes?: (fileName: string, meshes: Mesh[]) => void;
     applyDebugMaterialOverrideToMeshes?: (fileName: string, meshes: Mesh[]) => void;
     mmdRuntime: {
         createMmdModel(mesh: MmdMesh, options: object): ModelAssetRuntimeModel;
@@ -492,6 +829,179 @@ function logModelMaterialVisibilitySummary(fileName: string, meshes: readonly Me
     }
 }
 
+function getCapturedPmxMaterialInfo(material: ModelAssetMaterial): CapturedPmxMaterialInfo | null {
+    const captured = material.metadata?.[PMX_MATERIAL_DIAGNOSTIC_METADATA_KEY];
+    return captured && typeof captured === "object" ? captured as CapturedPmxMaterialInfo : null;
+}
+
+function texturePathToSearchText(texturePath: unknown): string {
+    if (typeof texturePath === "string") return texturePath.toLowerCase();
+    if (!texturePath || typeof texturePath !== "object") return "";
+    const record = texturePath as Record<string, unknown>;
+    return `${String(record.fileName ?? "")}${String(record.extension ?? "")}`.toLowerCase();
+}
+
+function shouldLogSuspiciousAlphaMaterial(
+    materialName: string | null,
+    material: ModelAssetMaterial,
+    captured: CapturedPmxMaterialInfo | null,
+): boolean {
+    const normalized = (materialName ?? "").toLowerCase();
+    const isFaceLike = normalized.includes("eye")
+        || normalized.includes("face")
+        || normalized.includes("hair")
+        || (materialName?.includes("顔") ?? false)
+        || (materialName?.includes("目") ?? false)
+        || (materialName?.includes("髪") ?? false)
+        || (materialName?.includes("睫") ?? false)
+        || (materialName?.includes("まつげ") ?? false)
+        || (materialName?.includes("頬") ?? false)
+        || (materialName?.includes("口") ?? false);
+    const texturePath = texturePathToSearchText(captured?.texturePath);
+    return isFaceLike
+        || Boolean(material.diffuseTexture?.hasAlpha)
+        || material.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback === true
+        || material.diffuseTexture?.metadata?.mmdModokiDecodedBmpAlphaFallback === true
+        || Number(material.alpha ?? 1) < 0.999
+        || Boolean(material.useAlphaFromDiffuseTexture)
+        || (typeof material.transparencyMode === "number" && material.transparencyMode !== Material.MATERIAL_OPAQUE)
+        || (captured?.diffuseAlpha !== null && captured?.diffuseAlpha !== undefined && captured.diffuseAlpha < 0.999)
+        || captured?.isDoubleSided === true
+        || (captured?.evaluatedTransparency !== null && captured?.evaluatedTransparency !== undefined)
+        || texturePath.endsWith(".dds")
+        || texturePath.endsWith(".png")
+        || texturePath.endsWith(".bmp");
+}
+
+function isOpaqueMaterial(material: ModelAssetMaterial): boolean {
+    return material.transparencyMode === Material.MATERIAL_OPAQUE
+        || material.transparencyMode === 0
+        || material.transparencyMode === null
+        || material.transparencyMode === undefined;
+}
+
+function formatTransparencyMode(mode: number | null | undefined): string | null {
+    if (mode === Material.MATERIAL_OPAQUE) return "opaque";
+    if (mode === Material.MATERIAL_ALPHATEST) return "alphatest";
+    if (mode === Material.MATERIAL_ALPHABLEND) return "alphablend";
+    if (mode === Material.MATERIAL_ALPHATESTANDBLEND) return "alphatest-and-blend";
+    return mode === null || mode === undefined ? null : String(mode);
+}
+
+function safeMaterialBooleanCall(call: (() => boolean) | undefined): boolean | null {
+    if (!call) return null;
+    try {
+        return Boolean(call());
+    } catch {
+        return null;
+    }
+}
+
+function logSuspiciousMaterialAlphaDiagnostics(fileName: string, meshes: readonly Mesh[], reason: string): void {
+    const entries: Array<Record<string, unknown>> = [];
+
+    for (const mesh of meshes) {
+        visitModelMaterials(mesh, (material, fallbackName, meshName) => {
+            const materialName = typeof material.name === "string" ? material.name : fallbackName;
+            const captured = getCapturedPmxMaterialInfo(material);
+            if (!shouldLogSuspiciousAlphaMaterial(materialName, material, captured)) return;
+
+            entries.push({
+                mesh: meshName,
+                material: materialName,
+                vertices: mesh.getTotalVertices?.() ?? 0,
+                meshAlphaIndex: mesh.alphaIndex,
+                renderingGroupId: mesh.renderingGroupId,
+                pmxIndex: captured?.index ?? null,
+                pmxName: captured?.name ?? null,
+                pmxEnglishName: captured?.englishName ?? null,
+                pmxDiffuseAlpha: captured?.diffuseAlpha ?? null,
+                pmxFlag: captured?.flag ?? null,
+                pmxDoubleSided: captured?.isDoubleSided ?? null,
+                pmxEvaluatedTransparency: captured?.evaluatedTransparency ?? null,
+                pmxTextureIndex: captured?.textureIndex ?? null,
+                pmxTexturePath: captured?.texturePath ?? null,
+                pmxSphereTextureIndex: captured?.sphereTextureIndex ?? null,
+                pmxSphereTexturePath: captured?.sphereTexturePath ?? null,
+                pmxSphereTextureMode: captured?.sphereTextureMode ?? null,
+                pmxToonTextureIndex: captured?.toonTextureIndex ?? null,
+                pmxToonTexturePath: captured?.toonTexturePath ?? null,
+                babylonAlpha: material.alpha ?? null,
+                babylonTransparencyMode: material.transparencyMode ?? null,
+                babylonTransparencyModeName: formatTransparencyMode(material.transparencyMode),
+                useAlphaFromDiffuseTexture: material.useAlphaFromDiffuseTexture ?? null,
+                diffuseTexture: material.diffuseTexture?.name ?? null,
+                diffuseHasAlpha: material.diffuseTexture?.hasAlpha ?? null,
+                decodedDds: material.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback === true,
+                decodedBmp: material.diffuseTexture?.metadata?.mmdModokiDecodedBmpAlphaFallback === true,
+                alphaCutOff: material.alphaCutOff ?? null,
+                backFaceCulling: material.backFaceCulling ?? null,
+                forceDepthWrite: material.forceDepthWrite ?? null,
+                needDepthPrePass: material.needDepthPrePass ?? null,
+                disableDepthWrite: material.disableDepthWrite ?? null,
+                disableColorWrite: material.disableColorWrite ?? null,
+                needAlphaBlending: safeMaterialBooleanCall(material.needAlphaBlending?.bind(material)),
+                needAlphaTesting: safeMaterialBooleanCall(material.needAlphaTesting?.bind(material)),
+                needAlphaBlendingForMesh: safeMaterialBooleanCall(material.needAlphaBlendingForMesh?.bind(material, mesh)),
+                needAlphaTestingForMesh: safeMaterialBooleanCall(material.needAlphaTestingForMesh?.bind(material, mesh)),
+                alphaTestTexture: material.getAlphaTestTexture?.()?.name ?? null,
+            });
+        });
+        if (entries.length >= 60) break;
+    }
+
+    if (entries.length > 0) {
+        logInfo("asset", "suspicious material alpha diagnostics", {
+            fileName,
+            reason,
+            materialCount: entries.length,
+            materials: entries,
+        });
+    }
+}
+
+function logAlphaTextureKeptOpaqueCandidates(fileName: string, meshes: readonly Mesh[], reason: string): void {
+    const entries: Array<Record<string, unknown>> = [];
+
+    for (const mesh of meshes) {
+        visitModelMaterials(mesh, (material, fallbackName, meshName) => {
+            const hasDiffuseAlpha = material.diffuseTexture?.hasAlpha === true;
+            if (!hasDiffuseAlpha || material.useAlphaFromDiffuseTexture === true || !isOpaqueMaterial(material)) return;
+
+            const captured = getCapturedPmxMaterialInfo(material);
+            entries.push({
+                mesh: meshName,
+                material: typeof material.name === "string" ? material.name : fallbackName,
+                meshAlphaIndex: mesh.alphaIndex,
+                renderingGroupId: mesh.renderingGroupId,
+                pmxIndex: captured?.index ?? null,
+                pmxName: captured?.name ?? null,
+                pmxDiffuseAlpha: captured?.diffuseAlpha ?? null,
+                pmxDoubleSided: captured?.isDoubleSided ?? null,
+                pmxTexturePath: captured?.texturePath ?? null,
+                diffuseTexture: material.diffuseTexture?.name ?? null,
+                decodedDds: material.diffuseTexture?.metadata?.mmdModokiDecodedDdsFallback === true,
+                decodedBmp: material.diffuseTexture?.metadata?.mmdModokiDecodedBmpAlphaFallback === true,
+                babylonTransparencyMode: material.transparencyMode ?? null,
+                babylonTransparencyModeName: formatTransparencyMode(material.transparencyMode),
+                useAlphaFromDiffuseTexture: material.useAlphaFromDiffuseTexture ?? null,
+                alphaCutOff: material.alphaCutOff ?? null,
+                forceDepthWrite: material.forceDepthWrite ?? null,
+            });
+        });
+        if (entries.length >= 40) break;
+    }
+
+    if (entries.length > 0) {
+        logInfo("asset", "alpha texture kept opaque candidates", {
+            fileName,
+            reason,
+            materialCount: entries.length,
+            materials: entries,
+        });
+    }
+}
+
 function attachMaterialCompileDiagnostics(fileName: string, meshes: readonly Mesh[]): void {
     for (const material of collectUniqueModelMaterials(meshes)) {
         const previousOnCompiled = material.onCompiled;
@@ -527,12 +1037,16 @@ function schedulePostRenderMaterialDiagnostics(fileName: string, scene: Scene, m
             scene.onAfterRenderObservable.remove(observer);
         }
         logModelMaterialVisibilitySummary(fileName, meshes, "after-render-frames");
+        logSuspiciousMaterialAlphaDiagnostics(fileName, meshes, "after-render-frames");
+        logAlphaTextureKeptOpaqueCandidates(fileName, meshes, "after-render-frames");
     });
     window.setTimeout(() => {
         if (observer) {
             scene.onAfterRenderObservable.remove(observer);
         }
         logModelMaterialVisibilitySummary(fileName, meshes, "after-timeout");
+        logSuspiciousMaterialAlphaDiagnostics(fileName, meshes, "after-timeout");
+        logAlphaTextureKeptOpaqueCandidates(fileName, meshes, "after-timeout");
     }, 1500);
 }
 
@@ -546,6 +1060,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
 
         logInfo("asset", "model load started", { filePath, fileName });
         const materialBuilder = ensureSharedMmdMaterialBuilder(fileName);
+        installPmxMaterialDiagnosticCapture(materialBuilder);
         host.suspendSceneRendering();
         renderingSuspended = true;
 
@@ -662,11 +1177,14 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.applyModelEdgeToMeshes(result.meshes as Mesh[]);
         host.applyCelShadingToMeshes(result.meshes as Mesh[]);
         host.applyAnisotropicFilteringToMeshes?.(result.meshes as Mesh[]);
+        host.applyAlphaTextureDebugToMeshes?.(fileName, result.meshes as Mesh[]);
         host.applyDebugMaterialOverrideToMeshes?.(fileName, result.meshes as Mesh[]);
         useParentMeshBoundsForSubMeshes(result.meshes as Mesh[]);
         await waitForMmdMaterialPluginsReady(fileName, result.meshes as Mesh[]);
         restoreMaterialDirtyMechanismAfterImport(host.scene, result.meshes as Mesh[]);
         logModelMaterialVisibilitySummary(fileName, result.meshes as Mesh[], "after-material-setup");
+        logSuspiciousMaterialAlphaDiagnostics(fileName, result.meshes as Mesh[], "after-material-setup");
+        logAlphaTextureKeptOpaqueCandidates(fileName, result.meshes as Mesh[], "after-material-setup");
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
 
         const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
@@ -680,6 +1198,8 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.patchModelAfterPhysicsForPausedState?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);
         logModelMaterialVisibilitySummary(fileName, result.meshes as Mesh[], "after-runtime-model-created");
+        logSuspiciousMaterialAlphaDiagnostics(fileName, result.meshes as Mesh[], "after-runtime-model-created");
+        logAlphaTextureKeptOpaqueCandidates(fileName, result.meshes as Mesh[], "after-runtime-model-created");
         host.modelKeyframeTracksByModel.set(mmdModel, new Map());
         host.modelSourceAnimationsByModel.delete(mmdModel);
         host.setModelMotionImports(mmdModel, []);

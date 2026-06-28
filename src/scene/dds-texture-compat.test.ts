@@ -76,6 +76,7 @@ describe("dds texture compatibility", () => {
         const view = new DataView(buffer);
         view.setUint8(128, 10);
         view.setUint8(129, 250);
+        view.setUint8(130, 0x08);
         view.setUint16(136, 0x001f, true);
         view.setUint16(138, 0xf800, true);
         view.setUint32(140, 3, true);
@@ -83,6 +84,8 @@ describe("dds texture compatibility", () => {
         const decoded = decodeDdsTextureToRgba(buffer);
 
         expect(decoded?.hasAlpha).toBe(true);
+        expect(decoded?.minAlpha).toBe(10);
+        expect(decoded?.maxAlpha).toBe(250);
         expect(Array.from(decoded?.rgba.slice(0, 4) ?? [])).toEqual([170, 0, 85, 10]);
         expect(decoded?.rgba[3]).toBe(10);
     });
@@ -100,6 +103,35 @@ describe("dds texture compatibility", () => {
         const decoded = decodeDdsTextureToRgba(buffer);
 
         expect(decoded?.hasAlpha).toBe(false);
+        expect(decoded?.minAlpha).toBe(255);
+        expect(decoded?.maxAlpha).toBe(255);
         expect(decoded?.rgba[3]).toBe(255);
+    });
+
+    it("decodes DXT3 alpha for every block after alpha has already been found", () => {
+        const buffer = createDds("DXT3", 32, 8, 4);
+        const view = new DataView(buffer);
+
+        for (let offset = 128; offset < 136; offset += 2) {
+            view.setUint16(offset, 0xeeee, true);
+        }
+        view.setUint16(136, 0xf800, true);
+        view.setUint16(138, 0x001f, true);
+        view.setUint32(140, 0, true);
+
+        for (let offset = 144; offset < 152; offset += 2) {
+            view.setUint16(offset, 0x0000, true);
+        }
+        view.setUint16(152, 0xf800, true);
+        view.setUint16(154, 0x001f, true);
+        view.setUint32(156, 0, true);
+
+        const decoded = decodeDdsTextureToRgba(buffer);
+
+        expect(decoded?.hasAlpha).toBe(true);
+        expect(decoded?.minAlpha).toBe(0);
+        expect(decoded?.maxAlpha).toBe(238);
+        expect(decoded?.rgba[3]).toBe(238);
+        expect(decoded?.rgba[(4 * 4) + 3]).toBe(0);
     });
 });

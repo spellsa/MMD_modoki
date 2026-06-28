@@ -1,6 +1,8 @@
 // eslint-disable-next-line import/no-unresolved
 import debugWhiteWgslText from "../../wgsl/toon_debug_white_shadow.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
+import alphaTextureDebugWgslText from "../../wgsl/alpha_texture_debug.wgsl?raw";
+// eslint-disable-next-line import/no-unresolved
 import fullLightWgslText from "../../wgsl/full_light.wgsl?raw";
 // eslint-disable-next-line import/no-unresolved
 import fullLightAddWgslText from "../../wgsl/full_light_add.wgsl?raw";
@@ -1975,6 +1977,41 @@ export function applyWgslShaderPresetToMaterials(
     if (!applied) return false;
 
     syncLuminousGlowLayer(host);
+    host.engine.releaseEffects?.();
+    host.onMaterialShaderStateChanged?.();
+    return true;
+}
+
+export function applyWgslAlphaTextureDebugToMaterials(
+    host: MaterialShaderHost,
+    materials: Iterable<MaterialShaderMaterial>,
+): boolean {
+    if (!isWgslMaterialShaderAssignmentAvailable(host)) return false;
+
+    const seen = new Set<object>();
+    let applied = false;
+    for (const material of materials) {
+        const key = getMaterialKey(material);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+
+        setExternalWgslToonShaderForMaterial(host, material, null, null);
+        setPresetWgslToonFragmentForMaterial(host, material, alphaTextureDebugWgslText);
+        if ("alpha" in material) {
+            material.alpha = 1;
+        }
+        if ("alphaCutOff" in material) {
+            material.alphaCutOff = 0;
+        }
+        if ("transparencyMode" in material) {
+            material.transparencyMode = Material.MATERIAL_OPAQUE;
+        }
+        markMaterialShaderDirty(material);
+        applied = true;
+    }
+
+    if (!applied) return false;
+
     host.engine.releaseEffects?.();
     host.onMaterialShaderStateChanged?.();
     return true;

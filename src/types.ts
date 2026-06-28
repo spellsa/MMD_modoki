@@ -133,6 +133,10 @@ declare global {
         mmdModokiDiagnostics?: {
             dumpPerformanceSnapshot: () => Record<string, unknown>;
         };
+        mmdModokiDebug?: {
+            enableAlphaTextureView: () => boolean;
+            disableAlphaTextureView: () => void;
+        };
     }
 }
 

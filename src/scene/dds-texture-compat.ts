@@ -10,6 +10,8 @@ export type DdsTextureInfo = {
 export type DecodedDdsTexture = DdsTextureInfo & {
     rgba: Uint8Array;
     hasAlpha: boolean;
+    minAlpha: number;
+    maxAlpha: number;
 };
 
 const DDS_MAGIC = 0x20534444;
@@ -84,7 +86,19 @@ export function decodeDdsTextureToRgba(data: ArrayBuffer | ArrayBufferView): Dec
         return null;
     }
 
-    return { ...info, rgba, hasAlpha };
+    const { minAlpha, maxAlpha } = computeAlphaRange(rgba);
+    return { ...info, rgba, hasAlpha, minAlpha, maxAlpha };
+}
+
+function computeAlphaRange(rgba: Uint8Array): { minAlpha: number; maxAlpha: number } {
+    let minAlpha = 255;
+    let maxAlpha = 0;
+    for (let index = 3; index < rgba.length; index += 4) {
+        const alpha = rgba[index];
+        minAlpha = Math.min(minAlpha, alpha);
+        maxAlpha = Math.max(maxAlpha, alpha);
+    }
+    return { minAlpha, maxAlpha };
 }
 
 function decodeDxt1(bytes: Uint8Array, offset: number, width: number, height: number, out: Uint8Array): boolean {
@@ -95,7 +109,8 @@ function decodeDxt1(bytes: Uint8Array, offset: number, width: number, height: nu
 
     for (let blockY = 0; blockY < blockCountY; blockY += 1) {
         for (let blockX = 0; blockX < blockCountX; blockX += 1) {
-            hasAlpha ||= decodeDxtColorBlock(bytes, cursor, blockX, blockY, width, height, out, false);
+            const blockHasAlpha = decodeDxtColorBlock(bytes, cursor, blockX, blockY, width, height, out, false);
+            hasAlpha = hasAlpha || blockHasAlpha;
             cursor += 8;
         }
     }
@@ -114,7 +129,8 @@ function decodeDxt3(bytes: Uint8Array, offset: number, width: number, height: nu
             const alphaCursor = cursor;
             const colorCursor = cursor + 8;
             decodeDxtColorBlock(bytes, colorCursor, blockX, blockY, width, height, out, true);
-            hasAlpha ||= applyDxt3Alpha(bytes, alphaCursor, blockX, blockY, width, height, out);
+            const blockHasAlpha = applyDxt3Alpha(bytes, alphaCursor, blockX, blockY, width, height, out);
+            hasAlpha = hasAlpha || blockHasAlpha;
             cursor += 16;
         }
     }
@@ -133,7 +149,8 @@ function decodeDxt5(bytes: Uint8Array, offset: number, width: number, height: nu
             const alphaCursor = cursor;
             const colorCursor = cursor + 8;
             decodeDxtColorBlock(bytes, colorCursor, blockX, blockY, width, height, out, true);
-            hasAlpha ||= applyDxt5Alpha(bytes, alphaCursor, blockX, blockY, width, height, out);
+            const blockHasAlpha = applyDxt5Alpha(bytes, alphaCursor, blockX, blockY, width, height, out);
+            hasAlpha = hasAlpha || blockHasAlpha;
             cursor += 16;
         }
     }

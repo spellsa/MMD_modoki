@@ -210,6 +210,10 @@ async function initializeApp(): Promise<void> {
     window.mmdModokiDiagnostics = {
       dumpPerformanceSnapshot: () => mmdManager.dumpPerformanceSnapshot(),
     };
+    window.mmdModokiDebug = {
+      enableAlphaTextureView: () => mmdManager.enableAlphaTextureDebugView(),
+      disableAlphaTextureView: () => mmdManager.disableAlphaTextureDebugView(),
+    };
     const engine = mmdManager.getEngineType();
     const physicsBackend = mmdManager.getPhysicsBackendLabel();
     logInfo("renderer", "MmdManager initialized", {
