@@ -378,9 +378,11 @@ export class BottomPanel {
             legacyLabelClass: "bone-number-label",
             legacyInputClass: "bone-number-input",
         })));
+        grid.element.classList.toggle("bone-number-grid--camera", isCameraControl);
         for (const def of controlDefs) {
             const input = grid.inputs.get(def.key);
             if (!input) continue;
+            input.parentElement?.classList.toggle("bone-number-row--camera-extra", def.key === "camDistance" || def.key === "camFov");
             input.dataset.displayStep = String(def.displayStep ?? def.step);
             this.configureBoneNumberInput(input, def);
             input.disabled = def.disabled === true;

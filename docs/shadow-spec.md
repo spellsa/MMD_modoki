@@ -358,13 +358,12 @@ UI:
 - モデル表面の遮蔽影には、toon 側の境界グラデを入れます
 - 現在の既定値
   - `selfShadowEdgeSoftness = 0.05`
-  - `occlusionShadowEdgeSoftness = 0.01`
+  - `occlusionShadowEdgeSoftness = 0.05`
 
 このため、現行仕様では次の見た目は意図通りです。
 
 - 地面影の縁が少し柔らかい
-- 遮蔽影は比較的くっきり寄り
-- セルフ影の境界は遮蔽影より少し柔らかい
+- 遮蔽影とセルフ影の境界は同程度に柔らかい
 
 逆に次のような出方は不具合候補です。
 

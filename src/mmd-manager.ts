@@ -1556,7 +1556,7 @@ ${beforeFogAppendBlock}
     );
     private shadowEnabled = true;
     private shadowDarknessValue = 0.0;
-    private shadowModeValue: ShadowMode = "cascaded";
+    private shadowModeValue: ShadowMode = "standard";
     private shadowFrustumSizeValue = 220;
     private shadowMaxZValue = 1000;
     private shadowBiasValue = 0.0005;
@@ -1571,7 +1571,7 @@ ${beforeFogAppendBlock}
     private iblShadowOpacityValue = 0.6;
     private iblShadowDistanceScaleValue = 4;
     private selfShadowEdgeSoftnessValue = 0.05;
-    private occlusionShadowEdgeSoftnessValue = 0.01;
+    private occlusionShadowEdgeSoftnessValue = 0.05;
     private toonShadowInfluenceValue = 1;
 
     private lightColorTemperatureKelvin = 6500;

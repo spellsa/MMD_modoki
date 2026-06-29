@@ -317,7 +317,7 @@ export class ViewportTopBarController {
 
     private refreshModeToggle(): void {
         if (!this.modeToggleButton) return;
-        const label = this.state.mode === "model" ? t("viewportBottomBar.modelEdit") : t("viewportBottomBar.cameraEdit");
+        const label = this.state.mode === "model" ? t("viewportBottomBar.cameraEdit") : t("viewportBottomBar.modelEdit");
         this.modeToggleButton.textContent = label;
         this.modeToggleButton.setAttribute("aria-label", label);
         this.modeToggleButton.setAttribute("aria-pressed", "true");

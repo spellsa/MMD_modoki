@@ -14,8 +14,9 @@ export type ModelInfoSelectState = {
 
 type ModelInfoPanelElements = {
     select: HTMLSelectElement | null;
+    chkVisibility: HTMLInputElement | null;
     chkShadow: HTMLInputElement | null;
-    btnVisibility: HTMLButtonElement | null;
+    btnLoad: HTMLButtonElement | null;
     btnDelete: HTMLButtonElement | null;
 };
 
@@ -31,8 +32,9 @@ export type ModelInfoPanelControllerDeps = {
 function resolveModelInfoPanelElements(): ModelInfoPanelElements {
     return {
         select: document.getElementById("info-model-select") as HTMLSelectElement | null,
+        chkVisibility: document.getElementById("chk-model-visibility") as HTMLInputElement | null,
         chkShadow: document.getElementById("chk-model-shadow") as HTMLInputElement | null,
-        btnVisibility: document.getElementById("btn-model-visibility") as HTMLButtonElement | null,
+        btnLoad: document.getElementById("btn-model-load") as HTMLButtonElement | null,
         btnDelete: document.getElementById("btn-model-delete") as HTMLButtonElement | null,
     };
 }
@@ -102,11 +104,9 @@ export class ModelInfoPanelController {
         const hasModel = this.mmdManager.getLoadedModels().length > 0;
         const enabled = isModelTarget && hasModel;
 
-        if (this.elements.btnVisibility) {
-            this.elements.btnVisibility.disabled = !enabled;
-            this.elements.btnVisibility.textContent = enabled && !this.mmdManager.getActiveModelVisibility()
-                ? t("button.show")
-                : t("button.hide");
+        if (this.elements.chkVisibility) {
+            this.elements.chkVisibility.disabled = !enabled;
+            this.elements.chkVisibility.checked = enabled ? this.mmdManager.getActiveModelVisibility() : false;
         }
 
         if (this.elements.chkShadow) {
@@ -185,7 +185,7 @@ export class ModelInfoPanelController {
             this.selectTimelineTarget(value, true);
         });
 
-        this.elements.btnVisibility?.addEventListener("click", () => {
+        this.elements.chkVisibility?.addEventListener("change", () => {
             if (this.dispatchAction?.({ type: "model.toggleActiveVisibility", source: "button" })) return;
             this.toggleActiveModelVisibility();
         });
@@ -194,6 +194,10 @@ export class ModelInfoPanelController {
             const castShadow = this.elements.chkShadow?.checked ?? true;
             if (this.dispatchAction?.({ type: "model.setActiveShadow", source: "button", castShadow })) return;
             this.setActiveModelCastsShadow(castShadow);
+        });
+
+        this.elements.btnLoad?.addEventListener("click", () => {
+            this.dispatchAction?.({ type: "project.openModel", source: "panel" });
         });
 
         this.elements.btnDelete?.addEventListener("click", () => {

@@ -372,7 +372,7 @@
       <main id="viewport-container">
         <div id="viewport-top-bar" class="viewport-top-bar">
           <div class="viewport-top-left">
-            <button id="btn-toolbar-mode-toggle" class="toolbar-mode-toggle-btn is-active" type="button" aria-pressed="true" data-i18n="viewportBottomBar.cameraEdit">カメラ編</button>
+            <button id="btn-toolbar-mode-toggle" class="toolbar-mode-toggle-btn is-active" type="button" aria-pressed="true" data-i18n="viewportBottomBar.modelEdit">モデル編</button>
             <div id="perf-display" class="perf-badge">
               <span id="fps-value">--</span>
               <span class="perf-label" data-i18n="label.fps">FPS</span>
@@ -389,18 +389,18 @@
             </div>
           </div>
           <div class="viewport-top-right">
-            <button id="viewport-tool-fov" class="viewport-tool-btn" type="button" data-i18n-title="viewportTopBar.fov" aria-label="視野角" title="視野角">
-              <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
-                <path d="M3.8 9 14.2 3.2M3.8 9l10.4 5.8" />
-                <path d="M10.7 5.2c1.15 2.2 1.15 5.4 0 7.6" />
-                <path d="M8.4 6.5c0.7 1.45 0.7 3.55 0 5" opacity="0.7" />
-              </svg>
-            </button>
             <button id="viewport-tool-distance" class="viewport-tool-btn" type="button" data-i18n-title="viewportTopBar.distance" aria-label="カメラ距離" title="カメラ距離">
               <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
                 <circle cx="7.2" cy="7.2" r="4.1" />
                 <path d="m10.4 10.4 4 4" />
                 <path d="M7.2 4.8v4.8M4.8 7.2h4.8" />
+              </svg>
+            </button>
+            <button id="viewport-tool-fov" class="viewport-tool-btn" type="button" data-i18n-title="viewportTopBar.fov" aria-label="視野角" title="視野角">
+              <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
+                <path d="M3.8 9 14.2 3.2M3.8 9l10.4 5.8" />
+                <path d="M10.7 5.2c1.15 2.2 1.15 5.4 0 7.6" />
+                <path d="M8.4 6.5c0.7 1.45 0.7 3.55 0 5" opacity="0.7" />
               </svg>
             </button>
             <button id="viewport-tool-pan" class="viewport-tool-btn" type="button" data-i18n-title="viewportTopBar.pan" aria-label="カメラ移動" title="カメラ移動">
@@ -500,26 +500,6 @@
               <button id="viewport-axis-space-toggle" class="viewport-axis-space-toggle" type="button" data-i18n="viewportBottomBar.local">local</button>
             </div>
             <div class="viewport-axis-handle-row">
-              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--x" data-handle-kind="move" data-handle-axis="x">
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
-                </svg>
-                <span>X</span>
-              </span>
-              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--y" data-handle-kind="move" data-handle-axis="y">
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
-                </svg>
-                <span>Y</span>
-              </span>
-              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--z" data-handle-kind="move" data-handle-axis="z">
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
-                </svg>
-                <span>Z</span>
-              </span>
-            </div>
-            <div class="viewport-axis-handle-row">
               <span class="viewport-axis-handle-tool viewport-axis-handle-tool--rotate viewport-axis-handle-axis--x" data-handle-kind="rotate" data-handle-axis="x">
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M12.8 6.4A4.8 4.8 0 1 0 10 12.1M12.8 6.4V3.2M12.8 6.4H9.6" />
@@ -535,6 +515,26 @@
               <span class="viewport-axis-handle-tool viewport-axis-handle-tool--rotate viewport-axis-handle-axis--z" data-handle-kind="rotate" data-handle-axis="z">
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M12.8 6.4A4.8 4.8 0 1 0 10 12.1M12.8 6.4V3.2M12.8 6.4H9.6" />
+                </svg>
+                <span>Z</span>
+              </span>
+            </div>
+            <div class="viewport-axis-handle-row">
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--x" data-handle-kind="move" data-handle-axis="x">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
+                </svg>
+                <span>X</span>
+              </span>
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--y" data-handle-kind="move" data-handle-axis="y">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
+                </svg>
+                <span>Y</span>
+              </span>
+              <span class="viewport-axis-handle-tool viewport-axis-handle-tool--move viewport-axis-handle-axis--z" data-handle-kind="move" data-handle-axis="z">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M8 2v12M2 8h12M8 2l-2 2M8 2l2 2M8 14l-2-2M8 14l2-2M2 8l2-2M2 8l2 2M14 8l-2-2M14 8l-2 2" />
                 </svg>
                 <span>Z</span>
               </span>
@@ -685,12 +685,20 @@
                 </select>
               </div>
               <div class="info-actions">
-                <label class="info-toggle-label" title="選択モデルが影を落とすかを切り替え" data-i18n-title="model.shadowCaster.title">
-                  <input id="chk-model-shadow" type="checkbox" disabled checked>
-                  <span data-i18n="model.shadowCaster.label">影</span>
-                </label>
-                <button id="btn-model-visibility" class="info-action-btn" type="button" disabled data-i18n="button.hide">非表示</button>
-                <button id="btn-model-delete" class="info-action-btn info-action-btn--danger" type="button" disabled data-i18n="button.delete">削除</button>
+                <div class="info-button-row">
+                  <button id="btn-model-load" class="info-action-btn" type="button" data-i18n="button.load">読込...</button>
+                  <button id="btn-model-delete" class="info-action-btn info-action-btn--danger" type="button" disabled data-i18n="button.delete">削除</button>
+                </div>
+                <div class="info-check-list">
+                  <label class="info-toggle-label" title="選択モデルの表示/非表示を切り替え">
+                    <input id="chk-model-visibility" type="checkbox" disabled checked>
+                    <span data-i18n="button.show">表示</span>
+                  </label>
+                  <label class="info-toggle-label" title="選択モデルが影を落とすかを切り替え" data-i18n-title="model.shadowCaster.title">
+                    <input id="chk-model-shadow" type="checkbox" disabled checked>
+                    <span data-i18n="model.shadowCaster.label">影</span>
+                  </label>
+                </div>
               </div>
             </div>
             <div class="info-compact-stats">
@@ -979,8 +987,8 @@
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.occlusionShadowEdge">遮蔽影境界</span>
-              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="10" step="1">
-              <span id="light-occlusion-shadow-softness-val" class="light-value">0.010</span>
+              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="50" step="1">
+              <span id="light-occlusion-shadow-softness-val" class="light-value">0.050</span>
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowStrength">照度</span>

@@ -215,8 +215,8 @@ export class ViewportAxisHandleController {
 
     private resolveRange(kind: ViewportHandleKind): { min: number; max: number; scale: number } {
         return kind === "move"
-            ? { min: -30, max: 30, scale: 0.01 }
-            : { min: -180, max: 180, scale: 0.1 };
+            ? { min: -30, max: 30, scale: 0.02 }
+            : { min: -180, max: 180, scale: 0.2 };
     }
 
     private cloneEditValue<T extends ViewportAxisHandleBoneEditValue | ViewportAxisHandleCameraEditValue>(value: T): T {

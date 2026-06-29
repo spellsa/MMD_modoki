@@ -2645,6 +2645,11 @@ export class UIController {
             const engineType = this.mmdManager.getEngineType();
             const shaderType = this.mmdManager.getShaderRuntimeLabel();
             const physicsType = this.mmdManager.getPhysicsBackendLabel();
+            const applyMutedBadgeStyle = (element: HTMLElement): void => {
+                element.style.background = "rgba(255,255,255,0.045)";
+                element.style.color = "#9a9aa3";
+                element.style.borderColor = "rgba(255,255,255,0.08)";
+            };
             const shaderBadgeLabel = shaderType === "WGSL-first"
                 ? "WGSL"
                 : shaderType === "WGSL-custom"
@@ -2659,55 +2664,9 @@ export class UIController {
                     ? "WGSL renderer with standard MMD material presets"
                     : "GLSL renderer";
 
-            if (engineType === "WebGPU") {
-                engineEl.style.background = "rgba(139,92,246,0.15)";
-                engineEl.style.color = "#a78bfa";
-                engineEl.style.borderColor = "rgba(139,92,246,0.3)";
-            } else if (engineType === "WebGL1") {
-                engineEl.style.background = "rgba(245,158,11,0.15)";
-                engineEl.style.color = "#fbbf24";
-                engineEl.style.borderColor = "rgba(245,158,11,0.3)";
-            } else {
-                engineEl.style.background = "";
-                engineEl.style.color = "";
-                engineEl.style.borderColor = "";
-            }
-
-            if (shaderType === "WGSL-first") {
-                shaderEl.style.background = "rgba(34,197,94,0.15)";
-                shaderEl.style.color = "#86efac";
-                shaderEl.style.borderColor = "rgba(34,197,94,0.3)";
-            } else if (shaderType === "WGSL-custom") {
-                shaderEl.style.background = "rgba(245,158,11,0.15)";
-                shaderEl.style.color = "#fbbf24";
-                shaderEl.style.borderColor = "rgba(245,158,11,0.3)";
-            } else {
-                shaderEl.style.background = "rgba(56,189,248,0.12)";
-                shaderEl.style.color = "#7dd3fc";
-                shaderEl.style.borderColor = "rgba(56,189,248,0.24)";
-            }
-
-            if (physicsType === "WASM MPR") {
-                physicsEl.style.background = "rgba(168,85,247,0.16)";
-                physicsEl.style.color = "#d8b4fe";
-                physicsEl.style.borderColor = "rgba(168,85,247,0.32)";
-            } else if (physicsType === "Bullet MPR") {
-                physicsEl.style.background = "rgba(34,197,94,0.15)";
-                physicsEl.style.color = "#86efac";
-                physicsEl.style.borderColor = "rgba(34,197,94,0.3)";
-            } else if (physicsType === "Bullet SPR") {
-                physicsEl.style.background = "rgba(20,184,166,0.15)";
-                physicsEl.style.color = "#5eead4";
-                physicsEl.style.borderColor = "rgba(20,184,166,0.3)";
-            } else if (physicsType === "Ammo") {
-                physicsEl.style.background = "rgba(245,158,11,0.15)";
-                physicsEl.style.color = "#fbbf24";
-                physicsEl.style.borderColor = "rgba(245,158,11,0.3)";
-            } else {
-                physicsEl.style.background = "rgba(148,163,184,0.14)";
-                physicsEl.style.color = "#cbd5e1";
-                physicsEl.style.borderColor = "rgba(148,163,184,0.24)";
-            }
+            applyMutedBadgeStyle(engineEl);
+            applyMutedBadgeStyle(shaderEl);
+            applyMutedBadgeStyle(physicsEl);
         };
 
         updatePerfBadges();
@@ -2716,9 +2675,7 @@ export class UIController {
         setInterval(() => {
             const fps = this.mmdManager.getFps();
             fpsEl.textContent = String(fps);
-            fpsEl.style.color = fps >= 55 ? "var(--accent-green)"
-                : fps >= 30 ? "var(--accent-amber)"
-                    : "var(--accent-red)";
+            fpsEl.style.color = "#ff4fa3";
             updatePerfBadges();
             this.dofPanelController?.refreshAutoFocusReadout();
         }, 1000);
