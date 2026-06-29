@@ -5493,11 +5493,21 @@ ${beforeFogAppendBlock}
 
         const searchText = `${materialName} ${this.getMaterialTextureAlphaSearchText(material)}`.toLowerCase();
         if (this.isLikelyMmdAlphaOverlayMaterial(searchText)) return true;
+        if (this.isDecodedWhiteMattedAlphaTextureForMaterial(material)) return true;
 
         const alphaRange = this.getDecodedTextureAlphaRangeForMaterial(material);
         if (!alphaRange) return false;
 
         return alphaRange.maxAlpha <= 220;
+    }
+
+    private isDecodedWhiteMattedAlphaTextureForMaterial(material: MmdManagerMaterialLike): boolean {
+        return this.isDecodedWhiteMattedAlphaTexture(material.diffuseTexture)
+            || this.isDecodedWhiteMattedAlphaTexture(material.albedoTexture);
+    }
+
+    private isDecodedWhiteMattedAlphaTexture(texture: MmdManagerMaterialLike["diffuseTexture"]): boolean {
+        return texture?.metadata?.mmdModokiDecodedWhiteMattedAlpha === true;
     }
 
     private isLikelyMmdAlphaOverlayMaterial(searchText: string): boolean {
@@ -5625,13 +5635,21 @@ ${beforeFogAppendBlock}
             ? (material as { subMaterials: unknown[] }).subMaterials
             : [material];
 
+        const modelSubMaterials = subMaterials.filter((subMaterial): subMaterial is MmdManagerMaterialLike =>
+            Boolean(subMaterial) && typeof subMaterial === "object",
+        );
+        if (
+            modelSubMaterials.length > 0
+            && modelSubMaterials.every((subMaterial) => this.shouldTreatAsAlphaOverlayShadowlessMaterial(subMaterial))
+        ) {
+            return { castsShadow: false, receivesShadow: false };
+        }
+
         let castsShadow = false;
         let receivesShadow = false;
         let sawMappedMaterial = false;
 
-        for (const subMaterial of subMaterials) {
-            if (!subMaterial || typeof subMaterial !== "object") continue;
-
+        for (const subMaterial of modelSubMaterials) {
             const materialFlag = materialFlagMap.get(subMaterial as object);
             if (materialFlag === undefined) {
                 castsShadow = true;
@@ -5649,6 +5667,11 @@ ${beforeFogAppendBlock}
         }
 
         return { castsShadow, receivesShadow };
+    }
+
+    private shouldTreatAsAlphaOverlayShadowlessMaterial(material: MmdManagerMaterialLike): boolean {
+        const materialName = typeof material.name === "string" ? material.name : "";
+        return this.shouldDisableDepthWriteForAlphaOverlayMaterial(materialName, material);
     }
 
     private getSkeletonBoneTextureSize(skeleton: Skeleton): { width: number; height: number; elementCount: number } {
@@ -6958,6 +6981,9 @@ ${beforeFogAppendBlock}
                 mmdModokiDecodedBmpHasAlpha: true,
                 mmdModokiDecodedTextureMinAlpha: decoded.minAlpha,
                 mmdModokiDecodedTextureMaxAlpha: decoded.maxAlpha,
+                mmdModokiDecodedTransparentPixelRatio: decoded.transparentPixelRatio,
+                mmdModokiDecodedLowAlphaPixelRatio: decoded.lowAlphaPixelRatio,
+                mmdModokiDecodedWhiteMattedAlpha: decoded.whiteMattedAlpha,
             };
             texture.wrapU = Texture.CLAMP_ADDRESSMODE;
             texture.wrapV = Texture.CLAMP_ADDRESSMODE;
@@ -6971,6 +6997,9 @@ ${beforeFogAppendBlock}
                 height: decoded.height,
                 minAlpha: decoded.minAlpha,
                 maxAlpha: decoded.maxAlpha,
+                transparentPixelRatio: decoded.transparentPixelRatio,
+                lowAlphaPixelRatio: decoded.lowAlphaPixelRatio,
+                whiteMattedAlpha: decoded.whiteMattedAlpha,
                 invertY,
                 wrap: "clamp",
             });

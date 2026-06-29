@@ -30,7 +30,7 @@ describe("bmp texture compatibility", () => {
 
     it("decodes 32-bit bottom-up BMP pixels to top-down RGBA", () => {
         const buffer = create32BitBmp(1, 2, [
-            10, 20, 30, 40,
+            10, 20, 30, 200,
             50, 60, 70, 255,
         ]);
 
@@ -39,11 +39,52 @@ describe("bmp texture compatibility", () => {
         expect(decoded?.width).toBe(1);
         expect(decoded?.height).toBe(2);
         expect(decoded?.hasAlpha).toBe(true);
-        expect(decoded?.minAlpha).toBe(40);
+        expect(decoded?.minAlpha).toBe(200);
         expect(decoded?.maxAlpha).toBe(255);
+        expect(decoded?.transparentPixelRatio).toBe(0);
+        expect(decoded?.lowAlphaPixelRatio).toBe(0);
+        expect(decoded?.whiteMattedAlpha).toBe(false);
         expect(Array.from(decoded?.rgba ?? [])).toEqual([
             70, 60, 50, 255,
-            30, 20, 10, 40,
+            30, 20, 10, 200,
+        ]);
+    });
+
+    it("bleeds visible RGB into fully transparent BMP pixels to avoid white fringes", () => {
+        const buffer = create32BitBmp(3, 1, [
+            255, 255, 255, 0,
+            10, 20, 200, 255,
+            255, 255, 255, 8,
+        ]);
+
+        const decoded = decodeBmpTextureToRgba(buffer);
+
+        expect(decoded?.transparentPixelRatio).toBeCloseTo(1 / 3);
+        expect(decoded?.lowAlphaPixelRatio).toBeCloseTo(1 / 3);
+        expect(decoded?.whiteMattedAlpha).toBe(false);
+        expect(Array.from(decoded?.rgba ?? [])).toEqual([
+            200, 20, 10, 0,
+            200, 20, 10, 255,
+            200, 20, 10, 8,
+        ]);
+    });
+
+    it("unmattes white RGB from low-alpha BMP pixels before bleeding", () => {
+        const lowAlphaPixels = Array.from({ length: 16 }, () => [239, 239, 255, 16]).flat();
+        const buffer = create32BitBmp(81, 1, [
+            ...Array.from({ length: 64 }, () => [255, 255, 255, 0]).flat(),
+            ...lowAlphaPixels,
+            0, 0, 255, 255,
+        ]);
+
+        const decoded = decodeBmpTextureToRgba(buffer);
+        const lowAlphaOffset = 64 * 4;
+
+        expect(decoded?.transparentPixelRatio).toBeCloseTo(64 / 81);
+        expect(decoded?.lowAlphaPixelRatio).toBeCloseTo(16 / 81);
+        expect(decoded?.whiteMattedAlpha).toBe(true);
+        expect(Array.from(decoded?.rgba.slice(lowAlphaOffset, lowAlphaOffset + 4) ?? [])).toEqual([
+            255, 0, 0, 16,
         ]);
     });
 

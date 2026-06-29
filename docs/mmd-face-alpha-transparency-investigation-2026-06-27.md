@@ -427,3 +427,44 @@ Tda式重音テトTypeS.pmx の顔まわり、目ハイライト、前髪影な�
 - 32bit BMP は MMD_modoki 側の fallback decode を追加しているため、BMP header、BGRA/RGBA、alpha 有無判定で別問題が出る可能性がある。
 - TGA は形式差、上下反転、alpha depth、RLE 圧縮などの確認余地が残る。
 - 形式横断で見るべき観点は「実ファイルの alpha range」「fallback decode 後の metadata」「babylon-mmd material builder の alpha evaluation」「最終 material state」「描画順 / depth write」。
+## 2026-06-28 追記: 32bit BMP の白にじみ対策
+
+シァンユェ(香月) Ver1.05 軽量版の `頬紅` 材質で、`t044.bmp` の透過グラデーションが MMD/PMXE と違って白っぽく見える問題を確認した。
+
+確認結果:
+
+- `t044.bmp` は 32bit BMP / 512x512 / BI_RGB。
+- 実ファイルおよび fallback decode 後の alpha range は `minAlpha: 0, maxAlpha: 255`。
+- `頬紅` 材質には `t044.bmp` が割り当たっている。
+- material builder 後および後段補正後、最終的に `alphablend`, `useAlphaFromDiffuseTexture: true`, `forceDepthWrite: false` まで入っている。
+- したがって「BMP alpha が読めていない」「材質が opaque のまま」という問題ではなさそう。
+
+追加で実ファイルの RGB/alpha 分布を確認したところ、`alpha=0` のピクセルは平均 RGB `[255,255,255]` で、透明領域が真っ白だった。さらに `alpha=1..16` の低アルファ帯もほぼ白だった。
+
+このようなテクスチャでは、GPU の bilinear filtering 時に透明側の白 RGB と頬色 RGB が補間され、alpha は効いていても境界に白っぽいにじみが出る。これは alpha 欠損ではなく、透明ピクセル側 RGB の bleed 問題と見なす。
+
+対応:
+
+- 32bit BMP fallback decode 後、alpha 値は変更せず、低アルファピクセルの RGB だけを近傍の高アルファピクセル色で補う処理を追加。
+- さらに、透明領域と低アルファ領域が白い BMP は、白背景へ合成済みの straight alpha 画像と見なし、RGB だけを white matte 解除する。
+- 対象は `alpha < 128` のピクセル。
+- 補色元は `alpha >= 128` のピクセル。
+- 最大 16 iteration の局所的な色拡張で、遠い完全透明背景全体を塗りつぶすのではなく、境界付近の白にじみを抑える目的。
+
+確認:
+
+- `t044.bmp` の `alpha=1..16` 帯の平均 RGB は、補正前のほぼ白から、より頬色に近い値へ寄った。
+- `npm.cmd run test:unit` 成功。
+- `npm.cmd run lint` 成功。
+
+注意:
+
+- alpha 値は変えていないため、透過グラデーション形状そのものは保持される。
+- ただし 32bit BMP 全般へ効く補正なので、透明領域の RGB を意図的に使う特殊テクスチャがあれば見た目が変わる可能性がある。
+- 実機では `頬紅` / `アイシャドウ` / 前髪影など、白背景 alpha BMP の境界に白にじみが減るか確認する。
+
+2026-06-29 追記:
+
+- シァンユェ(香月) Ver1.05 軽量版で、顔まわりの白っぽいフチが大きく改善したことをユーザー実機で確認した。
+- 対応は顔材質名の個別対応ではなく、32bit BMP fallback decode の共通処理として整理した。
+- 詳細は [BMP alpha transparency investigation 2026-06-28](./bmp-alpha-transparency-investigation-2026-06-28.md) に分離する。
