@@ -5,7 +5,7 @@
 ## 目的
 
 - リリースは `vX.Y.Z` 形式の tag を push して行う。
-- zip 配布物のビルドと GitHub Release への asset 添付は [`.github/workflows/build-zips.yml`](/d:/DevTools/Projects/MMD_modoki/.github/workflows/build-zips.yml) で行う。
+- zip 配布物のビルドと GitHub Release への asset 添付は [`.github/workflows/build-zips.yml`](../.github/workflows/build-zips.yml) で行う。
 - tag push 時に Windows / macOS / Linux の zip をビルドし、同じ tag 名の prerelease に自動添付する。
 
 ## 手順

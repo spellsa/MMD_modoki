@@ -1,6 +1,6 @@
 ﻿# 物理演算タスクリスト（MMD 寄せ）
 
-更新日: 2026-02-21
+更新日: 2026-06-29
 
 ## 方針
 
@@ -41,6 +41,7 @@
 
 - [ ] 検証用モデルセット（軽量/標準/重い）を用意する
 - [ ] 裙・髪など連結チェーンで発散しないか確認する
+- [ ] 長髪モデルで、再生中に髪物理がぬるっと伸びる症状を診断する
 - [ ] 停止時ジッタ（微振動）を評価する
 - [ ] 再生速度変更時（0.5x/1.0x/2.0x）で破綻しないか確認する
 - [ ] フレームシーク後の安定復帰を確認する
@@ -56,6 +57,27 @@
 ## 注記
 
 - フェーズ 3 の実装項目は、`babylon-mmd` の `MmdAmmoPhysics` に委譲して達成している。
+
+## 既知のモデル依存不具合
+
+### 2026-06-29 GirlsFrontline ClukayDefault 髪物理の伸び
+
+- モデル: `GirlsFrontline ClukayDefault`
+- 症状: 停止中は髪が通常の長さに見えるが、物理演算ありで再生すると、髪がゆっくり伸びるように破綻する。
+- スクリーンショット: `スクリーンショット 2026-06-29 122256.png`
+- 重要度: v0.2 で物理あり再生を見せるなら高め。長髪・連結チェーンの代表的な破綻として扱う。
+- 初期仮説:
+  - 再生開始・シーク後の物理 reset / 初期姿勢同期が足りない。
+  - physics step の delta time / substep / maxStepNum がモデルに対して大きい。
+  - 剛体とボーンの双方向同期、または mode 2 の bone alignment が MMD とズレている。
+  - joint constraint の線形/角度制限、ばね、constraint frame offset の解釈差。
+  - モデルスケールと physics world scale のズレ。
+- 次に見るログ:
+  - 再生開始時とシーク時に physics reset / initialize が呼ばれているか。
+  - backend (`MPR` / `SPR` / `Ammo` / `Off`) ごとの差。
+  - `physicsStepAvgMs`, `physicsStepMaxMs`, 実 substep 数。
+  - 髪系ボーン / 剛体の初期位置と再生中の最大変位。
+  - joint の linear limit / angular limit / spring 値が極端ではないか。
 
 ## 直近の着手順（最初の 1 週間）
 

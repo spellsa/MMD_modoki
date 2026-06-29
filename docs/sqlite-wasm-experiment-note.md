@@ -205,6 +205,6 @@ SQLite 公式には、そのまま、あるいは発想元として使える資�
 
 ## 関連メモ
 
-- [mmd-basic-task-checklist.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-basic-task-checklist.md)
-- [undo-redo-investigation.md](/d:/DevTools/Projects/MMD_modoki/docs/undo-redo-investigation.md)
-- [glb-loading-investigation-2026-04-01.md](/d:/DevTools/Projects/MMD_modoki/docs/glb-loading-investigation-2026-04-01.md)
+- [mmd-basic-task-checklist.md](./mmd-basic-task-checklist.md)
+- [undo-redo-investigation.md](./undo-redo-investigation.md)
+- [glb-loading-investigation-2026-04-01.md](./glb-loading-investigation-2026-04-01.md)

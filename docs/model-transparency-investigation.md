@@ -9,7 +9,7 @@ MMD 本家では透過して見えるのに、`MMD modoki` 側では不透明に
 現時点で確認できた `頬紅` / `口紅上` / `口紅下` は、PMX 原データ上では透過材質ではなかった。
 
 確認ログ:
-- [localhost-1774591474320.log](file:///d:/MMD/modoki/log/localhost-1774591474320.log)
+- `localhost-1774591474320.log` (local reproduction log; not committed)
 
 該当材質の主な値:
 - `diffuseRGBA = [1, 1, 1, 1]`

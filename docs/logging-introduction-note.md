@@ -603,7 +603,7 @@ main process 側で受け取った payload は `sanitizeLogData` を通す。
 
 ## 関連メモ
 
-- [mmd-basic-task-checklist.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-basic-task-checklist.md)
-- [v0.1.7-feedback.md](/d:/DevTools/Projects/MMD_modoki/docs/v0.1.7-feedback.md)
-- [sqlite-wasm-experiment-note.md](/d:/DevTools/Projects/MMD_modoki/docs/sqlite-wasm-experiment-note.md)
-- [troubleshooting.md](/d:/DevTools/Projects/MMD_modoki/docs/troubleshooting.md)
+- [mmd-basic-task-checklist.md](./mmd-basic-task-checklist.md)
+- [v0.1.7-feedback.md](./v0.1.7-feedback.md)
+- [sqlite-wasm-experiment-note.md](./sqlite-wasm-experiment-note.md)
+- [troubleshooting.md](./troubleshooting.md)

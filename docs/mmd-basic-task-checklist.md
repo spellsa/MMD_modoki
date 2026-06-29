@@ -265,10 +265,10 @@
 
 - [ ] WebGPU 重量モデルでの顔モーフ崩れは当面既知制限として扱う → [webgpu-heavy-model-face-morph-limit-2026-04-18.md](./webgpu-heavy-model-face-morph-limit-2026-04-18.md)
 
-- [mmd-project-positioning-note.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-project-positioning-note.md)
-- [glb-loading-investigation-2026-04-01.md](/d:/DevTools/Projects/MMD_modoki/docs/glb-loading-investigation-2026-04-01.md)
-- [generic-object-panel-design.md](/d:/DevTools/Projects/MMD_modoki/docs/generic-object-panel-design.md)
-- [sqlite-wasm-experiment-note.md](/d:/DevTools/Projects/MMD_modoki/docs/sqlite-wasm-experiment-note.md)
+- [mmd-project-positioning-note.md](./mmd-project-positioning-note.md)
+- [glb-loading-investigation-2026-04-01.md](./glb-loading-investigation-2026-04-01.md)
+- [generic-object-panel-design.md](./generic-object-panel-design.md)
+- [sqlite-wasm-experiment-note.md](./sqlite-wasm-experiment-note.md)
 
 ## 2026-04-20 メモ
 

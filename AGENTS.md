@@ -45,8 +45,11 @@
 
 関連メモ:
 
-- [docs/mmd-project-positioning-note.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-project-positioning-note.md)
-- [docs/mmd-basic-task-checklist.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-basic-task-checklist.md)
+- [docs/README.md](./docs/README.md)
+- [docs/docs-index.md](./docs/docs-index.md)
+- [docs/architecture.md](./docs/architecture.md)
+- [docs/mmd-project-positioning-note.md](./docs/mmd-project-positioning-note.md)
+- [docs/mmd-basic-task-checklist.md](./docs/mmd-basic-task-checklist.md)
 
 ## このリポジトリ固有のルール
 
@@ -211,7 +214,7 @@ UI を実際に動かさないと確認しづらい変更では、現行の `smo
 - UI 動作確認は `lint` / `test:unit` / `smoke:launch` の代替ではなく追加確認として扱う。
 - 自動化できない UI 導線は、手動確認結果を `docs/` に残すだけでもよい。
 - file dialog は直接自動操作の対象にしない。
-- 詳細な E2E 導入検討は [docs/electron-local-smoke-test-plan.md](/d:/DevTools/Projects/MMD_modoki/docs/electron-local-smoke-test-plan.md) を参照する。
+- 詳細な E2E 導入検討は [docs/electron-local-smoke-test-plan.md](./docs/electron-local-smoke-test-plan.md) を参照する。
 
 ## コードベースの主要箇所
 
@@ -233,10 +236,6 @@ UI を実際に動かさないと確認しづらい変更では、現行の `smo
 - `.x` アクセサリ処理は PMX/PMD と前提が異なる拡張経路
 - 一部の `docs` は文字コードや保守状態に癖があるため、必要以上の大規模書き換えは避ける
 
-関連メモ:
-
-- [docs/sqlite-wasm-experiment-note.md](/d:/DevTools/Projects/MMD_modoki/docs/sqlite-wasm-experiment-note.md)
-
 ## ドキュメント運用
 
 大きめの変更を始める前に、まず `docs/` に既存の設計メモや調査メモがないか確認してください。
@@ -249,10 +248,14 @@ UI を実際に動かさないと確認しづらい変更では、現行の `smo
 
 参照開始点:
 
-- [docs/mmd-basic-task-checklist.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-basic-task-checklist.md)
-- [docs/mmd-project-positioning-note.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-project-positioning-note.md)
-- [docs/timeline-spec.md](/d:/DevTools/Projects/MMD_modoki/docs/timeline-spec.md)
-- [docs/physics-runtime-spec.md](/d:/DevTools/Projects/MMD_modoki/docs/physics-runtime-spec.md)
+- [docs/README.md](./docs/README.md)
+- [docs/docs-index.md](./docs/docs-index.md)
+- [docs/architecture.md](./docs/architecture.md)
+- [docs/mmd-basic-task-checklist.md](./docs/mmd-basic-task-checklist.md)
+- [docs/mmd-project-positioning-note.md](./docs/mmd-project-positioning-note.md)
+- [docs/timeline-spec.md](./docs/timeline-spec.md)
+- [docs/physics-runtime-spec.md](./docs/physics-runtime-spec.md)
+- [docs/troubleshooting.md](./docs/troubleshooting.md)
 
 ## エージェント向け実務ガイド
 
@@ -262,39 +265,3 @@ UI を実際に動かさないと確認しづらい変更では、現行の `smo
 - 楽観的な言い回しより、制約とトレードオフを明示する
 - `src/timeline.ts` は今後の実装の手本として扱う。特に、更新頻度の違う表示をレイヤーごとに分離する、状態変更と描画実行を直結させず更新要求を局所的にスケジュールする、可視範囲だけを描画・計算する、座標計算・選択判定・描画を小さな関数に分ける、という方針を優先する
 - タイムライン系や編集系 UI に機能を足すときは、既存ロジックにベタ書きで混ぜず、`timeline.ts` のように追加機能を局所化できるデータ構造・描画関数・更新経路を先に設計する
-
-## サブエージェント利用方針
-
-長めのタスク、調査範囲が広いタスク、影響範囲が読み切りにくいタスクでは、サブエージェントを積極的に使ってよいです。
-
-サブエージェントに向いている作業:
-
-- Babylon.js / babylon-mmd / Electron / WebGPU 公式情報の調査
-- 既存 docs と実装の差分確認
-- UI 設計の観点出し
-- Action / Command / undo / redo のテスト観点出し
-- FrameGraph / RenderTarget / shader 周辺のリスク洗い出し
-- 変更前のコードレビュー
-- 実装後の回帰リスク・不足テスト確認
-
-使い方の方針:
-
-- サブエージェントは調査、比較、レビュー、観点出しに使う。
-- サブエージェントの回答をそのまま採用せず、メインエージェントが統合して最終判断する。
-- ファイル編集、コミット対象の選定、ユーザーへの最終報告はメインエージェントが行う。
-- サブエージェントの結論は、一次情報、既存 docs、実コードで確認してから採用する。
-- 同じファイルを複数エージェントで同時に編集しない。
-- サブエージェントの結果で重要な知見が出た場合は、必要に応じて `docs/` に残す。
-
-長めの実装タスクでは、最初に次を分けて考えるとよいです。
-
-```text
-main agent
-  実装方針、編集、検証、最終判断
-
-sub-agent
-  公式 docs 調査
-  既存設計メモ確認
-  テスト観点整理
-  リスクレビュー
-```

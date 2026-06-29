@@ -440,7 +440,7 @@ export class MmdManager {
 
 ### 2026-03-19 追記
 
-- `timeline` 周りを [`src/editor/timeline-edit-service.ts`](/d:/DevTools/Projects/MMD_modoki/src/editor/timeline-edit-service.ts) に切り出し始めた
+- `timeline` 周りを [`src/editor/timeline-edit-service.ts`](../src/editor/timeline-edit-service.ts) に切り出し始めた
 - `MmdManager` 側は `hasTimelineKeyframe` / `addTimelineKeyframe` / `removeTimelineKeyframe` / `moveTimelineKeyframe` を委譲する形に変更した
 - `emitMergedKeyframeTracks` と `refreshTotalFramesFromContent` も service 側へ寄せた
 - `getActiveModelTimelineTracks` / `getCameraTimelineTracks` / `buildModelTrackFrameMapFromAnimation` も service 側に分離した
@@ -450,7 +450,7 @@ export class MmdManager {
 - `npx tsc --noEmit` は既存の `i18n` / `mmd-manager` の型エラーで止まっている
 - 次は `loadPMX` の切り出し、または `runtime` / `playback` 側の分割に進める
 ### 2026-03-19 追加
-- `loadPMX` を [`src/assets/model-asset-service.ts`](/d:/DevTools/Projects/MMD_modoki/src/assets/model-asset-service.ts) に切り出した
+- `loadPMX` を [`src/assets/model-asset-service.ts`](../src/assets/model-asset-service.ts) に切り出した
 - `MmdManager` 側は `loadPMX` を薄い委譲に変更した
 - `loadPMX` では PMX 読み込み後の `ModelInfo` 組み立て、物理補助、材質補正、モデル初期化、ロード後通知までをまとめて扱う
 - ランタイム / playback は今回は分割せず、`MmdManager` 本体に残す方針にした

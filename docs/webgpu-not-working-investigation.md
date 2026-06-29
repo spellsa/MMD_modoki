@@ -17,7 +17,7 @@
 - `WebGPUEngine.IsSupportedAsync` が `false`、または `CreateAsync(...)` が失敗した場合は WebGL2 へフォールバックする。
 
 参照:
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L2692)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L2692)
 
 ## 3. `WebGPU (WGSL)` 表示の意味
 
@@ -25,8 +25,8 @@
 - これは「WebGPU エンジンとして起動した」ことは示すが、材質 shader、SSAO、DoF、SSR、Volumetric Light まで正常とは限らない。
 
 参照:
-- [src/ui-controller.ts](/d:/DevTools/Projects/MMD_modoki/src/ui-controller.ts#L1657)
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L4815)
+- [src/ui-controller.ts](../src/ui-controller.ts#L1657)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L4815)
 
 結論:
 
@@ -47,8 +47,8 @@
 - `WebGPU initialization failed. Falling back to WebGL2. Reason: ...`
 
 参照:
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L2696)
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L2718)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L2696)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L2718)
 
 ## 5. WebGPU 起動後に一部だけ壊れるケース
 
@@ -59,8 +59,8 @@
 - 立体感不足が「WebGPU が効いていない」と見える原因になりうる。
 
 参照:
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L4792)
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L6318)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L4792)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L6318)
 - [docs/ssao-webgpu-investigation.md](./ssao-webgpu-investigation.md)
 
 ### 5-2. 材質 shader / toon / sphere
@@ -69,7 +69,7 @@
 - これはエンジン起動成功だけでは検知しにくい。
 
 参照:
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L383)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L383)
 
 ### 5-3. 個別 pipeline の無効化
 
@@ -77,10 +77,10 @@
 - WebGPU バッジは残るため、「WebGPU なのに見た目が弱い」状態になる。
 
 参照:
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L5823)
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L6355)
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L6502)
-- [src/mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts#L6622)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L5823)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L6355)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L6502)
+- [src/mmd-manager.ts](../src/mmd-manager.ts#L6622)
 
 ## 6. Electron 側のフラグ対応
 
@@ -95,7 +95,7 @@
 - `force_high_performance_gpu`
 
 参照:
-- [src/main.ts](/d:/DevTools/Projects/MMD_modoki/src/main.ts#L19)
+- [src/main.ts](../src/main.ts#L19)
 
 補足:
 
