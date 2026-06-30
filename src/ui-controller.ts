@@ -236,6 +236,12 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         setActive: (manager, active) => { manager.postEffectOffsetShadowEnabled = active; },
     },
     {
+        id: "offsetHighlight",
+        label: "Offset Highlight",
+        isActive: (manager) => manager.postEffectOffsetHighlightEnabled,
+        setActive: (manager, active) => { manager.postEffectOffsetHighlightEnabled = active; },
+    },
+    {
         id: "dof",
         label: "DoF",
         isActive: (manager) => manager.dofEnabled,
@@ -4175,6 +4181,18 @@ export class UIController {
                 this.mmdManager.postEffectOffsetShadowSoftness = 0;
                 this.mmdManager.postEffectOffsetShadowNormalInfluence = 0;
                 break;
+            case "offsetHighlight":
+                this.mmdManager.postEffectOffsetHighlightStrength = 1;
+                this.mmdManager.postEffectOffsetHighlightOffsetX = 0;
+                this.mmdManager.postEffectOffsetHighlightOffsetY = -50;
+                this.mmdManager.postEffectOffsetHighlightDepthThreshold = 0.1;
+                this.mmdManager.postEffectOffsetHighlightNormalThreshold = 0;
+                this.mmdManager.postEffectOffsetHighlightThickness = 0.35;
+                this.mmdManager.postEffectOffsetHighlightSoftness = 0;
+                this.mmdManager.postEffectOffsetHighlightDepthScale = 1;
+                this.mmdManager.setPostEffectOffsetHighlightColor(1, 1, 1);
+                this.mmdManager.postEffectOffsetHighlightDebugView = false;
+                break;
             case "ssr":
                 this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 1);
                 this.mmdManager.postEffectSsrStep = Math.max(this.mmdManager.postEffectSsrStep, 4);
@@ -4228,6 +4246,9 @@ export class UIController {
                 break;
             case "offsetShadow":
                 this.mmdManager.postEffectOffsetShadowEnabled = true;
+                break;
+            case "offsetHighlight":
+                this.mmdManager.postEffectOffsetHighlightEnabled = true;
                 break;
             case "ssr":
                 this.mmdManager.postEffectSsrEnabled = true;
@@ -4624,6 +4645,21 @@ export class UIController {
                 );
                 break;
             }
+            case "offsetHighlight": {
+                const offsetHighlightColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetHighlightColor());
+                rows.push(
+                    color("offsetHighlightColor", "Color", offsetHighlightColor, offsetHighlightColor),
+                    range("offsetHighlightStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightStrength * 100), this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2)),
+                    range("offsetHighlightOffsetX", "Offset X", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`),
+                    range("offsetHighlightOffsetY", "Offset Y", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`),
+                    range("offsetHighlightDepthThreshold", "Depth Edge", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightDepthThreshold * 1000), this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3)),
+                    range("offsetHighlightNormalThreshold", "Normal Edge", 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightNormalThreshold * 100), this.mmdManager.postEffectOffsetHighlightNormalThreshold.toFixed(2)),
+                    range("offsetHighlightDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightDepthScale * 100), this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2)),
+                    range("offsetHighlightThickness", "Thickness", 1, 100, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
+                    range("offsetHighlightSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetHighlightSoftness * 10), `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`),
+                );
+                break;
+            }
             case "ssr":
                 rows.push(
                     range("ssrStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectSsrStrength * 100), this.mmdManager.postEffectSsrStrength.toFixed(2)),
@@ -4799,6 +4835,36 @@ export class UIController {
                 this.mmdManager.setPostEffectOffsetShadowColor(colorValue.r, colorValue.g, colorValue.b);
                 break;
             }
+            case "offsetHighlightStrength":
+                this.mmdManager.postEffectOffsetHighlightStrength = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightOffsetX":
+                this.mmdManager.postEffectOffsetHighlightOffsetX = Number(rawValue);
+                break;
+            case "offsetHighlightOffsetY":
+                this.mmdManager.postEffectOffsetHighlightOffsetY = Number(rawValue);
+                break;
+            case "offsetHighlightDepthThreshold":
+                this.mmdManager.postEffectOffsetHighlightDepthThreshold = Number(rawValue) / 1000;
+                break;
+            case "offsetHighlightNormalThreshold":
+                this.mmdManager.postEffectOffsetHighlightNormalThreshold = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightDepthScale":
+                this.mmdManager.postEffectOffsetHighlightDepthScale = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightThickness":
+                this.mmdManager.postEffectOffsetHighlightThickness = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightSoftness":
+                this.mmdManager.postEffectOffsetHighlightSoftness = Number(rawValue) / 10;
+                break;
+            case "offsetHighlightColor": {
+                const colorValue = this.readEffectStackHexColor(String(rawValue));
+                if (!colorValue) return;
+                this.mmdManager.setPostEffectOffsetHighlightColor(colorValue.r, colorValue.g, colorValue.b);
+                break;
+            }
             case "ssrStrength":
                 this.mmdManager.postEffectSsrStrength = Number(rawValue) / 100;
                 break;
@@ -4879,6 +4945,16 @@ export class UIController {
             case "offsetShadowNormalInfluence":
             case "offsetShadowColor":
                 return "offsetShadow";
+            case "offsetHighlightStrength":
+            case "offsetHighlightOffsetX":
+            case "offsetHighlightOffsetY":
+            case "offsetHighlightDepthThreshold":
+            case "offsetHighlightNormalThreshold":
+            case "offsetHighlightDepthScale":
+            case "offsetHighlightThickness":
+            case "offsetHighlightSoftness":
+            case "offsetHighlightColor":
+                return "offsetHighlight";
             case "ssrStrength":
             case "ssrStep":
                 return "ssr";
@@ -5007,6 +5083,33 @@ export class UIController {
                 break;
             case "offsetShadowColor":
                 valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
+                break;
+            case "offsetHighlightStrength":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2);
+                break;
+            case "offsetHighlightOffsetX":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`;
+                break;
+            case "offsetHighlightOffsetY":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`;
+                break;
+            case "offsetHighlightDepthThreshold":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3);
+                break;
+            case "offsetHighlightNormalThreshold":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightNormalThreshold.toFixed(2);
+                break;
+            case "offsetHighlightDepthScale":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2);
+                break;
+            case "offsetHighlightThickness":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2);
+                break;
+            case "offsetHighlightSoftness":
+                valueElement.textContent = `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`;
+                break;
+            case "offsetHighlightColor":
+                valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetHighlightColor());
                 break;
             case "ssrStrength":
                 valueElement.textContent = this.mmdManager.postEffectSsrStrength.toFixed(2);

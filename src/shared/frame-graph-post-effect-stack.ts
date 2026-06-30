@@ -2,6 +2,7 @@ export const FRAME_GRAPH_POST_EFFECT_IDS = [
     "ssr",
     "ssao",
     "offsetShadow",
+    "offsetHighlight",
     "dof",
     "luminous",
     "bloom",
@@ -38,6 +39,8 @@ export type FrameGraphPostEffectActivationSettings = {
     ssaoStrength: number;
     offsetShadowEnabled: boolean;
     offsetShadowStrength: number;
+    offsetHighlightEnabled: boolean;
+    offsetHighlightStrength: number;
     ssrEnabled: boolean;
     ssrStrength: number;
 };
@@ -105,6 +108,8 @@ export function isFrameGraphPostEffectActiveInSettings(
             return settings.ssaoEnabled && settings.ssaoStrength > 0.00001;
         case "offsetShadow":
             return settings.offsetShadowEnabled && settings.offsetShadowStrength > 0.0001;
+        case "offsetHighlight":
+            return settings.offsetHighlightEnabled && settings.offsetHighlightStrength > 0.0001;
         case "dof":
             return settings.dofEnabled;
         case "luminous":

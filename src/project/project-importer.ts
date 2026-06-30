@@ -164,6 +164,17 @@ type ProjectImportHost = {
     postEffectOffsetShadowNormalInfluence: number;
     setPostEffectOffsetShadowColor(r: number, g: number, b: number): void;
     postEffectOffsetShadowDebugView: boolean;
+    postEffectOffsetHighlightEnabled: boolean;
+    postEffectOffsetHighlightStrength: number;
+    postEffectOffsetHighlightOffsetX: number;
+    postEffectOffsetHighlightOffsetY: number;
+    postEffectOffsetHighlightDepthThreshold: number;
+    postEffectOffsetHighlightNormalThreshold: number;
+    postEffectOffsetHighlightThickness: number;
+    postEffectOffsetHighlightSoftness: number;
+    postEffectOffsetHighlightDepthScale: number;
+    setPostEffectOffsetHighlightColor(r: number, g: number, b: number): void;
+    postEffectOffsetHighlightDebugView: boolean;
     postEffectColorCurvesEnabled: boolean;
     postEffectColorCurvesHue: number;
     postEffectColorCurvesDensity: number;
@@ -841,6 +852,32 @@ export async function importProjectState(
         : false;
     host.postEffectOffsetShadowEnabled = typeof data.effects.offsetShadowEnabled === "boolean"
         ? data.effects.offsetShadowEnabled
+        : false;
+    host.postEffectOffsetHighlightStrength = readFiniteNumber(data.effects.offsetHighlightStrength, 1);
+    host.postEffectOffsetHighlightOffsetX = readFiniteNumber(data.effects.offsetHighlightOffsetX, 0);
+    host.postEffectOffsetHighlightOffsetY = readFiniteNumber(data.effects.offsetHighlightOffsetY, -50);
+    host.postEffectOffsetHighlightDepthThreshold = readFiniteNumber(data.effects.offsetHighlightDepthThreshold, 0.1);
+    host.postEffectOffsetHighlightNormalThreshold = readFiniteNumber(data.effects.offsetHighlightNormalThreshold, 0);
+    host.postEffectOffsetHighlightThickness = readFiniteNumber(data.effects.offsetHighlightThickness, 0.35);
+    host.postEffectOffsetHighlightSoftness = readFiniteNumber(data.effects.offsetHighlightSoftness, 0);
+    host.postEffectOffsetHighlightDepthScale = readFiniteNumber(data.effects.offsetHighlightDepthScale, 1);
+    if (data.effects.offsetHighlightColor &&
+        Number.isFinite(data.effects.offsetHighlightColor.r) &&
+        Number.isFinite(data.effects.offsetHighlightColor.g) &&
+        Number.isFinite(data.effects.offsetHighlightColor.b)) {
+        host.setPostEffectOffsetHighlightColor(
+            data.effects.offsetHighlightColor.r,
+            data.effects.offsetHighlightColor.g,
+            data.effects.offsetHighlightColor.b,
+        );
+    } else {
+        host.setPostEffectOffsetHighlightColor(1, 1, 1);
+    }
+    host.postEffectOffsetHighlightDebugView = typeof data.effects.offsetHighlightDebugView === "boolean"
+        ? data.effects.offsetHighlightDebugView
+        : false;
+    host.postEffectOffsetHighlightEnabled = typeof data.effects.offsetHighlightEnabled === "boolean"
+        ? data.effects.offsetHighlightEnabled
         : false;
     host.postEffectColorCurvesEnabled = typeof data.effects.colorCurvesEnabled === "boolean"
         ? data.effects.colorCurvesEnabled

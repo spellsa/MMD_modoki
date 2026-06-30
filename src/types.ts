@@ -388,6 +388,17 @@ export interface ProjectEffectState {
     offsetShadowNormalInfluence?: number;
     offsetShadowColor?: ProjectRgbColor;
     offsetShadowDebugView?: boolean;
+    offsetHighlightEnabled?: boolean;
+    offsetHighlightStrength?: number;
+    offsetHighlightOffsetX?: number;
+    offsetHighlightOffsetY?: number;
+    offsetHighlightDepthThreshold?: number;
+    offsetHighlightNormalThreshold?: number;
+    offsetHighlightThickness?: number;
+    offsetHighlightSoftness?: number;
+    offsetHighlightDepthScale?: number;
+    offsetHighlightColor?: ProjectRgbColor;
+    offsetHighlightDebugView?: boolean;
     colorCurvesEnabled?: boolean;
     colorCurvesHue?: number;
     colorCurvesDensity?: number;

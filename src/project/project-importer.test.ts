@@ -125,6 +125,17 @@ function createHost() {
         postEffectOffsetShadowNormalInfluence: 0,
         setPostEffectOffsetShadowColor: vi.fn(),
         postEffectOffsetShadowDebugView: false,
+        postEffectOffsetHighlightEnabled: false,
+        postEffectOffsetHighlightStrength: 1,
+        postEffectOffsetHighlightOffsetX: 0,
+        postEffectOffsetHighlightOffsetY: -50,
+        postEffectOffsetHighlightDepthThreshold: 0.1,
+        postEffectOffsetHighlightNormalThreshold: 0,
+        postEffectOffsetHighlightThickness: 0.35,
+        postEffectOffsetHighlightSoftness: 0,
+        postEffectOffsetHighlightDepthScale: 1,
+        setPostEffectOffsetHighlightColor: vi.fn(),
+        postEffectOffsetHighlightDebugView: false,
         setPostEffectExternalLut: vi.fn(),
         setExternalWgslToonShader: vi.fn(),
         setPostEffectFogColor: vi.fn(),
@@ -234,6 +245,17 @@ describe("importProjectState", () => {
                 offsetShadowNormalInfluence: 0.6,
                 offsetShadowColor: { r: 0.25, g: 0.18, b: 0.12 },
                 offsetShadowDebugView: true,
+                offsetHighlightEnabled: true,
+                offsetHighlightStrength: 0.65,
+                offsetHighlightOffsetX: -6,
+                offsetHighlightOffsetY: -10,
+                offsetHighlightDepthThreshold: 0.03,
+                offsetHighlightNormalThreshold: 0.2,
+                offsetHighlightThickness: 0.42,
+                offsetHighlightSoftness: 1.5,
+                offsetHighlightDepthScale: 0.75,
+                offsetHighlightColor: { r: 1, g: 0.8, b: 0.6 },
+                offsetHighlightDebugView: true,
                 glowIntensity: 1.25,
                 glowThreshold: 0.18,
                 glowKernel: 48,
@@ -244,6 +266,7 @@ describe("importProjectState", () => {
                 frameGraphPostStack: [
                     { id: "luminous", enabled: true },
                     { id: "offsetShadow", enabled: true },
+                    { id: "offsetHighlight", enabled: true },
                     { id: "bloom", enabled: false },
                 ],
             },
@@ -272,7 +295,18 @@ describe("importProjectState", () => {
         expect(host.postEffectOffsetShadowNormalInfluence).toBe(0.6);
         expect(host.setPostEffectOffsetShadowColor).toHaveBeenCalledWith(0.25, 0.18, 0.12);
         expect(host.postEffectOffsetShadowDebugView).toBe(true);
-        expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["luminous", "offsetShadow", "bloom"]);
+        expect(host.postEffectOffsetHighlightEnabled).toBe(true);
+        expect(host.postEffectOffsetHighlightStrength).toBe(0.65);
+        expect(host.postEffectOffsetHighlightOffsetX).toBe(-6);
+        expect(host.postEffectOffsetHighlightOffsetY).toBe(-10);
+        expect(host.postEffectOffsetHighlightDepthThreshold).toBe(0.03);
+        expect(host.postEffectOffsetHighlightNormalThreshold).toBe(0.2);
+        expect(host.postEffectOffsetHighlightThickness).toBe(0.42);
+        expect(host.postEffectOffsetHighlightSoftness).toBe(1.5);
+        expect(host.postEffectOffsetHighlightDepthScale).toBe(0.75);
+        expect(host.setPostEffectOffsetHighlightColor).toHaveBeenCalledWith(1, 0.8, 0.6);
+        expect(host.postEffectOffsetHighlightDebugView).toBe(true);
+        expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["luminous", "offsetShadow", "offsetHighlight", "bloom"]);
     });
 
     it("restores mirroring floor viewport values", async () => {

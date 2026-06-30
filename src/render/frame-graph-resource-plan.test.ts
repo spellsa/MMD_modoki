@@ -25,6 +25,8 @@ function createSettings(
         ssaoStrength: 1,
         offsetShadowEnabled: false,
         offsetShadowStrength: 0.35,
+        offsetHighlightEnabled: false,
+        offsetHighlightStrength: 0.55,
         ssrEnabled: false,
         ssrStrength: 0.3,
         antialiasEnabled: true,
@@ -97,6 +99,28 @@ describe("buildFrameGraphResourcePlan", () => {
             resolution: "full",
         });
         expect(plan.requirementKeys).not.toContain("viewNormal");
+    });
+
+    it("uses geometry depth and normal for Offset Highlight", () => {
+        const plan = buildFrameGraphResourcePlan(createSettings({
+            offsetHighlightEnabled: true,
+            offsetHighlightStrength: 0.55,
+        }), ["offsetHighlight"]);
+
+        expect(plan.activeEffects).toEqual(["offsetHighlight"]);
+        expect(plan.needsGeometryRenderer).toBe(true);
+        expect(plan.requirements).toContainEqual({
+            key: "viewDepth",
+            consumers: ["offsetHighlight"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+        expect(plan.requirements).toContainEqual({
+            key: "viewNormal",
+            consumers: ["offsetHighlight"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
     });
 
     it("keeps DoF scene depth separate from geometry view depth", () => {

@@ -121,6 +121,17 @@ type ProjectExportHost = {
     postEffectOffsetShadowNormalInfluence: number;
     getPostEffectOffsetShadowColor: () => { r: number; g: number; b: number };
     postEffectOffsetShadowDebugView: boolean;
+    postEffectOffsetHighlightEnabled: boolean;
+    postEffectOffsetHighlightStrength: number;
+    postEffectOffsetHighlightOffsetX: number;
+    postEffectOffsetHighlightOffsetY: number;
+    postEffectOffsetHighlightDepthThreshold: number;
+    postEffectOffsetHighlightNormalThreshold: number;
+    postEffectOffsetHighlightThickness: number;
+    postEffectOffsetHighlightSoftness: number;
+    postEffectOffsetHighlightDepthScale: number;
+    getPostEffectOffsetHighlightColor: () => { r: number; g: number; b: number };
+    postEffectOffsetHighlightDebugView: boolean;
     postEffectColorCurvesEnabled: boolean;
     postEffectColorCurvesHue: number;
     postEffectColorCurvesDensity: number;
@@ -377,6 +388,17 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             offsetShadowNormalInfluence: host.postEffectOffsetShadowNormalInfluence,
             offsetShadowColor: host.getPostEffectOffsetShadowColor(),
             offsetShadowDebugView: host.postEffectOffsetShadowDebugView,
+            offsetHighlightEnabled: host.postEffectOffsetHighlightEnabled,
+            offsetHighlightStrength: host.postEffectOffsetHighlightStrength,
+            offsetHighlightOffsetX: host.postEffectOffsetHighlightOffsetX,
+            offsetHighlightOffsetY: host.postEffectOffsetHighlightOffsetY,
+            offsetHighlightDepthThreshold: host.postEffectOffsetHighlightDepthThreshold,
+            offsetHighlightNormalThreshold: host.postEffectOffsetHighlightNormalThreshold,
+            offsetHighlightThickness: host.postEffectOffsetHighlightThickness,
+            offsetHighlightSoftness: host.postEffectOffsetHighlightSoftness,
+            offsetHighlightDepthScale: host.postEffectOffsetHighlightDepthScale,
+            offsetHighlightColor: host.getPostEffectOffsetHighlightColor(),
+            offsetHighlightDebugView: host.postEffectOffsetHighlightDebugView,
             colorCurvesEnabled: host.postEffectColorCurvesEnabled,
             colorCurvesHue: host.postEffectColorCurvesHue,
             colorCurvesDensity: host.postEffectColorCurvesDensity,

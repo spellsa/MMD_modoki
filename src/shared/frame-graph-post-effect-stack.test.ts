@@ -29,6 +29,8 @@ function createActivationSettings(
         ssaoStrength: 1,
         offsetShadowEnabled: false,
         offsetShadowStrength: 0.35,
+        offsetHighlightEnabled: false,
+        offsetHighlightStrength: 0.55,
         ssrEnabled: false,
         ssrStrength: 0.3,
         ...overrides,
@@ -75,6 +77,8 @@ describe("frame graph post effect stack helpers", () => {
             bloomEnabled: true,
             offsetShadowEnabled: true,
             offsetShadowStrength: 0.45,
+            offsetHighlightEnabled: true,
+            offsetHighlightStrength: 0.5,
             ssaoEnabled: true,
             ssaoStrength: 0,
             ssrEnabled: true,
@@ -89,6 +93,7 @@ describe("frame graph post effect stack helpers", () => {
         expect(isFrameGraphPostEffectActiveInSettings(settings, "luminous")).toBe(false);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "ssao")).toBe(false);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "offsetShadow")).toBe(true);
+        expect(isFrameGraphPostEffectActiveInSettings(settings, "offsetHighlight")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "edgeBlur")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "distortion")).toBe(true);
     });
@@ -98,10 +103,11 @@ describe("frame graph post effect stack helpers", () => {
             grainIntensity: 0.2,
             bloomEnabled: true,
             offsetShadowEnabled: true,
+            offsetHighlightEnabled: true,
             ssrEnabled: true,
             ssrStrength: 0.4,
             lutEnabled: true,
-        }))).toEqual(["ssr", "offsetShadow", "bloom", "lut", "grain"]);
+        }))).toEqual(["ssr", "offsetShadow", "offsetHighlight", "bloom", "lut", "grain"]);
     });
 });
 

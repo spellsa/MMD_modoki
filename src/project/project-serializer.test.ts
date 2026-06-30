@@ -128,6 +128,17 @@ function createHost() {
         postEffectOffsetShadowNormalInfluence: 0,
         getPostEffectOffsetShadowColor: () => ({ r: 0.29, g: 0.21, b: 0.16 }),
         postEffectOffsetShadowDebugView: false,
+        postEffectOffsetHighlightEnabled: false,
+        postEffectOffsetHighlightStrength: 1,
+        postEffectOffsetHighlightOffsetX: 0,
+        postEffectOffsetHighlightOffsetY: -50,
+        postEffectOffsetHighlightDepthThreshold: 0.1,
+        postEffectOffsetHighlightNormalThreshold: 0,
+        postEffectOffsetHighlightThickness: 0.35,
+        postEffectOffsetHighlightSoftness: 0,
+        postEffectOffsetHighlightDepthScale: 1,
+        getPostEffectOffsetHighlightColor: () => ({ r: 1, g: 1, b: 1 }),
+        postEffectOffsetHighlightDebugView: false,
         postEffectColorCurvesEnabled: false,
         postEffectColorCurvesHue: 30,
         postEffectColorCurvesDensity: 0,
@@ -232,6 +243,16 @@ describe("exportProjectState", () => {
             postEffectOffsetShadowMaxDepth: 0.7,
             postEffectOffsetShadowDepthScale: 0.8,
             getPostEffectOffsetShadowColor: () => ({ r: 0.25, g: 0.18, b: 0.12 }),
+            postEffectOffsetHighlightEnabled: true,
+            postEffectOffsetHighlightStrength: 0.65,
+            postEffectOffsetHighlightOffsetX: -6,
+            postEffectOffsetHighlightOffsetY: -10,
+            postEffectOffsetHighlightDepthThreshold: 0.03,
+            postEffectOffsetHighlightNormalThreshold: 0.2,
+            postEffectOffsetHighlightThickness: 0.42,
+            postEffectOffsetHighlightSoftness: 1.5,
+            postEffectOffsetHighlightDepthScale: 0.75,
+            getPostEffectOffsetHighlightColor: () => ({ r: 1, g: 0.8, b: 0.6 }),
             postEffectGlowIntensity: 1.25,
             postEffectGlowThreshold: 0.18,
             postEffectGlowKernel: 48,
@@ -242,6 +263,7 @@ describe("exportProjectState", () => {
             getFrameGraphPostEffectStackEntries: () => [
                 { id: "luminous", enabled: true },
                 { id: "offsetShadow", enabled: true },
+                { id: "offsetHighlight", enabled: true },
                 { id: "bloom", enabled: true },
                 { id: "lut", enabled: false },
             ],
@@ -263,9 +285,20 @@ describe("exportProjectState", () => {
         expect(project.effects.offsetShadowMaxDepth).toBe(0.7);
         expect(project.effects.offsetShadowDepthScale).toBe(0.8);
         expect(project.effects.offsetShadowColor).toEqual({ r: 0.25, g: 0.18, b: 0.12 });
+        expect(project.effects.offsetHighlightEnabled).toBe(true);
+        expect(project.effects.offsetHighlightStrength).toBe(0.65);
+        expect(project.effects.offsetHighlightOffsetX).toBe(-6);
+        expect(project.effects.offsetHighlightOffsetY).toBe(-10);
+        expect(project.effects.offsetHighlightDepthThreshold).toBe(0.03);
+        expect(project.effects.offsetHighlightNormalThreshold).toBe(0.2);
+        expect(project.effects.offsetHighlightThickness).toBe(0.42);
+        expect(project.effects.offsetHighlightSoftness).toBe(1.5);
+        expect(project.effects.offsetHighlightDepthScale).toBe(0.75);
+        expect(project.effects.offsetHighlightColor).toEqual({ r: 1, g: 0.8, b: 0.6 });
         expect(project.effects.frameGraphPostStack).toEqual([
             { id: "luminous", enabled: true },
             { id: "offsetShadow", enabled: true },
+            { id: "offsetHighlight", enabled: true },
             { id: "bloom", enabled: true },
             { id: "lut", enabled: false },
         ]);

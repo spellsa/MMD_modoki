@@ -1613,6 +1613,17 @@ ${beforeFogAppendBlock}
     private postEffectOffsetShadowNormalInfluenceValue = 0;
     private postEffectOffsetShadowColorValue = new Color3(0.29, 0.21, 0.16);
     private postEffectOffsetShadowDebugViewValue = false;
+    private postEffectOffsetHighlightEnabledValue = false;
+    private postEffectOffsetHighlightStrengthValue = 1;
+    private postEffectOffsetHighlightOffsetXValue = 0;
+    private postEffectOffsetHighlightOffsetYValue = -50;
+    private postEffectOffsetHighlightDepthThresholdValue = 0.1;
+    private postEffectOffsetHighlightNormalThresholdValue = 0;
+    private postEffectOffsetHighlightThicknessValue = 0.35;
+    private postEffectOffsetHighlightSoftnessValue = 0;
+    private postEffectOffsetHighlightDepthScaleValue = 1;
+    private postEffectOffsetHighlightColorValue = new Color3(1, 1, 1);
+    private postEffectOffsetHighlightDebugViewValue = false;
     private postEffectColorCurvesEnabledValue = false;
     private postEffectColorCurvesHueValue = 30;
     private postEffectColorCurvesDensityValue = 0;
@@ -7349,6 +7360,17 @@ ${beforeFogAppendBlock}
             offsetShadowNormalInfluence: this.postEffectOffsetShadowNormalInfluenceValue,
             offsetShadowColor: this.getPostEffectOffsetShadowColor(),
             offsetShadowDebugView: this.postEffectOffsetShadowDebugViewValue,
+            offsetHighlightEnabled: this.postEffectOffsetHighlightEnabledValue,
+            offsetHighlightStrength: this.postEffectOffsetHighlightStrengthValue,
+            offsetHighlightOffsetX: this.postEffectOffsetHighlightOffsetXValue,
+            offsetHighlightOffsetY: this.postEffectOffsetHighlightOffsetYValue,
+            offsetHighlightDepthThreshold: this.postEffectOffsetHighlightDepthThresholdValue,
+            offsetHighlightNormalThreshold: this.postEffectOffsetHighlightNormalThresholdValue,
+            offsetHighlightThickness: this.postEffectOffsetHighlightThicknessValue,
+            offsetHighlightSoftness: this.postEffectOffsetHighlightSoftnessValue,
+            offsetHighlightDepthScale: this.postEffectOffsetHighlightDepthScaleValue,
+            offsetHighlightColor: this.getPostEffectOffsetHighlightColor(),
+            offsetHighlightDebugView: this.postEffectOffsetHighlightDebugViewValue,
             ssrEnabled: this.postEffectSsrEnabledValue,
             ssrStrength: this.postEffectSsrStrengthValue,
             ssrStep: this.postEffectSsrStepValue,
@@ -7776,6 +7798,8 @@ ${beforeFogAppendBlock}
                 return this.postEffectSsaoEnabledValue;
             case "offsetShadow":
                 return this.postEffectOffsetShadowEnabledValue;
+            case "offsetHighlight":
+                return this.postEffectOffsetHighlightEnabledValue;
             case "dof":
                 return this.dofEnabledValue;
             case "luminous":
@@ -8368,6 +8392,103 @@ ${beforeFogAppendBlock}
             Math.max(0, Math.min(1, Number.isFinite(r) ? r : 0.29)),
             Math.max(0, Math.min(1, Number.isFinite(g) ? g : 0.21)),
             Math.max(0, Math.min(1, Number.isFinite(b) ? b : 0.16)),
+        );
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightEnabled(): boolean {
+        return this.postEffectOffsetHighlightEnabledValue;
+    }
+    set postEffectOffsetHighlightEnabled(v: boolean) {
+        this.postEffectOffsetHighlightEnabledValue = Boolean(v);
+        this.refreshFrameGraphPostEffectsBackendForResourcePlanChange();
+    }
+
+    get postEffectOffsetHighlightStrength(): number {
+        return this.postEffectOffsetHighlightStrengthValue;
+    }
+    set postEffectOffsetHighlightStrength(v: number) {
+        this.postEffectOffsetHighlightStrengthValue = Math.max(0, Math.min(2, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightOffsetX(): number {
+        return this.postEffectOffsetHighlightOffsetXValue;
+    }
+    set postEffectOffsetHighlightOffsetX(v: number) {
+        this.postEffectOffsetHighlightOffsetXValue = Math.max(-256, Math.min(256, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightOffsetY(): number {
+        return this.postEffectOffsetHighlightOffsetYValue;
+    }
+    set postEffectOffsetHighlightOffsetY(v: number) {
+        this.postEffectOffsetHighlightOffsetYValue = Math.max(-256, Math.min(256, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightDepthThreshold(): number {
+        return this.postEffectOffsetHighlightDepthThresholdValue;
+    }
+    set postEffectOffsetHighlightDepthThreshold(v: number) {
+        this.postEffectOffsetHighlightDepthThresholdValue = Math.max(0, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightNormalThreshold(): number {
+        return this.postEffectOffsetHighlightNormalThresholdValue;
+    }
+    set postEffectOffsetHighlightNormalThreshold(v: number) {
+        this.postEffectOffsetHighlightNormalThresholdValue = Math.max(0, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightThickness(): number {
+        return this.postEffectOffsetHighlightThicknessValue;
+    }
+    set postEffectOffsetHighlightThickness(v: number) {
+        this.postEffectOffsetHighlightThicknessValue = Math.max(0.0001, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightSoftness(): number {
+        return this.postEffectOffsetHighlightSoftnessValue;
+    }
+    set postEffectOffsetHighlightSoftness(v: number) {
+        this.postEffectOffsetHighlightSoftnessValue = Math.max(0, Math.min(12, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightDepthScale(): number {
+        return this.postEffectOffsetHighlightDepthScaleValue;
+    }
+    set postEffectOffsetHighlightDepthScale(v: number) {
+        this.postEffectOffsetHighlightDepthScaleValue = Math.max(0, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetHighlightDebugView(): boolean {
+        return this.postEffectOffsetHighlightDebugViewValue;
+    }
+    set postEffectOffsetHighlightDebugView(v: boolean) {
+        this.postEffectOffsetHighlightDebugViewValue = Boolean(v);
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    getPostEffectOffsetHighlightColor(): { r: number; g: number; b: number } {
+        return {
+            r: this.postEffectOffsetHighlightColorValue.r,
+            g: this.postEffectOffsetHighlightColorValue.g,
+            b: this.postEffectOffsetHighlightColorValue.b,
+        };
+    }
+
+    setPostEffectOffsetHighlightColor(r: number, g: number, b: number): void {
+        this.postEffectOffsetHighlightColorValue = new Color3(
+            Math.max(0, Math.min(1, Number.isFinite(r) ? r : 1)),
+            Math.max(0, Math.min(1, Number.isFinite(g) ? g : 1)),
+            Math.max(0, Math.min(1, Number.isFinite(b) ? b : 1)),
         );
         this.applyDefaultPipelinePostProcessSettings();
     }
