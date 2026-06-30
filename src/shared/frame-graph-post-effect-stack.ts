@@ -1,6 +1,7 @@
 export const FRAME_GRAPH_POST_EFFECT_IDS = [
     "ssr",
     "ssao",
+    "offsetShadow",
     "dof",
     "luminous",
     "bloom",
@@ -18,6 +19,27 @@ export type FrameGraphPostEffectId = typeof FRAME_GRAPH_POST_EFFECT_IDS[number];
 export type FrameGraphPostEffectStackEntry = {
     id: FrameGraphPostEffectId;
     enabled: boolean;
+};
+
+export type FrameGraphPostEffectActivationSettings = {
+    dofEnabled: boolean;
+    luminousEnabled: boolean;
+    luminousIntensity: number;
+    bloomEnabled: boolean;
+    lutEnabled: boolean;
+    sharpenEdge: number;
+    grainIntensity: number;
+    chromaticAberration: number;
+    vignetteEnabled: boolean;
+    vignetteWeight: number;
+    edgeBlurStrength: number;
+    lensDistortion: number;
+    ssaoEnabled: boolean;
+    ssaoStrength: number;
+    offsetShadowEnabled: boolean;
+    offsetShadowStrength: number;
+    ssrEnabled: boolean;
+    ssrStrength: number;
 };
 
 const FRAME_GRAPH_POST_EFFECT_ID_SET = new Set<string>(FRAME_GRAPH_POST_EFFECT_IDS);
@@ -70,6 +92,46 @@ export function normalizeFrameGraphPostEffectStack(
         });
     }
     return result;
+}
+
+export function isFrameGraphPostEffectActiveInSettings(
+    settings: FrameGraphPostEffectActivationSettings,
+    id: FrameGraphPostEffectId,
+): boolean {
+    switch (id) {
+        case "ssr":
+            return settings.ssrEnabled && settings.ssrStrength > 0.00001;
+        case "ssao":
+            return settings.ssaoEnabled && settings.ssaoStrength > 0.00001;
+        case "offsetShadow":
+            return settings.offsetShadowEnabled && settings.offsetShadowStrength > 0.0001;
+        case "dof":
+            return settings.dofEnabled;
+        case "luminous":
+            return settings.luminousEnabled && settings.luminousIntensity > 0.0001;
+        case "bloom":
+            return settings.bloomEnabled;
+        case "lut":
+            return settings.lutEnabled;
+        case "sharpen":
+            return settings.sharpenEdge > 0.0001;
+        case "grain":
+            return settings.grainIntensity > 0.0001;
+        case "chromatic":
+            return settings.chromaticAberration > 0.0001;
+        case "vignette":
+            return settings.vignetteEnabled && settings.vignetteWeight > 0.0001;
+        case "edgeBlur":
+            return settings.edgeBlurStrength > 0.0001;
+        case "distortion":
+            return Math.abs(settings.lensDistortion) > 0.0001;
+    }
+}
+
+export function getActiveFrameGraphPostEffectIdsFromSettings(
+    settings: FrameGraphPostEffectActivationSettings,
+): FrameGraphPostEffectId[] {
+    return FRAME_GRAPH_POST_EFFECT_IDS.filter((id) => isFrameGraphPostEffectActiveInSettings(settings, id));
 }
 
 export function addFrameGraphPostEffectId(

@@ -100,6 +100,7 @@ type ProjectExportHost = {
     postEffectBloomWeight: number;
     postEffectBloomThreshold: number;
     postEffectBloomKernel: number;
+    getPostEffectBloomColor: () => { r: number; g: number; b: number };
     postEffectChromaticAberration: number;
     postEffectGrainIntensity: number;
     postEffectSharpenEdge: number;
@@ -108,6 +109,18 @@ type ProjectExportHost = {
     postEffectSsaoRadius: number;
     postEffectSsaoFadeEnd: number;
     postEffectSsaoDebugView: boolean;
+    postEffectOffsetShadowEnabled: boolean;
+    postEffectOffsetShadowStrength: number;
+    postEffectOffsetShadowOffsetX: number;
+    postEffectOffsetShadowOffsetY: number;
+    postEffectOffsetShadowDepthBias: number;
+    postEffectOffsetShadowMaxDepth: number;
+    postEffectOffsetShadowDepthScale: number;
+    postEffectOffsetShadowThickness: number;
+    postEffectOffsetShadowSoftness: number;
+    postEffectOffsetShadowNormalInfluence: number;
+    getPostEffectOffsetShadowColor: () => { r: number; g: number; b: number };
+    postEffectOffsetShadowDebugView: boolean;
     postEffectColorCurvesEnabled: boolean;
     postEffectColorCurvesHue: number;
     postEffectColorCurvesDensity: number;
@@ -343,6 +356,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             bloomWeight: host.postEffectBloomWeight,
             bloomThreshold: host.postEffectBloomThreshold,
             bloomKernel: host.postEffectBloomKernel,
+            bloomColor: host.getPostEffectBloomColor(),
             chromaticAberration: host.postEffectChromaticAberration,
             grainIntensity: host.postEffectGrainIntensity,
             sharpenEdge: host.postEffectSharpenEdge,
@@ -351,6 +365,18 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             ssaoRadius: host.postEffectSsaoRadius,
             ssaoFadeEnd: host.postEffectSsaoFadeEnd,
             ssaoDebugView: host.postEffectSsaoDebugView,
+            offsetShadowEnabled: host.postEffectOffsetShadowEnabled,
+            offsetShadowStrength: host.postEffectOffsetShadowStrength,
+            offsetShadowOffsetX: host.postEffectOffsetShadowOffsetX,
+            offsetShadowOffsetY: host.postEffectOffsetShadowOffsetY,
+            offsetShadowDepthBias: host.postEffectOffsetShadowDepthBias,
+            offsetShadowMaxDepth: host.postEffectOffsetShadowMaxDepth,
+            offsetShadowDepthScale: host.postEffectOffsetShadowDepthScale,
+            offsetShadowThickness: host.postEffectOffsetShadowThickness,
+            offsetShadowSoftness: host.postEffectOffsetShadowSoftness,
+            offsetShadowNormalInfluence: host.postEffectOffsetShadowNormalInfluence,
+            offsetShadowColor: host.getPostEffectOffsetShadowColor(),
+            offsetShadowDebugView: host.postEffectOffsetShadowDebugView,
             colorCurvesEnabled: host.postEffectColorCurvesEnabled,
             colorCurvesHue: host.postEffectColorCurvesHue,
             colorCurvesDensity: host.postEffectColorCurvesDensity,

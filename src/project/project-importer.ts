@@ -143,6 +143,7 @@ type ProjectImportHost = {
     postEffectBloomWeight: number;
     postEffectBloomThreshold: number;
     postEffectBloomKernel: number;
+    setPostEffectBloomColor(r: number, g: number, b: number): void;
     postEffectChromaticAberration: number;
     postEffectGrainIntensity: number;
     postEffectSharpenEdge: number;
@@ -151,6 +152,18 @@ type ProjectImportHost = {
     postEffectSsaoFadeEnd: number;
     postEffectSsaoDebugView: boolean;
     postEffectSsaoEnabled: boolean;
+    postEffectOffsetShadowEnabled: boolean;
+    postEffectOffsetShadowStrength: number;
+    postEffectOffsetShadowOffsetX: number;
+    postEffectOffsetShadowOffsetY: number;
+    postEffectOffsetShadowDepthBias: number;
+    postEffectOffsetShadowMaxDepth: number;
+    postEffectOffsetShadowDepthScale: number;
+    postEffectOffsetShadowThickness: number;
+    postEffectOffsetShadowSoftness: number;
+    postEffectOffsetShadowNormalInfluence: number;
+    setPostEffectOffsetShadowColor(r: number, g: number, b: number): void;
+    postEffectOffsetShadowDebugView: boolean;
     postEffectColorCurvesEnabled: boolean;
     postEffectColorCurvesHue: number;
     postEffectColorCurvesDensity: number;
@@ -770,6 +783,14 @@ export async function importProjectState(
     host.postEffectBloomKernel = typeof data.effects.bloomKernel === "number" && Number.isFinite(data.effects.bloomKernel)
         ? data.effects.bloomKernel
         : 100;
+    if (data.effects.bloomColor &&
+        Number.isFinite(data.effects.bloomColor.r) &&
+        Number.isFinite(data.effects.bloomColor.g) &&
+        Number.isFinite(data.effects.bloomColor.b)) {
+        host.setPostEffectBloomColor(data.effects.bloomColor.r, data.effects.bloomColor.g, data.effects.bloomColor.b);
+    } else {
+        host.setPostEffectBloomColor(1, 0.48, 0.16);
+    }
     host.postEffectChromaticAberration = typeof data.effects.chromaticAberration === "number" && Number.isFinite(data.effects.chromaticAberration)
         ? data.effects.chromaticAberration
         : 0;
@@ -793,6 +814,33 @@ export async function importProjectState(
         : false;
     host.postEffectSsaoEnabled = typeof data.effects.ssaoEnabled === "boolean"
         ? data.effects.ssaoEnabled
+        : false;
+    host.postEffectOffsetShadowStrength = readFiniteNumber(data.effects.offsetShadowStrength, 0.35);
+    host.postEffectOffsetShadowOffsetX = readFiniteNumber(data.effects.offsetShadowOffsetX, 0);
+    host.postEffectOffsetShadowOffsetY = readFiniteNumber(data.effects.offsetShadowOffsetY, -30);
+    host.postEffectOffsetShadowDepthBias = readFiniteNumber(data.effects.offsetShadowDepthBias, 0.1);
+    host.postEffectOffsetShadowMaxDepth = readFiniteNumber(data.effects.offsetShadowMaxDepth, 2);
+    host.postEffectOffsetShadowDepthScale = readFiniteNumber(data.effects.offsetShadowDepthScale, 1);
+    host.postEffectOffsetShadowThickness = readFiniteNumber(data.effects.offsetShadowThickness, 1);
+    host.postEffectOffsetShadowSoftness = readFiniteNumber(data.effects.offsetShadowSoftness, 0);
+    host.postEffectOffsetShadowNormalInfluence = readFiniteNumber(data.effects.offsetShadowNormalInfluence, 0);
+    if (data.effects.offsetShadowColor &&
+        Number.isFinite(data.effects.offsetShadowColor.r) &&
+        Number.isFinite(data.effects.offsetShadowColor.g) &&
+        Number.isFinite(data.effects.offsetShadowColor.b)) {
+        host.setPostEffectOffsetShadowColor(
+            data.effects.offsetShadowColor.r,
+            data.effects.offsetShadowColor.g,
+            data.effects.offsetShadowColor.b,
+        );
+    } else {
+        host.setPostEffectOffsetShadowColor(0.29, 0.21, 0.16);
+    }
+    host.postEffectOffsetShadowDebugView = typeof data.effects.offsetShadowDebugView === "boolean"
+        ? data.effects.offsetShadowDebugView
+        : false;
+    host.postEffectOffsetShadowEnabled = typeof data.effects.offsetShadowEnabled === "boolean"
+        ? data.effects.offsetShadowEnabled
         : false;
     host.postEffectColorCurvesEnabled = typeof data.effects.colorCurvesEnabled === "boolean"
         ? data.effects.colorCurvesEnabled

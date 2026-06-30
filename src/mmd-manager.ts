@@ -1592,6 +1592,7 @@ ${beforeFogAppendBlock}
     private postEffectBloomWeightValue = 1;
     private postEffectBloomThresholdValue = 1;
     private postEffectBloomKernelValue = 100;
+    private postEffectBloomColorValue = new Color3(1, 0.48, 0.16);
     private postEffectChromaticAberrationValue = 0;
     private postEffectGrainIntensityValue = 0;
     private postEffectSharpenEdgeValue = 0;
@@ -1600,6 +1601,18 @@ ${beforeFogAppendBlock}
     private postEffectSsaoRadiusValue = 2;
     private postEffectSsaoFadeEndValue = 200;
     private postEffectSsaoDebugViewValue = false;
+    private postEffectOffsetShadowEnabledValue = false;
+    private postEffectOffsetShadowStrengthValue = 0.35;
+    private postEffectOffsetShadowOffsetXValue = 0;
+    private postEffectOffsetShadowOffsetYValue = -30;
+    private postEffectOffsetShadowDepthBiasValue = 0.1;
+    private postEffectOffsetShadowMaxDepthValue = 2;
+    private postEffectOffsetShadowDepthScaleValue = 1;
+    private postEffectOffsetShadowThicknessValue = 1;
+    private postEffectOffsetShadowSoftnessValue = 0;
+    private postEffectOffsetShadowNormalInfluenceValue = 0;
+    private postEffectOffsetShadowColorValue = new Color3(0.29, 0.21, 0.16);
+    private postEffectOffsetShadowDebugViewValue = false;
     private postEffectColorCurvesEnabledValue = false;
     private postEffectColorCurvesHueValue = 30;
     private postEffectColorCurvesDensityValue = 0;
@@ -7311,6 +7324,7 @@ ${beforeFogAppendBlock}
             bloomWeight: this.postEffectBloomWeightValue,
             bloomThreshold: this.postEffectBloomThresholdValue,
             bloomKernel: this.postEffectBloomKernelValue,
+            bloomColor: this.getPostEffectBloomColor(),
             vignetteEnabled: this.postEffectVignetteEnabledValue,
             vignetteWeight: this.postEffectVignetteWeightValue,
             edgeBlurStrength: this.dofLensEdgeBlurValue,
@@ -7323,6 +7337,18 @@ ${beforeFogAppendBlock}
             ssaoRadius: this.postEffectSsaoRadiusValue,
             ssaoShadowColor: this.getShadowColor(),
             ssaoToonInfluence: this.toonShadowInfluenceValue,
+            offsetShadowEnabled: this.postEffectOffsetShadowEnabledValue,
+            offsetShadowStrength: this.postEffectOffsetShadowStrengthValue,
+            offsetShadowOffsetX: this.postEffectOffsetShadowOffsetXValue,
+            offsetShadowOffsetY: this.postEffectOffsetShadowOffsetYValue,
+            offsetShadowDepthBias: this.postEffectOffsetShadowDepthBiasValue,
+            offsetShadowMaxDepth: this.postEffectOffsetShadowMaxDepthValue,
+            offsetShadowDepthScale: this.postEffectOffsetShadowDepthScaleValue,
+            offsetShadowThickness: this.postEffectOffsetShadowThicknessValue,
+            offsetShadowSoftness: this.postEffectOffsetShadowSoftnessValue,
+            offsetShadowNormalInfluence: this.postEffectOffsetShadowNormalInfluenceValue,
+            offsetShadowColor: this.getPostEffectOffsetShadowColor(),
+            offsetShadowDebugView: this.postEffectOffsetShadowDebugViewValue,
             ssrEnabled: this.postEffectSsrEnabledValue,
             ssrStrength: this.postEffectSsrStrengthValue,
             ssrStep: this.postEffectSsrStepValue,
@@ -7748,6 +7774,8 @@ ${beforeFogAppendBlock}
                 return this.postEffectSsrEnabledValue;
             case "ssao":
                 return this.postEffectSsaoEnabledValue;
+            case "offsetShadow":
+                return this.postEffectOffsetShadowEnabledValue;
             case "dof":
                 return this.dofEnabledValue;
             case "luminous":
@@ -8153,6 +8181,23 @@ ${beforeFogAppendBlock}
         this.applyDefaultPipelinePostProcessSettings();
     }
 
+    getPostEffectBloomColor(): { r: number; g: number; b: number } {
+        return {
+            r: this.postEffectBloomColorValue.r,
+            g: this.postEffectBloomColorValue.g,
+            b: this.postEffectBloomColorValue.b,
+        };
+    }
+
+    setPostEffectBloomColor(r: number, g: number, b: number): void {
+        this.postEffectBloomColorValue = new Color3(
+            Math.max(0, Math.min(1, Number.isFinite(r) ? r : 1)),
+            Math.max(0, Math.min(1, Number.isFinite(g) ? g : 0.48)),
+            Math.max(0, Math.min(1, Number.isFinite(b) ? b : 0.16)),
+        );
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
     /** Default pipeline chromatic aberration amount (0..200, 0 = OFF). */
     get postEffectChromaticAberration(): number {
         return this.postEffectChromaticAberrationValue;
@@ -8220,6 +8265,111 @@ ${beforeFogAppendBlock}
     set postEffectSsaoDebugView(v: boolean) {
         this.postEffectSsaoDebugViewValue = Boolean(v);
         this.applySsaoSettings();
+    }
+
+    get postEffectOffsetShadowEnabled(): boolean {
+        return this.postEffectOffsetShadowEnabledValue;
+    }
+    set postEffectOffsetShadowEnabled(v: boolean) {
+        this.postEffectOffsetShadowEnabledValue = Boolean(v);
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowStrength(): number {
+        return this.postEffectOffsetShadowStrengthValue;
+    }
+    set postEffectOffsetShadowStrength(v: number) {
+        this.postEffectOffsetShadowStrengthValue = Math.max(0, Math.min(2, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowOffsetX(): number {
+        return this.postEffectOffsetShadowOffsetXValue;
+    }
+    set postEffectOffsetShadowOffsetX(v: number) {
+        this.postEffectOffsetShadowOffsetXValue = Math.max(-64, Math.min(64, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowOffsetY(): number {
+        return this.postEffectOffsetShadowOffsetYValue;
+    }
+    set postEffectOffsetShadowOffsetY(v: number) {
+        this.postEffectOffsetShadowOffsetYValue = Math.max(-64, Math.min(64, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowDepthBias(): number {
+        return this.postEffectOffsetShadowDepthBiasValue;
+    }
+    set postEffectOffsetShadowDepthBias(v: number) {
+        this.postEffectOffsetShadowDepthBiasValue = Math.max(0, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowMaxDepth(): number {
+        return this.postEffectOffsetShadowMaxDepthValue;
+    }
+    set postEffectOffsetShadowMaxDepth(v: number) {
+        this.postEffectOffsetShadowMaxDepthValue = Math.max(0.001, Math.min(4, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowDepthScale(): number {
+        return this.postEffectOffsetShadowDepthScaleValue;
+    }
+    set postEffectOffsetShadowDepthScale(v: number) {
+        this.postEffectOffsetShadowDepthScaleValue = Math.max(0, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowThickness(): number {
+        return this.postEffectOffsetShadowThicknessValue;
+    }
+    set postEffectOffsetShadowThickness(v: number) {
+        this.postEffectOffsetShadowThicknessValue = Math.max(0.0001, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowSoftness(): number {
+        return this.postEffectOffsetShadowSoftnessValue;
+    }
+    set postEffectOffsetShadowSoftness(v: number) {
+        this.postEffectOffsetShadowSoftnessValue = Math.max(0, Math.min(12, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowNormalInfluence(): number {
+        return this.postEffectOffsetShadowNormalInfluenceValue;
+    }
+    set postEffectOffsetShadowNormalInfluence(v: number) {
+        this.postEffectOffsetShadowNormalInfluenceValue = Math.max(0, Math.min(1, v));
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    get postEffectOffsetShadowDebugView(): boolean {
+        return this.postEffectOffsetShadowDebugViewValue;
+    }
+    set postEffectOffsetShadowDebugView(v: boolean) {
+        this.postEffectOffsetShadowDebugViewValue = Boolean(v);
+        this.applyDefaultPipelinePostProcessSettings();
+    }
+
+    getPostEffectOffsetShadowColor(): { r: number; g: number; b: number } {
+        return {
+            r: this.postEffectOffsetShadowColorValue.r,
+            g: this.postEffectOffsetShadowColorValue.g,
+            b: this.postEffectOffsetShadowColorValue.b,
+        };
+    }
+
+    setPostEffectOffsetShadowColor(r: number, g: number, b: number): void {
+        this.postEffectOffsetShadowColorValue = new Color3(
+            Math.max(0, Math.min(1, Number.isFinite(r) ? r : 0.29)),
+            Math.max(0, Math.min(1, Number.isFinite(g) ? g : 0.21)),
+            Math.max(0, Math.min(1, Number.isFinite(b) ? b : 0.16)),
+        );
+        this.applyDefaultPipelinePostProcessSettings();
     }
 
     /** Color curves enabled state. */

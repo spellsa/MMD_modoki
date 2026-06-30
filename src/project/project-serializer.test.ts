@@ -107,6 +107,7 @@ function createHost() {
         postEffectBloomWeight: 1,
         postEffectBloomThreshold: 1,
         postEffectBloomKernel: 100,
+        getPostEffectBloomColor: () => ({ r: 1, g: 0.48, b: 0.16 }),
         postEffectChromaticAberration: 0,
         postEffectGrainIntensity: 0,
         postEffectSharpenEdge: 0,
@@ -115,6 +116,18 @@ function createHost() {
         postEffectSsaoRadius: 2,
         postEffectSsaoFadeEnd: 200,
         postEffectSsaoDebugView: false,
+        postEffectOffsetShadowEnabled: false,
+        postEffectOffsetShadowStrength: 0.35,
+        postEffectOffsetShadowOffsetX: 0,
+        postEffectOffsetShadowOffsetY: -30,
+        postEffectOffsetShadowDepthBias: 0.1,
+        postEffectOffsetShadowMaxDepth: 2,
+        postEffectOffsetShadowDepthScale: 1,
+        postEffectOffsetShadowThickness: 1,
+        postEffectOffsetShadowSoftness: 0,
+        postEffectOffsetShadowNormalInfluence: 0,
+        getPostEffectOffsetShadowColor: () => ({ r: 0.29, g: 0.21, b: 0.16 }),
+        postEffectOffsetShadowDebugView: false,
         postEffectColorCurvesEnabled: false,
         postEffectColorCurvesHue: 30,
         postEffectColorCurvesDensity: 0,
@@ -211,6 +224,14 @@ describe("exportProjectState", () => {
         const project = exportProjectState({
             ...createHost(),
             postEffectGlowEnabled: true,
+            getPostEffectBloomColor: () => ({ r: 1, g: 0.42, b: 0.12 }),
+            postEffectOffsetShadowEnabled: true,
+            postEffectOffsetShadowStrength: 0.55,
+            postEffectOffsetShadowOffsetX: 2,
+            postEffectOffsetShadowOffsetY: 9,
+            postEffectOffsetShadowMaxDepth: 0.7,
+            postEffectOffsetShadowDepthScale: 0.8,
+            getPostEffectOffsetShadowColor: () => ({ r: 0.25, g: 0.18, b: 0.12 }),
             postEffectGlowIntensity: 1.25,
             postEffectGlowThreshold: 0.18,
             postEffectGlowKernel: 48,
@@ -220,6 +241,7 @@ describe("exportProjectState", () => {
             postEffectGlowGlarePower: 0.75,
             getFrameGraphPostEffectStackEntries: () => [
                 { id: "luminous", enabled: true },
+                { id: "offsetShadow", enabled: true },
                 { id: "bloom", enabled: true },
                 { id: "lut", enabled: false },
             ],
@@ -233,8 +255,17 @@ describe("exportProjectState", () => {
         expect(project.effects.glowGlareLength).toBe(96);
         expect(project.effects.glowGlareAngle).toBe(15);
         expect(project.effects.glowGlarePower).toBe(0.75);
+        expect(project.effects.bloomColor).toEqual({ r: 1, g: 0.42, b: 0.12 });
+        expect(project.effects.offsetShadowEnabled).toBe(true);
+        expect(project.effects.offsetShadowStrength).toBe(0.55);
+        expect(project.effects.offsetShadowOffsetX).toBe(2);
+        expect(project.effects.offsetShadowOffsetY).toBe(9);
+        expect(project.effects.offsetShadowMaxDepth).toBe(0.7);
+        expect(project.effects.offsetShadowDepthScale).toBe(0.8);
+        expect(project.effects.offsetShadowColor).toEqual({ r: 0.25, g: 0.18, b: 0.12 });
         expect(project.effects.frameGraphPostStack).toEqual([
             { id: "luminous", enabled: true },
+            { id: "offsetShadow", enabled: true },
             { id: "bloom", enabled: true },
             { id: "lut", enabled: false },
         ]);

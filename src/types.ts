@@ -367,6 +367,7 @@ export interface ProjectEffectState {
     bloomWeight?: number;
     bloomThreshold?: number;
     bloomKernel?: number;
+    bloomColor?: ProjectRgbColor;
     chromaticAberration?: number;
     grainIntensity?: number;
     sharpenEdge?: number;
@@ -375,6 +376,18 @@ export interface ProjectEffectState {
     ssaoRadius?: number;
     ssaoFadeEnd?: number;
     ssaoDebugView?: boolean;
+    offsetShadowEnabled?: boolean;
+    offsetShadowStrength?: number;
+    offsetShadowOffsetX?: number;
+    offsetShadowOffsetY?: number;
+    offsetShadowDepthBias?: number;
+    offsetShadowMaxDepth?: number;
+    offsetShadowDepthScale?: number;
+    offsetShadowThickness?: number;
+    offsetShadowSoftness?: number;
+    offsetShadowNormalInfluence?: number;
+    offsetShadowColor?: ProjectRgbColor;
+    offsetShadowDebugView?: boolean;
     colorCurvesEnabled?: boolean;
     colorCurvesHue?: number;
     colorCurvesDensity?: number;

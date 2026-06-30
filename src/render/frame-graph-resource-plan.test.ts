@@ -23,6 +23,8 @@ function createSettings(
         lensDistortion: 0,
         ssaoEnabled: false,
         ssaoStrength: 1,
+        offsetShadowEnabled: false,
+        offsetShadowStrength: 0.35,
         ssrEnabled: false,
         ssrStrength: 0.3,
         antialiasEnabled: true,
@@ -78,6 +80,23 @@ describe("buildFrameGraphResourcePlan", () => {
             producer: "geometryRenderer",
             resolution: "full",
         });
+    });
+
+    it("uses geometry depth for Offset Shadow", () => {
+        const plan = buildFrameGraphResourcePlan(createSettings({
+            offsetShadowEnabled: true,
+            offsetShadowStrength: 0.55,
+        }), ["offsetShadow"]);
+
+        expect(plan.activeEffects).toEqual(["offsetShadow"]);
+        expect(plan.needsGeometryRenderer).toBe(true);
+        expect(plan.requirements).toContainEqual({
+            key: "viewDepth",
+            consumers: ["offsetShadow"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+        expect(plan.requirementKeys).not.toContain("viewNormal");
     });
 
     it("keeps DoF scene depth separate from geometry view depth", () => {

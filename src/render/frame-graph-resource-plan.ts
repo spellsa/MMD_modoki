@@ -1,6 +1,8 @@
 import {
     FRAME_GRAPH_POST_EFFECT_IDS,
+    getActiveFrameGraphPostEffectIdsFromSettings,
     normalizeFrameGraphPostEffectIds,
+    type FrameGraphPostEffectActivationSettings,
     type FrameGraphPostEffectId,
 } from "../shared/frame-graph-post-effect-stack";
 
@@ -12,24 +14,8 @@ export type FrameGraphSharedResourceKey =
     | "reflectivity"
     | "luminousMask";
 
-export type FrameGraphResourcePlanSettings = {
+export type FrameGraphResourcePlanSettings = FrameGraphPostEffectActivationSettings & {
     imageProcessingEnabled: boolean;
-    dofEnabled: boolean;
-    luminousEnabled: boolean;
-    luminousIntensity: number;
-    bloomEnabled: boolean;
-    lutEnabled: boolean;
-    sharpenEdge: number;
-    grainIntensity: number;
-    chromaticAberration: number;
-    vignetteEnabled: boolean;
-    vignetteWeight: number;
-    edgeBlurStrength: number;
-    lensDistortion: number;
-    ssaoEnabled: boolean;
-    ssaoStrength: number;
-    ssrEnabled: boolean;
-    ssrStrength: number;
     antialiasEnabled: boolean;
 };
 
@@ -64,35 +50,6 @@ function addConsumer(
     consumersByKey.set(key, consumers);
 }
 
-function isEffectActive(settings: FrameGraphResourcePlanSettings, id: FrameGraphPostEffectId): boolean {
-    switch (id) {
-        case "ssr":
-            return settings.ssrEnabled && settings.ssrStrength > 0.00001;
-        case "ssao":
-            return settings.ssaoEnabled && settings.ssaoStrength > 0.00001;
-        case "dof":
-            return settings.dofEnabled;
-        case "luminous":
-            return settings.luminousEnabled && settings.luminousIntensity > 0.0001;
-        case "bloom":
-            return settings.bloomEnabled;
-        case "lut":
-            return settings.lutEnabled;
-        case "sharpen":
-            return settings.sharpenEdge > 0.0001;
-        case "grain":
-            return settings.grainIntensity > 0.0001;
-        case "chromatic":
-            return settings.chromaticAberration > 0.0001;
-        case "vignette":
-            return settings.vignetteEnabled && settings.vignetteWeight > 0.0001;
-        case "edgeBlur":
-            return settings.edgeBlurStrength > 0.0001;
-        case "distortion":
-            return Math.abs(settings.lensDistortion) > 0.0001;
-    }
-}
-
 function getProducer(key: FrameGraphSharedResourceKey): FrameGraphResourceRequirement["producer"] {
     switch (key) {
         case "sceneColor":
@@ -112,7 +69,7 @@ export function buildFrameGraphResourcePlan(
     settings: FrameGraphResourcePlanSettings,
     effectOrder: readonly FrameGraphPostEffectId[] = FRAME_GRAPH_POST_EFFECT_IDS,
 ): FrameGraphResourcePlan {
-    const activeEffects = FRAME_GRAPH_POST_EFFECT_IDS.filter((id) => isEffectActive(settings, id));
+    const activeEffects = getActiveFrameGraphPostEffectIdsFromSettings(settings);
     const normalizedOrder = normalizeFrameGraphPostEffectIds(effectOrder, activeEffects);
     const consumersByKey = new Map<FrameGraphSharedResourceKey, Set<FrameGraphPostEffectId>>();
 
@@ -129,6 +86,10 @@ export function buildFrameGraphResourcePlan(
     if (activeEffects.includes("ssao")) {
         addConsumer(consumersByKey, "viewDepth", "ssao");
         addConsumer(consumersByKey, "viewNormal", "ssao");
+    }
+
+    if (activeEffects.includes("offsetShadow")) {
+        addConsumer(consumersByKey, "viewDepth", "offsetShadow");
     }
 
     if (activeEffects.includes("dof")) {

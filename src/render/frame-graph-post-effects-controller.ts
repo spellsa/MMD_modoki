@@ -35,6 +35,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { createLutAtlasTextureFrom3dlText } from "./lut-atlas-texture";
 import {
     FRAME_GRAPH_POST_EFFECT_IDS,
+    isFrameGraphPostEffectActiveInSettings,
     normalizeFrameGraphPostEffectIds,
     type FrameGraphPostEffectId,
 } from "../shared/frame-graph-post-effect-stack";
@@ -89,12 +90,14 @@ export type FrameGraphPostEffectsDiagnosticsSnapshot = {
         ssr: boolean;
         ssao: boolean;
         ssaoToonComposite: boolean;
+        offsetShadow: boolean;
         dof: boolean;
         luminousExtract: boolean;
         luminousCoreBlur: boolean;
         luminousHaloBlur: boolean;
         luminousComposite: boolean;
         bloom: boolean;
+        bloomTint: boolean;
         lut: boolean;
         colorCorrection: boolean;
         sharpen: boolean;
@@ -143,6 +146,7 @@ export type FrameGraphPostEffectsSettings = {
     bloomWeight: number;
     bloomThreshold: number;
     bloomKernel: number;
+    bloomColor: { r: number; g: number; b: number };
     vignetteEnabled: boolean;
     vignetteWeight: number;
     edgeBlurStrength: number;
@@ -155,6 +159,18 @@ export type FrameGraphPostEffectsSettings = {
     ssaoRadius: number;
     ssaoShadowColor: { r: number; g: number; b: number };
     ssaoToonInfluence: number;
+    offsetShadowEnabled: boolean;
+    offsetShadowStrength: number;
+    offsetShadowOffsetX: number;
+    offsetShadowOffsetY: number;
+    offsetShadowDepthBias: number;
+    offsetShadowMaxDepth: number;
+    offsetShadowDepthScale: number;
+    offsetShadowThickness: number;
+    offsetShadowSoftness: number;
+    offsetShadowNormalInfluence: number;
+    offsetShadowColor: { r: number; g: number; b: number };
+    offsetShadowDebugView: boolean;
     ssrEnabled: boolean;
     ssrStrength: number;
     ssrStep: number;
@@ -593,6 +609,174 @@ function ensureLuminousShaders(): void {
                 let core = gaussianBlur(input.vUV, uniforms.texelStep * 0.24) * 0.82;
                 let halo = gaussianBlur(input.vUV, uniforms.texelStep) * 0.28;
                 fragmentOutputs.color = vec4f(core + halo, 1.0);
+                return fragmentOutputs;
+            }
+        `;
+    }
+}
+
+function ensureBloomTintShaders(): void {
+    const shaderKey = "mmdFrameGraphBloomTintPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform sampler2D originalSampler;
+            uniform vec3 bloomColor;
+
+            void main(void) {
+                vec4 bloomed = texture2D(textureSampler, vUV);
+                vec4 original = texture2D(originalSampler, vUV);
+                vec3 bloomDelta = max(bloomed.rgb - original.rgb, vec3(0.0));
+                gl_FragColor = vec4(original.rgb + bloomDelta * bloomColor, bloomed.a);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            var originalSamplerSampler: sampler;
+            var originalSampler: texture_2d<f32>;
+            uniform bloomColor: vec3f;
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let bloomed = textureSample(textureSampler, textureSamplerSampler, input.vUV);
+                let original = textureSample(originalSampler, originalSamplerSampler, input.vUV);
+                let bloomDelta = max(bloomed.rgb - original.rgb, vec3f(0.0));
+                fragmentOutputs.color = vec4f(original.rgb + bloomDelta * uniforms.bloomColor, bloomed.a);
+                return fragmentOutputs;
+            }
+        `;
+    }
+}
+
+function ensureOffsetShadowShaders(): void {
+    const shaderKey = "mmdFrameGraphOffsetShadowPixelShader";
+    if (!ShaderStore.ShadersStore[shaderKey]) {
+        ShaderStore.ShadersStore[shaderKey] = `
+            precision highp float;
+            varying vec2 vUV;
+            uniform sampler2D textureSampler;
+            uniform sampler2D depthSampler;
+            uniform vec2 texelSize;
+            uniform vec2 offsetPixels;
+            uniform float strength;
+            uniform float depthBias;
+            uniform float maxDepth;
+            uniform float depthScale;
+            uniform float thickness;
+            uniform float softness;
+            uniform vec3 shadowColor;
+            uniform float debugView;
+
+            float sampleDepth(vec2 uv) {
+                return texture2D(depthSampler, clamp(uv, vec2(0.0), vec2(1.0))).r;
+            }
+
+            float resolveOffsetScale(float currentDepth) {
+                float distanceScale = clamp(10.0 / max(0.000001, currentDepth), 0.1, 1.0);
+                return mix(1.0, distanceScale, clamp(depthScale, 0.0, 1.0));
+            }
+
+            float sampleShadowMask(vec2 uv, vec2 offsetUv) {
+                float currentDepth = sampleDepth(uv);
+                float offsetDepth = sampleDepth(offsetUv);
+                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+                    return 0.0;
+                }
+                float depthDelta = currentDepth - offsetDepth;
+                float minMask = smoothstep(depthBias, depthBias + max(0.0001, thickness), depthDelta);
+                float resolvedMaxDepth = max(depthBias + 0.0001, maxDepth);
+                float maxMask = 1.0 - smoothstep(resolvedMaxDepth, resolvedMaxDepth + max(0.0001, thickness * 0.1), depthDelta);
+                return minMask * maxMask;
+            }
+
+            void main(void) {
+                vec4 source = texture2D(textureSampler, vUV);
+                float currentDepth = sampleDepth(vUV);
+                float offsetScale = resolveOffsetScale(currentDepth);
+                vec2 offsetUv = vUV - offsetPixels * texelSize * offsetScale;
+                float radius = max(0.0, softness) * offsetScale;
+                float mask = sampleShadowMask(vUV, offsetUv) * 0.42;
+                mask += sampleShadowMask(vUV, offsetUv + vec2(texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(vUV, offsetUv - vec2(texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(vUV, offsetUv + vec2(0.0, texelSize.y * radius)) * 0.135;
+                mask += sampleShadowMask(vUV, offsetUv - vec2(0.0, texelSize.y * radius)) * 0.135;
+                mask = clamp(mask * strength, 0.0, 1.0);
+                if (debugView > 0.5) {
+                    gl_FragColor = vec4(vec3(mask), source.a);
+                    return;
+                }
+                vec3 shaded = mix(source.rgb, source.rgb * shadowColor, mask);
+                gl_FragColor = vec4(shaded, source.a);
+            }
+        `;
+    }
+    if (!ShaderStore.ShadersStoreWGSL[shaderKey]) {
+        ShaderStore.ShadersStoreWGSL[shaderKey] = `
+            varying vUV: vec2f;
+            var textureSamplerSampler: sampler;
+            var textureSampler: texture_2d<f32>;
+            var depthSamplerSampler: sampler;
+            var depthSampler: texture_2d<f32>;
+            uniform texelSize: vec2f;
+            uniform offsetPixels: vec2f;
+            uniform strength: f32;
+            uniform depthBias: f32;
+            uniform maxDepth: f32;
+            uniform depthScale: f32;
+            uniform thickness: f32;
+            uniform softness: f32;
+            uniform shadowColor: vec3f;
+            uniform debugView: f32;
+
+            fn sampleDepth(uv: vec2f) -> f32 {
+                return textureSampleLevel(depthSampler, depthSamplerSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0).r;
+            }
+
+            fn resolveOffsetScale(currentDepth: f32) -> f32 {
+                let distanceScale = clamp(10.0 / max(0.000001, currentDepth), 0.1, 1.0);
+                return mix(1.0, distanceScale, clamp(uniforms.depthScale, 0.0, 1.0));
+            }
+
+            fn sampleShadowMask(uv: vec2f, offsetUv: vec2f) -> f32 {
+                let currentDepth = sampleDepth(uv);
+                let offsetDepth = sampleDepth(offsetUv);
+                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+                    return 0.0;
+                }
+                let depthDelta = currentDepth - offsetDepth;
+                let minMask = smoothstep(uniforms.depthBias, uniforms.depthBias + max(0.0001, uniforms.thickness), depthDelta);
+                let resolvedMaxDepth = max(uniforms.depthBias + 0.0001, uniforms.maxDepth);
+                let maxMask = 1.0 - smoothstep(resolvedMaxDepth, resolvedMaxDepth + max(0.0001, uniforms.thickness * 0.1), depthDelta);
+                return minMask * maxMask;
+            }
+
+            #define CUSTOM_FRAGMENT_DEFINITIONS
+            @fragment
+            fn main(input: FragmentInputs)->FragmentOutputs {
+                let source = textureSampleLevel(textureSampler, textureSamplerSampler, input.vUV, 0.0);
+                let currentDepth = sampleDepth(input.vUV);
+                let offsetScale = resolveOffsetScale(currentDepth);
+                let offsetUv = input.vUV - uniforms.offsetPixels * uniforms.texelSize * offsetScale;
+                let radius = max(0.0, uniforms.softness) * offsetScale;
+                var mask = sampleShadowMask(input.vUV, offsetUv) * 0.42;
+                mask += sampleShadowMask(input.vUV, offsetUv + vec2f(uniforms.texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(input.vUV, offsetUv - vec2f(uniforms.texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(input.vUV, offsetUv + vec2f(0.0, uniforms.texelSize.y * radius)) * 0.135;
+                mask += sampleShadowMask(input.vUV, offsetUv - vec2f(0.0, uniforms.texelSize.y * radius)) * 0.135;
+                mask = clamp(mask * uniforms.strength, 0.0, 1.0);
+                if (uniforms.debugView > 0.5) {
+                    fragmentOutputs.color = vec4f(vec3f(mask), source.a);
+                    return fragmentOutputs;
+                }
+                let shaded = mix(source.rgb, source.rgb * uniforms.shadowColor, vec3f(mask));
+                fragmentOutputs.color = vec4f(shaded, source.a);
                 return fragmentOutputs;
             }
         `;
@@ -1231,6 +1415,52 @@ class FrameGraphPostEffectsLuminousThinBlurTask extends FrameGraphPostProcessTas
     }
 }
 
+class FrameGraphPostEffectsBloomTintTask extends FrameGraphPostProcessTask {
+    originalTexture?: FrameGraphTextureHandle;
+
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsBloomTintTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        const pass = super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const effect = this.postProcess.effect;
+                effect.setFloat3(
+                    "bloomColor",
+                    Math.max(0, Math.min(1, settings.bloomColor.r)),
+                    Math.max(0, Math.min(1, settings.bloomColor.g)),
+                    Math.max(0, Math.min(1, settings.bloomColor.b)),
+                );
+                if (this.originalTexture !== undefined) {
+                    context.bindTextureHandle(effect, "originalSampler", this.originalTexture);
+                }
+                additionalBindings?.(context);
+            },
+        );
+        if (this.originalTexture !== undefined) {
+            pass.addDependencies(this.originalTexture);
+        }
+        return pass;
+    }
+}
+
 class FrameGraphPostEffectsSsaoToonCompositeTask extends FrameGraphPostProcessTask {
     originalTexture?: FrameGraphTextureHandle;
 
@@ -1262,7 +1492,7 @@ class FrameGraphPostEffectsSsaoToonCompositeTask extends FrameGraphPostProcessTa
                 const engine = this.postProcess.options.engine;
                 effect.setFloat3("shadowColor", shadowColor.r, shadowColor.g, shadowColor.b);
                 effect.setFloat("toonInfluence", settings.ssaoToonInfluence);
-                effect.setFloat("enabled", settings.ssaoEnabled && settings.ssaoStrength > 0.00001 ? 1 : 0);
+                effect.setFloat("enabled", isFrameGraphPostEffectActiveInSettings(settings, "ssao") ? 1 : 0);
                 effect.setFloat2(
                     "texelSize",
                     1 / Math.max(1, engine.getRenderWidth()),
@@ -1276,6 +1506,67 @@ class FrameGraphPostEffectsSsaoToonCompositeTask extends FrameGraphPostProcessTa
         );
         if (this.originalTexture !== undefined) {
             pass.addDependencies(this.originalTexture);
+        }
+        return pass;
+    }
+}
+
+class FrameGraphPostEffectsOffsetShadowTask extends FrameGraphPostProcessTask {
+    depthTexture?: FrameGraphTextureHandle;
+
+    constructor(
+        name: string,
+        frameGraph: FrameGraph,
+        postProcess: EffectWrapper,
+        private readonly getSettings: () => FrameGraphPostEffectsSettings,
+    ) {
+        super(name, frameGraph, postProcess);
+    }
+
+    override getClassName(): string {
+        return "FrameGraphPostEffectsOffsetShadowTask";
+    }
+
+    override record(
+        skipCreationOfDisabledPasses = false,
+        additionalExecute?: (context: FrameGraphRenderContext) => void,
+        additionalBindings?: (context: FrameGraphRenderContext) => void,
+    ): FrameGraphRenderPass {
+        const pass = super.record(
+            skipCreationOfDisabledPasses,
+            additionalExecute,
+            (context) => {
+                const settings = this.getSettings();
+                const effect = this.postProcess.effect;
+                const engine = this.postProcess.options.engine;
+                const shadowColor = settings.offsetShadowColor;
+                effect.setFloat2(
+                    "texelSize",
+                    1 / Math.max(1, engine.getRenderWidth()),
+                    1 / Math.max(1, engine.getRenderHeight()),
+                );
+                effect.setFloat2("offsetPixels", settings.offsetShadowOffsetX, settings.offsetShadowOffsetY);
+                effect.setFloat("strength", Math.max(0, Math.min(2, settings.offsetShadowStrength)));
+                effect.setFloat("depthBias", Math.max(0, Math.min(1, settings.offsetShadowDepthBias)));
+                effect.setFloat("maxDepth", Math.max(0.001, Math.min(4, settings.offsetShadowMaxDepth)));
+                effect.setFloat("depthScale", Math.max(0, Math.min(1, settings.offsetShadowDepthScale)));
+                effect.setFloat("thickness", Math.max(0.0001, Math.min(1, settings.offsetShadowThickness)));
+                effect.setFloat("softness", Math.max(0, Math.min(12, settings.offsetShadowSoftness)));
+                effect.setFloat3(
+                    "shadowColor",
+                    Math.max(0, Math.min(1, shadowColor.r)),
+                    Math.max(0, Math.min(1, shadowColor.g)),
+                    Math.max(0, Math.min(1, shadowColor.b)),
+                );
+                effect.setFloat("debugView", settings.offsetShadowDebugView ? 1 : 0);
+                if (this.depthTexture !== undefined) {
+                    context.bindTextureHandle(effect, "depthSampler", this.depthTexture);
+                }
+                additionalBindings?.(context);
+            },
+        );
+        if (this.depthTexture !== undefined) {
+            pass.addDependencies(this.depthTexture);
         }
         return pass;
     }
@@ -1363,6 +1654,8 @@ export class FrameGraphPostEffectsController {
     private ssaoTask: FrameGraphSSAO2RenderingPipelineTask | null = null;
     private ssaoToonCompositeEffect: EffectWrapper | null = null;
     private ssaoToonCompositeTask: FrameGraphPostEffectsSsaoToonCompositeTask | null = null;
+    private offsetShadowEffect: EffectWrapper | null = null;
+    private offsetShadowTask: FrameGraphPostEffectsOffsetShadowTask | null = null;
     private ssrTask: FrameGraphSSRRenderingPipelineTask | null = null;
     private depthOfFieldTask: FrameGraphDepthOfFieldTask | null = null;
     private luminousExtractEffect: EffectWrapper | null = null;
@@ -1378,6 +1671,8 @@ export class FrameGraphPostEffectsController {
     private luminousEffect: EffectWrapper | null = null;
     private luminousTask: FrameGraphPostEffectsLuminousTask | null = null;
     private bloomTask: FrameGraphBloomTask | null = null;
+    private bloomTintEffect: EffectWrapper | null = null;
+    private bloomTintTask: FrameGraphPostEffectsBloomTintTask | null = null;
     private chromaticAberrationEffect: ThinChromaticAberrationPostProcess | null = null;
     private chromaticAberrationTask: FrameGraphChromaticAberrationTask | null = null;
     private vignetteEdgeBlurEffect: EffectWrapper | null = null;
@@ -1425,6 +1720,7 @@ export class FrameGraphPostEffectsController {
             bloomWeight: 1,
             bloomThreshold: 1,
             bloomKernel: 100,
+            bloomColor: { r: 1, g: 0.48, b: 0.16 },
             vignetteEnabled: false,
             vignetteWeight: 0.3,
             edgeBlurStrength: 0,
@@ -1437,6 +1733,18 @@ export class FrameGraphPostEffectsController {
             ssaoRadius: 2,
             ssaoShadowColor: { r: 0.5, g: 0.5, b: 0.5 },
             ssaoToonInfluence: 1,
+            offsetShadowEnabled: false,
+            offsetShadowStrength: 0.35,
+            offsetShadowOffsetX: 0,
+            offsetShadowOffsetY: -30,
+            offsetShadowDepthBias: 0.1,
+            offsetShadowMaxDepth: 2,
+            offsetShadowDepthScale: 1,
+            offsetShadowThickness: 1,
+            offsetShadowSoftness: 0,
+            offsetShadowNormalInfluence: 0,
+            offsetShadowColor: { r: 0.29, g: 0.21, b: 0.16 },
+            offsetShadowDebugView: false,
             ssrEnabled: false,
             ssrStrength: 0.3,
             ssrStep: 4,
@@ -1495,6 +1803,7 @@ export class FrameGraphPostEffectsController {
                 ssr: this.ssrTask !== null,
                 ssao: this.ssaoTask !== null,
                 ssaoToonComposite: this.ssaoToonCompositeTask !== null,
+                offsetShadow: this.offsetShadowTask !== null,
                 dof: this.depthOfFieldTask !== null,
                 luminousExtract: this.luminousExtractTask !== null,
                 luminousCoreBlur: this.luminousCoreBlurHorizontalTask !== null
@@ -1503,6 +1812,7 @@ export class FrameGraphPostEffectsController {
                     && this.luminousHaloBlurVerticalTask !== null,
                 luminousComposite: this.luminousTask !== null,
                 bloom: this.bloomTask !== null,
+                bloomTint: this.bloomTintTask !== null,
                 lut: this.lutTask !== null,
                 colorCorrection: this.colorCorrectionEffect !== null,
                 sharpen: this.sharpenTask !== null,
@@ -1551,6 +1861,8 @@ export class FrameGraphPostEffectsController {
 
         ensureColorCorrectionShaders();
         ensureLuminousShaders();
+        ensureBloomTintShaders();
+        ensureOffsetShadowShaders();
         ensureLutShaders();
         ensureSsaoToonCompositeShaders();
         ensureVignetteEdgeBlurShaders();
@@ -1671,7 +1983,7 @@ export class FrameGraphPostEffectsController {
             this.geometryRendererTask = geometryRendererTask;
 
             let ssaoSourceTexture = imageProcessingTask.outputTexture;
-            if (this.isSsrEnabled(initialSettings)) {
+            if (this.isPostEffectActive(initialSettings, "ssr")) {
                 const ssrTask = new FrameGraphSSRRenderingPipelineTask(
                     "frameGraphPostEffectsSSR",
                     frameGraph,
@@ -1690,7 +2002,7 @@ export class FrameGraphPostEffectsController {
                 dofSourceTexture = ssrTask.outputTexture;
             }
 
-            if (initialSettings.ssaoEnabled && initialSettings.ssaoStrength > 0.00001) {
+            if (this.isPostEffectActive(initialSettings, "ssao")) {
                 const ssaoTask = new FrameGraphSSAO2RenderingPipelineTask(
                     "frameGraphPostEffectsSSAO2",
                     frameGraph,
@@ -1728,6 +2040,42 @@ export class FrameGraphPostEffectsController {
                 frameGraph.addTask(ssaoToonCompositeTask);
                 this.ssaoToonCompositeTask = ssaoToonCompositeTask;
                 dofSourceTexture = ssaoToonCompositeTask.outputTexture;
+            }
+
+            if (this.isPostEffectActive(initialSettings, "offsetShadow")) {
+                this.offsetShadowEffect = new EffectWrapper({
+                    engine: frameGraph.engine,
+                    fragmentShader: "mmdFrameGraphOffsetShadow",
+                    useShaderStore: true,
+                    useAsPostProcess: true,
+                    uniforms: [
+                        "texelSize",
+                        "offsetPixels",
+                        "strength",
+                        "depthBias",
+                        "maxDepth",
+                        "depthScale",
+                        "thickness",
+                        "softness",
+                        "shadowColor",
+                        "debugView",
+                    ],
+                    samplers: ["depthSampler"],
+                    name: "mmdFrameGraphOffsetShadow",
+                    shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+                });
+                const offsetShadowTask = new FrameGraphPostEffectsOffsetShadowTask(
+                    "frameGraphPostEffectsOffsetShadow",
+                    frameGraph,
+                    this.offsetShadowEffect,
+                    this.getSettings,
+                );
+                offsetShadowTask.sourceTexture = dofSourceTexture;
+                offsetShadowTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+                offsetShadowTask.disabled = false;
+                frameGraph.addTask(offsetShadowTask);
+                this.offsetShadowTask = offsetShadowTask;
+                dofSourceTexture = offsetShadowTask.outputTexture;
             }
         }
 
@@ -1899,6 +2247,28 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(bloomTask);
         this.bloomTask = bloomTask;
 
+        this.bloomTintEffect = new EffectWrapper({
+            engine: frameGraph.engine,
+            fragmentShader: "mmdFrameGraphBloomTint",
+            useShaderStore: true,
+            useAsPostProcess: true,
+            uniforms: ["bloomColor"],
+            samplers: ["originalSampler"],
+            name: "mmdFrameGraphBloomTint",
+            shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
+        });
+        const bloomTintTask = new FrameGraphPostEffectsBloomTintTask(
+            "frameGraphPostEffectsBloomTint",
+            frameGraph,
+            this.bloomTintEffect,
+            this.getSettings,
+        );
+        bloomTintTask.sourceTexture = bloomTask.outputTexture;
+        bloomTintTask.originalTexture = luminousOutputTexture;
+        bloomTintTask.disabled = !initialSettings.bloomEnabled;
+        frameGraph.addTask(bloomTintTask);
+        this.bloomTintTask = bloomTintTask;
+
         this.lutEffect = new EffectWrapper({
             engine: frameGraph.engine,
             fragmentShader: "mmdFrameGraphLut",
@@ -1916,7 +2286,7 @@ export class FrameGraphPostEffectsController {
             this.getSettings,
             () => this.lutTexture,
         );
-        lutTask.sourceTexture = bloomTask.outputTexture;
+        lutTask.sourceTexture = bloomTintTask.outputTexture;
         lutTask.disabled = !this.isLutEnabled(initialSettings);
         frameGraph.addTask(lutTask);
         this.lutTask = lutTask;
@@ -2135,19 +2505,26 @@ export class FrameGraphPostEffectsController {
             this.geometryRendererTask.disabled = !resourcePlan.needsGeometryRenderer;
         }
         if (this.ssrTask) {
-            this.ssrTask.disabled = !this.isSsrEnabled(settings);
+            this.ssrTask.disabled = !this.isPostEffectActive(settings, "ssr");
             this.applySsrSettings(this.ssrTask, settings);
         }
         if (this.ssaoTask) {
-            this.ssaoTask.disabled = !settings.ssaoEnabled || settings.ssaoStrength <= 0.00001;
+            this.ssaoTask.disabled = !this.isPostEffectActive(settings, "ssao");
             this.applySsaoSettings(this.ssaoTask, settings, this.ssaoTask.camera);
         }
         if (this.ssaoToonCompositeTask) {
-            this.ssaoToonCompositeTask.disabled = !settings.ssaoEnabled || settings.ssaoStrength <= 0.00001;
+            this.ssaoToonCompositeTask.disabled = !this.isPostEffectActive(settings, "ssao");
+        }
+        if (this.offsetShadowTask) {
+            this.offsetShadowTask.disabled = !this.isPostEffectActive(settings, "offsetShadow")
+                || this.offsetShadowTask.depthTexture === undefined;
         }
         if (this.bloomTask) {
             this.bloomTask.disabled = !settings.bloomEnabled;
             this.applyBloomSettings(this.bloomTask, settings);
+        }
+        if (this.bloomTintTask) {
+            this.bloomTintTask.disabled = !settings.bloomEnabled;
         }
         if (this.lutTask) {
             this.lutTask.disabled = !this.isLutEnabled(settings);
@@ -2230,6 +2607,13 @@ export class FrameGraphPostEffectsController {
                         this.connectedOrder.push("ssao");
                     }
                     break;
+                case "offsetShadow":
+                    if (this.offsetShadowTask && !this.offsetShadowTask.disabled) {
+                        this.offsetShadowTask.sourceTexture = currentTexture;
+                        currentTexture = this.offsetShadowTask.outputTexture;
+                        this.connectedOrder.push("offsetShadow");
+                    }
+                    break;
                 case "dof":
                     if (this.depthOfFieldTask && !this.depthOfFieldTask.disabled) {
                         this.depthOfFieldTask.sourceTexture = currentTexture;
@@ -2245,9 +2629,11 @@ export class FrameGraphPostEffectsController {
                     }
                     break;
                 case "bloom":
-                    if (this.bloomTask && !this.bloomTask.disabled) {
+                    if (this.bloomTask && !this.bloomTask.disabled && this.bloomTintTask && !this.bloomTintTask.disabled) {
                         this.bloomTask.sourceTexture = currentTexture;
-                        currentTexture = this.bloomTask.outputTexture;
+                        this.bloomTintTask.sourceTexture = this.bloomTask.outputTexture;
+                        this.bloomTintTask.originalTexture = currentTexture;
+                        currentTexture = this.bloomTintTask.outputTexture;
                         this.connectedOrder.push("bloom");
                     }
                     break;
@@ -2326,6 +2712,9 @@ export class FrameGraphPostEffectsController {
         this.ssaoToonCompositeEffect?.dispose();
         this.ssaoToonCompositeEffect = null;
         this.ssaoToonCompositeTask = null;
+        this.offsetShadowEffect?.dispose();
+        this.offsetShadowEffect = null;
+        this.offsetShadowTask = null;
         this.depthOfFieldTask = null;
         this.luminousExtractEffect?.dispose();
         this.luminousExtractEffect = null;
@@ -2346,6 +2735,9 @@ export class FrameGraphPostEffectsController {
         this.luminousEffect = null;
         this.luminousTask = null;
         this.bloomTask = null;
+        this.bloomTintEffect?.dispose();
+        this.bloomTintEffect = null;
+        this.bloomTintTask = null;
         this.chromaticAberrationEffect?.dispose();
         this.chromaticAberrationEffect = null;
         this.chromaticAberrationTask = null;
@@ -2481,8 +2873,11 @@ export class FrameGraphPostEffectsController {
         ssrTask.ssr.debug = false;
     }
 
-    private isSsrEnabled(settings: FrameGraphPostEffectsSettings): boolean {
-        return settings.ssrEnabled && settings.ssrStrength > 0.00001;
+    private isPostEffectActive(
+        settings: FrameGraphPostEffectsSettings,
+        id: FrameGraphPostEffectId,
+    ): boolean {
+        return isFrameGraphPostEffectActiveInSettings(settings, id);
     }
 
     private applyChromaticAberrationSettings(
@@ -2512,8 +2907,8 @@ export class FrameGraphPostEffectsController {
     }
 
     private isVignetteEdgeBlurEnabled(settings: FrameGraphPostEffectsSettings): boolean {
-        return (settings.vignetteEnabled && settings.vignetteWeight > 0.0001)
-            || settings.edgeBlurStrength > 0.0001;
+        return this.isPostEffectActive(settings, "vignette")
+            || this.isPostEffectActive(settings, "edgeBlur");
     }
 
     private getSourceTextureSize(scene: Scene, sourceTexture: InternalTexture): { width: number; height: number } {

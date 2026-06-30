@@ -230,6 +230,12 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         setActive: (manager, active) => { manager.postEffectSsaoEnabled = active; },
     },
     {
+        id: "offsetShadow",
+        label: "Offset Shadow",
+        isActive: (manager) => manager.postEffectOffsetShadowEnabled,
+        setActive: (manager, active) => { manager.postEffectOffsetShadowEnabled = active; },
+    },
+    {
         id: "dof",
         label: "DoF",
         isActive: (manager) => manager.dofEnabled,
@@ -4158,6 +4164,17 @@ export class UIController {
                 this.mmdManager.postEffectSsaoFadeEnd = Math.min(this.mmdManager.postEffectSsaoFadeEnd, 100);
                 this.mmdManager.postEffectSsaoDebugView = false;
                 break;
+            case "offsetShadow":
+                this.mmdManager.postEffectOffsetShadowStrength = 0.35;
+                this.mmdManager.postEffectOffsetShadowOffsetX = 0;
+                this.mmdManager.postEffectOffsetShadowOffsetY = -30;
+                this.mmdManager.postEffectOffsetShadowDepthBias = 0.1;
+                this.mmdManager.postEffectOffsetShadowMaxDepth = 2;
+                this.mmdManager.postEffectOffsetShadowDepthScale = 1;
+                this.mmdManager.postEffectOffsetShadowThickness = 1;
+                this.mmdManager.postEffectOffsetShadowSoftness = 0;
+                this.mmdManager.postEffectOffsetShadowNormalInfluence = 0;
+                break;
             case "ssr":
                 this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 1);
                 this.mmdManager.postEffectSsrStep = Math.max(this.mmdManager.postEffectSsrStep, 4);
@@ -4208,6 +4225,9 @@ export class UIController {
                 break;
             case "ssao":
                 this.mmdManager.postEffectSsaoEnabled = true;
+                break;
+            case "offsetShadow":
+                this.mmdManager.postEffectOffsetShadowEnabled = true;
                 break;
             case "ssr":
                 this.mmdManager.postEffectSsrEnabled = true;
@@ -4343,6 +4363,25 @@ export class UIController {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#39;");
+    }
+
+    private toEffectStackHexColor(color: { r: number; g: number; b: number }): string {
+        const toHex = (value: number): string => {
+            const byte = Math.max(0, Math.min(255, Math.round(value * 255)));
+            return byte.toString(16).padStart(2, "0");
+        };
+        return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+    }
+
+    private readEffectStackHexColor(value: string): { r: number; g: number; b: number } | null {
+        const match = /^#([0-9a-f]{6})$/i.exec(value);
+        if (!match) return null;
+        const hex = match[1];
+        return {
+            r: Number.parseInt(hex.slice(0, 2), 16) / 255,
+            g: Number.parseInt(hex.slice(2, 4), 16) / 255,
+            b: Number.parseInt(hex.slice(4, 6), 16) / 255,
+        };
     }
 
     private getFrameGraphPostStackLutSourceLabel(): string {
@@ -4481,15 +4520,30 @@ export class UIController {
                 <span class="effect-layer-control-value" data-effect-stack-value="${action}">${displayValue}</span>
             </div>
         `;
+        const color = (
+            field: string,
+            label: string,
+            value: string,
+            displayValue: string,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <input class="effect-layer-control-color" type="color" value="${value}" data-effect-stack-control="${field}"${disabledAttr}>
+                <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
+            </div>
+        `;
 
         switch (effect.id) {
-            case "bloom":
+            case "bloom": {
+                const bloomColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectBloomColor());
                 rows.push(
+                    color("bloomColor", "Color", bloomColor, bloomColor),
                     range("bloomWeight", "Weight", 0, 200, Math.round(this.mmdManager.postEffectBloomWeight * 100), this.mmdManager.postEffectBloomWeight.toFixed(2)),
                     range("bloomThreshold", "Threshold", 0, 200, Math.round(this.mmdManager.postEffectBloomThreshold * 100), this.mmdManager.postEffectBloomThreshold.toFixed(2)),
                     range("bloomKernel", "Kernel", 1, 256, Math.round(this.mmdManager.postEffectBloomKernel), String(Math.round(this.mmdManager.postEffectBloomKernel))),
                 );
                 break;
+            }
             case "luminous":
                 rows.push(
                     range("luminousIntensity", "Intensity", 0, 200, Math.round(this.mmdManager.postEffectGlowIntensity * 100), this.mmdManager.postEffectGlowIntensity.toFixed(2)),
@@ -4555,6 +4609,21 @@ export class UIController {
                     range("ssaoFadeEnd", "FadeEnd", 4, 200, Math.round(this.mmdManager.postEffectSsaoFadeEnd), `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`),
                 );
                 break;
+            case "offsetShadow": {
+                const offsetShadowColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
+                rows.push(
+                    color("offsetShadowColor", "Color", offsetShadowColor, offsetShadowColor),
+                    range("offsetShadowStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowStrength * 100), this.mmdManager.postEffectOffsetShadowStrength.toFixed(2)),
+                    range("offsetShadowOffsetX", "Offset X", -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetX), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`),
+                    range("offsetShadowOffsetY", "Offset Y", -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetY), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`),
+                    range("offsetShadowDepthBias", "Min Depth", 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowDepthBias * 1000), this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3)),
+                    range("offsetShadowMaxDepth", "Max Depth", 1, 4000, Math.round(this.mmdManager.postEffectOffsetShadowMaxDepth * 1000), this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3)),
+                    range("offsetShadowDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetShadowDepthScale * 100), this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2)),
+                    range("offsetShadowThickness", "Thickness", 1, 100, Math.round(this.mmdManager.postEffectOffsetShadowThickness * 100), this.mmdManager.postEffectOffsetShadowThickness.toFixed(2)),
+                    range("offsetShadowSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetShadowSoftness * 10), `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`),
+                );
+                break;
+            }
             case "ssr":
                 rows.push(
                     range("ssrStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectSsrStrength * 100), this.mmdManager.postEffectSsrStrength.toFixed(2)),
@@ -4590,7 +4659,9 @@ export class UIController {
 
     private applyFrameGraphPostStackControl(control: HTMLInputElement | HTMLSelectElement, commit: boolean): void {
         const field = control.dataset.effectStackControl ?? "";
-        const rawValue = control instanceof HTMLInputElement ? Number(control.value) : control.value;
+        const rawValue = control instanceof HTMLInputElement && control.type !== "color"
+            ? Number(control.value)
+            : control.value;
         const effectId = this.getFrameGraphPostEffectIdForControlField(field);
         const wasActive = effectId ? this.mmdManager.isFrameGraphPostEffectActive(effectId) : false;
 
@@ -4604,6 +4675,12 @@ export class UIController {
             case "bloomKernel":
                 this.mmdManager.postEffectBloomKernel = Number(rawValue);
                 break;
+            case "bloomColor": {
+                const colorValue = this.readEffectStackHexColor(String(rawValue));
+                if (!colorValue) return;
+                this.mmdManager.setPostEffectBloomColor(colorValue.r, colorValue.g, colorValue.b);
+                break;
+            }
             case "luminousIntensity":
                 this.mmdManager.postEffectGlowIntensity = Number(rawValue) / 100;
                 break;
@@ -4689,6 +4766,39 @@ export class UIController {
             case "ssaoFadeEnd":
                 this.mmdManager.postEffectSsaoFadeEnd = Number(rawValue);
                 break;
+            case "offsetShadowStrength":
+                this.mmdManager.postEffectOffsetShadowStrength = Number(rawValue) / 100;
+                break;
+            case "offsetShadowOffsetX":
+                this.mmdManager.postEffectOffsetShadowOffsetX = Number(rawValue);
+                break;
+            case "offsetShadowOffsetY":
+                this.mmdManager.postEffectOffsetShadowOffsetY = Number(rawValue);
+                break;
+            case "offsetShadowDepthBias":
+                this.mmdManager.postEffectOffsetShadowDepthBias = Number(rawValue) / 1000;
+                break;
+            case "offsetShadowMaxDepth":
+                this.mmdManager.postEffectOffsetShadowMaxDepth = Number(rawValue) / 1000;
+                break;
+            case "offsetShadowDepthScale":
+                this.mmdManager.postEffectOffsetShadowDepthScale = Number(rawValue) / 100;
+                break;
+            case "offsetShadowThickness":
+                this.mmdManager.postEffectOffsetShadowThickness = Number(rawValue) / 100;
+                break;
+            case "offsetShadowSoftness":
+                this.mmdManager.postEffectOffsetShadowSoftness = Number(rawValue) / 10;
+                break;
+            case "offsetShadowNormalInfluence":
+                this.mmdManager.postEffectOffsetShadowNormalInfluence = Number(rawValue) / 100;
+                break;
+            case "offsetShadowColor": {
+                const colorValue = this.readEffectStackHexColor(String(rawValue));
+                if (!colorValue) return;
+                this.mmdManager.setPostEffectOffsetShadowColor(colorValue.r, colorValue.g, colorValue.b);
+                break;
+            }
             case "ssrStrength":
                 this.mmdManager.postEffectSsrStrength = Number(rawValue) / 100;
                 break;
@@ -4732,6 +4842,7 @@ export class UIController {
             case "bloomWeight":
             case "bloomThreshold":
             case "bloomKernel":
+            case "bloomColor":
                 return "bloom";
             case "luminousIntensity":
             case "luminousThreshold":
@@ -4757,6 +4868,17 @@ export class UIController {
             case "ssaoRadius":
             case "ssaoFadeEnd":
                 return "ssao";
+            case "offsetShadowStrength":
+            case "offsetShadowOffsetX":
+            case "offsetShadowOffsetY":
+            case "offsetShadowDepthBias":
+            case "offsetShadowMaxDepth":
+            case "offsetShadowDepthScale":
+            case "offsetShadowThickness":
+            case "offsetShadowSoftness":
+            case "offsetShadowNormalInfluence":
+            case "offsetShadowColor":
+                return "offsetShadow";
             case "ssrStrength":
             case "ssrStep":
                 return "ssr";
@@ -4792,6 +4914,9 @@ export class UIController {
                 break;
             case "bloomKernel":
                 valueElement.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
+                break;
+            case "bloomColor":
+                valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectBloomColor());
                 break;
             case "luminousIntensity":
                 valueElement.textContent = this.mmdManager.postEffectGlowIntensity.toFixed(2);
@@ -4852,6 +4977,36 @@ export class UIController {
                 break;
             case "ssaoFadeEnd":
                 valueElement.textContent = `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`;
+                break;
+            case "offsetShadowStrength":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowStrength.toFixed(2);
+                break;
+            case "offsetShadowOffsetX":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`;
+                break;
+            case "offsetShadowOffsetY":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`;
+                break;
+            case "offsetShadowDepthBias":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3);
+                break;
+            case "offsetShadowMaxDepth":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3);
+                break;
+            case "offsetShadowDepthScale":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2);
+                break;
+            case "offsetShadowThickness":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowThickness.toFixed(2);
+                break;
+            case "offsetShadowSoftness":
+                valueElement.textContent = `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`;
+                break;
+            case "offsetShadowNormalInfluence":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowNormalInfluence.toFixed(2);
+                break;
+            case "offsetShadowColor":
+                valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
                 break;
             case "ssrStrength":
                 valueElement.textContent = this.mmdManager.postEffectSsrStrength.toFixed(2);
