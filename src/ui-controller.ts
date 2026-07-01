@@ -220,96 +220,86 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
     {
         id: "ssr",
         label: "SSR",
-        isActive: (manager) => manager.postEffectSsrEnabled,
-        setActive: (manager, active) => { manager.postEffectSsrEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("ssr"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssr", active); },
     },
     {
         id: "ssao",
         label: "SSAO",
-        isActive: (manager) => manager.postEffectSsaoEnabled,
-        setActive: (manager, active) => { manager.postEffectSsaoEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("ssao"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssao", active); },
     },
     {
         id: "offsetShadow",
         label: "Offset Shadow",
-        isActive: (manager) => manager.postEffectOffsetShadowEnabled,
-        setActive: (manager, active) => { manager.postEffectOffsetShadowEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("offsetShadow"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("offsetShadow", active); },
     },
     {
         id: "offsetHighlight",
         label: "Offset Rim",
-        isActive: (manager) => manager.postEffectOffsetHighlightEnabled,
-        setActive: (manager, active) => { manager.postEffectOffsetHighlightEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("offsetHighlight"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("offsetHighlight", active); },
     },
     {
         id: "dof",
         label: "DoF",
-        isActive: (manager) => manager.dofEnabled,
-        setActive: (manager, active) => { manager.dofEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("dof"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("dof", active); },
     },
     {
         id: "luminous",
         label: "Luminous",
-        isActive: (manager) => manager.postEffectGlowEnabled,
-        setActive: (manager, active) => { manager.postEffectGlowEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("luminous"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("luminous", active); },
     },
     {
         id: "bloom",
         label: "Bloom",
-        isActive: (manager) => manager.postEffectBloomEnabled,
-        setActive: (manager, active) => { manager.postEffectBloomEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("bloom"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("bloom", active); },
     },
     {
         id: "lut",
         label: "LUT",
-        isActive: (manager) => manager.postEffectLutEnabled,
-        setActive: (manager, active) => { manager.postEffectLutEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("lut"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("lut", active); },
     },
     {
         id: "sharpen",
         label: "Sharpen",
-        isActive: (manager) => manager.postEffectSharpenEdge > 0.000001,
-        setActive: (manager, active) => {
-            if (!active) manager.postEffectSharpenEdge = 0;
-        },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("sharpen"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("sharpen", active); },
     },
     {
         id: "grain",
         label: "Grain",
-        isActive: (manager) => manager.postEffectGrainIntensity > 0.000001,
-        setActive: (manager, active) => {
-            if (!active) manager.postEffectGrainIntensity = 0;
-        },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("grain"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("grain", active); },
     },
     {
         id: "chromatic",
         label: "Chroma",
-        isActive: (manager) => manager.postEffectChromaticAberration > 0.000001,
-        setActive: (manager, active) => {
-            if (!active) manager.postEffectChromaticAberration = 0;
-        },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("chromatic"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("chromatic", active); },
     },
     {
         id: "vignette",
         label: "Vignette",
-        isActive: (manager) => manager.postEffectVignetteEnabled,
-        setActive: (manager, active) => { manager.postEffectVignetteEnabled = active; },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("vignette"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("vignette", active); },
     },
     {
         id: "edgeBlur",
         label: "EdgeBlur",
-        isActive: (manager) => manager.dofLensEdgeBlur > 0.000001,
-        setActive: (manager, active) => {
-            if (!active) manager.dofLensEdgeBlur = 0;
-        },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("edgeBlur"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("edgeBlur", active); },
     },
     {
         id: "distortion",
         label: "Distort",
-        isActive: (manager) => manager.dofLensDistortionInfluence > 0.000001,
-        setActive: (manager, active) => {
-            if (!active) manager.dofLensDistortionInfluence = 0;
-        },
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("distortion"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("distortion", active); },
     },
 ];
 
@@ -4283,9 +4273,6 @@ export class UIController {
         const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
         if (!effect) return;
         const wasActive = this.mmdManager.isFrameGraphPostEffectActive(effectId);
-        if (enabled) {
-            this.applyFrameGraphPostEffectDefaultValues(effectId);
-        }
         effect.setActive(this.mmdManager, enabled);
         if (wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
             this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();

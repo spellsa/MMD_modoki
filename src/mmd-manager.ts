@@ -223,6 +223,7 @@ import {
 } from "./render/frame-graph-post-effects-controller";
 import { buildFrameGraphResourcePlan } from "./render/frame-graph-resource-plan";
 import {
+    addFrameGraphPostEffectId,
     FRAME_GRAPH_POST_EFFECT_IDS,
     normalizeFrameGraphPostEffectIds,
     type FrameGraphPostEffectId,
@@ -1664,6 +1665,7 @@ ${beforeFogAppendBlock}
     private postEffectFogOpacityValue = 0.2;
     private postEffectFogColorValue = new Color3(0.04, 0.04, 0.06);
     private frameGraphPostEffectStackIdsValue: FrameGraphPostEffectId[] = [];
+    private frameGraphPostEffectStackEnabledValue = new Map<FrameGraphPostEffectId, boolean>();
     private antialiasEnabledValue = true;
     private postEffectFarDofStrengthValue = 0;
     private readonly farDofEnabled = false;
@@ -7317,13 +7319,13 @@ ${beforeFogAppendBlock}
             contrast: this.postEffectContrastValue,
             gammaPower: this.postEffectGammaValue,
             imageProcessingEnabled: this.isFrameGraphImageProcessingTaskNeeded(),
-            dofEnabled: this.dofEnabledValue,
+            dofEnabled: this.isFrameGraphPostEffectActive("dof"),
             dofBlurLevel: this.dofBlurLevelValue,
             dofFocusDistanceMm: this.dofFocusDistanceMmValue,
             dofEffectiveFStop: this.dofFStopValue,
             dofLensSize: this.dofLensSizeValue,
             dofFocalLength: this.dofFocalLengthValue,
-            luminousEnabled: this.postEffectGlowEnabledValue,
+            luminousEnabled: this.isFrameGraphPostEffectActive("luminous"),
             luminousIntensity: this.postEffectGlowIntensityValue,
             luminousThreshold: this.postEffectGlowThresholdValue,
             luminousRadius: this.postEffectGlowKernelValue,
@@ -7331,24 +7333,24 @@ ${beforeFogAppendBlock}
             luminousGlareLength: this.postEffectGlowGlareLengthValue,
             luminousGlareAngle: this.postEffectGlowGlareAngleValue,
             luminousGlarePower: this.postEffectGlowGlarePowerValue,
-            bloomEnabled: this.postEffectBloomEnabledValue,
+            bloomEnabled: this.isFrameGraphPostEffectActive("bloom"),
             bloomWeight: this.postEffectBloomWeightValue,
             bloomThreshold: this.postEffectBloomThresholdValue,
             bloomKernel: this.postEffectBloomKernelValue,
             bloomColor: this.getPostEffectBloomColor(),
-            vignetteEnabled: this.postEffectVignetteEnabledValue,
+            vignetteEnabled: this.isFrameGraphPostEffectActive("vignette"),
             vignetteWeight: this.postEffectVignetteWeightValue,
-            edgeBlurStrength: this.dofLensEdgeBlurValue,
-            lensDistortion: this.dofLensDistortionValue,
-            chromaticAberration: this.postEffectChromaticAberrationValue,
-            grainIntensity: this.postEffectGrainIntensityValue,
-            sharpenEdge: this.postEffectSharpenEdgeValue,
-            ssaoEnabled: this.postEffectSsaoEnabledValue,
+            edgeBlurStrength: this.isFrameGraphPostEffectActive("edgeBlur") ? this.dofLensEdgeBlurValue : 0,
+            lensDistortion: this.isFrameGraphPostEffectActive("distortion") ? this.dofLensDistortionValue : 0,
+            chromaticAberration: this.isFrameGraphPostEffectActive("chromatic") ? this.postEffectChromaticAberrationValue : 0,
+            grainIntensity: this.isFrameGraphPostEffectActive("grain") ? this.postEffectGrainIntensityValue : 0,
+            sharpenEdge: this.isFrameGraphPostEffectActive("sharpen") ? this.postEffectSharpenEdgeValue : 0,
+            ssaoEnabled: this.isFrameGraphPostEffectActive("ssao"),
             ssaoStrength: this.postEffectSsaoStrengthValue,
             ssaoRadius: this.postEffectSsaoRadiusValue,
             ssaoShadowColor: this.getShadowColor(),
             ssaoToonInfluence: this.toonShadowInfluenceValue,
-            offsetShadowEnabled: this.postEffectOffsetShadowEnabledValue,
+            offsetShadowEnabled: this.isFrameGraphPostEffectActive("offsetShadow"),
             offsetShadowStrength: this.postEffectOffsetShadowStrengthValue,
             offsetShadowOffsetX: this.postEffectOffsetShadowOffsetXValue,
             offsetShadowOffsetY: this.postEffectOffsetShadowOffsetYValue,
@@ -7360,7 +7362,7 @@ ${beforeFogAppendBlock}
             offsetShadowNormalInfluence: this.postEffectOffsetShadowNormalInfluenceValue,
             offsetShadowColor: this.getPostEffectOffsetShadowColor(),
             offsetShadowDebugView: this.postEffectOffsetShadowDebugViewValue,
-            offsetHighlightEnabled: this.postEffectOffsetHighlightEnabledValue,
+            offsetHighlightEnabled: this.isFrameGraphPostEffectActive("offsetHighlight"),
             offsetHighlightStrength: this.postEffectOffsetHighlightStrengthValue,
             offsetHighlightOffsetX: this.postEffectOffsetHighlightOffsetXValue,
             offsetHighlightOffsetY: this.postEffectOffsetHighlightOffsetYValue,
@@ -7371,10 +7373,10 @@ ${beforeFogAppendBlock}
             offsetHighlightDepthScale: this.postEffectOffsetHighlightDepthScaleValue,
             offsetHighlightColor: this.getPostEffectOffsetHighlightColor(),
             offsetHighlightDebugView: this.postEffectOffsetHighlightDebugViewValue,
-            ssrEnabled: this.postEffectSsrEnabledValue,
+            ssrEnabled: this.isFrameGraphPostEffectActive("ssr"),
             ssrStrength: this.postEffectSsrStrengthValue,
             ssrStep: this.postEffectSsrStepValue,
-            lutEnabled: this.postEffectLutEnabledValue && isLutSourceReadyImpl(this),
+            lutEnabled: this.isFrameGraphPostEffectActive("lut") && isLutSourceReadyImpl(this),
             lutIntensity: this.postEffectLutIntensityValue,
             lutRuntimeText: this.getFrameGraphPostEffectLutRuntimeText(),
             lutTextureKey: this.getFrameGraphPostEffectLutTextureKey(),
@@ -7392,7 +7394,7 @@ ${beforeFogAppendBlock}
     }
 
     private getFrameGraphPostEffectLutRuntimeText(): string | null {
-        if (!this.postEffectLutEnabledValue || !isLutSourceReadyImpl(this)) {
+        if (!this.isFrameGraphPostEffectActive("lut") || !isLutSourceReadyImpl(this)) {
             return null;
         }
         if (this.postEffectLutSourceModeValue === "builtin") {
@@ -7402,7 +7404,7 @@ ${beforeFogAppendBlock}
     }
 
     private getFrameGraphPostEffectLutTextureKey(): string | null {
-        if (!this.postEffectLutEnabledValue || !isLutSourceReadyImpl(this)) {
+        if (!this.isFrameGraphPostEffectActive("lut") || !isLutSourceReadyImpl(this)) {
             return null;
         }
         if (this.postEffectLutSourceModeValue === "builtin") {
@@ -7551,7 +7553,7 @@ ${beforeFogAppendBlock}
     }
 
     private reportFrameGraphLuminousMaskDiagnostics(): void {
-        if (this.postEffectBackend !== "frameGraph" || !this.postEffectGlowEnabledValue) {
+        if (this.postEffectBackend !== "frameGraph" || !this.isFrameGraphPostEffectActive("luminous")) {
             return;
         }
         const renderedCount = this.frameGraphPostEffectsLuminousMaskRenderedSubMeshCount;
@@ -7763,7 +7765,7 @@ ${beforeFogAppendBlock}
     public getFrameGraphPostEffectStackIds(): readonly FrameGraphPostEffectId[] {
         return normalizeFrameGraphPostEffectIds(
             this.frameGraphPostEffectStackIdsValue,
-            this.getActiveFrameGraphPostEffectIds(),
+            this.getParameterActiveFrameGraphPostEffectIds(),
         );
     }
 
@@ -7772,14 +7774,51 @@ ${beforeFogAppendBlock}
         if (this.areFrameGraphPostEffectIdsEqual(this.frameGraphPostEffectStackIdsValue, normalized)) {
             return;
         }
+        const normalizedSet = new Set(normalized);
+        for (const id of normalized) {
+            if (!this.frameGraphPostEffectStackEnabledValue.has(id)) {
+                this.frameGraphPostEffectStackEnabledValue.set(id, true);
+            }
+        }
+        for (const id of Array.from(this.frameGraphPostEffectStackEnabledValue.keys())) {
+            if (!normalizedSet.has(id)) {
+                this.frameGraphPostEffectStackEnabledValue.delete(id);
+            }
+        }
         this.frameGraphPostEffectStackIdsValue = normalized;
+        this.refreshFrameGraphPostEffectsBackendForOrderChange();
+    }
+
+    public setFrameGraphPostEffectStackEntries(entries: readonly FrameGraphPostEffectStackEntry[]): void {
+        const normalized = normalizeFrameGraphPostEffectIds(entries.map((entry) => entry.id));
+        const enabledById = new Map<FrameGraphPostEffectId, boolean>();
+        for (const entry of entries) {
+            if (normalized.includes(entry.id) && !enabledById.has(entry.id)) {
+                enabledById.set(entry.id, entry.enabled);
+            }
+        }
+        const idsChanged = !this.areFrameGraphPostEffectIdsEqual(this.frameGraphPostEffectStackIdsValue, normalized);
+        let enabledChanged = idsChanged || this.frameGraphPostEffectStackEnabledValue.size !== enabledById.size;
+        if (!enabledChanged) {
+            for (const id of normalized) {
+                if (this.frameGraphPostEffectStackEnabledValue.get(id) !== enabledById.get(id)) {
+                    enabledChanged = true;
+                    break;
+                }
+            }
+        }
+        if (!enabledChanged) {
+            return;
+        }
+        this.frameGraphPostEffectStackIdsValue = normalized;
+        this.frameGraphPostEffectStackEnabledValue = enabledById;
         this.refreshFrameGraphPostEffectsBackendForOrderChange();
     }
 
     public getFrameGraphPostEffectStackEntries(): FrameGraphPostEffectStackEntry[] {
         return this.getFrameGraphPostEffectStackIds().map((id) => ({
             id,
-            enabled: this.isFrameGraphPostEffectActive(id),
+            enabled: this.isFrameGraphPostEffectStackEnabled(id),
         }));
     }
 
@@ -7791,6 +7830,28 @@ ${beforeFogAppendBlock}
     }
 
     public isFrameGraphPostEffectActive(id: FrameGraphPostEffectId): boolean {
+        return this.getFrameGraphPostEffectStackIds().includes(id)
+            && this.isFrameGraphPostEffectStackEnabled(id);
+    }
+
+    public setFrameGraphPostEffectStackEntryEnabled(id: FrameGraphPostEffectId, enabled: boolean): void {
+        if (!this.getFrameGraphPostEffectStackIds().includes(id)) {
+            this.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(this.getFrameGraphPostEffectStackIds(), id));
+        }
+        const next = Boolean(enabled);
+        if (this.isFrameGraphPostEffectStackEnabled(id) === next) {
+            return;
+        }
+        this.frameGraphPostEffectStackEnabledValue.set(id, next);
+        this.refreshFrameGraphPostEffectsBackendForStackStateChange();
+    }
+
+    private isFrameGraphPostEffectStackEnabled(id: FrameGraphPostEffectId): boolean {
+        return this.frameGraphPostEffectStackEnabledValue.get(id)
+            ?? this.isFrameGraphPostEffectParameterActive(id);
+    }
+
+    private isFrameGraphPostEffectParameterActive(id: FrameGraphPostEffectId): boolean {
         switch (id) {
             case "ssr":
                 return this.postEffectSsrEnabledValue;
@@ -7822,6 +7883,10 @@ ${beforeFogAppendBlock}
                 return Math.abs(this.dofLensDistortionValue) > 0.000001
                     || Math.abs(this.dofLensDistortionInfluenceValue) > 0.000001;
         }
+    }
+
+    private getParameterActiveFrameGraphPostEffectIds(): FrameGraphPostEffectId[] {
+        return FRAME_GRAPH_POST_EFFECT_IDS.filter((id) => this.isFrameGraphPostEffectParameterActive(id));
     }
 
     private getActiveFrameGraphPostEffectIds(): FrameGraphPostEffectId[] {

@@ -140,6 +140,7 @@ function createHost() {
         setExternalWgslToonShader: vi.fn(),
         setPostEffectFogColor: vi.fn(),
         setFrameGraphPostEffectStackIds: vi.fn(),
+        setFrameGraphPostEffectStackEntries: vi.fn(),
         refreshTotalFramesFromContent: vi.fn(),
         setRenderFpsLimit: vi.fn(),
         seekTo: vi.fn(),
@@ -223,7 +224,10 @@ describe("importProjectState", () => {
 
         await importProjectState(host, project);
 
-        expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["lut", "bloom"]);
+        expect(host.setFrameGraphPostEffectStackEntries).toHaveBeenCalledWith([
+            { id: "lut", enabled: true },
+            { id: "bloom", enabled: false },
+        ]);
     });
 
     it("restores FrameGraph Luminous effect values", async () => {
@@ -306,7 +310,12 @@ describe("importProjectState", () => {
         expect(host.postEffectOffsetHighlightDepthScale).toBe(0.75);
         expect(host.setPostEffectOffsetHighlightColor).toHaveBeenCalledWith(1, 0.8, 0.6);
         expect(host.postEffectOffsetHighlightDebugView).toBe(true);
-        expect(host.setFrameGraphPostEffectStackIds).toHaveBeenCalledWith(["luminous", "offsetShadow", "offsetHighlight", "bloom"]);
+        expect(host.setFrameGraphPostEffectStackEntries).toHaveBeenCalledWith([
+            { id: "luminous", enabled: true },
+            { id: "offsetShadow", enabled: true },
+            { id: "offsetHighlight", enabled: true },
+            { id: "bloom", enabled: false },
+        ]);
     });
 
     it("restores mirroring floor viewport values", async () => {

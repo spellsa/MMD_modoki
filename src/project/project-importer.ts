@@ -11,6 +11,7 @@ import { createCameraAnimationFromTrack, deserializeCameraTrack, deserializeMode
 import {
     normalizeFrameGraphPostEffectStack,
     type FrameGraphPostEffectId,
+    type FrameGraphPostEffectStackEntry,
 } from "../shared/frame-graph-post-effect-stack";
 
 type ProjectImportRuntimeModel = {
@@ -213,6 +214,7 @@ type ProjectImportHost = {
     postEffectFogOpacity: number;
     setPostEffectFogColor(r: number, g: number, b: number): void;
     setFrameGraphPostEffectStackIds?: (ids: readonly FrameGraphPostEffectId[]) => void;
+    setFrameGraphPostEffectStackEntries?: (entries: readonly FrameGraphPostEffectStackEntry[]) => void;
     refreshTotalFramesFromContent(): void;
     setRenderFpsLimit(value: number): void;
     renderFpsLimit: number;
@@ -997,9 +999,12 @@ export async function importProjectState(
         host.setPostEffectFogColor(data.effects.fogColor.r, data.effects.fogColor.g, data.effects.fogColor.b);
     }
     if (Array.isArray(data.effects.frameGraphPostStack)) {
-        host.setFrameGraphPostEffectStackIds?.(
-            normalizeFrameGraphPostEffectStack(data.effects.frameGraphPostStack).map((entry) => entry.id),
-        );
+        const stackEntries = normalizeFrameGraphPostEffectStack(data.effects.frameGraphPostStack);
+        if (host.setFrameGraphPostEffectStackEntries) {
+            host.setFrameGraphPostEffectStackEntries(stackEntries);
+        } else {
+            host.setFrameGraphPostEffectStackIds?.(stackEntries.map((entry) => entry.id));
+        }
     }
 
     host.refreshTotalFramesFromContent();
