@@ -414,3 +414,19 @@ v0.2 の PoC が進んで設定項目が増える場合は、settings または 
 4. WebGPU で `scene color -> copy -> backbuffer` の最小 PoC を作る
 5. DoF を 1 つだけ追加して既存 DoF と比較する
 6. 空気遠近は通常 PostProcess で見た目を作り、Frame Graph 化できるか判断する
+
+## 2026-07-01 現行補足
+
+この文書は初期 PoC 計画として残す。現在の実装は、ここで想定していた「固定順の DoF / Bloom / LUT / SSAO PoC」から進み、右パネルの FrameGraph / Post stack をユーザーが並べ替えられる構成になっている。
+
+現行の前提:
+
+- FrameGraph はまだ MMD scene render 全体の置き換えではなく、既存 scene color を取り込む post effect backend として扱う。
+- Stack entry は `{ id, enabled }` を持ち、順序と ON/OFF を project に保存する。
+- ON/OFF は効果パラメーターとは分離する。OFF にしても色や強度などの値は保持する。
+- `Offset Rim -> Bloom` のように並べると、前段効果の結果へ後段効果がかかる。
+- WebGPU FrameGraph の texture 依存は build 後に固定されるため、順序や enabled 状態を変えたら backend を rebuild する。
+
+現在 stack で扱う主な効果は `SSR / SSAO / Offset Shadow / Offset Rim / DoF / Luminous / Bloom / LUT / Sharpen / Grain / Chroma / Vignette / EdgeBlur / Distort`。詳細は [FrameGraph Post Stack 現行仕様メモ 2026-07-01](./framegraph-post-stack-current-spec-2026-07-01.md) を参照する。
+
+このため、本文中の「feature flag default OFF」「DoF / Bloom / LUT の最小順序 PoC」「LUT は Classic 優先」といった記述は当時の段階の判断であり、現在の UI / runtime 状態とは一致しない箇所がある。

@@ -502,3 +502,18 @@ Frame Graph 移行の最初の難所だった「通常描画の scene color を 
 - 実機確認では 1.0 を超える範囲より、0.0-1.0 の範囲を細かく触れるほうが調整しやすい。
 - Frame Graph backend 選択時は、既存値が 1.0 を超えている場合に UI 初期化時点で 1.0 へ丸める。
 - Classic backend の SSAO UI とは DOM を共有しない方針を維持する。
+
+## 2026-07-01 現行補足
+
+この進捗メモの 2026-04 / 2026-05 時点の記述には、現在から見ると古い判断が含まれる。最新の大きな差分は次の通り。
+
+- FrameGraph backend は固定 task chain ではなく、UI の post stack order を runtime order として反映する。
+- `frameGraphPostStack` により、順序と enabled 状態を project save/load で保持する。
+- 個別 ON/OFF はパラメーター値を消さず、stack entry の `enabled` だけを切り替える。
+- Luminous は FrameGraph stack の `luminous` として扱い、専用 luminous mask から blur / composite する経路に寄っている。旧 GlowLayer は主に classic / fallback 文脈。
+- LUT は FrameGraph 側にも stack entry として存在する。外部 LUT や出力反映の完全確認は引き続き残課題。
+- SSAO / SSR は depth / normal / reflectivity を必要とする重い resource を使うため、resource plan と stack enabled 状態の同期が重要。
+- `Offset Shadow` と `Offset Rim` が custom FrameGraph post effect として追加された。
+- WebGPU の validation warning を避けるため、stack 順序変更時に `execute()` 中で texture を live reconnect しない。backend rebuild を行う。
+
+今後この文書を読む場合は、実装済みの現行仕様として [FrameGraph Post Stack 現行仕様メモ 2026-07-01](./framegraph-post-stack-current-spec-2026-07-01.md) を先に見ること。

@@ -1,6 +1,6 @@
 # MMD基本機能タスクチェックリスト
 
-更新日: 2026-04-13
+更新日: 2026-07-01
 
 ## 対象ファイル
 
@@ -47,6 +47,7 @@
 - [x] DoF / レンズ関連調整
 - [x] モデル輪郭調整
 - [x] FrameGraph 効果スタックで Luminous を追加 / 並べ替え / 保存復元
+- [x] FrameGraph 効果スタックで Bloom / DoF / LUT / SSR / SSAO / Luminous / Offset Shadow / Offset Rim などを追加 / 並べ替え / 保存復元
 - [x] PNG 出力
 - [x] WebM 出力
 - [x] UI 非表示モード
@@ -56,6 +57,8 @@
 補足:
 - 動画出力は `WebM` 採用
 - `MP4` は当面スコープ外
+- FrameGraph Post stack の現行仕様は [FrameGraph Post Stack 現行仕様メモ 2026-07-01](./framegraph-post-stack-current-spec-2026-07-01.md) を参照。
+- FrameGraph / PostFX の既知制約は [FrameGraph / PostFX 危険メモ 2026-07-01](./framegraph-postfx-risk-note-2026-07-01.md) を参照。
 - Luminous は AutoLuminous 資産を拾う補助発光として実装中。現行仕様は [Luminous / AutoLuminous 代替 FrameGraph 再設計メモ](./luminous-frame-graph-redesign-plan-2026-06-13.md) を参照。
 
 ## 3. タイムライン・キーフレーム編集
@@ -69,7 +72,7 @@
 - [x] 1フレーム移動
 - [x] ボーンのギズモ操作からキーフレーム登録
 - [x] カメラキーフレーム登録
-- [ ] オートキー登録（ボーン / カメラを動かしたら自動で現在フレームにキー登録）
+- [x] オートキー登録（ボーン / カメラを動かしたら自動で現在フレームにキー登録）
 - [ ] キー登録補助機能（上書き確認 / 未変更時スキップ / 複数対象の一括登録 など）
 - [ ] ボーンの位置 / 角度補正
 - [ ] モーフの位置 / 角度補正
@@ -128,7 +131,7 @@
 - [x] 剛体表示 / 方向表示 UI
 - [x] `disableOffsetForConstraintFrame: true` でのモデル動作
 - [x] 読み込み / 再生開始時の物理安定化
-- [ ] 物理モード 0/1/2 の比較検証
+- [x] 物理モード 0/1/2 の比較検証
 - [ ] `disableBidirectionalTransformation` 切り替え検証
 - [ ] 物理焼込キーの読み込み
 - [ ] 物理焼込キーの編集

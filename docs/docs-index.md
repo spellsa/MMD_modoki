@@ -40,6 +40,8 @@
 
 - [v0.2 作業メモ](./v0.2-task-memo.md)
 - [v0.2 作業チェックリスト](./v0.2-task-checklist.md)
+- [v0.2 ブランチ総括 2026-07-01](./v0.2-branch-summary-2026-07-01.md)
+- [v0.2 main 統合計画 2026-07-01](./v0.2-main-merge-plan-2026-07-01.md)
 - [v0.2 UI レイアウトスケッチ](./v0.2-ui-layout-sketch-2026-05-30.md)
 - [v0.2 レンダリング性能計測](./v0.2-render-performance-measurement-2026-04-28.md)
 - [v0.1.7 リリースノート下書き](./v0.1.7-release-note-draft.md)
@@ -154,8 +156,10 @@
 ## Frame Graph / PostFX
 
 - [ポストエフェクト拡充バックログ](./post-effects-backlog.md)
+- [FrameGraph / PostFX 危険メモ 2026-07-01](./framegraph-postfx-risk-note-2026-07-01.md)
 - [Frame Graph post effects plan](./frame-graph-post-effects-plan-2026-04-28.md)
 - [Frame Graph post effects progress](./frame-graph-post-effects-progress-2026-04-28.md)
+- [FrameGraph Post Stack current spec 2026-07-01](./framegraph-post-stack-current-spec-2026-07-01.md)
 - [Frame Graph effect stack order plan](./frame-graph-effect-stack-order-plan-2026-06-13.md)
 - [Frame Graph resource registry note](./frame-graph-resource-registry-note-2026-05-30.md)
 - [FrameGraph current resource inventory](./framegraph-current-resource-inventory-2026-06-14.md)

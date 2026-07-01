@@ -78,3 +78,24 @@ DepthRenderer の削減は、Classic 側 DoF / FarDoF PostProcess の残存と�
   - WebGPU / Bullet MPR 初期化まで passed
 - `npm.cmd run log:errors`
   - latest session に warn/error なし
+
+## 2026-07-01 現行補足
+
+ResourcePlan は、FrameGraph post stack の拡張後も引き続き重要。現在は `Offset Shadow` / `Offset Rim` / `Luminous` / `SSAO` / `SSR` など、必要 resource が大きく異なる効果が同じ stack に並ぶ。
+
+現行の追加前提:
+
+- `offsetShadow` は `viewDepth` を使う。実装上は段差判定と receiver guard が主で、法線はデフォルトで強く使わない。
+- `offsetHighlight` / UI 表示 `Offset Rim` は `viewDepth` を使う。post effect の depth offset 差分から輪郭リムを作る。
+- `luminous` は `luminousMask` を使う。
+- `ssao` は `viewDepth` / `viewNormal` を使う。
+- `ssr` は `viewDepth` / `viewNormal` / `reflectivity` を使う。
+- `dof` は scene depth 系を使う。
+
+Stack order / enabled 変更は resource plan と task chain の両方に影響する。WebGPU FrameGraph の task 依存を `execute()` 中に差し替えると validation warning や黒画面化につながるため、現在は backend rebuild で対応する。
+
+今後の確認対象:
+
+- rapid reorder / rapid toggle を debounce するか。
+- strength 0 から正値へ変わるなど、active threshold をまたぐパラメーター変更で resource rebuild が必要か。
+- model mask / receiver mask を追加する場合、ResourcePlan の key と producer をどう分けるか。

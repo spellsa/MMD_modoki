@@ -524,3 +524,22 @@ UI / project:
 - v0.2 では FrameGraph stack の一員として扱えるところまでを優先する
 - 見た目は `色を保つ / 白飛びしにくい / Bloom と分業する` を優先する
 - 旧 `GlowLayer` 経路はすぐ消さず、FrameGraph 版が安定するまで fallback として残す
+
+## 2026-07-01 現行補足
+
+Luminous は現在、FrameGraph post stack の `luminous` entry として扱う。旧 `GlowLayer` ベースの LuminousGlow は、AutoLuminous-lite / classic fallback 的な位置づけとして読む。
+
+現行の扱い:
+
+- `+` から `Luminous` を追加できる。
+- stack の順序に従うため、`Luminous -> Bloom` と `Bloom -> Luminous` で見た目が変わる。
+- Luminous は材質 / luminous preset / AutoLuminous 系の判定から luminous source mask を作り、そこから blur / composite する。
+- Bloom は画面入力の明部をにじませる効果で、Luminous とは役割を分ける。
+- ライトブルームに色を乗せる用途は Bloom 側の color を使う。Luminous は材質発光寄りの効果として扱う。
+
+未解決:
+
+- 本家 AutoLuminous 完全互換ではない。
+- AL code / texture sequence / popup light のような特殊機能は未対応。
+- depth-aware blur / composite は今後の候補。
+- GlowLayer 経路をいつまで fallback として残すかは、FrameGraph 版の安定確認後に判断する。

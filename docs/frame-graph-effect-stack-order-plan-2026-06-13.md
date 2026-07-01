@@ -373,3 +373,36 @@ SSAO / SSR が OFF なのに GeometryRenderer を作ると重い。ordered stack
 - `npm.cmd run test:unit -- --run src/shared/frame-graph-post-effect-stack.test.ts src/project/project-serializer.test.ts src/project/project-importer.test.ts`
 - `npm.cmd run lint`
 - `npm.cmd run smoke:launch`
+
+## 2026-07-01 現行補足
+
+この計画は概ね実装済み。現在は、FrameGraph / Post の stack UI、上下ボタン、ドラッグ並べ替え、個別 enabled、project save/load が入っている。
+
+当初の `FrameGraphPostEffectId` より対象が増えている。現行 stack id は次を基準にする。
+
+```text
+ssr
+ssao
+offsetShadow
+offsetHighlight
+dof
+luminous
+bloom
+lut
+sharpen
+grain
+chromatic
+vignette
+edgeBlur
+distortion
+```
+
+注意:
+
+- `offsetHighlight` は internal id。UI 表示は `Offset Rim`。
+- stack entry は `{ id, enabled }`。enabled は各効果パラメーターの保存値とは別に扱う。
+- `+` ボタンで追加した効果は canonical order に挿入し、その後ユーザーが並べ替えられる。
+- disabled row は stack から消さない。OFF のまま順序を保存できる。
+- WebGPU FrameGraph は task 依存を build 後に安全に差し替えにくいため、順序 / enabled 変更時は backend rebuild を行う。
+
+未解決として、rapid reorder / rapid toggle の debounce、active threshold をまたぐパラメーター変更時の rebuild 条件、`offsetHighlight` の命名整理が残る。

@@ -164,3 +164,25 @@ Phase 1 の screen-space 近似を実装した。
 - 対象モデル / 材質のフィルタ
 - material toon shadow band / `NdotL` への直接合成
 - debug view の UI トグル
+
+## 2026-07-01 現行補足
+
+Offset Shadow は Phase 1 の screen-space 近似として実装済み。現在は FrameGraph stack の `offsetShadow` として、`+` から追加できる。
+
+現行の主な変更点:
+
+- デフォルト値は実機調整後の値に寄せた。
+- `maxDepth` の上限は UI 上 4000 付近まで扱えるようにした。
+- 法線影響は目や斜め面で余計に陰りやすかったため、デフォルトでは強く使わない。
+- 遠方背景や空に影が落ちる問題に対して、receiver depth 側の緩い guard を追加した。
+
+現在の receiver guard:
+
+```text
+maxReceiverDepth = max(10.0, maxDepth * 20.0)
+currentDepth > maxReceiverDepth の場合は shadow mask を 0 にする
+```
+
+これはモデル判定ではなく深度ベースの抑制なので、床や背景を完全に除外するものではない。必要になれば、model mask / object id / render layer mask を追加して、キャラだけに効かせる方向を検討する。
+
+また、stack の順序と enabled 状態は共通 stack state で管理する。ON/OFF しても Offset Shadow の色や強度などのパラメーターは保持される。

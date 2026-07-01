@@ -119,3 +119,22 @@
 - WebGL2 / WebGPU の両方で破綻しない
 - PNG出力とプレビューで見た目差が小さい
 - プロジェクト保存/読込で設定が復元される
+
+## 2026-07-01 現行補足
+
+この backlog の一部は実装状況が進んでいる。特に FrameGraph / Post stack 側では、単純な Classic post effect とは別に、stack entry として扱う効果が増えた。
+
+現行で追加済みの主な FrameGraph stack 効果:
+
+- `Offset Shadow`: 深度 offset 差分から作るアニメ調の落ち影補助。
+- `Offset Rim`: 深度 offset 差分から作る外側リムライト。internal id は `offsetHighlight`。
+- `Luminous`: 材質 / luminous source mask ベースの発光。
+- `SSR`, `SSAO`, `DoF`, `Bloom`, `LUT`, `Sharpen`, `Grain`, `Chroma`, `Vignette`, `EdgeBlur`, `Distort`
+
+Backlog 上の `Glow Layer` は、現行では FrameGraph `Luminous` と旧 GlowLayer / classic fallback を分けて読む。`SSR` は UI から stack entry として扱えるが、材質プリセットや出力確認はまだ残課題。
+
+今後 backlog を整理する場合は、効果を次の 3 種に分けると混乱しにくい。
+
+- Classic / Babylon pipeline の既存 PostFX
+- FrameGraph post stack の実用効果
+- Lab / 将来候補の実験効果

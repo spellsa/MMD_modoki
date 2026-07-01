@@ -398,3 +398,24 @@ Diagnostics は通常の編集 UI に常時混ぜず、drawer または Lab 画�
 Effect 欄は、`Post / Materials / Particles / Lighting` の 4 タブ Shell まで実装済み。
 
 次は `Post` タブ内の既存 PostFX UI を、Bloom / LUT などから compact list + details へ段階的に置き換える。
+
+## 2026-07-01 現行補足
+
+Effect panel の FrameGraph / Post 領域は、当初の placeholder / disabled `+` から進み、現在は実際に post effect を追加・並べ替え・個別 ON/OFF できる。
+
+現行の大きな差分:
+
+- `+` から FrameGraph post effect を追加できる。
+- stack row には checkbox があり、OFF にしても row とパラメーターは残る。
+- 上下移動とドラッグで順序を変えられる。
+- 順序は runtime の post effect order に反映される。
+- `Offset Rim -> Bloom` のような順序で、前段効果へ後段 Bloom をかけられる。
+- stack entry の `enabled` と、各効果の色 / 強度 / threshold などのパラメーターは別管理。
+- project save/load で `frameGraphPostStack` を復元する。
+
+今後 UI 側で注意すること:
+
+- row の ON/OFF を効果パラメーターの enabled だけで代用しない。
+- stack order / enabled 変更時は FrameGraph backend rebuild が必要。
+- internal id `offsetHighlight` は UI では `Offset Rim` として表示する。
+- 未実装 Lab 的な効果と、既に stack に入った実用効果を同じ見た目で混ぜすぎない。
