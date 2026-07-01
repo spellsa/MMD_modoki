@@ -7904,6 +7904,9 @@ ${beforeFogAppendBlock}
         if (this.postEffectBackend !== "frameGraph" || !this.frameGraphPostEffectsController) {
             return;
         }
+        // FrameGraph texture dependencies are fixed after build on WebGPU.
+        // Rebuild the graph for stack order/state changes instead of mutating
+        // task source textures during execute.
         this.disposeFrameGraphPostEffectsController();
         this.initializePostEffectBackend();
     }

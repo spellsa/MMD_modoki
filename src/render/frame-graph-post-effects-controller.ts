@@ -701,6 +701,10 @@ function ensureOffsetShadowShaders(): void {
                 if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
                     return 0.0;
                 }
+                float maxReceiverDepth = max(10.0, maxDepth * 20.0);
+                if (currentDepth > maxReceiverDepth) {
+                    return 0.0;
+                }
                 float depthDelta = currentDepth - offsetDepth;
                 float minMask = smoothstep(depthBias, depthBias + max(0.0001, thickness), depthDelta);
                 float resolvedMaxDepth = max(depthBias + 0.0001, maxDepth);
@@ -760,6 +764,10 @@ function ensureOffsetShadowShaders(): void {
                 let currentDepth = sampleDepth(uv);
                 let offsetDepth = sampleDepth(offsetUv);
                 if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+                    return 0.0;
+                }
+                let maxReceiverDepth = max(10.0, uniforms.maxDepth * 20.0);
+                if (currentDepth > maxReceiverDepth) {
                     return 0.0;
                 }
                 let depthDelta = currentDepth - offsetDepth;
@@ -2818,9 +2826,6 @@ export class FrameGraphPostEffectsController {
         }
         if (this.fxaaTask) {
             this.fxaaTask.disabled = !settings.antialiasEnabled;
-        }
-        if (this.baseOutputTexture !== null && this.outputTask !== null) {
-            this.connectPostEffectOrder(this.baseOutputTexture, this.outputTask, resourcePlan.effectOrder);
         }
         try {
             this.frameGraph.execute();

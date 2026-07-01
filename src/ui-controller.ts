@@ -4272,11 +4272,7 @@ export class UIController {
     private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
         const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
         if (!effect) return;
-        const wasActive = this.mmdManager.isFrameGraphPostEffectActive(effectId);
         effect.setActive(this.mmdManager, enabled);
-        if (wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
-            this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();
-        }
         this.refreshFrameGraphPostAddUi();
     }
 
