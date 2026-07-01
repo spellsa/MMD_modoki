@@ -803,12 +803,10 @@ function ensureOffsetHighlightShaders(): void {
             varying vec2 vUV;
             uniform sampler2D textureSampler;
             uniform sampler2D depthSampler;
-            uniform sampler2D normalSampler;
             uniform vec2 texelSize;
             uniform vec2 offsetPixels;
             uniform float strength;
             uniform float depthThreshold;
-            uniform float normalThreshold;
             uniform float thickness;
             uniform float softness;
             uniform float depthScale;
@@ -819,34 +817,26 @@ function ensureOffsetHighlightShaders(): void {
                 return texture2D(depthSampler, clamp(uv, vec2(0.0), vec2(1.0))).r;
             }
 
-            vec3 sampleNormal(vec2 uv) {
-                return texture2D(normalSampler, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
-            }
-
             float resolveOffsetScale(float currentDepth) {
                 float distanceScale = clamp(10.0 / max(0.000001, currentDepth), 0.1, 1.0);
                 return mix(1.0, distanceScale, clamp(depthScale, 0.0, 1.0));
             }
 
+            float resolveForegroundMask(float currentDepth) {
+                float farMask = 1.0 - smoothstep(25.0, 80.0, currentDepth);
+                return farMask;
+            }
+
             float sampleHighlightMask(vec2 uv, vec2 direction, float sampleRadius) {
                 float currentDepth = sampleDepth(uv);
                 vec2 offsetUv = uv - direction * texelSize * sampleRadius;
-                vec2 oppositeUv = uv + direction * texelSize * sampleRadius;
                 float offsetDepth = sampleDepth(offsetUv);
-                float oppositeDepth = sampleDepth(oppositeUv);
-                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001 || oppositeDepth <= 0.000001) {
+                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
                     return 0.0;
                 }
                 float thresholdRange = max(0.0001, thickness);
                 float depthDelta = offsetDepth - currentDepth;
-                float oppositeDelta = max(0.0, currentDepth - oppositeDepth);
-                float directionalDepthDelta = max(0.0, depthDelta - oppositeDelta * 0.85);
-                float convexSideMask = smoothstep(0.0001, depthThreshold + thresholdRange, directionalDepthDelta);
-                float depthMask = smoothstep(depthThreshold, depthThreshold + thresholdRange, directionalDepthDelta);
-                vec3 normalDelta = abs(sampleNormal(uv) - sampleNormal(offsetUv));
-                float normalEdge = max(max(normalDelta.r, normalDelta.g), normalDelta.b);
-                float normalMask = smoothstep(normalThreshold, normalThreshold + thresholdRange, normalEdge) * convexSideMask;
-                return max(depthMask, normalMask);
+                return smoothstep(depthThreshold, depthThreshold + thresholdRange, depthDelta);
             }
 
             void main(void) {
@@ -855,21 +845,14 @@ function ensureOffsetHighlightShaders(): void {
                 float offsetScale = resolveOffsetScale(currentDepth);
                 float offsetLength = length(offsetPixels);
                 vec2 direction = offsetLength > 0.001 ? offsetPixels / offsetLength : vec2(0.0, -1.0);
-                vec2 tangent = vec2(-direction.y, direction.x);
-                float sampleRadius = max(1.0, min(4.0, offsetLength * 0.0625)) * offsetScale;
-                float lineRadius = max(1.0, min(6.0, 1.0 + softness + thickness * 4.0)) * offsetScale;
-                float centerMask = sampleHighlightMask(vUV, direction, sampleRadius);
-                float tangentPlusMask = sampleHighlightMask(vUV + tangent * texelSize * lineRadius, direction, sampleRadius);
-                float tangentMinusMask = sampleHighlightMask(vUV - tangent * texelSize * lineRadius, direction, sampleRadius);
-                float directionPlusMask = sampleHighlightMask(vUV + direction * texelSize * lineRadius, direction, sampleRadius);
-                float directionMinusMask = sampleHighlightMask(vUV - direction * texelSize * lineRadius, direction, sampleRadius);
-                float continuityMask = smoothstep(0.08, 0.28, max(tangentPlusMask, tangentMinusMask));
-                float mask = centerMask * 0.52;
-                mask += tangentPlusMask * 0.12;
-                mask += tangentMinusMask * 0.12;
-                mask += directionPlusMask * 0.12;
-                mask += directionMinusMask * 0.12;
-                mask *= continuityMask;
+                float sampleRadius = max(1.0, min(24.0, offsetLength * 0.125)) * offsetScale;
+                float spreadRadius = max(0.0, min(18.0, softness + thickness * 5.0)) * offsetScale;
+                float mask = sampleHighlightMask(vUV, direction, sampleRadius) * 0.34;
+                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius * 0.25, direction, sampleRadius) * 0.23;
+                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius * 0.50, direction, sampleRadius) * 0.18;
+                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius * 0.75, direction, sampleRadius) * 0.14;
+                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius, direction, sampleRadius) * 0.11;
+                mask *= resolveForegroundMask(currentDepth);
                 mask = clamp(mask * strength, 0.0, 1.0);
                 if (debugView > 0.5) {
                     gl_FragColor = vec4(vec3(mask), source.a);
@@ -887,13 +870,10 @@ function ensureOffsetHighlightShaders(): void {
             var textureSampler: texture_2d<f32>;
             var depthSamplerSampler: sampler;
             var depthSampler: texture_2d<f32>;
-            var normalSamplerSampler: sampler;
-            var normalSampler: texture_2d<f32>;
             uniform texelSize: vec2f;
             uniform offsetPixels: vec2f;
             uniform strength: f32;
             uniform depthThreshold: f32;
-            uniform normalThreshold: f32;
             uniform thickness: f32;
             uniform softness: f32;
             uniform depthScale: f32;
@@ -904,34 +884,26 @@ function ensureOffsetHighlightShaders(): void {
                 return textureSampleLevel(depthSampler, depthSamplerSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0).r;
             }
 
-            fn sampleNormal(uv: vec2f) -> vec3f {
-                return textureSampleLevel(normalSampler, normalSamplerSampler, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0).rgb;
-            }
-
             fn resolveOffsetScale(currentDepth: f32) -> f32 {
                 let distanceScale = clamp(10.0 / max(0.000001, currentDepth), 0.1, 1.0);
                 return mix(1.0, distanceScale, clamp(uniforms.depthScale, 0.0, 1.0));
             }
 
+            fn resolveForegroundMask(currentDepth: f32) -> f32 {
+                let farMask = 1.0 - smoothstep(25.0, 80.0, currentDepth);
+                return farMask;
+            }
+
             fn sampleHighlightMask(uv: vec2f, direction: vec2f, sampleRadius: f32) -> f32 {
                 let currentDepth = sampleDepth(uv);
                 let offsetUv = uv - direction * uniforms.texelSize * sampleRadius;
-                let oppositeUv = uv + direction * uniforms.texelSize * sampleRadius;
                 let offsetDepth = sampleDepth(offsetUv);
-                let oppositeDepth = sampleDepth(oppositeUv);
-                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001 || oppositeDepth <= 0.000001) {
+                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
                     return 0.0;
                 }
                 let thresholdRange = max(0.0001, uniforms.thickness);
                 let depthDelta = offsetDepth - currentDepth;
-                let oppositeDelta = max(0.0, currentDepth - oppositeDepth);
-                let directionalDepthDelta = max(0.0, depthDelta - oppositeDelta * 0.85);
-                let convexSideMask = smoothstep(0.0001, uniforms.depthThreshold + thresholdRange, directionalDepthDelta);
-                let depthMask = smoothstep(uniforms.depthThreshold, uniforms.depthThreshold + thresholdRange, directionalDepthDelta);
-                let normalDelta = abs(sampleNormal(uv) - sampleNormal(offsetUv));
-                let normalEdge = max(max(normalDelta.r, normalDelta.g), normalDelta.b);
-                let normalMask = smoothstep(uniforms.normalThreshold, uniforms.normalThreshold + thresholdRange, normalEdge) * convexSideMask;
-                return max(depthMask, normalMask);
+                return smoothstep(uniforms.depthThreshold, uniforms.depthThreshold + thresholdRange, depthDelta);
             }
 
             #define CUSTOM_FRAGMENT_DEFINITIONS
@@ -945,21 +917,14 @@ function ensureOffsetHighlightShaders(): void {
                 if (offsetLength > 0.001) {
                     direction = uniforms.offsetPixels / offsetLength;
                 }
-                let tangent = vec2f(-direction.y, direction.x);
-                let sampleRadius = max(1.0, min(4.0, offsetLength * 0.0625)) * offsetScale;
-                let lineRadius = max(1.0, min(6.0, 1.0 + uniforms.softness + uniforms.thickness * 4.0)) * offsetScale;
-                let centerMask = sampleHighlightMask(input.vUV, direction, sampleRadius);
-                let tangentPlusMask = sampleHighlightMask(input.vUV + tangent * uniforms.texelSize * lineRadius, direction, sampleRadius);
-                let tangentMinusMask = sampleHighlightMask(input.vUV - tangent * uniforms.texelSize * lineRadius, direction, sampleRadius);
-                let directionPlusMask = sampleHighlightMask(input.vUV + direction * uniforms.texelSize * lineRadius, direction, sampleRadius);
-                let directionMinusMask = sampleHighlightMask(input.vUV - direction * uniforms.texelSize * lineRadius, direction, sampleRadius);
-                let continuityMask = smoothstep(0.08, 0.28, max(tangentPlusMask, tangentMinusMask));
-                var mask = centerMask * 0.52;
-                mask += tangentPlusMask * 0.12;
-                mask += tangentMinusMask * 0.12;
-                mask += directionPlusMask * 0.12;
-                mask += directionMinusMask * 0.12;
-                mask *= continuityMask;
+                let sampleRadius = max(1.0, min(24.0, offsetLength * 0.125)) * offsetScale;
+                let spreadRadius = max(0.0, min(18.0, uniforms.softness + uniforms.thickness * 5.0)) * offsetScale;
+                var mask = sampleHighlightMask(input.vUV, direction, sampleRadius) * 0.34;
+                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius * 0.25, direction, sampleRadius) * 0.23;
+                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius * 0.50, direction, sampleRadius) * 0.18;
+                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius * 0.75, direction, sampleRadius) * 0.14;
+                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius, direction, sampleRadius) * 0.11;
+                mask *= resolveForegroundMask(currentDepth);
                 mask = clamp(mask * uniforms.strength, 0.0, 1.0);
                 if (uniforms.debugView > 0.5) {
                     fragmentOutputs.color = vec4f(vec3f(mask), source.a);
@@ -1764,7 +1729,6 @@ class FrameGraphPostEffectsOffsetShadowTask extends FrameGraphPostProcessTask {
 
 class FrameGraphPostEffectsOffsetHighlightTask extends FrameGraphPostProcessTask {
     depthTexture?: FrameGraphTextureHandle;
-    normalTexture?: FrameGraphTextureHandle;
 
     constructor(
         name: string,
@@ -1800,8 +1764,7 @@ class FrameGraphPostEffectsOffsetHighlightTask extends FrameGraphPostProcessTask
                 effect.setFloat2("offsetPixels", settings.offsetHighlightOffsetX, settings.offsetHighlightOffsetY);
                 effect.setFloat("strength", Math.max(0, Math.min(2, settings.offsetHighlightStrength)));
                 effect.setFloat("depthThreshold", Math.max(0, Math.min(1, settings.offsetHighlightDepthThreshold)));
-                effect.setFloat("normalThreshold", Math.max(0, Math.min(1, settings.offsetHighlightNormalThreshold)));
-                effect.setFloat("thickness", Math.max(0.0001, Math.min(1, settings.offsetHighlightThickness)));
+                effect.setFloat("thickness", Math.max(0.0001, Math.min(3, settings.offsetHighlightThickness)));
                 effect.setFloat("softness", Math.max(0, Math.min(12, settings.offsetHighlightSoftness)));
                 effect.setFloat("depthScale", Math.max(0, Math.min(1, settings.offsetHighlightDepthScale)));
                 effect.setFloat3(
@@ -1814,17 +1777,11 @@ class FrameGraphPostEffectsOffsetHighlightTask extends FrameGraphPostProcessTask
                 if (this.depthTexture !== undefined) {
                     context.bindTextureHandle(effect, "depthSampler", this.depthTexture);
                 }
-                if (this.normalTexture !== undefined) {
-                    context.bindTextureHandle(effect, "normalSampler", this.normalTexture);
-                }
                 additionalBindings?.(context);
             },
         );
         if (this.depthTexture !== undefined) {
             pass.addDependencies(this.depthTexture);
-        }
-        if (this.normalTexture !== undefined) {
-            pass.addDependencies(this.normalTexture);
         }
         return pass;
     }
@@ -2008,10 +1965,10 @@ export class FrameGraphPostEffectsController {
             offsetHighlightEnabled: false,
             offsetHighlightStrength: 1,
             offsetHighlightOffsetX: 0,
-            offsetHighlightOffsetY: -50,
+            offsetHighlightOffsetY: -100,
             offsetHighlightDepthThreshold: 0.1,
             offsetHighlightNormalThreshold: 0,
-            offsetHighlightThickness: 0.35,
+            offsetHighlightThickness: 1,
             offsetHighlightSoftness: 0,
             offsetHighlightDepthScale: 1,
             offsetHighlightColor: { r: 1, g: 1, b: 1 },
@@ -2362,14 +2319,13 @@ export class FrameGraphPostEffectsController {
                         "offsetPixels",
                         "strength",
                         "depthThreshold",
-                        "normalThreshold",
                         "thickness",
                         "softness",
                         "depthScale",
                         "highlightColor",
                         "debugView",
                     ],
-                    samplers: ["depthSampler", "normalSampler"],
+                    samplers: ["depthSampler"],
                     name: "mmdFrameGraphOffsetHighlight",
                     shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
                 });
@@ -2381,7 +2337,6 @@ export class FrameGraphPostEffectsController {
                 );
                 offsetHighlightTask.sourceTexture = dofSourceTexture;
                 offsetHighlightTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
-                offsetHighlightTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
                 offsetHighlightTask.disabled = false;
                 frameGraph.addTask(offsetHighlightTask);
                 this.offsetHighlightTask = offsetHighlightTask;
@@ -2831,8 +2786,7 @@ export class FrameGraphPostEffectsController {
         }
         if (this.offsetHighlightTask) {
             this.offsetHighlightTask.disabled = !this.isPostEffectActive(settings, "offsetHighlight")
-                || this.offsetHighlightTask.depthTexture === undefined
-                || this.offsetHighlightTask.normalTexture === undefined;
+                || this.offsetHighlightTask.depthTexture === undefined;
         }
         if (this.bloomTask) {
             this.bloomTask.disabled = !settings.bloomEnabled;

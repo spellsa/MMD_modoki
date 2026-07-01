@@ -94,7 +94,6 @@ export function buildFrameGraphResourcePlan(
 
     if (activeEffects.includes("offsetHighlight")) {
         addConsumer(consumersByKey, "viewDepth", "offsetHighlight");
-        addConsumer(consumersByKey, "viewNormal", "offsetHighlight");
     }
 
     if (activeEffects.includes("dof")) {

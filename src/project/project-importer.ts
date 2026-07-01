@@ -855,10 +855,10 @@ export async function importProjectState(
         : false;
     host.postEffectOffsetHighlightStrength = readFiniteNumber(data.effects.offsetHighlightStrength, 1);
     host.postEffectOffsetHighlightOffsetX = readFiniteNumber(data.effects.offsetHighlightOffsetX, 0);
-    host.postEffectOffsetHighlightOffsetY = readFiniteNumber(data.effects.offsetHighlightOffsetY, -50);
+    host.postEffectOffsetHighlightOffsetY = readFiniteNumber(data.effects.offsetHighlightOffsetY, -100);
     host.postEffectOffsetHighlightDepthThreshold = readFiniteNumber(data.effects.offsetHighlightDepthThreshold, 0.1);
     host.postEffectOffsetHighlightNormalThreshold = readFiniteNumber(data.effects.offsetHighlightNormalThreshold, 0);
-    host.postEffectOffsetHighlightThickness = readFiniteNumber(data.effects.offsetHighlightThickness, 0.35);
+    host.postEffectOffsetHighlightThickness = readFiniteNumber(data.effects.offsetHighlightThickness, 1);
     host.postEffectOffsetHighlightSoftness = readFiniteNumber(data.effects.offsetHighlightSoftness, 0);
     host.postEffectOffsetHighlightDepthScale = readFiniteNumber(data.effects.offsetHighlightDepthScale, 1);
     if (data.effects.offsetHighlightColor &&

@@ -1616,10 +1616,10 @@ ${beforeFogAppendBlock}
     private postEffectOffsetHighlightEnabledValue = false;
     private postEffectOffsetHighlightStrengthValue = 1;
     private postEffectOffsetHighlightOffsetXValue = 0;
-    private postEffectOffsetHighlightOffsetYValue = -50;
+    private postEffectOffsetHighlightOffsetYValue = -100;
     private postEffectOffsetHighlightDepthThresholdValue = 0.1;
     private postEffectOffsetHighlightNormalThresholdValue = 0;
-    private postEffectOffsetHighlightThicknessValue = 0.35;
+    private postEffectOffsetHighlightThicknessValue = 1;
     private postEffectOffsetHighlightSoftnessValue = 0;
     private postEffectOffsetHighlightDepthScaleValue = 1;
     private postEffectOffsetHighlightColorValue = new Color3(1, 1, 1);
@@ -8448,7 +8448,7 @@ ${beforeFogAppendBlock}
         return this.postEffectOffsetHighlightThicknessValue;
     }
     set postEffectOffsetHighlightThickness(v: number) {
-        this.postEffectOffsetHighlightThicknessValue = Math.max(0.0001, Math.min(1, v));
+        this.postEffectOffsetHighlightThicknessValue = Math.max(0.0001, Math.min(3, v));
         this.applyDefaultPipelinePostProcessSettings();
     }
 

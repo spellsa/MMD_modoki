@@ -237,7 +237,7 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
     },
     {
         id: "offsetHighlight",
-        label: "Offset Highlight",
+        label: "Offset Rim",
         isActive: (manager) => manager.postEffectOffsetHighlightEnabled,
         setActive: (manager, active) => { manager.postEffectOffsetHighlightEnabled = active; },
     },
@@ -4184,10 +4184,10 @@ export class UIController {
             case "offsetHighlight":
                 this.mmdManager.postEffectOffsetHighlightStrength = 1;
                 this.mmdManager.postEffectOffsetHighlightOffsetX = 0;
-                this.mmdManager.postEffectOffsetHighlightOffsetY = -50;
+                this.mmdManager.postEffectOffsetHighlightOffsetY = -100;
                 this.mmdManager.postEffectOffsetHighlightDepthThreshold = 0.1;
                 this.mmdManager.postEffectOffsetHighlightNormalThreshold = 0;
-                this.mmdManager.postEffectOffsetHighlightThickness = 0.35;
+                this.mmdManager.postEffectOffsetHighlightThickness = 1;
                 this.mmdManager.postEffectOffsetHighlightSoftness = 0;
                 this.mmdManager.postEffectOffsetHighlightDepthScale = 1;
                 this.mmdManager.setPostEffectOffsetHighlightColor(1, 1, 1);
@@ -4653,9 +4653,8 @@ export class UIController {
                     range("offsetHighlightOffsetX", "Offset X", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`),
                     range("offsetHighlightOffsetY", "Offset Y", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`),
                     range("offsetHighlightDepthThreshold", "Depth Edge", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightDepthThreshold * 1000), this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3)),
-                    range("offsetHighlightNormalThreshold", "Normal Edge", 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightNormalThreshold * 100), this.mmdManager.postEffectOffsetHighlightNormalThreshold.toFixed(2)),
                     range("offsetHighlightDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightDepthScale * 100), this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2)),
-                    range("offsetHighlightThickness", "Thickness", 1, 100, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
+                    range("offsetHighlightThickness", "Thickness", 1, 300, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
                     range("offsetHighlightSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetHighlightSoftness * 10), `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`),
                 );
                 break;

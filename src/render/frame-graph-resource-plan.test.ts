@@ -101,7 +101,7 @@ describe("buildFrameGraphResourcePlan", () => {
         expect(plan.requirementKeys).not.toContain("viewNormal");
     });
 
-    it("uses geometry depth and normal for Offset Highlight", () => {
+    it("uses geometry depth for Offset Rim", () => {
         const plan = buildFrameGraphResourcePlan(createSettings({
             offsetHighlightEnabled: true,
             offsetHighlightStrength: 0.55,
@@ -115,12 +115,7 @@ describe("buildFrameGraphResourcePlan", () => {
             producer: "geometryRenderer",
             resolution: "full",
         });
-        expect(plan.requirements).toContainEqual({
-            key: "viewNormal",
-            consumers: ["offsetHighlight"],
-            producer: "geometryRenderer",
-            resolution: "full",
-        });
+        expect(plan.requirementKeys).not.toContain("viewNormal");
     });
 
     it("keeps DoF scene depth separate from geometry view depth", () => {
