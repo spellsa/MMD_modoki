@@ -1,6 +1,227 @@
-import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectSerializedAccessoryTransformTrack, ProjectSerializedModelAnimation } from "../types";
+import type {
+    MmdModokiProjectFileV1,
+    ProjectAccessoryState,
+    ProjectModelMaterialShaderState,
+    ProjectMotionImport,
+    ProjectSerializedAccessoryTransformTrack,
+    ProjectSerializedModelAnimation,
+} from "../types";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { createCameraAnimationFromTrack, deserializeCameraTrack, deserializeModelAnimation } from "./project-codec";
+import {
+    normalizeFrameGraphPostEffectStack,
+    type FrameGraphPostEffectId,
+    type FrameGraphPostEffectStackEntry,
+} from "../shared/frame-graph-post-effect-stack";
+
+type ProjectImportRuntimeModel = {
+    createRuntimeAnimation(animation: object): unknown;
+    setRuntimeAnimation(animationHandle: unknown): void;
+};
+
+type ProjectImportSceneModel = {
+    info: { path: string };
+    mesh: object;
+    model: ProjectImportRuntimeModel;
+};
+
+type ProjectImportHost = {
+    sceneModels: ProjectImportSceneModel[];
+    modelSourceAnimationsByModel: WeakMap<ProjectImportRuntimeModel, object>;
+    modelKeyframeTracksByModel: WeakMap<ProjectImportRuntimeModel, Map<string, Uint32Array>>;
+    clearProjectForImport(): void;
+    loadPMX(path: string): Promise<{ name: string } | null>;
+    loadVMD(path: string): Promise<unknown>;
+    loadVPD(path: string): Promise<unknown>;
+    loadCameraVMD(path: string): Promise<boolean>;
+    loadMP3(path: string): Promise<boolean>;
+    applyImportedMaterialShaderStates(
+        modelIndex: number,
+        states: ProjectModelMaterialShaderState[] | undefined,
+        warnings: string[],
+        modelPath: string,
+    ): void;
+    setLightDirection(x: number, y: number, z: number): void;
+    setDofFocusTargetByPath?: (modelPath: string | null, boneName: string | null) => void;
+    updateEditorDofFocusAndFStop?: () => void;
+    applyEditorDofSettings?: () => void;
+    applyDofLensBlurSettings?: () => void;
+    applyLightColorTemperature?: () => void;
+    applyToonShadowInfluenceToAllModels?: () => void;
+    syncLuminousGlowLayer?: () => void;
+    engine?: { releaseEffects?: () => void };
+    setActiveModelByIndex(index: number): void;
+    setActiveModelVisibility(visible: boolean): void;
+    applySceneMeshVisibility(mesh: object, visible: boolean): void;
+    setModelCastsShadowByIndex?: (modelIndex: number, castsShadow: boolean) => void;
+    setModelMotionImports(model: ProjectImportRuntimeModel, imports: ProjectMotionImport[]): void;
+    buildModelTrackFrameMapFromAnimation(animation: object): Map<string, Uint32Array>;
+    emitMergedKeyframeTracks(): void;
+    applyCameraAnimation(animation: object, path: string | null): void;
+    getCameraDistance(): number;
+    getCameraFov(): number;
+    applyCameraTrackPose(
+        target: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        distance: number,
+        fov: number,
+    ): void;
+    setGroundVisible(visible: boolean): void;
+    setSkydomeVisible(visible: boolean): void;
+    antialiasEnabled: boolean;
+    mirroringFloorReflectance: number;
+    mirroringFloorSize: number;
+    mirroringFloorHeight: number;
+    mirroringFloorResolution: number;
+    mirroringFloorEnabled: boolean;
+    setBackgroundVideoFromPath(path: string): Promise<void>;
+    setBackgroundImageFromPath(path: string): Promise<void>;
+    clearBackgroundMedia(): void;
+    lightIntensity: number;
+    ambientIntensity: number;
+    lightColorTemperature: number;
+    setLightColor(r: number, g: number, b: number): void;
+    lightFlatStrength: number;
+    lightFlatColorInfluence: number;
+    setShadowColor(r: number, g: number, b: number): void;
+    toonShadowInfluence: number;
+    shadowMode: "cascaded" | "standard";
+    shadowDarkness: number;
+    shadowFrustumSize: number;
+    shadowFrustumSizeValue: number;
+    shadowMaxZ: number;
+    shadowMaxZValue: number;
+    shadowBias: number;
+    shadowBiasValue: number;
+    shadowNormalBias: number;
+    shadowNormalBiasValue: number;
+    shadowFilteringQuality: number;
+    shadowBlurKernel: number;
+    shadowPenumbraEnabled: boolean;
+    shadowPenumbraSize: number;
+    transparentShadowEnabled: boolean;
+    softTransparentShadowEnabled: boolean;
+    iblShadowOpacity: number;
+    iblShadowDistanceScale: number;
+    iblShadowsEnabled: boolean;
+    characterContactShadowOpacity: number;
+    characterContactShadowScale: number;
+    characterContactShadowEnabled: boolean;
+    selfShadowEdgeSoftness: number;
+    occlusionShadowEdgeSoftness: number;
+    setShadowEnabled(enabled: boolean): void;
+    setPhysicsSimulationRateHz(value: number): void;
+    setPhysicsGravityAcceleration(value: number): void;
+    setPhysicsGravityDirection(x: number, y: number, z: number): void;
+    isPhysicsAvailable(): boolean;
+    setPhysicsEnabled(enabled: boolean): void;
+    dofEnabled: boolean;
+    dofFocusDistanceMm: number;
+    dofAutoFocusNearOffsetMm: number;
+    dofBlurLevel: number;
+    dofFStop: number;
+    dofNearSuppressionScale: number;
+    dofLensSize: number;
+    dofFocalLengthDistanceInverted: boolean;
+    dofFocalLength: number;
+    dofLensBlurStrength: number;
+    dofLensEdgeBlur: number;
+    dofLensDistortion: number;
+    dofLensDistortionInfluence: number;
+    modelEdgeWidth: number;
+    modelEdgeColorOverrideEnabled: boolean;
+    setModelEdgeColor: (r: number, g: number, b: number) => void;
+    postEffectContrast: number;
+    postEffectGamma: number;
+    postEffectExposure: number;
+    postEffectToneMappingEnabled: boolean;
+    postEffectToneMappingType: number;
+    postEffectDitheringEnabled: boolean;
+    postEffectDitheringIntensity: number;
+    postEffectVignetteEnabled: boolean;
+    postEffectVignetteWeight: number;
+    postEffectBloomEnabled: boolean;
+    postEffectBloomWeight: number;
+    postEffectBloomThreshold: number;
+    postEffectBloomKernel: number;
+    setPostEffectBloomColor(r: number, g: number, b: number): void;
+    postEffectChromaticAberration: number;
+    postEffectGrainIntensity: number;
+    postEffectSharpenEdge: number;
+    postEffectSsaoStrength: number;
+    postEffectSsaoRadius: number;
+    postEffectSsaoFadeEnd: number;
+    postEffectSsaoDebugView: boolean;
+    postEffectSsaoEnabled: boolean;
+    postEffectOffsetShadowEnabled: boolean;
+    postEffectOffsetShadowStrength: number;
+    postEffectOffsetShadowOffsetX: number;
+    postEffectOffsetShadowOffsetY: number;
+    postEffectOffsetShadowDepthBias: number;
+    postEffectOffsetShadowMaxDepth: number;
+    postEffectOffsetShadowDepthScale: number;
+    postEffectOffsetShadowThickness: number;
+    postEffectOffsetShadowSoftness: number;
+    postEffectOffsetShadowNormalInfluence: number;
+    setPostEffectOffsetShadowColor(r: number, g: number, b: number): void;
+    postEffectOffsetShadowDebugView: boolean;
+    postEffectOffsetHighlightEnabled: boolean;
+    postEffectOffsetHighlightStrength: number;
+    postEffectOffsetHighlightOffsetX: number;
+    postEffectOffsetHighlightOffsetY: number;
+    postEffectOffsetHighlightDepthThreshold: number;
+    postEffectOffsetHighlightNormalThreshold: number;
+    postEffectOffsetHighlightThickness: number;
+    postEffectOffsetHighlightSoftness: number;
+    postEffectOffsetHighlightDepthScale: number;
+    setPostEffectOffsetHighlightColor(r: number, g: number, b: number): void;
+    postEffectOffsetHighlightDebugView: boolean;
+    postEffectColorCurvesEnabled: boolean;
+    postEffectColorCurvesHue: number;
+    postEffectColorCurvesDensity: number;
+    postEffectColorCurvesSaturation: number;
+    postEffectColorCurvesExposure: number;
+    postEffectGlowEnabled: boolean;
+    postEffectGlowIntensity: number;
+    postEffectGlowThreshold: number;
+    postEffectGlowKernel: number;
+    postEffectGlowGlareCount: number;
+    postEffectGlowGlareLength: number;
+    postEffectGlowGlareAngle: number;
+    postEffectGlowGlarePower: number;
+    postEffectLutPreset: string;
+    postEffectLutSourceMode: string;
+    setPostEffectExternalLut(path: string | null, label: string | null, content: string | null): void;
+    postEffectLutIntensity: number;
+    postEffectLutEnabled: boolean;
+    setExternalWgslToonShader(path: string | null, content: string | null): void;
+    postEffectMotionBlurEnabled: boolean;
+    postEffectMotionBlurStrength: number;
+    postEffectMotionBlurSamples: number;
+    postEffectSsrEnabled: boolean;
+    postEffectSsrStrength: number;
+    postEffectSsrStep: number;
+    postEffectVlsEnabled: boolean;
+    postEffectVlsExposure: number;
+    postEffectVlsDecay: number;
+    postEffectVlsWeight: number;
+    postEffectVlsDensity: number;
+    postEffectFogEnabled: boolean;
+    postEffectFogMode: number;
+    postEffectFogStart: number;
+    postEffectFogEnd: number;
+    postEffectFogDensity: number;
+    postEffectFogOpacity: number;
+    setPostEffectFogColor(r: number, g: number, b: number): void;
+    setFrameGraphPostEffectStackIds?: (ids: readonly FrameGraphPostEffectId[]) => void;
+    setFrameGraphPostEffectStackEntries?: (entries: readonly FrameGraphPostEffectStackEntry[]) => void;
+    refreshTotalFramesFromContent(): void;
+    setRenderFpsLimit(value: number): void;
+    renderFpsLimit: number;
+    seekTo(frame: number): void;
+    setPlaybackSpeed(speed: number): void;
+    setTimelineTarget(target: "model" | "camera"): void;
+};
 
 function normalizePathForCompare(value: string): string {
     return value.replace(/\\/g, "/").toLowerCase();
@@ -36,7 +257,7 @@ function isProjectFileV1(value: unknown): value is MmdModokiProjectFileV1 {
 }
 
 function finalizeImportedRenderState(
-    host: any,
+    host: ProjectImportHost,
     data: MmdModokiProjectFileV1,
     warnings: string[],
 ): void {
@@ -74,7 +295,7 @@ function finalizeImportedRenderState(
 }
 
 export async function importProjectState(
-    host: any,
+    host: ProjectImportHost,
     data: unknown,
     options: { forExport?: boolean } = {},
 ): Promise<{ loadedModels: number; warnings: string[] }> {
@@ -125,6 +346,10 @@ export async function importProjectState(
         } else {
             host.applySceneMeshVisibility(targetEntry.mesh, Boolean(modelState.visible));
         }
+        host.setModelCastsShadowByIndex?.(
+            modelIndex,
+            typeof modelState.castsShadow === "boolean" ? modelState.castsShadow : true,
+        );
 
         const targetModel = targetEntry.model;
 
@@ -136,7 +361,7 @@ export async function importProjectState(
             const embeddedAnimation = deserializeModelAnimation(embeddedAnimationData, `${modelInfo.name}@project`);
             if (embeddedAnimation) {
                 host.modelSourceAnimationsByModel.set(targetModel, embeddedAnimation);
-                host.setModelMotionImports(targetModel, (modelState.motionImports ?? []).map((item: any) => ({ ...item })));
+                host.setModelMotionImports(targetModel, (modelState.motionImports ?? []).map((item) => ({ ...item })));
                 const animHandle = targetModel.createRuntimeAnimation(embeddedAnimation);
                 targetModel.setRuntimeAnimation(animHandle);
                 host.modelKeyframeTracksByModel.set(
@@ -250,7 +475,7 @@ export async function importProjectState(
     if (!isExportImport && data.scene.activeModelPath) {
         const targetPath = normalizePathForCompare(data.scene.activeModelPath);
         const targetIndex = host.sceneModels.findIndex(
-            (entry: any) => normalizePathForCompare(entry.info.path) === targetPath,
+            (entry) => normalizePathForCompare(entry.info.path) === targetPath,
         );
         if (targetIndex >= 0) {
             host.setActiveModelByIndex(targetIndex);
@@ -330,7 +555,7 @@ export async function importProjectState(
                 if (typeof accessoryState.parentModelPath === "string" && accessoryState.parentModelPath.trim().length > 0) {
                     const normalizedParentPath = normalizePathForCompare(accessoryState.parentModelPath);
                     parentModelIndex = host.sceneModels.findIndex(
-                        (entry: any) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
+                        (entry) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
                     );
                     if (parentModelIndex < 0) {
                         warnings.push(
@@ -359,6 +584,21 @@ export async function importProjectState(
     host.setGroundVisible(Boolean(data.viewport.groundVisible));
     host.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
+    host.mirroringFloorReflectance = typeof data.viewport.mirroringFloorReflectance === "number" && Number.isFinite(data.viewport.mirroringFloorReflectance)
+        ? data.viewport.mirroringFloorReflectance
+        : 0.35;
+    host.mirroringFloorSize = typeof data.viewport.mirroringFloorSize === "number" && Number.isFinite(data.viewport.mirroringFloorSize)
+        ? data.viewport.mirroringFloorSize
+        : 40;
+    host.mirroringFloorHeight = typeof data.viewport.mirroringFloorHeight === "number" && Number.isFinite(data.viewport.mirroringFloorHeight)
+        ? data.viewport.mirroringFloorHeight
+        : 0;
+    host.mirroringFloorResolution = typeof data.viewport.mirroringFloorResolution === "number" && Number.isFinite(data.viewport.mirroringFloorResolution)
+        ? data.viewport.mirroringFloorResolution
+        : 512;
+    host.mirroringFloorEnabled = typeof data.viewport.mirroringFloorEnabled === "boolean"
+        ? data.viewport.mirroringFloorEnabled
+        : false;
     if (typeof data.viewport.backgroundVideoPath === "string" && data.viewport.backgroundVideoPath.trim().length > 0) {
         try {
             await host.setBackgroundVideoFromPath(data.viewport.backgroundVideoPath);
@@ -419,6 +659,45 @@ export async function importProjectState(
     host.shadowNormalBias = typeof data.lighting.shadowNormalBias === "number" && Number.isFinite(data.lighting.shadowNormalBias)
         ? data.lighting.shadowNormalBias
         : host.shadowNormalBiasValue;
+    host.shadowFilteringQuality = typeof data.lighting.shadowFilteringQuality === "number" && Number.isFinite(data.lighting.shadowFilteringQuality)
+        ? data.lighting.shadowFilteringQuality
+        : 1;
+    host.shadowBlurKernel = typeof data.lighting.shadowBlurKernel === "number" && Number.isFinite(data.lighting.shadowBlurKernel)
+        ? data.lighting.shadowBlurKernel
+        : 0;
+    host.shadowPenumbraEnabled = typeof data.lighting.shadowPenumbraEnabled === "boolean"
+        ? data.lighting.shadowPenumbraEnabled
+        : false;
+    host.shadowPenumbraSize = typeof data.lighting.shadowPenumbraSize === "number" && Number.isFinite(data.lighting.shadowPenumbraSize)
+        ? data.lighting.shadowPenumbraSize
+        : 0.035;
+    host.transparentShadowEnabled = typeof data.lighting.transparentShadowEnabled === "boolean"
+        ? data.lighting.transparentShadowEnabled
+        : true;
+    host.softTransparentShadowEnabled = typeof data.lighting.softTransparentShadowEnabled === "boolean"
+        ? data.lighting.softTransparentShadowEnabled
+        : true;
+    if (data.lighting.shadowMode === "standard" || data.lighting.shadowMode === "cascaded") {
+        host.shadowMode = data.lighting.shadowMode;
+    }
+    host.iblShadowOpacity = typeof data.lighting.iblShadowOpacity === "number" && Number.isFinite(data.lighting.iblShadowOpacity)
+        ? data.lighting.iblShadowOpacity
+        : 0.25;
+    host.iblShadowDistanceScale = typeof data.lighting.iblShadowDistanceScale === "number" && Number.isFinite(data.lighting.iblShadowDistanceScale)
+        ? data.lighting.iblShadowDistanceScale
+        : 4;
+    host.iblShadowsEnabled = typeof data.lighting.iblShadowsEnabled === "boolean"
+        ? data.lighting.iblShadowsEnabled
+        : false;
+    host.characterContactShadowOpacity = typeof data.lighting.characterContactShadowOpacity === "number" && Number.isFinite(data.lighting.characterContactShadowOpacity)
+        ? data.lighting.characterContactShadowOpacity
+        : 0.35;
+    host.characterContactShadowScale = typeof data.lighting.characterContactShadowScale === "number" && Number.isFinite(data.lighting.characterContactShadowScale)
+        ? data.lighting.characterContactShadowScale
+        : 1;
+    host.characterContactShadowEnabled = typeof data.lighting.characterContactShadowEnabled === "boolean"
+        ? data.lighting.characterContactShadowEnabled
+        : false;
     const legacyShadowEdgeSoftness = typeof data.lighting.shadowEdgeSoftness === "number" && Number.isFinite(data.lighting.shadowEdgeSoftness)
         ? data.lighting.shadowEdgeSoftness
         : null;
@@ -439,7 +718,7 @@ export async function importProjectState(
         data.physics.gravityDirection.y,
         data.physics.gravityDirection.z,
     );
-    if (host.physicsAvailable) {
+    if (host.isPhysicsAvailable()) {
         host.setPhysicsEnabled(Boolean(data.physics.enabled));
     } else if (data.physics.enabled) {
         warnings.push("Physics was enabled in project, but physics is unavailable in this environment");
@@ -469,6 +748,15 @@ export async function importProjectState(
     host.dofLensDistortion = readFiniteNumber(data.effects.dofLensDistortion, 0);
     host.dofLensDistortionInfluence = readFiniteNumber(data.effects.dofLensDistortionInfluence, 0);
     host.modelEdgeWidth = readFiniteNumber(data.effects.modelEdgeWidth, 1);
+    host.modelEdgeColorOverrideEnabled = typeof data.effects.modelEdgeColorOverrideEnabled === "boolean"
+        ? data.effects.modelEdgeColorOverrideEnabled
+        : false;
+    const modelEdgeColor = data.effects.modelEdgeColor;
+    host.setModelEdgeColor(
+        modelEdgeColor && Number.isFinite(modelEdgeColor.r) ? modelEdgeColor.r : 0,
+        modelEdgeColor && Number.isFinite(modelEdgeColor.g) ? modelEdgeColor.g : 0,
+        modelEdgeColor && Number.isFinite(modelEdgeColor.b) ? modelEdgeColor.b : 0,
+    );
     host.postEffectContrast = readFiniteNumber(data.effects.contrast, 1);
     const importedGamma = readFiniteNumber(data.effects.gamma, 1);
     const gammaEncodingVersion = (data.effects as { gammaEncodingVersion?: unknown }).gammaEncodingVersion;
@@ -508,6 +796,14 @@ export async function importProjectState(
     host.postEffectBloomKernel = typeof data.effects.bloomKernel === "number" && Number.isFinite(data.effects.bloomKernel)
         ? data.effects.bloomKernel
         : 100;
+    if (data.effects.bloomColor &&
+        Number.isFinite(data.effects.bloomColor.r) &&
+        Number.isFinite(data.effects.bloomColor.g) &&
+        Number.isFinite(data.effects.bloomColor.b)) {
+        host.setPostEffectBloomColor(data.effects.bloomColor.r, data.effects.bloomColor.g, data.effects.bloomColor.b);
+    } else {
+        host.setPostEffectBloomColor(1, 0.48, 0.16);
+    }
     host.postEffectChromaticAberration = typeof data.effects.chromaticAberration === "number" && Number.isFinite(data.effects.chromaticAberration)
         ? data.effects.chromaticAberration
         : 0;
@@ -532,6 +828,59 @@ export async function importProjectState(
     host.postEffectSsaoEnabled = typeof data.effects.ssaoEnabled === "boolean"
         ? data.effects.ssaoEnabled
         : false;
+    host.postEffectOffsetShadowStrength = readFiniteNumber(data.effects.offsetShadowStrength, 0.35);
+    host.postEffectOffsetShadowOffsetX = readFiniteNumber(data.effects.offsetShadowOffsetX, 0);
+    host.postEffectOffsetShadowOffsetY = readFiniteNumber(data.effects.offsetShadowOffsetY, -30);
+    host.postEffectOffsetShadowDepthBias = readFiniteNumber(data.effects.offsetShadowDepthBias, 0.1);
+    host.postEffectOffsetShadowMaxDepth = readFiniteNumber(data.effects.offsetShadowMaxDepth, 2);
+    host.postEffectOffsetShadowDepthScale = readFiniteNumber(data.effects.offsetShadowDepthScale, 1);
+    host.postEffectOffsetShadowThickness = readFiniteNumber(data.effects.offsetShadowThickness, 1);
+    host.postEffectOffsetShadowSoftness = readFiniteNumber(data.effects.offsetShadowSoftness, 0);
+    host.postEffectOffsetShadowNormalInfluence = readFiniteNumber(data.effects.offsetShadowNormalInfluence, 0);
+    if (data.effects.offsetShadowColor &&
+        Number.isFinite(data.effects.offsetShadowColor.r) &&
+        Number.isFinite(data.effects.offsetShadowColor.g) &&
+        Number.isFinite(data.effects.offsetShadowColor.b)) {
+        host.setPostEffectOffsetShadowColor(
+            data.effects.offsetShadowColor.r,
+            data.effects.offsetShadowColor.g,
+            data.effects.offsetShadowColor.b,
+        );
+    } else {
+        host.setPostEffectOffsetShadowColor(0.29, 0.21, 0.16);
+    }
+    host.postEffectOffsetShadowDebugView = typeof data.effects.offsetShadowDebugView === "boolean"
+        ? data.effects.offsetShadowDebugView
+        : false;
+    host.postEffectOffsetShadowEnabled = typeof data.effects.offsetShadowEnabled === "boolean"
+        ? data.effects.offsetShadowEnabled
+        : false;
+    host.postEffectOffsetHighlightStrength = readFiniteNumber(data.effects.offsetHighlightStrength, 1);
+    host.postEffectOffsetHighlightOffsetX = readFiniteNumber(data.effects.offsetHighlightOffsetX, 0);
+    host.postEffectOffsetHighlightOffsetY = readFiniteNumber(data.effects.offsetHighlightOffsetY, -100);
+    host.postEffectOffsetHighlightDepthThreshold = readFiniteNumber(data.effects.offsetHighlightDepthThreshold, 0.1);
+    host.postEffectOffsetHighlightNormalThreshold = readFiniteNumber(data.effects.offsetHighlightNormalThreshold, 0);
+    host.postEffectOffsetHighlightThickness = readFiniteNumber(data.effects.offsetHighlightThickness, 1);
+    host.postEffectOffsetHighlightSoftness = readFiniteNumber(data.effects.offsetHighlightSoftness, 0);
+    host.postEffectOffsetHighlightDepthScale = readFiniteNumber(data.effects.offsetHighlightDepthScale, 1);
+    if (data.effects.offsetHighlightColor &&
+        Number.isFinite(data.effects.offsetHighlightColor.r) &&
+        Number.isFinite(data.effects.offsetHighlightColor.g) &&
+        Number.isFinite(data.effects.offsetHighlightColor.b)) {
+        host.setPostEffectOffsetHighlightColor(
+            data.effects.offsetHighlightColor.r,
+            data.effects.offsetHighlightColor.g,
+            data.effects.offsetHighlightColor.b,
+        );
+    } else {
+        host.setPostEffectOffsetHighlightColor(1, 1, 1);
+    }
+    host.postEffectOffsetHighlightDebugView = typeof data.effects.offsetHighlightDebugView === "boolean"
+        ? data.effects.offsetHighlightDebugView
+        : false;
+    host.postEffectOffsetHighlightEnabled = typeof data.effects.offsetHighlightEnabled === "boolean"
+        ? data.effects.offsetHighlightEnabled
+        : false;
     host.postEffectColorCurvesEnabled = typeof data.effects.colorCurvesEnabled === "boolean"
         ? data.effects.colorCurvesEnabled
         : false;
@@ -553,9 +902,24 @@ export async function importProjectState(
     host.postEffectGlowIntensity = typeof data.effects.glowIntensity === "number" && Number.isFinite(data.effects.glowIntensity)
         ? data.effects.glowIntensity
         : 0.5;
+    host.postEffectGlowThreshold = typeof data.effects.glowThreshold === "number" && Number.isFinite(data.effects.glowThreshold)
+        ? data.effects.glowThreshold
+        : 0.5;
     host.postEffectGlowKernel = typeof data.effects.glowKernel === "number" && Number.isFinite(data.effects.glowKernel)
         ? data.effects.glowKernel
         : 20;
+    host.postEffectGlowGlareCount = typeof data.effects.glowGlareCount === "number" && Number.isFinite(data.effects.glowGlareCount)
+        ? data.effects.glowGlareCount
+        : 0;
+    host.postEffectGlowGlareLength = typeof data.effects.glowGlareLength === "number" && Number.isFinite(data.effects.glowGlareLength)
+        ? data.effects.glowGlareLength
+        : 48;
+    host.postEffectGlowGlareAngle = typeof data.effects.glowGlareAngle === "number" && Number.isFinite(data.effects.glowGlareAngle)
+        ? data.effects.glowGlareAngle
+        : 0;
+    host.postEffectGlowGlarePower = typeof data.effects.glowGlarePower === "number" && Number.isFinite(data.effects.glowGlarePower)
+        ? data.effects.glowGlarePower
+        : 0.4;
     host.postEffectLutPreset = typeof data.effects.lutPreset === "string"
         ? data.effects.lutPreset
         : host.postEffectLutPreset;
@@ -591,10 +955,10 @@ export async function importProjectState(
         : false;
     host.postEffectSsrStrength = typeof data.effects.ssrStrength === "number" && Number.isFinite(data.effects.ssrStrength)
         ? data.effects.ssrStrength
-        : 0.8;
+        : 0.3;
     host.postEffectSsrStep = typeof data.effects.ssrStep === "number" && Number.isFinite(data.effects.ssrStep)
         ? data.effects.ssrStep
-        : 0.75;
+        : 4;
     host.postEffectVlsEnabled = typeof data.effects.vlsEnabled === "boolean"
         ? data.effects.vlsEnabled
         : false;
@@ -633,6 +997,14 @@ export async function importProjectState(
         Number.isFinite(data.effects.fogColor.g) &&
         Number.isFinite(data.effects.fogColor.b)) {
         host.setPostEffectFogColor(data.effects.fogColor.r, data.effects.fogColor.g, data.effects.fogColor.b);
+    }
+    if (Array.isArray(data.effects.frameGraphPostStack)) {
+        const stackEntries = normalizeFrameGraphPostEffectStack(data.effects.frameGraphPostStack);
+        if (host.setFrameGraphPostEffectStackEntries) {
+            host.setFrameGraphPostEffectStackEntries(stackEntries);
+        } else {
+            host.setFrameGraphPostEffectStackIds?.(stackEntries.map((entry) => entry.id));
+        }
     }
 
     host.refreshTotalFramesFromContent();

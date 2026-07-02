@@ -1,6 +1,6 @@
 import { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import { MmdBoneAnimationTrack, MmdCameraAnimationTrack, MmdMorphAnimationTrack, MmdMovableBoneAnimationTrack, MmdPropertyAnimationTrack } from "babylon-mmd/esm/Loader/Animation/mmdAnimationTrack";
-import type { KeyframeTrack, TrackCategory } from "../types";
+import type { KeyframeTrack, ModelInfo, TrackCategory } from "../types";
 import { addFrameNumber, classifyBone, createTrackKey, hasFrameNumber, mergeFrameNumbers, moveFrameNumber, parseTrackKey, removeFrameNumber } from "../shared/timeline-helpers";
 
 const EMPTY_KEYFRAME_FRAMES = new Uint32Array(0);
@@ -20,7 +20,117 @@ type RuntimePropertyTrackMutable = {
     getIkState: (index: number) => Uint8Array;
 };
 
-export function getOrCreateModelTrackFrameMap(host: any, model: any): Map<string, Uint32Array> {
+type CameraTrackBatchMutable = {
+    frameNumbers: Uint32Array;
+    positions: Float32Array;
+    positionInterpolations: Uint8Array;
+    rotations: Float32Array;
+    rotationInterpolations: Uint8Array;
+    distances: Float32Array;
+    distanceInterpolations: Uint8Array;
+    fovs: Float32Array;
+    fovInterpolations: Uint8Array;
+};
+
+type MorphTrackBatchMutable = {
+    name: string;
+    frameNumbers: Uint32Array;
+    weights: Float32Array;
+};
+
+type MovableBoneTrackBatchMutable = {
+    name: string;
+    frameNumbers: Uint32Array;
+    positions: Float32Array;
+    positionInterpolations: Uint8Array;
+    rotations: Float32Array;
+    rotationInterpolations: Uint8Array;
+    physicsToggles: Uint8Array;
+};
+
+type BoneTrackBatchMutable = {
+    name: string;
+    frameNumbers: Uint32Array;
+    rotations: Float32Array;
+    rotationInterpolations: Uint8Array;
+    physicsToggles: Uint8Array;
+};
+
+type TimelineEditRuntimeModel = {
+    name?: string;
+};
+
+type TimelineEditSceneModel = {
+    model: TimelineEditRuntimeModel;
+};
+
+type TimelineEditHost = {
+    currentModel: TimelineEditRuntimeModel | null;
+    activeModelInfo: ModelInfo | null;
+    sceneModels: TimelineEditSceneModel[];
+    modelKeyframeTracksByModel: WeakMap<TimelineEditRuntimeModel, Map<string, Uint32Array>>;
+    modelSourceAnimationsByModel: WeakMap<TimelineEditRuntimeModel, MmdAnimation>;
+    cameraKeyframeFrames: Uint32Array;
+    cameraSourceAnimation: MmdAnimation | null;
+    cameraMotionPath: string | null;
+    timelineTarget: "model" | "camera";
+    showPhysicsBonesInTimeline?: boolean;
+    mmdRuntime: {
+        animationFrameTimeDuration: number;
+        seekAnimation(frame: number, forceEvaluate: boolean): void;
+    };
+    audioPlayer: unknown | null;
+    _totalFrames: number;
+    _currentFrame: number;
+    manualPlaybackWithoutAudio: boolean;
+    manualPlaybackFrameCursor: number;
+    timelineEditBatchDepth?: number;
+    timelineEditPendingEmit?: boolean;
+    onFrameUpdate?: (currentFrame: number, totalFrames: number) => void;
+    onKeyframesLoaded?: (tracks: KeyframeTrack[]) => void;
+    getActiveModelVisibility?: () => boolean;
+};
+
+export type BoneKeyframePayload = {
+    kind: "bone";
+    rotations: number[];
+    rotationInterpolations: number[];
+    physicsToggles: number[];
+};
+
+export type MovableBoneKeyframePayload = {
+    kind: "movableBone";
+    positions: number[];
+    positionInterpolations: number[];
+    rotations: number[];
+    rotationInterpolations: number[];
+    physicsToggles: number[];
+};
+
+export type MorphKeyframePayload = {
+    kind: "morph";
+    weights: number[];
+};
+
+export type CameraKeyframePayload = {
+    kind: "camera";
+    positions: number[];
+    positionInterpolations: number[];
+    rotations: number[];
+    rotationInterpolations: number[];
+    distances: number[];
+    distanceInterpolations: number[];
+    fovs: number[];
+    fovInterpolations: number[];
+};
+
+export type TimelineKeyframePayload =
+    | BoneKeyframePayload
+    | MovableBoneKeyframePayload
+    | MorphKeyframePayload
+    | CameraKeyframePayload;
+
+export function getOrCreateModelTrackFrameMap(host: TimelineEditHost, model: TimelineEditRuntimeModel): Map<string, Uint32Array> {
     let frameMap = host.modelKeyframeTracksByModel.get(model);
     if (!frameMap) {
         frameMap = new Map<string, Uint32Array>();
@@ -29,7 +139,7 @@ export function getOrCreateModelTrackFrameMap(host: any, model: any): Map<string
     return frameMap;
 }
 
-function getCurrentModelAnimation(host: any): MmdAnimation | null {
+function getCurrentModelAnimation(host: TimelineEditHost): MmdAnimation | null {
     if (!host.currentModel) return null;
     return host.modelSourceAnimationsByModel.get(host.currentModel) ?? null;
 }
@@ -43,6 +153,26 @@ function createModelAnimationForEditing(name: string): MmdAnimation {
     const propertyTrack = new MmdPropertyAnimationTrack(0, []);
     const cameraTrack = new MmdCameraAnimationTrack(0);
     return new MmdAnimation(name, [], [], [], propertyTrack, cameraTrack);
+}
+
+function refreshAnimationFrameRange(animation: MmdAnimation): void {
+    let minStartFrame = Number.MAX_SAFE_INTEGER;
+    let maxEndFrame = Number.MIN_SAFE_INTEGER;
+
+    const visitTrack = (track: { startFrame: number; endFrame: number }): void => {
+        minStartFrame = Math.min(minStartFrame, track.startFrame);
+        maxEndFrame = Math.max(maxEndFrame, track.endFrame);
+    };
+
+    for (const track of animation.boneTracks) visitTrack(track);
+    for (const track of animation.movableBoneTracks) visitTrack(track);
+    for (const track of animation.morphTracks) visitTrack(track);
+    visitTrack(animation.propertyTrack);
+    visitTrack(animation.cameraTrack);
+
+    const mutableAnimation = animation as unknown as { startFrame: number; endFrame: number };
+    mutableAnimation.startFrame = minStartFrame === Number.MAX_SAFE_INTEGER ? 0 : minStartFrame;
+    mutableAnimation.endFrame = maxEndFrame === Number.MIN_SAFE_INTEGER ? 0 : maxEndFrame;
 }
 
 function createFrameIndexMap(frames: Uint32Array): Map<number, number> {
@@ -77,7 +207,221 @@ function copyUint8FrameBlock(
     destination.set(source.subarray(sourceOffset, sourceOffset + stride), destinationOffset);
 }
 
-export function getRegisteredKeyframeStats(host: any): { hasAnyKeyframe: boolean; maxFrame: number } {
+function readFloatFrameBlock(
+    source: ArrayLike<number>,
+    sourceFrameIndex: number,
+    stride: number,
+): number[] {
+    const result = new Array<number>(stride);
+    const sourceOffset = sourceFrameIndex * stride;
+    for (let i = 0; i < stride; i += 1) {
+        const value = source[sourceOffset + i];
+        result[i] = Number.isFinite(value) ? value : 0;
+    }
+    return result;
+}
+
+function readUint8FrameBlock(
+    source: ArrayLike<number>,
+    sourceFrameIndex: number,
+    stride: number,
+): number[] {
+    const result = new Array<number>(stride);
+    const sourceOffset = sourceFrameIndex * stride;
+    for (let i = 0; i < stride; i += 1) {
+        const value = source[sourceOffset + i];
+        const normalized = Number.isFinite(value) ? Math.round(value) : 0;
+        result[i] = Math.max(0, Math.min(255, normalized));
+    }
+    return result;
+}
+
+function findFrameIndex(frames: ArrayLike<number>, frame: number): number {
+    const normalized = Math.max(0, Math.floor(frame));
+    for (let i = 0; i < (frames?.length ?? 0); i += 1) {
+        if (Math.max(0, Math.floor(frames[i] ?? 0)) === normalized) return i;
+    }
+    return -1;
+}
+
+function removeFloatValues(
+    values: ArrayLike<number>,
+    stride: number,
+    frameIndex: number,
+): Float32Array {
+    const sourceFrameCount = Math.floor((values?.length ?? 0) / stride);
+    const target = new Float32Array(Math.max(0, sourceFrameCount - 1) * stride);
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        if (sourceFrameIndex === frameIndex) continue;
+        const targetFrameIndex = sourceFrameIndex > frameIndex ? sourceFrameIndex - 1 : sourceFrameIndex;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        for (let i = 0; i < stride; i += 1) {
+            const value = values[sourceOffset + i];
+            target[targetOffset + i] = Number.isFinite(value) ? value : 0;
+        }
+    }
+    return target;
+}
+
+function removeUint8Values(
+    values: ArrayLike<number>,
+    stride: number,
+    frameIndex: number,
+): Uint8Array {
+    const sourceFrameCount = Math.floor((values?.length ?? 0) / stride);
+    const target = new Uint8Array(Math.max(0, sourceFrameCount - 1) * stride);
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        if (sourceFrameIndex === frameIndex) continue;
+        const targetFrameIndex = sourceFrameIndex > frameIndex ? sourceFrameIndex - 1 : sourceFrameIndex;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        for (let i = 0; i < stride; i += 1) {
+            const value = values[sourceOffset + i];
+            const normalized = Number.isFinite(value) ? Math.round(value) : 0;
+            target[targetOffset + i] = Math.max(0, Math.min(255, normalized));
+        }
+    }
+    return target;
+}
+
+function createNormalizedFrameSet(frames: readonly number[]): Set<number> {
+    const normalizedFrames = new Set<number>();
+    for (const frame of frames) {
+        if (!Number.isFinite(frame)) continue;
+        normalizedFrames.add(Math.max(0, Math.floor(frame)));
+    }
+    return normalizedFrames;
+}
+
+function mergeFrameArrays(...sources: Array<ArrayLike<number> | null | undefined>): Uint32Array {
+    const frames = new Set<number>();
+    for (const source of sources) {
+        if (!source) continue;
+        for (let i = 0; i < source.length; i += 1) {
+            const value = source[i];
+            if (!Number.isFinite(value)) continue;
+            frames.add(Math.max(0, Math.floor(value)));
+        }
+    }
+    return new Uint32Array([...frames].sort((a, b) => a - b));
+}
+
+function getBoneKeyframeFrames(animation: MmdAnimation | null, boneName: string): Uint32Array {
+    if (!animation) return EMPTY_KEYFRAME_FRAMES;
+
+    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === boneName);
+    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === boneName);
+    return mergeFrameArrays(boneTrack?.frameNumbers, movableTrack?.frameNumbers);
+}
+
+function hasExplicitBoneKeyframe(animation: MmdAnimation | null, boneName: string, frame: number): boolean {
+    const normalizedFrame = Math.max(0, Math.floor(frame));
+    const frames = getBoneKeyframeFrames(animation, boneName);
+    for (let i = 0; i < frames.length; i += 1) {
+        if (frames[i] === normalizedFrame) return true;
+    }
+    return false;
+}
+
+function getDefaultPhysicsOnFrames(animation: MmdAnimation | null, boneName: string, showPhysicsBones: boolean): number[] | null {
+    if (!showPhysicsBones) return null;
+    return hasExplicitBoneKeyframe(animation, boneName, 0) ? null : [0];
+}
+
+function getBonePhysicsOnFrames(animation: MmdAnimation | null, boneName: string): Uint32Array {
+    if (!animation) return EMPTY_KEYFRAME_FRAMES;
+
+    const collect = (
+        frameNumbers: ArrayLike<number> | undefined,
+        physicsToggles: ArrayLike<number> | undefined,
+    ): number[] => {
+        if (!frameNumbers || !physicsToggles) return [];
+        const result: number[] = [];
+        const length = Math.min(frameNumbers.length, physicsToggles.length);
+        for (let i = 0; i < length; i += 1) {
+            if (Math.round(physicsToggles[i] ?? 0) !== 1) continue;
+            result.push(Math.max(0, Math.floor(frameNumbers[i] ?? 0)));
+        }
+        return result;
+    };
+
+    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === boneName);
+    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === boneName);
+    return mergeFrameArrays(
+        boneTrack ? collect(boneTrack.frameNumbers, boneTrack.physicsToggles) : null,
+        movableTrack ? collect(movableTrack.frameNumbers, movableTrack.physicsToggles) : null,
+    );
+}
+
+function removeFrameNumbersForPayloads(
+    frames: ArrayLike<number>,
+    framesToRemove: ReadonlySet<number>,
+): { frames: Uint32Array; removedIndexes: number[] } | null {
+    const sourceLength = frames?.length ?? 0;
+    const keptFrames: number[] = [];
+    const removedIndexes: number[] = [];
+    for (let i = 0; i < sourceLength; i += 1) {
+        const frame = Math.max(0, Math.floor(frames[i] ?? 0));
+        if (framesToRemove.has(frame)) {
+            removedIndexes.push(i);
+        } else {
+            keptFrames.push(frame);
+        }
+    }
+    if (removedIndexes.length !== framesToRemove.size) return null;
+    return {
+        frames: new Uint32Array(keptFrames),
+        removedIndexes,
+    };
+}
+
+function removeFloatValuesByIndexes(
+    values: ArrayLike<number>,
+    stride: number,
+    removedIndexes: readonly number[],
+): Float32Array {
+    const sourceFrameCount = Math.floor((values?.length ?? 0) / stride);
+    const removedSet = new Set(removedIndexes);
+    const target = new Float32Array(Math.max(0, sourceFrameCount - removedSet.size) * stride);
+    let targetFrameIndex = 0;
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        if (removedSet.has(sourceFrameIndex)) continue;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        for (let i = 0; i < stride; i += 1) {
+            const value = values[sourceOffset + i];
+            target[targetOffset + i] = Number.isFinite(value) ? value : 0;
+        }
+        targetFrameIndex += 1;
+    }
+    return target;
+}
+
+function removeUint8ValuesByIndexes(
+    values: ArrayLike<number>,
+    stride: number,
+    removedIndexes: readonly number[],
+): Uint8Array {
+    const sourceFrameCount = Math.floor((values?.length ?? 0) / stride);
+    const removedSet = new Set(removedIndexes);
+    const target = new Uint8Array(Math.max(0, sourceFrameCount - removedSet.size) * stride);
+    let targetFrameIndex = 0;
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        if (removedSet.has(sourceFrameIndex)) continue;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        for (let i = 0; i < stride; i += 1) {
+            const value = values[sourceOffset + i];
+            const normalized = Number.isFinite(value) ? Math.round(value) : 0;
+            target[targetOffset + i] = Math.max(0, Math.min(255, normalized));
+        }
+        targetFrameIndex += 1;
+    }
+    return target;
+}
+
+export function getRegisteredKeyframeStats(host: TimelineEditHost): { hasAnyKeyframe: boolean; maxFrame: number } {
     let hasAnyKeyframe = false;
     let maxFrame = 0;
 
@@ -113,10 +457,13 @@ export function getRegisteredKeyframeStats(host: any): { hasAnyKeyframe: boolean
     return { hasAnyKeyframe, maxFrame };
 }
 
-export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
+export function getActiveModelTimelineTracks(host: TimelineEditHost): KeyframeTrack[] {
     if (!host.currentModel || !host.activeModelInfo) return [];
 
     const visibleBoneNameSet = new Set(host.activeModelInfo.boneNames);
+    const physicsBoneNameSet = new Set(host.activeModelInfo.physicsBoneNames ?? []);
+    const showPhysicsBones = host.showPhysicsBonesInTimeline === true;
+    const animation = getCurrentModelAnimation(host);
     const isVisibleBoneCategory = (category: TrackCategory): boolean => {
         return category === "root" || category === "semi-standard" || category === "bone";
     };
@@ -128,12 +475,23 @@ export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
         const parsed = parseTrackKey(key);
         if (!parsed) continue;
         if (isVisibleBoneCategory(parsed.category) && !visibleBoneNameSet.has(parsed.name)) {
-            continue;
+            if (!showPhysicsBones || !physicsBoneNameSet.has(parsed.name)) continue;
         }
+        const isPhysicsBone = physicsBoneNameSet.has(parsed.name);
+        const defaultPhysicsOnFrames = getDefaultPhysicsOnFrames(animation, parsed.name, showPhysicsBones);
         trackMap.set(key, {
             name: parsed.name,
             category: parsed.category,
-            frames,
+            frames: isPhysicsBone && showPhysicsBones
+                ? mergeFrameArrays(frames, getBoneKeyframeFrames(animation, parsed.name))
+                : frames,
+            physicsOnFrames: isPhysicsBone
+                ? getBonePhysicsOnFrames(animation, parsed.name)
+                : undefined,
+            virtualPhysicsOnFrames: isPhysicsBone && defaultPhysicsOnFrames
+                ? mergeFrameArrays(defaultPhysicsOnFrames)
+                : undefined,
+            physicsBone: isPhysicsBone,
         });
     }
 
@@ -145,6 +503,38 @@ export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
                 name: boneName,
                 category,
                 frames: EMPTY_KEYFRAME_FRAMES,
+            });
+        }
+    }
+
+    if (showPhysicsBones) {
+        for (const boneName of physicsBoneNameSet) {
+            const category = classifyBone(boneName);
+            const key = createTrackKey(category, boneName);
+            const existing = trackMap.get(key);
+            const defaultPhysicsOnFrames = getDefaultPhysicsOnFrames(animation, boneName, true);
+            const physicsOnFrames = getBonePhysicsOnFrames(animation, boneName);
+            const displayFrames = mergeFrameArrays(existing?.frames, getBoneKeyframeFrames(animation, boneName));
+            const virtualPhysicsOnFrames = defaultPhysicsOnFrames
+                ? mergeFrameArrays(defaultPhysicsOnFrames)
+                : undefined;
+            if (existing) {
+                trackMap.set(key, {
+                    ...existing,
+                    frames: displayFrames,
+                    physicsOnFrames,
+                    virtualPhysicsOnFrames,
+                    physicsBone: true,
+                });
+                continue;
+            }
+            trackMap.set(key, {
+                name: boneName,
+                category,
+                frames: displayFrames,
+                physicsOnFrames,
+                virtualPhysicsOnFrames,
+                physicsBone: true,
             });
         }
     }
@@ -177,6 +567,12 @@ export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
         appendByKey(createTrackKey(classifyBone(boneName), boneName));
     }
 
+    if (showPhysicsBones) {
+        for (const boneName of physicsBoneNameSet) {
+            appendByKey(createTrackKey(classifyBone(boneName), boneName));
+        }
+    }
+
     for (const morphName of host.activeModelInfo.morphNames) {
         appendByKey(createTrackKey("morph", morphName));
     }
@@ -189,7 +585,7 @@ export function getActiveModelTimelineTracks(host: any): KeyframeTrack[] {
     return ordered;
 }
 
-export function getCameraTimelineTracks(host: any): KeyframeTrack[] {
+export function getCameraTimelineTracks(host: TimelineEditHost): KeyframeTrack[] {
     return [
         {
             name: "Camera",
@@ -199,7 +595,7 @@ export function getCameraTimelineTracks(host: any): KeyframeTrack[] {
     ];
 }
 
-export function refreshTotalFramesFromContent(host: any): void {
+export function refreshTotalFramesFromContent(host: TimelineEditHost): void {
     const runtimeDurationFrame = Math.max(0, Math.floor(host.mmdRuntime.animationFrameTimeDuration));
     const { hasAnyKeyframe, maxFrame } = getRegisteredKeyframeStats(host);
     const hasAudio = host.audioPlayer !== null;
@@ -219,7 +615,12 @@ export function refreshTotalFramesFromContent(host: any): void {
     host.onFrameUpdate?.(host._currentFrame, host._totalFrames);
 }
 
-export function emitMergedKeyframeTracks(host: any): void {
+export function emitMergedKeyframeTracks(host: TimelineEditHost): void {
+    if ((host.timelineEditBatchDepth ?? 0) > 0) {
+        host.timelineEditPendingEmit = true;
+        return;
+    }
+
     refreshTotalFramesFromContent(host);
     if (!host.onKeyframesLoaded) return;
 
@@ -231,7 +632,20 @@ export function emitMergedKeyframeTracks(host: any): void {
     host.onKeyframesLoaded(getActiveModelTimelineTracks(host));
 }
 
-export function hasTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+export function beginTimelineEditBatch(host: TimelineEditHost): void {
+    host.timelineEditBatchDepth = (host.timelineEditBatchDepth ?? 0) + 1;
+}
+
+export function endTimelineEditBatch(host: TimelineEditHost): void {
+    const nextDepth = Math.max(0, (host.timelineEditBatchDepth ?? 0) - 1);
+    host.timelineEditBatchDepth = nextDepth;
+    if (nextDepth > 0 || !host.timelineEditPendingEmit) return;
+
+    host.timelineEditPendingEmit = false;
+    emitMergedKeyframeTracks(host);
+}
+
+export function hasTimelineKeyframe(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
@@ -245,14 +659,14 @@ export function hasTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name"
     return hasFrameNumber(frames, normalized);
 }
 
-export function hasInfoKeyframe(host: any, frame: number): boolean {
+export function hasInfoKeyframe(host: TimelineEditHost, frame: number): boolean {
     const animation = getCurrentModelAnimation(host);
     if (!animation) return false;
     const normalized = Math.max(0, Math.floor(frame));
     return hasFrameNumber(animation.propertyTrack.frameNumbers, normalized);
 }
 
-export function addTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+export function addTimelineKeyframe(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
@@ -350,7 +764,7 @@ function readUint8Block(
     return block;
 }
 
-export function addInfoKeyframe(host: any, frame: number): boolean {
+export function addInfoKeyframe(host: TimelineEditHost, frame: number): boolean {
     const animation = getCurrentModelAnimation(host);
     if (!animation) return false;
 
@@ -387,11 +801,12 @@ export function addInfoKeyframe(host: any, frame: number): boolean {
     }
 
     (animation as unknown as { propertyTrack: MmdPropertyAnimationTrack }).propertyTrack = nextTrack;
+    refreshAnimationFrameRange(animation);
     emitMergedKeyframeTracks(host);
     return true;
 }
 
-export function ensureCameraAnimationForEditing(host: any): boolean {
+export function ensureCameraAnimationForEditing(host: TimelineEditHost): boolean {
     if (host.cameraSourceAnimation) return true;
 
     const cameraTrack = new MmdCameraAnimationTrack(0);
@@ -401,7 +816,7 @@ export function ensureCameraAnimationForEditing(host: any): boolean {
     return true;
 }
 
-export function ensureModelAnimationForEditing(host: any, track: Pick<KeyframeTrack, "name" | "category">): boolean {
+export function ensureModelAnimationForEditing(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">): boolean {
     if (!host.currentModel) return false;
 
     let animation = getCurrentModelAnimation(host);
@@ -428,14 +843,44 @@ export function ensureModelAnimationForEditing(host: any, track: Pick<KeyframeTr
 
     const hasExistingBoneTrack = animationMutable.boneTracks.some((candidate) => candidate.name === track.name);
     const hasExistingMovableTrack = animationMutable.movableBoneTracks.some((candidate) => candidate.name === track.name);
-    if (!hasExistingBoneTrack && !hasExistingMovableTrack) {
-        animationMutable.movableBoneTracks.push(new MmdMovableBoneAnimationTrack(track.name, 0));
+    const preferMovableTrack = shouldUseMovableBoneTrack(host, track);
+    if (preferMovableTrack) {
+        if (!hasExistingMovableTrack) {
+            animationMutable.movableBoneTracks.push(new MmdMovableBoneAnimationTrack(track.name, 0));
+        }
+    } else if (!hasExistingBoneTrack) {
+        const existingMovableTrack = animationMutable.movableBoneTracks.find((candidate) => candidate.name === track.name);
+        animationMutable.boneTracks.push(existingMovableTrack
+            ? createBoneTrackFromMovableTrack(existingMovableTrack)
+            : new MmdBoneAnimationTrack(track.name, 0));
+    }
+    if (!preferMovableTrack) {
+        const wrongMovableIndex = animationMutable.movableBoneTracks.findIndex((candidate) => candidate.name === track.name);
+        if (wrongMovableIndex >= 0) {
+            animationMutable.movableBoneTracks.splice(wrongMovableIndex, 1);
+        }
     }
 
     return true;
 }
 
-export function removeTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+function createBoneTrackFromMovableTrack(track: MmdMovableBoneAnimationTrack): MmdBoneAnimationTrack {
+    const boneTrack = new MmdBoneAnimationTrack(track.name, track.frameNumbers.length);
+    boneTrack.frameNumbers.set(track.frameNumbers);
+    boneTrack.rotations.set(track.rotations);
+    boneTrack.rotationInterpolations.set(track.rotationInterpolations);
+    boneTrack.physicsToggles.set(track.physicsToggles);
+    return boneTrack;
+}
+
+function shouldUseMovableBoneTrack(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">): boolean {
+    if (track.category === "camera" || track.category === "morph") return false;
+    const boneControl = host.activeModelInfo?.boneControlInfos?.find((candidate) => candidate.name === track.name);
+    if (boneControl) return boneControl.movable;
+    return track.category === "root";
+}
+
+export function removeTimelineKeyframe(host: TimelineEditHost, track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
@@ -458,7 +903,7 @@ export function removeTimelineKeyframe(host: any, track: Pick<KeyframeTrack, "na
 }
 
 export function moveTimelineKeyframe(
-    host: any,
+    host: TimelineEditHost,
     track: Pick<KeyframeTrack, "name" | "category">,
     fromFrame: number,
     toFrame: number,
@@ -485,7 +930,436 @@ export function moveTimelineKeyframe(
     return true;
 }
 
-export function buildModelTrackFrameMapFromAnimation(host: any, animation: any, frameOffset = 0): Map<string, Uint32Array> {
+export function readTimelineKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+): TimelineKeyframePayload | null {
+    const normalized = Math.max(0, Math.floor(frame));
+
+    if (track.category === "camera") {
+        const cameraTrack = host.cameraSourceAnimation?.cameraTrack;
+        if (!cameraTrack) return null;
+        const frameIndex = findFrameIndex(cameraTrack.frameNumbers, normalized);
+        if (frameIndex < 0) return null;
+        return {
+            kind: "camera",
+            positions: readFloatFrameBlock(cameraTrack.positions, frameIndex, 3),
+            positionInterpolations: readUint8FrameBlock(cameraTrack.positionInterpolations, frameIndex, 12),
+            rotations: readFloatFrameBlock(cameraTrack.rotations, frameIndex, 3),
+            rotationInterpolations: readUint8FrameBlock(cameraTrack.rotationInterpolations, frameIndex, 4),
+            distances: readFloatFrameBlock(cameraTrack.distances, frameIndex, 1),
+            distanceInterpolations: readUint8FrameBlock(cameraTrack.distanceInterpolations, frameIndex, 4),
+            fovs: readFloatFrameBlock(cameraTrack.fovs, frameIndex, 1),
+            fovInterpolations: readUint8FrameBlock(cameraTrack.fovInterpolations, frameIndex, 4),
+        };
+    }
+
+    const animation = getCurrentModelAnimation(host);
+    if (!animation) return null;
+
+    if (track.category === "morph") {
+        const morphTrack = animation.morphTracks.find((candidate) => candidate.name === track.name);
+        if (!morphTrack) return null;
+        const frameIndex = findFrameIndex(morphTrack.frameNumbers, normalized);
+        if (frameIndex < 0) return null;
+        return {
+            kind: "morph",
+            weights: readFloatFrameBlock(morphTrack.weights, frameIndex, 1),
+        };
+    }
+
+    const preferMovableTrack = shouldUseMovableBoneTrack(host, track);
+    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === track.name);
+    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
+    if (preferMovableTrack && movableTrack) {
+        const frameIndex = findFrameIndex(movableTrack.frameNumbers, normalized);
+        if (frameIndex < 0) return null;
+        return {
+            kind: "movableBone",
+            positions: readFloatFrameBlock(movableTrack.positions, frameIndex, 3),
+            positionInterpolations: readUint8FrameBlock(movableTrack.positionInterpolations, frameIndex, 12),
+            rotations: readFloatFrameBlock(movableTrack.rotations, frameIndex, 4),
+            rotationInterpolations: readUint8FrameBlock(movableTrack.rotationInterpolations, frameIndex, 4),
+            physicsToggles: readUint8FrameBlock(movableTrack.physicsToggles, frameIndex, 1),
+        };
+    }
+
+    if (boneTrack) {
+        const frameIndex = findFrameIndex(boneTrack.frameNumbers, normalized);
+        if (frameIndex >= 0) {
+            return {
+                kind: "bone",
+                rotations: readFloatFrameBlock(boneTrack.rotations, frameIndex, 4),
+                rotationInterpolations: readUint8FrameBlock(boneTrack.rotationInterpolations, frameIndex, 4),
+                physicsToggles: readUint8FrameBlock(boneTrack.physicsToggles, frameIndex, 1),
+            };
+        }
+    }
+
+    if (!movableTrack) return null;
+    const frameIndex = findFrameIndex(movableTrack.frameNumbers, normalized);
+    if (frameIndex < 0) return null;
+    return {
+        kind: "movableBone",
+        positions: readFloatFrameBlock(movableTrack.positions, frameIndex, 3),
+        positionInterpolations: readUint8FrameBlock(movableTrack.positionInterpolations, frameIndex, 12),
+        rotations: readFloatFrameBlock(movableTrack.rotations, frameIndex, 4),
+        rotationInterpolations: readUint8FrameBlock(movableTrack.rotationInterpolations, frameIndex, 4),
+        physicsToggles: readUint8FrameBlock(movableTrack.physicsToggles, frameIndex, 1),
+    };
+}
+
+export function applyTimelineKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+    payload: TimelineKeyframePayload | null,
+): boolean {
+    if (payload === null) {
+        return removeTimelineKeyframePayload(host, track, frame);
+    }
+
+    const normalized = Math.max(0, Math.floor(frame));
+    switch (payload.kind) {
+        case "camera":
+            return applyCameraKeyframePayload(host, normalized, payload);
+        case "morph":
+            return applyMorphKeyframePayload(host, track, normalized, payload);
+        case "movableBone":
+            return applyMovableBoneKeyframePayload(host, track, normalized, payload);
+        case "bone":
+            return applyBoneKeyframePayload(host, track, normalized, payload);
+    }
+}
+
+export function removeTimelineKeyframePayloads(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frames: readonly number[],
+): boolean {
+    const normalizedFrames = createNormalizedFrameSet(frames);
+    if (normalizedFrames.size === 0) return true;
+
+    if (track.category === "camera") {
+        const cameraTrack = host.cameraSourceAnimation?.cameraTrack as unknown as CameraTrackBatchMutable | undefined;
+        if (!cameraTrack) return false;
+        const frameEdit = removeFrameNumbersForPayloads(cameraTrack.frameNumbers, normalizedFrames);
+        if (!frameEdit) return false;
+        cameraTrack.frameNumbers = frameEdit.frames;
+        cameraTrack.positions = removeFloatValuesByIndexes(cameraTrack.positions, 3, frameEdit.removedIndexes);
+        cameraTrack.positionInterpolations = removeUint8ValuesByIndexes(cameraTrack.positionInterpolations, 12, frameEdit.removedIndexes);
+        cameraTrack.rotations = removeFloatValuesByIndexes(cameraTrack.rotations, 3, frameEdit.removedIndexes);
+        cameraTrack.rotationInterpolations = removeUint8ValuesByIndexes(cameraTrack.rotationInterpolations, 4, frameEdit.removedIndexes);
+        cameraTrack.distances = removeFloatValuesByIndexes(cameraTrack.distances, 1, frameEdit.removedIndexes);
+        cameraTrack.distanceInterpolations = removeUint8ValuesByIndexes(cameraTrack.distanceInterpolations, 4, frameEdit.removedIndexes);
+        cameraTrack.fovs = removeFloatValuesByIndexes(cameraTrack.fovs, 1, frameEdit.removedIndexes);
+        cameraTrack.fovInterpolations = removeUint8ValuesByIndexes(cameraTrack.fovInterpolations, 4, frameEdit.removedIndexes);
+        refreshAnimationFrameRange(host.cameraSourceAnimation);
+        host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
+        emitMergedKeyframeTracks(host);
+        return true;
+    }
+
+    const animation = getCurrentModelAnimation(host);
+    if (!animation || !host.currentModel) return false;
+
+    if (track.category === "morph") {
+        const morphTrack = animation.morphTracks.find((candidate) =>
+            candidate.name === track.name
+        ) as unknown as MorphTrackBatchMutable | undefined;
+        if (!morphTrack) return false;
+        const frameEdit = removeFrameNumbersForPayloads(morphTrack.frameNumbers, normalizedFrames);
+        if (!frameEdit) return false;
+        morphTrack.frameNumbers = frameEdit.frames;
+        morphTrack.weights = removeFloatValuesByIndexes(morphTrack.weights, 1, frameEdit.removedIndexes);
+        refreshAnimationFrameRange(animation);
+        syncModelFrameMapFromTrack(host, track, morphTrack.frameNumbers);
+        emitMergedKeyframeTracks(host);
+        return true;
+    }
+
+    const movableTrack = animation.movableBoneTracks.find((candidate) =>
+        candidate.name === track.name
+    ) as unknown as MovableBoneTrackBatchMutable | undefined;
+    if (movableTrack) {
+        const frameEdit = removeFrameNumbersForPayloads(movableTrack.frameNumbers, normalizedFrames);
+        if (!frameEdit) return false;
+        movableTrack.frameNumbers = frameEdit.frames;
+        movableTrack.positions = removeFloatValuesByIndexes(movableTrack.positions, 3, frameEdit.removedIndexes);
+        movableTrack.positionInterpolations = removeUint8ValuesByIndexes(movableTrack.positionInterpolations, 12, frameEdit.removedIndexes);
+        movableTrack.rotations = removeFloatValuesByIndexes(movableTrack.rotations, 4, frameEdit.removedIndexes);
+        movableTrack.rotationInterpolations = removeUint8ValuesByIndexes(movableTrack.rotationInterpolations, 4, frameEdit.removedIndexes);
+        movableTrack.physicsToggles = removeUint8ValuesByIndexes(movableTrack.physicsToggles, 1, frameEdit.removedIndexes);
+        refreshAnimationFrameRange(animation);
+        syncModelFrameMapFromTrack(host, track, movableTrack.frameNumbers);
+        emitMergedKeyframeTracks(host);
+        return true;
+    }
+
+    const boneTrack = animation.boneTracks.find((candidate) =>
+        candidate.name === track.name
+    ) as unknown as BoneTrackBatchMutable | undefined;
+    if (!boneTrack) return false;
+    const frameEdit = removeFrameNumbersForPayloads(boneTrack.frameNumbers, normalizedFrames);
+    if (!frameEdit) return false;
+    boneTrack.frameNumbers = frameEdit.frames;
+    boneTrack.rotations = removeFloatValuesByIndexes(boneTrack.rotations, 4, frameEdit.removedIndexes);
+    boneTrack.rotationInterpolations = removeUint8ValuesByIndexes(boneTrack.rotationInterpolations, 4, frameEdit.removedIndexes);
+    boneTrack.physicsToggles = removeUint8ValuesByIndexes(boneTrack.physicsToggles, 1, frameEdit.removedIndexes);
+    refreshAnimationFrameRange(animation);
+    syncModelFrameMapFromTrack(host, track, boneTrack.frameNumbers);
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
+function applyCameraKeyframePayload(
+    host: TimelineEditHost,
+    frame: number,
+    payload: CameraKeyframePayload,
+): boolean {
+    if (!ensureCameraAnimationForEditing(host)) return false;
+    const cameraTrack = host.cameraSourceAnimation?.cameraTrack as MmdCameraAnimationTrack;
+    const frameEdit = upsertFrameNumberForPayload(cameraTrack.frameNumbers, frame);
+    cameraTrack.frameNumbers = frameEdit.frames;
+    cameraTrack.positions = upsertFloatValuesForPayload(cameraTrack.positions, 3, frameEdit.index, frameEdit.exists, payload.positions);
+    cameraTrack.positionInterpolations = upsertUint8Values(cameraTrack.positionInterpolations, 12, frameEdit.index, frameEdit.exists, payload.positionInterpolations);
+    cameraTrack.rotations = upsertFloatValuesForPayload(cameraTrack.rotations, 3, frameEdit.index, frameEdit.exists, payload.rotations);
+    cameraTrack.rotationInterpolations = upsertUint8Values(cameraTrack.rotationInterpolations, 4, frameEdit.index, frameEdit.exists, payload.rotationInterpolations);
+    cameraTrack.distances = upsertFloatValuesForPayload(cameraTrack.distances, 1, frameEdit.index, frameEdit.exists, payload.distances);
+    cameraTrack.distanceInterpolations = upsertUint8Values(cameraTrack.distanceInterpolations, 4, frameEdit.index, frameEdit.exists, payload.distanceInterpolations);
+    cameraTrack.fovs = upsertFloatValuesForPayload(cameraTrack.fovs, 1, frameEdit.index, frameEdit.exists, payload.fovs);
+    cameraTrack.fovInterpolations = upsertUint8Values(cameraTrack.fovInterpolations, 4, frameEdit.index, frameEdit.exists, payload.fovInterpolations);
+    refreshAnimationFrameRange(host.cameraSourceAnimation);
+    host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
+function applyMorphKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+    payload: MorphKeyframePayload,
+): boolean {
+    if (!host.currentModel || !ensureModelAnimationForEditing(host, track)) return false;
+    const animation = getCurrentModelAnimation(host);
+    const morphTrack = animation?.morphTracks.find((candidate) => candidate.name === track.name);
+    if (!morphTrack) return false;
+    const frameEdit = upsertFrameNumberForPayload(morphTrack.frameNumbers, frame);
+    morphTrack.frameNumbers = frameEdit.frames;
+    morphTrack.weights = upsertFloatValuesForPayload(morphTrack.weights, 1, frameEdit.index, frameEdit.exists, payload.weights);
+    refreshAnimationFrameRange(animation);
+    syncModelFrameMapFromTrack(host, track, morphTrack.frameNumbers);
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
+function applyMovableBoneKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+    payload: MovableBoneKeyframePayload,
+): boolean {
+    if (!shouldUseMovableBoneTrack(host, track)) {
+        return applyBoneKeyframePayload(host, track, frame, {
+            kind: "bone",
+            rotations: payload.rotations,
+            rotationInterpolations: payload.rotationInterpolations,
+            physicsToggles: payload.physicsToggles,
+        });
+    }
+
+    if (!host.currentModel || !ensureModelAnimationForEditing(host, track)) return false;
+    const animation = getCurrentModelAnimation(host);
+    const movableTrack = animation?.movableBoneTracks.find((candidate) => candidate.name === track.name);
+    if (!movableTrack) return false;
+    const frameEdit = upsertFrameNumberForPayload(movableTrack.frameNumbers, frame);
+    movableTrack.frameNumbers = frameEdit.frames;
+    movableTrack.positions = upsertFloatValuesForPayload(movableTrack.positions, 3, frameEdit.index, frameEdit.exists, payload.positions);
+    movableTrack.positionInterpolations = upsertUint8Values(movableTrack.positionInterpolations, 12, frameEdit.index, frameEdit.exists, payload.positionInterpolations);
+    movableTrack.rotations = upsertFloatValuesForPayload(movableTrack.rotations, 4, frameEdit.index, frameEdit.exists, payload.rotations);
+    movableTrack.rotationInterpolations = upsertUint8Values(movableTrack.rotationInterpolations, 4, frameEdit.index, frameEdit.exists, payload.rotationInterpolations);
+    movableTrack.physicsToggles = upsertUint8Values(movableTrack.physicsToggles, 1, frameEdit.index, frameEdit.exists, payload.physicsToggles);
+    refreshAnimationFrameRange(animation);
+    syncModelFrameMapFromTrack(host, track, movableTrack.frameNumbers);
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
+function applyBoneKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+    payload: BoneKeyframePayload,
+): boolean {
+    if (!host.currentModel) return false;
+    let animation = getCurrentModelAnimation(host);
+    if (!animation) {
+        if (!ensureModelAnimationForEditing(host, track)) return false;
+        animation = getCurrentModelAnimation(host);
+    }
+    if (!animation) return false;
+
+    let boneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
+    if (!boneTrack) {
+        const animationMutable = animation as unknown as { boneTracks: MmdBoneAnimationTrack[] };
+        boneTrack = new MmdBoneAnimationTrack(track.name, 0);
+        animationMutable.boneTracks.push(boneTrack);
+    }
+    const frameEdit = upsertFrameNumberForPayload(boneTrack.frameNumbers, frame);
+    boneTrack.frameNumbers = frameEdit.frames;
+    boneTrack.rotations = upsertFloatValuesForPayload(boneTrack.rotations, 4, frameEdit.index, frameEdit.exists, payload.rotations);
+    boneTrack.rotationInterpolations = upsertUint8Values(boneTrack.rotationInterpolations, 4, frameEdit.index, frameEdit.exists, payload.rotationInterpolations);
+    boneTrack.physicsToggles = upsertUint8Values(boneTrack.physicsToggles, 1, frameEdit.index, frameEdit.exists, payload.physicsToggles);
+    refreshAnimationFrameRange(animation);
+    syncModelFrameMapFromTrack(host, track, boneTrack.frameNumbers);
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
+function removeTimelineKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+): boolean {
+    const normalized = Math.max(0, Math.floor(frame));
+
+    if (track.category === "camera") {
+        const cameraTrack = host.cameraSourceAnimation?.cameraTrack;
+        if (!cameraTrack) return false;
+        const frameIndex = findFrameIndex(cameraTrack.frameNumbers, normalized);
+        if (frameIndex < 0) return false;
+        cameraTrack.frameNumbers = removeFrameNumber(cameraTrack.frameNumbers, normalized);
+        cameraTrack.positions = removeFloatValues(cameraTrack.positions, 3, frameIndex);
+        cameraTrack.positionInterpolations = removeUint8Values(cameraTrack.positionInterpolations, 12, frameIndex);
+        cameraTrack.rotations = removeFloatValues(cameraTrack.rotations, 3, frameIndex);
+        cameraTrack.rotationInterpolations = removeUint8Values(cameraTrack.rotationInterpolations, 4, frameIndex);
+        cameraTrack.distances = removeFloatValues(cameraTrack.distances, 1, frameIndex);
+        cameraTrack.distanceInterpolations = removeUint8Values(cameraTrack.distanceInterpolations, 4, frameIndex);
+        cameraTrack.fovs = removeFloatValues(cameraTrack.fovs, 1, frameIndex);
+        cameraTrack.fovInterpolations = removeUint8Values(cameraTrack.fovInterpolations, 4, frameIndex);
+        refreshAnimationFrameRange(host.cameraSourceAnimation);
+        host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
+        emitMergedKeyframeTracks(host);
+        return true;
+    }
+
+    const animation = getCurrentModelAnimation(host);
+    if (!animation || !host.currentModel) return false;
+
+    if (track.category === "morph") {
+        const morphTrack = animation.morphTracks.find((candidate) => candidate.name === track.name);
+        if (!morphTrack) return false;
+        const frameIndex = findFrameIndex(morphTrack.frameNumbers, normalized);
+        if (frameIndex < 0) return false;
+        morphTrack.frameNumbers = removeFrameNumber(morphTrack.frameNumbers, normalized);
+        morphTrack.weights = removeFloatValues(morphTrack.weights, 1, frameIndex);
+        refreshAnimationFrameRange(animation);
+        syncModelFrameMapFromTrack(host, track, morphTrack.frameNumbers);
+        emitMergedKeyframeTracks(host);
+        return true;
+    }
+
+    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === track.name);
+    if (movableTrack) {
+        const frameIndex = findFrameIndex(movableTrack.frameNumbers, normalized);
+        if (frameIndex < 0) return false;
+        movableTrack.frameNumbers = removeFrameNumber(movableTrack.frameNumbers, normalized);
+        movableTrack.positions = removeFloatValues(movableTrack.positions, 3, frameIndex);
+        movableTrack.positionInterpolations = removeUint8Values(movableTrack.positionInterpolations, 12, frameIndex);
+        movableTrack.rotations = removeFloatValues(movableTrack.rotations, 4, frameIndex);
+        movableTrack.rotationInterpolations = removeUint8Values(movableTrack.rotationInterpolations, 4, frameIndex);
+        movableTrack.physicsToggles = removeUint8Values(movableTrack.physicsToggles, 1, frameIndex);
+        refreshAnimationFrameRange(animation);
+        syncModelFrameMapFromTrack(host, track, movableTrack.frameNumbers);
+        emitMergedKeyframeTracks(host);
+        return true;
+    }
+
+    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
+    if (!boneTrack) return false;
+    const frameIndex = findFrameIndex(boneTrack.frameNumbers, normalized);
+    if (frameIndex < 0) return false;
+    boneTrack.frameNumbers = removeFrameNumber(boneTrack.frameNumbers, normalized);
+    boneTrack.rotations = removeFloatValues(boneTrack.rotations, 4, frameIndex);
+    boneTrack.rotationInterpolations = removeUint8Values(boneTrack.rotationInterpolations, 4, frameIndex);
+    boneTrack.physicsToggles = removeUint8Values(boneTrack.physicsToggles, 1, frameIndex);
+    refreshAnimationFrameRange(animation);
+    syncModelFrameMapFromTrack(host, track, boneTrack.frameNumbers);
+    emitMergedKeyframeTracks(host);
+    return true;
+}
+
+function syncModelFrameMapFromTrack(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frames: Uint32Array,
+): void {
+    if (!host.currentModel) return;
+    const frameMap = getOrCreateModelTrackFrameMap(host, host.currentModel);
+    frameMap.set(createTrackKey(track.category, track.name), new Uint32Array(frames));
+}
+
+function upsertFrameNumberForPayload(
+    frames: ArrayLike<number>,
+    frame: number,
+): { frames: Uint32Array; index: number; exists: boolean } {
+    const normalizedFrame = Math.max(0, Math.floor(frame));
+    const sourceLength = frames?.length ?? 0;
+    let lo = 0;
+    let hi = sourceLength;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if ((frames[mid] ?? 0) < normalizedFrame) lo = mid + 1;
+        else hi = mid;
+    }
+
+    const exists = lo < sourceLength && (frames[lo] ?? 0) === normalizedFrame;
+    if (exists) {
+        return { frames: new Uint32Array(frames as ArrayLike<number>), index: lo, exists: true };
+    }
+
+    const nextFrames = new Uint32Array(sourceLength + 1);
+    for (let i = 0; i < lo; i += 1) nextFrames[i] = Math.max(0, Math.floor(frames[i] ?? 0));
+    nextFrames[lo] = normalizedFrame;
+    for (let i = lo; i < sourceLength; i += 1) {
+        nextFrames[i + 1] = Math.max(0, Math.floor(frames[i] ?? 0));
+    }
+    return { frames: nextFrames, index: lo, exists: false };
+}
+
+function upsertFloatValuesForPayload(
+    values: ArrayLike<number>,
+    stride: number,
+    frameIndex: number,
+    exists: boolean,
+    block: readonly number[],
+): Float32Array {
+    const sourceFrameCount = Math.floor((values?.length ?? 0) / stride);
+    const targetFrameCount = sourceFrameCount + (exists ? 0 : 1);
+    const target = new Float32Array(targetFrameCount * stride);
+    for (let sourceFrameIndex = 0; sourceFrameIndex < sourceFrameCount; sourceFrameIndex += 1) {
+        const targetFrameIndex = !exists && sourceFrameIndex >= frameIndex
+            ? sourceFrameIndex + 1
+            : sourceFrameIndex;
+        const sourceOffset = sourceFrameIndex * stride;
+        const targetOffset = targetFrameIndex * stride;
+        for (let i = 0; i < stride; i += 1) {
+            const value = values[sourceOffset + i];
+            target[targetOffset + i] = Number.isFinite(value) ? value : 0;
+        }
+    }
+
+    const writeOffset = frameIndex * stride;
+    for (let i = 0; i < stride; i += 1) {
+        const value = block[i] ?? 0;
+        target[writeOffset + i] = Number.isFinite(value) ? value : 0;
+    }
+    return target;
+}
+
+export function buildModelTrackFrameMapFromAnimation(_host: unknown, animation: MmdAnimation, frameOffset = 0): Map<string, Uint32Array> {
     const frameMap = new Map<string, Uint32Array>();
     const normalizedOffset = Math.max(0, Math.floor(frameOffset));
 
@@ -521,7 +1395,7 @@ export function buildModelTrackFrameMapFromAnimation(host: any, animation: any, 
     return frameMap;
 }
 
-export function getTimelineKeyframeStats(host: any): { hasAnyKeyframe: boolean; maxFrame: number } {
+export function getTimelineKeyframeStats(host: TimelineEditHost): { hasAnyKeyframe: boolean; maxFrame: number } {
     return getRegisteredKeyframeStats(host);
 }
 

@@ -91,6 +91,13 @@ typings/
 # Electron-Forge
 out/
 
+# Local smoke / UI test artifacts
+artifacts/smoke/
+artifacts/e2e/
+
+# Local reference materials (screenshots, notes, external UI references)
+local-references/
+
 # Local backup artifacts
 .git copy/
 .gitignore copy

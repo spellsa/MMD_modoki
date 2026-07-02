@@ -1,15 +1,104 @@
 import { DepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/depthOfFieldEffect";
 
+type EffectsPipelineColorValue = {
+    r: number;
+    g: number;
+    b: number;
+    set(r: number, g: number, b: number): void;
+};
+
+type EffectsPipelineHost = {
+    constructor: unknown;
+    postEffectLutExternalPathValue: string | null;
+    postEffectLutExternalTextValue: string | null;
+    postEffectLutExternalSourceFormatValue: "3dl" | "cube" | null;
+    postEffectLutExternalRevision: number;
+    postEffectLutExternalBlobUrl: string | null;
+    postEffectFogColorValue: EffectsPipelineColorValue;
+    postEffectMotionBlurEnabledValue: boolean;
+    postEffectMotionBlurStrengthValue: number;
+    postEffectMotionBlurSamplesValue: number;
+    postEffectSsrEnabledValue: boolean;
+    postEffectSsrStrengthValue: number;
+    postEffectSsrStepValue: number;
+    postEffectVlsEnabledValue: boolean;
+    postEffectVlsExposureValue: number;
+    postEffectVlsDecayValue: number;
+    postEffectVlsWeightValue: number;
+    postEffectVlsDensityValue: number;
+    postEffectFogEnabledValue: boolean;
+    postEffectFogModeValue: number;
+    postEffectFogStartValue: number;
+    postEffectFogEndValue: number;
+    postEffectFogDensityValue: number;
+    postEffectFogOpacityValue: number;
+    antialiasEnabledValue: boolean;
+    dofEnabledValue: boolean;
+    postEffectBackend: "classic" | "frameGraph" | "experimental";
+    defaultRenderingPipeline: {
+        depthOfFieldEnabled: boolean;
+        depthOfFieldBlurLevel: DepthOfFieldEffectBlurLevel;
+        depthOfField: {
+            depthTexture?: unknown;
+            lensSize: number;
+            focalLength: number;
+        };
+    } | null;
+    depthRenderer: { getDepthMap(): unknown } | null;
+    dofBlurLevelValue: number;
+    dofFocusDistanceMmValue: number;
+    dofAutoFocusToCameraTarget: boolean;
+    dofAutoFocusInFocusRadiusMm: number;
+    dofAutoFocusNearOffsetMmValue: number;
+    dofNearSuppressionScaleValue: number;
+    dofEffectiveFStopValue: number;
+    dofFStopValue: number;
+    dofLensBlurEnabledValue: boolean;
+    dofLensBlurStrengthValue: number;
+    dofLensEdgeBlurValue: number;
+    dofLensDistortionValue: number;
+    dofLensDistortionFollowsCameraFov: boolean;
+    dofLensDistortionInfluenceValue: number;
+    dofLensSizeValue: number;
+    dofFocalLengthValue: number;
+    dofFocalLengthFollowsCameraFov: boolean;
+    dofFocalLengthDistanceInvertedValue: boolean;
+    dofFocalLengthLinkedToCameraFov: boolean;
+    postEffectFarDofStrengthValue: number;
+    farDofEnabled: boolean;
+    applyImageProcessingSettings(): void;
+    applyFogSettings(): void;
+    applyMotionBlurSettings(): void;
+    applySsrSettings(): void;
+    applyVolumetricLightSettings(): void;
+    applyAntialiasSettings(): void;
+    updateEditorDofFocusAndFStop(): void;
+    applyDofLensBlurSettings(): void;
+    refreshFrameGraphPostEffectsBackendForResourcePlanChange(): boolean;
+    initializeDofPipeline(): void;
+    configureDofDepthRenderer(): void;
+    applyEditorDofSettings(): void;
+    applyDofLensOpticsSettings(): void;
+    updateDofLensDistortionFromCameraFov(): void;
+    updateDofFocalLengthFromCameraFov(): void;
+};
+
+function getEffectsPipelineHostStatics(host: EffectsPipelineHost): {
+    POST_EFFECT_LUT_PRESETS?: ReadonlyArray<{ id: string; label: string }>;
+} {
+    return host.constructor as { POST_EFFECT_LUT_PRESETS?: ReadonlyArray<{ id: string; label: string }> };
+}
+
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
 }
 
-export function getPostEffectLutPresetOptions(host: any): ReadonlyArray<{ id: string; label: string }> {
-    return host.constructor.POST_EFFECT_LUT_PRESETS ?? [];
+export function getPostEffectLutPresetOptions(host: EffectsPipelineHost): ReadonlyArray<{ id: string; label: string }> {
+    return getEffectsPipelineHostStatics(host).POST_EFFECT_LUT_PRESETS ?? [];
 }
 
 export function setPostEffectExternalLut(
-    host: any,
+    host: EffectsPipelineHost,
     path: string | null,
     text: string | null,
     sourceFormat: "3dl" | "cube" | null = null,
@@ -37,7 +126,7 @@ export function setPostEffectExternalLut(
     host.applyImageProcessingSettings();
 }
 
-export function getPostEffectFogColor(host: any): { r: number; g: number; b: number } {
+export function getPostEffectFogColor(host: EffectsPipelineHost): { r: number; g: number; b: number } {
     return {
         r: host.postEffectFogColorValue.r,
         g: host.postEffectFogColorValue.g,
@@ -45,150 +134,168 @@ export function getPostEffectFogColor(host: any): { r: number; g: number; b: num
     };
 }
 
-export function setPostEffectFogColor(host: any, r: number, g: number, b: number): void {
+export function setPostEffectFogColor(host: EffectsPipelineHost, r: number, g: number, b: number): void {
     host.postEffectFogColorValue.set(clamp(r, 0, 1), clamp(g, 0, 1), clamp(b, 0, 1));
     host.applyFogSettings();
 }
 
-export function getPostEffectMotionBlurEnabled(host: any): boolean {
+export function getPostEffectMotionBlurEnabled(host: EffectsPipelineHost): boolean {
     return host.postEffectMotionBlurEnabledValue;
 }
-export function setPostEffectMotionBlurEnabled(host: any, v: boolean): void {
+export function setPostEffectMotionBlurEnabled(host: EffectsPipelineHost, v: boolean): void {
     host.postEffectMotionBlurEnabledValue = Boolean(v);
     host.applyMotionBlurSettings();
 }
-export function getPostEffectMotionBlurStrength(host: any): number {
+export function getPostEffectMotionBlurStrength(host: EffectsPipelineHost): number {
     return host.postEffectMotionBlurStrengthValue;
 }
-export function setPostEffectMotionBlurStrength(host: any, v: number): void {
+export function setPostEffectMotionBlurStrength(host: EffectsPipelineHost, v: number): void {
     host.postEffectMotionBlurStrengthValue = clamp(v, 0, 2);
     host.applyMotionBlurSettings();
 }
-export function getPostEffectMotionBlurSamples(host: any): number {
+export function getPostEffectMotionBlurSamples(host: EffectsPipelineHost): number {
     return host.postEffectMotionBlurSamplesValue;
 }
-export function setPostEffectMotionBlurSamples(host: any, v: number): void {
+export function setPostEffectMotionBlurSamples(host: EffectsPipelineHost, v: number): void {
     host.postEffectMotionBlurSamplesValue = clamp(Math.round(v), 8, 64);
     host.applyMotionBlurSettings();
 }
 
-export function getPostEffectSsrEnabled(host: any): boolean {
+export function getPostEffectSsrEnabled(host: EffectsPipelineHost): boolean {
     return host.postEffectSsrEnabledValue;
 }
-export function setPostEffectSsrEnabled(host: any, v: boolean): void {
+export function setPostEffectSsrEnabled(host: EffectsPipelineHost, v: boolean): void {
     host.postEffectSsrEnabledValue = Boolean(v);
     host.applySsrSettings();
 }
-export function getPostEffectSsrStrength(host: any): number {
+export function getPostEffectSsrStrength(host: EffectsPipelineHost): number {
     return host.postEffectSsrStrengthValue;
 }
-export function setPostEffectSsrStrength(host: any, v: number): void {
+export function setPostEffectSsrStrength(host: EffectsPipelineHost, v: number): void {
     host.postEffectSsrStrengthValue = clamp(v, 0, 2);
     host.applySsrSettings();
 }
-export function getPostEffectSsrStep(host: any): number {
+export function getPostEffectSsrStep(host: EffectsPipelineHost): number {
     return host.postEffectSsrStepValue;
 }
-export function setPostEffectSsrStep(host: any, v: number): void {
+export function setPostEffectSsrStep(host: EffectsPipelineHost, v: number): void {
     host.postEffectSsrStepValue = clamp(Math.round(v), 1, 8);
     host.applySsrSettings();
 }
 
-export function getPostEffectVlsEnabled(host: any): boolean {
+export function getPostEffectVlsEnabled(host: EffectsPipelineHost): boolean {
     return host.postEffectVlsEnabledValue;
 }
-export function setPostEffectVlsEnabled(host: any, v: boolean): void {
+export function setPostEffectVlsEnabled(host: EffectsPipelineHost, v: boolean): void {
     host.postEffectVlsEnabledValue = Boolean(v);
     host.applyVolumetricLightSettings();
 }
-export function getPostEffectVlsExposure(host: any): number {
+export function getPostEffectVlsExposure(host: EffectsPipelineHost): number {
     return host.postEffectVlsExposureValue;
 }
-export function setPostEffectVlsExposure(host: any, v: number): void {
+export function setPostEffectVlsExposure(host: EffectsPipelineHost, v: number): void {
     host.postEffectVlsExposureValue = clamp(v, 0, 2);
     host.applyVolumetricLightSettings();
 }
-export function getPostEffectVlsDecay(host: any): number {
+export function getPostEffectVlsDecay(host: EffectsPipelineHost): number {
     return host.postEffectVlsDecayValue;
 }
-export function setPostEffectVlsDecay(host: any, v: number): void {
+export function setPostEffectVlsDecay(host: EffectsPipelineHost, v: number): void {
     host.postEffectVlsDecayValue = clamp(v, 0, 1);
     host.applyVolumetricLightSettings();
 }
-export function getPostEffectVlsWeight(host: any): number {
+export function getPostEffectVlsWeight(host: EffectsPipelineHost): number {
     return host.postEffectVlsWeightValue;
 }
-export function setPostEffectVlsWeight(host: any, v: number): void {
+export function setPostEffectVlsWeight(host: EffectsPipelineHost, v: number): void {
     host.postEffectVlsWeightValue = clamp(v, 0, 1);
     host.applyVolumetricLightSettings();
 }
-export function getPostEffectVlsDensity(host: any): number {
+export function getPostEffectVlsDensity(host: EffectsPipelineHost): number {
     return host.postEffectVlsDensityValue;
 }
-export function setPostEffectVlsDensity(host: any, v: number): void {
+export function setPostEffectVlsDensity(host: EffectsPipelineHost, v: number): void {
     host.postEffectVlsDensityValue = clamp(v, 0, 2);
     host.applyVolumetricLightSettings();
 }
 
-export function getPostEffectFogEnabled(host: any): boolean {
+export function getPostEffectFogEnabled(host: EffectsPipelineHost): boolean {
     return host.postEffectFogEnabledValue;
 }
-export function setPostEffectFogEnabled(host: any, v: boolean): void {
+export function setPostEffectFogEnabled(host: EffectsPipelineHost, v: boolean): void {
     host.postEffectFogEnabledValue = Boolean(v);
     host.applyFogSettings();
 }
-export function getPostEffectFogMode(host: any): number {
+export function getPostEffectFogMode(host: EffectsPipelineHost): number {
     return host.postEffectFogModeValue;
 }
-export function setPostEffectFogMode(host: any, v: number): void {
+export function setPostEffectFogMode(host: EffectsPipelineHost, v: number): void {
     void v;
     host.postEffectFogModeValue = 2;
     host.applyFogSettings();
 }
-export function getPostEffectFogStart(host: any): number {
+export function getPostEffectFogStart(host: EffectsPipelineHost): number {
     return host.postEffectFogStartValue;
 }
-export function setPostEffectFogStart(host: any, v: number): void {
+export function setPostEffectFogStart(host: EffectsPipelineHost, v: number): void {
     host.postEffectFogStartValue = clamp(v, 0, 100000);
     if (host.postEffectFogEndValue < host.postEffectFogStartValue + 0.01) {
         host.postEffectFogEndValue = host.postEffectFogStartValue + 0.01;
     }
     host.applyFogSettings();
 }
-export function getPostEffectFogEnd(host: any): number {
+export function getPostEffectFogEnd(host: EffectsPipelineHost): number {
     return host.postEffectFogEndValue;
 }
-export function setPostEffectFogEnd(host: any, v: number): void {
+export function setPostEffectFogEnd(host: EffectsPipelineHost, v: number): void {
     host.postEffectFogEndValue = Math.max(host.postEffectFogStartValue + 0.01, Math.min(100000, v));
     host.applyFogSettings();
 }
-export function getPostEffectFogDensity(host: any): number {
+export function getPostEffectFogDensity(host: EffectsPipelineHost): number {
     return host.postEffectFogDensityValue;
 }
-export function setPostEffectFogDensity(host: any, v: number): void {
+export function setPostEffectFogDensity(host: EffectsPipelineHost, v: number): void {
     host.postEffectFogDensityValue = clamp(v, 0, 0.01);
     host.applyFogSettings();
 }
-export function getPostEffectFogOpacity(host: any): number {
+export function getPostEffectFogOpacity(host: EffectsPipelineHost): number {
     return host.postEffectFogOpacityValue;
 }
-export function setPostEffectFogOpacity(host: any, v: number): void {
+export function setPostEffectFogOpacity(host: EffectsPipelineHost, v: number): void {
     host.postEffectFogOpacityValue = clamp(v, 0, 1);
     host.applyFogSettings();
 }
 
-export function getAntialiasEnabled(host: any): boolean {
+export function getAntialiasEnabled(host: EffectsPipelineHost): boolean {
     return host.antialiasEnabledValue;
 }
-export function setAntialiasEnabled(host: any, v: boolean): void {
+export function setAntialiasEnabled(host: EffectsPipelineHost, v: boolean): void {
     host.antialiasEnabledValue = Boolean(v);
     host.applyAntialiasSettings();
 }
 
-export function getDofEnabled(host: any): boolean {
+export function getDofEnabled(host: EffectsPipelineHost): boolean {
     return host.dofEnabledValue;
 }
-export function setDofEnabled(host: any, v: boolean): void {
+export function setDofEnabled(host: EffectsPipelineHost, v: boolean): void {
+    if (host.postEffectBackend === "frameGraph") {
+        const next = Boolean(v);
+        const changed = host.dofEnabledValue !== next;
+        host.dofEnabledValue = next;
+        if (host.dofEnabledValue) {
+            host.updateEditorDofFocusAndFStop();
+        }
+        if (host.defaultRenderingPipeline) {
+            host.defaultRenderingPipeline.depthOfFieldEnabled = false;
+        }
+        if (changed && host.refreshFrameGraphPostEffectsBackendForResourcePlanChange()) {
+            return;
+        }
+        host.applyDofLensBlurSettings();
+        host.applyAntialiasSettings();
+        return;
+    }
+
     if (v && !host.defaultRenderingPipeline) {
         host.initializeDofPipeline();
     }
@@ -206,16 +313,16 @@ export function setDofEnabled(host: any, v: boolean): void {
         if (host.depthRenderer) {
             host.defaultRenderingPipeline.depthOfField.depthTexture = host.depthRenderer.getDepthMap();
         }
-        host.defaultRenderingPipeline.depthOfFieldEnabled = host.dofEnabledValue;
+        host.defaultRenderingPipeline.depthOfFieldEnabled = host.postEffectBackend === "classic" && host.dofEnabledValue;
     }
     host.applyDofLensBlurSettings();
     host.applyAntialiasSettings();
 }
 
-export function getDofBlurLevel(host: any): number {
+export function getDofBlurLevel(host: EffectsPipelineHost): number {
     return host.dofBlurLevelValue;
 }
-export function setDofBlurLevel(host: any, v: number): void {
+export function setDofBlurLevel(host: EffectsPipelineHost, v: number): void {
     const level = v <= 0 ? DepthOfFieldEffectBlurLevel.Low : v === 1 ? DepthOfFieldEffectBlurLevel.Medium : DepthOfFieldEffectBlurLevel.High;
     host.dofBlurLevelValue = level;
     if (host.defaultRenderingPipeline) {
@@ -225,68 +332,68 @@ export function setDofBlurLevel(host: any, v: number): void {
     host.applyAntialiasSettings();
 }
 
-export function getDofFocusDistanceMm(host: any): number {
+export function getDofFocusDistanceMm(host: EffectsPipelineHost): number {
     return host.dofFocusDistanceMmValue;
 }
-export function setDofFocusDistanceMm(host: any, v: number): void {
+export function setDofFocusDistanceMm(host: EffectsPipelineHost, v: number): void {
     host.dofFocusDistanceMmValue = clamp(v, 0, 1000000000);
     host.updateEditorDofFocusAndFStop();
 }
-export function getDofAutoFocusEnabled(host: any): boolean {
+export function getDofAutoFocusEnabled(host: EffectsPipelineHost): boolean {
     return host.dofAutoFocusToCameraTarget;
 }
-export function getDofAutoFocusRangeMeters(host: any): number {
+export function getDofAutoFocusRangeMeters(host: EffectsPipelineHost): number {
     return host.dofAutoFocusInFocusRadiusMm / 1000;
 }
-export function getDofAutoFocusNearOffsetMm(host: any): number {
+export function getDofAutoFocusNearOffsetMm(host: EffectsPipelineHost): number {
     return host.dofAutoFocusNearOffsetMmValue;
 }
-export function setDofAutoFocusNearOffsetMm(host: any, v: number): void {
+export function setDofAutoFocusNearOffsetMm(host: EffectsPipelineHost, v: number): void {
     host.dofAutoFocusNearOffsetMmValue = clamp(v, -1000000000, 1000000000);
     host.updateEditorDofFocusAndFStop();
 }
-export function getDofNearSuppressionScale(host: any): number {
+export function getDofNearSuppressionScale(host: EffectsPipelineHost): number {
     return host.dofNearSuppressionScaleValue;
 }
-export function setDofNearSuppressionScale(host: any, v: number): void {
+export function setDofNearSuppressionScale(host: EffectsPipelineHost, v: number): void {
     host.dofNearSuppressionScaleValue = clamp(v, 0, 10);
     host.updateEditorDofFocusAndFStop();
 }
-export function getDofEffectiveFStop(host: any): number {
+export function getDofEffectiveFStop(host: EffectsPipelineHost): number {
     return host.dofEffectiveFStopValue;
 }
-export function getDofFStop(host: any): number {
+export function getDofFStop(host: EffectsPipelineHost): number {
     return host.dofFStopValue;
 }
-export function setDofFStop(host: any, v: number): void {
+export function setDofFStop(host: EffectsPipelineHost, v: number): void {
     host.dofFStopValue = clamp(v, 0.01, 32);
     host.updateEditorDofFocusAndFStop();
 }
-export function getDofLensBlurEnabled(host: any): boolean {
+export function getDofLensBlurEnabled(host: EffectsPipelineHost): boolean {
     return host.dofLensBlurEnabledValue;
 }
-export function setDofLensBlurEnabled(host: any, v: boolean): void {
+export function setDofLensBlurEnabled(host: EffectsPipelineHost, v: boolean): void {
     host.dofLensBlurEnabledValue = Boolean(v);
     host.applyDofLensBlurSettings();
 }
-export function getDofLensBlurStrength(host: any): number {
+export function getDofLensBlurStrength(host: EffectsPipelineHost): number {
     return host.dofLensBlurStrengthValue;
 }
-export function setDofLensBlurStrength(host: any, v: number): void {
+export function setDofLensBlurStrength(host: EffectsPipelineHost, v: number): void {
     host.dofLensBlurStrengthValue = clamp(v, 0, 1);
     host.applyDofLensBlurSettings();
 }
-export function getDofLensEdgeBlur(host: any): number {
+export function getDofLensEdgeBlur(host: EffectsPipelineHost): number {
     return host.dofLensEdgeBlurValue;
 }
-export function setDofLensEdgeBlur(host: any, v: number): void {
+export function setDofLensEdgeBlur(host: EffectsPipelineHost, v: number): void {
     host.dofLensEdgeBlurValue = clamp(v, 0, 3);
     host.applyDofLensOpticsSettings();
 }
-export function getDofLensDistortion(host: any): number {
+export function getDofLensDistortion(host: EffectsPipelineHost): number {
     return host.dofLensDistortionValue;
 }
-export function setDofLensDistortion(host: any, v: number): void {
+export function setDofLensDistortion(host: EffectsPipelineHost, v: number): void {
     if (host.dofLensDistortionFollowsCameraFov) {
         host.updateDofLensDistortionFromCameraFov();
         return;
@@ -294,13 +401,13 @@ export function setDofLensDistortion(host: any, v: number): void {
     host.dofLensDistortionValue = clamp(v, -1, 1);
     host.applyDofLensOpticsSettings();
 }
-export function getDofLensDistortionLinkedToCameraFov(host: any): boolean {
+export function getDofLensDistortionLinkedToCameraFov(host: EffectsPipelineHost): boolean {
     return host.dofLensDistortionFollowsCameraFov;
 }
-export function getDofLensDistortionInfluence(host: any): number {
+export function getDofLensDistortionInfluence(host: EffectsPipelineHost): number {
     return host.dofLensDistortionInfluenceValue;
 }
-export function setDofLensDistortionInfluence(host: any, v: number): void {
+export function setDofLensDistortionInfluence(host: EffectsPipelineHost, v: number): void {
     host.dofLensDistortionInfluenceValue = clamp(v, 0, 1);
     if (host.dofLensDistortionFollowsCameraFov) {
         host.updateDofLensDistortionFromCameraFov();
@@ -308,20 +415,20 @@ export function setDofLensDistortionInfluence(host: any, v: number): void {
     }
     host.applyDofLensOpticsSettings();
 }
-export function getDofLensSize(host: any): number {
+export function getDofLensSize(host: EffectsPipelineHost): number {
     return host.dofLensSizeValue;
 }
-export function setDofLensSize(host: any, v: number): void {
+export function setDofLensSize(host: EffectsPipelineHost, v: number): void {
     host.dofLensSizeValue = clamp(v, 0, 8192);
     if (host.defaultRenderingPipeline) {
         host.defaultRenderingPipeline.depthOfField.lensSize = host.dofLensSizeValue;
     }
     host.updateEditorDofFocusAndFStop();
 }
-export function getDofFocalLength(host: any): number {
+export function getDofFocalLength(host: EffectsPipelineHost): number {
     return host.dofFocalLengthValue;
 }
-export function setDofFocalLength(host: any, v: number): void {
+export function setDofFocalLength(host: EffectsPipelineHost, v: number): void {
     if (host.dofFocalLengthFollowsCameraFov) {
         host.updateDofFocalLengthFromCameraFov();
         host.updateEditorDofFocusAndFStop();
@@ -333,26 +440,26 @@ export function setDofFocalLength(host: any, v: number): void {
     }
     host.updateEditorDofFocusAndFStop();
 }
-export function getDofFocalLengthDistanceInverted(host: any): boolean {
+export function getDofFocalLengthDistanceInverted(host: EffectsPipelineHost): boolean {
     return host.dofFocalLengthDistanceInvertedValue;
 }
-export function setDofFocalLengthDistanceInverted(host: any, v: boolean): void {
+export function setDofFocalLengthDistanceInverted(host: EffectsPipelineHost, v: boolean): void {
     host.dofFocalLengthDistanceInvertedValue = Boolean(v);
     if (host.dofFocalLengthFollowsCameraFov) {
         host.updateDofFocalLengthFromCameraFov();
         host.updateEditorDofFocusAndFStop();
     }
 }
-export function getDofFocalLengthLinkedToCameraDistance(host: any): boolean {
+export function getDofFocalLengthLinkedToCameraDistance(host: EffectsPipelineHost): boolean {
     return host.dofFocalLengthLinkedToCameraFov;
 }
-export function getDofFocalLengthLinkedToCameraFov(host: any): boolean {
+export function getDofFocalLengthLinkedToCameraFov(host: EffectsPipelineHost): boolean {
     return host.dofFocalLengthFollowsCameraFov;
 }
-export function getPostEffectFarDofStrength(host: any): number {
+export function getPostEffectFarDofStrength(host: EffectsPipelineHost): number {
     return host.postEffectFarDofStrengthValue;
 }
-export function setPostEffectFarDofStrength(host: any, v: number): void {
+export function setPostEffectFarDofStrength(host: EffectsPipelineHost, v: number): void {
     if (!host.farDofEnabled) {
         host.postEffectFarDofStrengthValue = 0;
         return;

@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type ExperimentalPostFxElements = {
     motionBlurStrengthInput: HTMLInputElement;
@@ -12,6 +13,7 @@ type ExperimentalPostFxElements = {
 
 export type ExperimentalPostFxControllerDeps = {
     mmdManager: MmdManager;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function queryPanelElements(root: ParentNode): ExperimentalPostFxElements | null {
@@ -45,9 +47,12 @@ function queryPanelElements(root: ParentNode): ExperimentalPostFxElements | null
 
 export class ExperimentalPostFxController {
     private readonly mmdManager: MmdManager;
+    private readonly dispatchAction?: (action: EditorAction) => boolean;
+    private elements: ExperimentalPostFxElements | null = null;
 
     constructor(deps: ExperimentalPostFxControllerDeps) {
         this.mmdManager = deps.mmdManager;
+        this.dispatchAction = deps.dispatchAction;
     }
 
     public connect(root: ParentNode): boolean {
@@ -55,34 +60,27 @@ export class ExperimentalPostFxController {
         if (!elements) {
             return false;
         }
+        this.elements = elements;
 
         const applyMotionBlur = (): void => {
-            this.mmdManager.postEffectMotionBlurStrength = Number(elements.motionBlurStrengthInput.value) / 100;
-            this.mmdManager.postEffectMotionBlurSamples = 32;
-            this.mmdManager.postEffectMotionBlurEnabled = this.mmdManager.postEffectMotionBlurStrength > 0.000001;
-
-            elements.motionBlurStrengthValue.textContent = this.mmdManager.postEffectMotionBlurEnabled
-                ? this.mmdManager.postEffectMotionBlurStrength.toFixed(2)
-                : t("status.off");
+            const percent = Number(elements.motionBlurStrengthInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setMotionBlurStrength", source: "panel", percent })) {
+                this.setMotionBlurStrengthPercent(percent);
+            }
         };
 
         const applySsr = (): void => {
-            this.mmdManager.postEffectSsrStrength = 0;
-            this.mmdManager.postEffectSsrStep = 1;
-            this.mmdManager.postEffectSsrEnabled = false;
-            elements.ssrStrengthValue.textContent = t("status.off");
+            const percent = Number(elements.ssrStrengthInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setSsrStrength", source: "panel", percent })) {
+                this.setSsrStrengthPercent(percent);
+            }
         };
 
         const applyVls = (): void => {
-            this.mmdManager.postEffectVlsExposure = Number(elements.vlsExposureInput.value) / 100;
-            this.mmdManager.postEffectVlsDecay = 0.95;
-            this.mmdManager.postEffectVlsWeight = 0.4;
-            this.mmdManager.postEffectVlsDensity = 0.9;
-            this.mmdManager.postEffectVlsEnabled = this.mmdManager.postEffectVlsExposure > 0.000001;
-
-            elements.vlsExposureValue.textContent = this.mmdManager.postEffectVlsEnabled
-                ? this.mmdManager.postEffectVlsExposure.toFixed(2)
-                : t("status.off");
+            const percent = Number(elements.vlsExposureInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setVlsExposure", source: "panel", percent })) {
+                this.setVlsExposurePercent(percent);
+            }
         };
 
         this.disableSsao();
@@ -113,7 +111,55 @@ export class ExperimentalPostFxController {
         return true;
     }
 
+    public setMotionBlurStrengthPercent(percent: number): void {
+        const elements = this.elements;
+        if (!elements) return;
+        this.mmdManager.postEffectMotionBlurStrength = percent / 100;
+        this.mmdManager.postEffectMotionBlurSamples = 32;
+        this.mmdManager.postEffectMotionBlurEnabled = this.mmdManager.postEffectMotionBlurStrength > 0.000001;
+        elements.motionBlurStrengthInput.value = String(Math.max(0, Math.min(200, Math.round(percent))));
+        elements.motionBlurStrengthValue.textContent = this.mmdManager.postEffectMotionBlurEnabled
+            ? this.mmdManager.postEffectMotionBlurStrength.toFixed(2)
+            : t("status.off");
+    }
+
+    public setSsrStrengthPercent(percent: number): void {
+        const elements = this.elements;
+        if (!elements) return;
+        if (this.mmdManager.getPostEffectBackend() === "frameGraph") {
+            this.mmdManager.postEffectSsrStrength = percent / 100;
+            this.mmdManager.postEffectSsrEnabled = this.mmdManager.postEffectSsrStrength > 0.000001;
+            elements.ssrStrengthInput.value = String(Math.max(0, Math.min(200, Math.round(percent))));
+            elements.ssrStrengthValue.textContent = this.mmdManager.postEffectSsrEnabled
+                ? this.mmdManager.postEffectSsrStrength.toFixed(2)
+                : t("status.off");
+            return;
+        }
+        this.mmdManager.postEffectSsrStrength = 0;
+        this.mmdManager.postEffectSsrStep = 1;
+        this.mmdManager.postEffectSsrEnabled = false;
+        elements.ssrStrengthInput.value = "0";
+        elements.ssrStrengthValue.textContent = t("status.off");
+    }
+
+    public setVlsExposurePercent(percent: number): void {
+        const elements = this.elements;
+        if (!elements) return;
+        this.mmdManager.postEffectVlsExposure = percent / 100;
+        this.mmdManager.postEffectVlsDecay = 0.95;
+        this.mmdManager.postEffectVlsWeight = 0.4;
+        this.mmdManager.postEffectVlsDensity = 0.9;
+        this.mmdManager.postEffectVlsEnabled = this.mmdManager.postEffectVlsExposure > 0.000001;
+        elements.vlsExposureInput.value = String(Math.max(0, Math.min(200, Math.round(percent))));
+        elements.vlsExposureValue.textContent = this.mmdManager.postEffectVlsEnabled
+            ? this.mmdManager.postEffectVlsExposure.toFixed(2)
+            : t("status.off");
+    }
+
     private disableSsao(): void {
+        if (this.mmdManager.getPostEffectBackend() === "frameGraph") {
+            return;
+        }
         this.mmdManager.postEffectSsaoStrength = 0;
         this.mmdManager.postEffectSsaoRadius = 2;
         this.mmdManager.postEffectSsaoFadeEnd = 200;

@@ -53,6 +53,6 @@
 
 ## 関連メモ
 
-- [glb-loading-investigation-2026-04-01.md](/d:/DevTools/Projects/MMD_modoki/docs/glb-loading-investigation-2026-04-01.md)
-- [generic-object-panel-design.md](/d:/DevTools/Projects/MMD_modoki/docs/generic-object-panel-design.md)
-- [mmd-basic-task-checklist.md](/d:/DevTools/Projects/MMD_modoki/docs/mmd-basic-task-checklist.md)
+- [glb-loading-investigation-2026-04-01.md](./glb-loading-investigation-2026-04-01.md)
+- [generic-object-panel-design.md](./generic-object-panel-design.md)
+- [mmd-basic-task-checklist.md](./mmd-basic-task-checklist.md)

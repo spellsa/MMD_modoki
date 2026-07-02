@@ -1,4 +1,12 @@
-import type { MmdModokiProjectFileV1, ProjectAccessoryState, ProjectKeyframeBundle, ProjectSerializedAccessoryTransformTrack } from "../types";
+import type {
+    MmdModokiProjectFileV1,
+    ProjectAccessoryState,
+    ProjectKeyframeBundle,
+    ProjectModelMaterialShaderState,
+    ProjectMotionImport,
+    ProjectSerializedAccessoryTransformTrack,
+} from "../types";
+import type { FrameGraphPostEffectStackEntry } from "../shared/frame-graph-post-effect-stack";
 import { serializeCameraTrack, serializeModelAnimation } from "./project-codec";
 
 type ProjectExportAccessory = {
@@ -7,7 +15,183 @@ type ProjectExportAccessory = {
     visible: boolean;
 };
 
-export function exportProjectState(host: any): MmdModokiProjectFileV1 {
+type ProjectExportSceneModel = {
+    info: { path: string };
+    mesh: object;
+    model: object;
+};
+
+type ProjectExportHost = {
+    sceneModels: ProjectExportSceneModel[];
+    activeModelInfo: { path: string } | null;
+    timelineTarget: "model" | "camera";
+    _currentFrame: number;
+    _playbackSpeed: number;
+    cameraMotionPath: string | null;
+    audioSourcePath: string | null;
+    camera: {
+        position: { x: number; y: number; z: number };
+        target: { x: number; y: number; z: number };
+    };
+    cameraRotationEulerDeg: { x: number; y: number; z: number };
+    modelMotionImportsByModel: WeakMap<object, ProjectMotionImport[]>;
+    modelSourceAnimationsByModel: WeakMap<object, unknown>;
+    cameraSourceAnimation: { cameraTrack?: unknown } | null;
+    lightIntensity: number;
+    ambientIntensity: number;
+    lightColorTemperature: number;
+    lightFlatStrength: number;
+    lightFlatColorInfluence: number;
+    toonShadowInfluence: number;
+    shadowEnabled: boolean;
+    shadowMode: "cascaded" | "standard";
+    shadowDarkness: number;
+    shadowFrustumSize: number;
+    shadowMaxZ: number;
+    shadowBias: number;
+    shadowNormalBias: number;
+    shadowFilteringQuality: number;
+    shadowBlurKernel: number;
+    shadowPenumbraEnabled: boolean;
+    shadowPenumbraSize: number;
+    transparentShadowEnabled: boolean;
+    softTransparentShadowEnabled: boolean;
+    iblShadowsEnabled: boolean;
+    iblShadowOpacity: number;
+    iblShadowDistanceScale: number;
+    characterContactShadowEnabled: boolean;
+    characterContactShadowOpacity: number;
+    characterContactShadowScale: number;
+    shadowEdgeSoftness: number;
+    selfShadowEdgeSoftness: number;
+    occlusionShadowEdgeSoftness: number;
+    antialiasEnabled: boolean;
+    mirroringFloorEnabled: boolean;
+    mirroringFloorReflectance: number;
+    mirroringFloorSize: number;
+    mirroringFloorHeight: number;
+    mirroringFloorResolution: number;
+    dofEnabled: boolean;
+    dofFocusDistanceMm: number;
+    dofAutoFocusNearOffsetMm: number;
+    dofBlurLevel: number;
+    dofFStop: number;
+    dofNearSuppressionScale: number;
+    dofLensSize: number;
+    dofFocalLength: number;
+    dofFocalLengthDistanceInverted: boolean;
+    dofLensBlurStrength: number;
+    dofLensEdgeBlur: number;
+    dofLensDistortion: number;
+    dofLensDistortionInfluence: number;
+    modelEdgeWidth: number;
+    modelEdgeColorOverrideEnabled: boolean;
+    getModelEdgeColor: () => { r: number; g: number; b: number };
+    postEffectContrast: number;
+    postEffectGamma: number;
+    postEffectExposure: number;
+    postEffectToneMappingEnabled: boolean;
+    postEffectToneMappingType: number;
+    postEffectDitheringEnabled: boolean;
+    postEffectDitheringIntensity: number;
+    postEffectVignetteEnabled: boolean;
+    postEffectVignetteWeight: number;
+    postEffectBloomEnabled: boolean;
+    postEffectBloomWeight: number;
+    postEffectBloomThreshold: number;
+    postEffectBloomKernel: number;
+    getPostEffectBloomColor: () => { r: number; g: number; b: number };
+    postEffectChromaticAberration: number;
+    postEffectGrainIntensity: number;
+    postEffectSharpenEdge: number;
+    postEffectSsaoEnabled: boolean;
+    postEffectSsaoStrength: number;
+    postEffectSsaoRadius: number;
+    postEffectSsaoFadeEnd: number;
+    postEffectSsaoDebugView: boolean;
+    postEffectOffsetShadowEnabled: boolean;
+    postEffectOffsetShadowStrength: number;
+    postEffectOffsetShadowOffsetX: number;
+    postEffectOffsetShadowOffsetY: number;
+    postEffectOffsetShadowDepthBias: number;
+    postEffectOffsetShadowMaxDepth: number;
+    postEffectOffsetShadowDepthScale: number;
+    postEffectOffsetShadowThickness: number;
+    postEffectOffsetShadowSoftness: number;
+    postEffectOffsetShadowNormalInfluence: number;
+    getPostEffectOffsetShadowColor: () => { r: number; g: number; b: number };
+    postEffectOffsetShadowDebugView: boolean;
+    postEffectOffsetHighlightEnabled: boolean;
+    postEffectOffsetHighlightStrength: number;
+    postEffectOffsetHighlightOffsetX: number;
+    postEffectOffsetHighlightOffsetY: number;
+    postEffectOffsetHighlightDepthThreshold: number;
+    postEffectOffsetHighlightNormalThreshold: number;
+    postEffectOffsetHighlightThickness: number;
+    postEffectOffsetHighlightSoftness: number;
+    postEffectOffsetHighlightDepthScale: number;
+    getPostEffectOffsetHighlightColor: () => { r: number; g: number; b: number };
+    postEffectOffsetHighlightDebugView: boolean;
+    postEffectColorCurvesEnabled: boolean;
+    postEffectColorCurvesHue: number;
+    postEffectColorCurvesDensity: number;
+    postEffectColorCurvesSaturation: number;
+    postEffectColorCurvesExposure: number;
+    postEffectGlowEnabled: boolean;
+    postEffectGlowIntensity: number;
+    postEffectGlowThreshold: number;
+    postEffectGlowKernel: number;
+    postEffectGlowGlareCount: number;
+    postEffectGlowGlareLength: number;
+    postEffectGlowGlareAngle: number;
+    postEffectGlowGlarePower: number;
+    postEffectLutEnabled: boolean;
+    postEffectLutIntensity: number;
+    postEffectLutPreset: string;
+    postEffectLutSourceMode: "builtin" | "external-absolute" | "project-relative";
+    postEffectLutExternalPath: string | null;
+    postEffectMotionBlurEnabled: boolean;
+    postEffectMotionBlurStrength: number;
+    postEffectMotionBlurSamples: number;
+    postEffectSsrEnabled: boolean;
+    postEffectSsrStrength: number;
+    postEffectSsrStep: number;
+    postEffectVlsEnabled: boolean;
+    postEffectVlsExposure: number;
+    postEffectVlsDecay: number;
+    postEffectVlsWeight: number;
+    postEffectVlsDensity: number;
+    postEffectFogEnabled: boolean;
+    postEffectFogMode: number;
+    postEffectFogStart: number;
+    postEffectFogEnd: number;
+    postEffectFogDensity: number;
+    postEffectFogOpacity: number;
+    getModelVisibility: (mesh: object) => boolean;
+    getModelCastsShadow: (entry: ProjectExportSceneModel) => boolean;
+    getSerializedMaterialShaderStates: (entry: ProjectExportSceneModel) => ProjectModelMaterialShaderState[];
+    getSerializedLightDirection?: () => { x?: unknown; y?: unknown; z?: unknown } | null;
+    getLightDirection: () => { x?: unknown; y?: unknown; z?: unknown };
+    getLightColor: () => { r: number; g: number; b: number };
+    getShadowColor: () => { r: number; g: number; b: number };
+    getCameraFov: () => number;
+    getCameraDistance: () => number;
+    getPhysicsEnabled: () => boolean;
+    getPhysicsSimulationRateHz: () => number;
+    getPhysicsGravityAcceleration: () => number;
+    getPhysicsGravityDirection: () => { x: number; y: number; z: number };
+    getDofFocusTargetModelPath?: () => string | null;
+    getDofFocusTargetBoneName?: () => string | null;
+    getBackgroundImagePath: () => string | null;
+    getBackgroundVideoPath: () => string | null;
+    getExternalWgslToonShaderPath: () => string | null;
+    getPostEffectFogColor: () => { r: number; g: number; b: number };
+    getFrameGraphPostEffectStackEntries?: () => FrameGraphPostEffectStackEntry[];
+    isGroundVisible: () => boolean;
+    isSkydomeVisible: () => boolean;
+};
+
+export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFileV1 {
     const accessoryExtension = host as {
         getLoadedAccessories?: () => ProjectExportAccessory[];
         getAccessoryTransform?: (index: number) => {
@@ -19,10 +203,11 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
         getAccessoryTransformKeyframes?: (index: number) => ProjectSerializedAccessoryTransformTrack | null;
     };
 
-    const models = host.sceneModels.map((entry: any) => ({
+    const models = host.sceneModels.map((entry) => ({
         path: entry.info.path,
         visible: host.getModelVisibility(entry.mesh),
-        motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item: any) => ({ ...item })),
+        castsShadow: host.getModelCastsShadow(entry),
+        motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item) => ({ ...item })),
         materialShaders: host.getSerializedMaterialShaderStates(entry),
     }));
 
@@ -43,7 +228,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
     });
 
     const keyframes: ProjectKeyframeBundle = {
-        modelAnimations: host.sceneModels.map((entry: any) => ({
+        modelAnimations: host.sceneModels.map((entry) => ({
             modelPath: entry.info.path,
             animation: serializeModelAnimation(host.modelSourceAnimationsByModel.get(entry.model)),
         })),
@@ -110,11 +295,24 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             shadowColor: host.getShadowColor(),
             toonShadowInfluence: host.toonShadowInfluence,
             shadowEnabled: host.shadowEnabled,
+            shadowMode: host.shadowMode,
             shadowDarkness: host.shadowDarkness,
             shadowFrustumSize: host.shadowFrustumSize,
             shadowMaxZ: host.shadowMaxZ,
             shadowBias: host.shadowBias,
             shadowNormalBias: host.shadowNormalBias,
+            shadowFilteringQuality: host.shadowFilteringQuality,
+            shadowBlurKernel: host.shadowBlurKernel,
+            shadowPenumbraEnabled: host.shadowPenumbraEnabled,
+            shadowPenumbraSize: host.shadowPenumbraSize,
+            transparentShadowEnabled: host.transparentShadowEnabled,
+            softTransparentShadowEnabled: host.softTransparentShadowEnabled,
+            iblShadowsEnabled: host.iblShadowsEnabled,
+            iblShadowOpacity: host.iblShadowOpacity,
+            iblShadowDistanceScale: host.iblShadowDistanceScale,
+            characterContactShadowEnabled: host.characterContactShadowEnabled,
+            characterContactShadowOpacity: host.characterContactShadowOpacity,
+            characterContactShadowScale: host.characterContactShadowScale,
             shadowEdgeSoftness: host.shadowEdgeSoftness,
             selfShadowEdgeSoftness: host.selfShadowEdgeSoftness,
             occlusionShadowEdgeSoftness: host.occlusionShadowEdgeSoftness,
@@ -123,18 +321,19 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             groundVisible: host.isGroundVisible(),
             skydomeVisible: host.isSkydomeVisible(),
             antialiasEnabled: host.antialiasEnabled,
+            mirroringFloorEnabled: host.mirroringFloorEnabled,
+            mirroringFloorReflectance: host.mirroringFloorReflectance,
+            mirroringFloorSize: host.mirroringFloorSize,
+            mirroringFloorHeight: host.mirroringFloorHeight,
+            mirroringFloorResolution: host.mirroringFloorResolution,
             backgroundImagePath: host.getBackgroundImagePath(),
             backgroundVideoPath: host.getBackgroundVideoPath(),
         },
         physics: {
-            enabled: host.physicsEnabled,
-            simulationRateHz: host.physicsSimulationRateHz,
-            gravityAcceleration: host.physicsGravityAcceleration,
-            gravityDirection: {
-                x: host.physicsGravityDirection.x,
-                y: host.physicsGravityDirection.y,
-                z: host.physicsGravityDirection.z,
-            },
+            enabled: host.getPhysicsEnabled(),
+            simulationRateHz: host.getPhysicsSimulationRateHz(),
+            gravityAcceleration: host.getPhysicsGravityAcceleration(),
+            gravityDirection: host.getPhysicsGravityDirection(),
         },
         effects: {
             dofEnabled: host.dofEnabled,
@@ -153,6 +352,8 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             dofLensDistortion: host.dofLensDistortion,
             dofLensDistortionInfluence: host.dofLensDistortionInfluence,
             modelEdgeWidth: host.modelEdgeWidth,
+            modelEdgeColorOverrideEnabled: host.modelEdgeColorOverrideEnabled,
+            modelEdgeColor: host.getModelEdgeColor(),
             contrast: host.postEffectContrast,
             gamma: host.postEffectGamma,
             exposure: host.postEffectExposure,
@@ -166,6 +367,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             bloomWeight: host.postEffectBloomWeight,
             bloomThreshold: host.postEffectBloomThreshold,
             bloomKernel: host.postEffectBloomKernel,
+            bloomColor: host.getPostEffectBloomColor(),
             chromaticAberration: host.postEffectChromaticAberration,
             grainIntensity: host.postEffectGrainIntensity,
             sharpenEdge: host.postEffectSharpenEdge,
@@ -174,6 +376,29 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             ssaoRadius: host.postEffectSsaoRadius,
             ssaoFadeEnd: host.postEffectSsaoFadeEnd,
             ssaoDebugView: host.postEffectSsaoDebugView,
+            offsetShadowEnabled: host.postEffectOffsetShadowEnabled,
+            offsetShadowStrength: host.postEffectOffsetShadowStrength,
+            offsetShadowOffsetX: host.postEffectOffsetShadowOffsetX,
+            offsetShadowOffsetY: host.postEffectOffsetShadowOffsetY,
+            offsetShadowDepthBias: host.postEffectOffsetShadowDepthBias,
+            offsetShadowMaxDepth: host.postEffectOffsetShadowMaxDepth,
+            offsetShadowDepthScale: host.postEffectOffsetShadowDepthScale,
+            offsetShadowThickness: host.postEffectOffsetShadowThickness,
+            offsetShadowSoftness: host.postEffectOffsetShadowSoftness,
+            offsetShadowNormalInfluence: host.postEffectOffsetShadowNormalInfluence,
+            offsetShadowColor: host.getPostEffectOffsetShadowColor(),
+            offsetShadowDebugView: host.postEffectOffsetShadowDebugView,
+            offsetHighlightEnabled: host.postEffectOffsetHighlightEnabled,
+            offsetHighlightStrength: host.postEffectOffsetHighlightStrength,
+            offsetHighlightOffsetX: host.postEffectOffsetHighlightOffsetX,
+            offsetHighlightOffsetY: host.postEffectOffsetHighlightOffsetY,
+            offsetHighlightDepthThreshold: host.postEffectOffsetHighlightDepthThreshold,
+            offsetHighlightNormalThreshold: host.postEffectOffsetHighlightNormalThreshold,
+            offsetHighlightThickness: host.postEffectOffsetHighlightThickness,
+            offsetHighlightSoftness: host.postEffectOffsetHighlightSoftness,
+            offsetHighlightDepthScale: host.postEffectOffsetHighlightDepthScale,
+            offsetHighlightColor: host.getPostEffectOffsetHighlightColor(),
+            offsetHighlightDebugView: host.postEffectOffsetHighlightDebugView,
             colorCurvesEnabled: host.postEffectColorCurvesEnabled,
             colorCurvesHue: host.postEffectColorCurvesHue,
             colorCurvesDensity: host.postEffectColorCurvesDensity,
@@ -181,7 +406,12 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             colorCurvesExposure: host.postEffectColorCurvesExposure,
             glowEnabled: host.postEffectGlowEnabled,
             glowIntensity: host.postEffectGlowIntensity,
+            glowThreshold: host.postEffectGlowThreshold,
             glowKernel: host.postEffectGlowKernel,
+            glowGlareCount: host.postEffectGlowGlareCount,
+            glowGlareLength: host.postEffectGlowGlareLength,
+            glowGlareAngle: host.postEffectGlowGlareAngle,
+            glowGlarePower: host.postEffectGlowGlarePower,
             lutEnabled: host.postEffectLutEnabled,
             lutIntensity: host.postEffectLutIntensity,
             lutPreset: host.postEffectLutPreset,
@@ -206,6 +436,7 @@ export function exportProjectState(host: any): MmdModokiProjectFileV1 {
             fogDensity: host.postEffectFogDensity,
             fogOpacity: host.postEffectFogOpacity,
             fogColor: host.getPostEffectFogColor(),
+            frameGraphPostStack: host.getFrameGraphPostEffectStackEntries?.(),
             gammaEncodingVersion: 2,
         },
         accessories,

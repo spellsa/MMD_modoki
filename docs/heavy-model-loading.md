@@ -1,6 +1,17 @@
 # 重量級モデル読み込みメモ
 
-更新日: 2026-03-15
+更新日: 2026-04-27
+
+## v0.2 での扱い
+
+このメモは v0.1 系の暫定対応記録として残す。
+
+Babylon.js 9.2.0 では、bone matrix texture の必要幅が `maxTextureSize` を超える場合に 2D texture として高さ方向へ逃がせるため、`(bones + 1) * 4 > maxTextureSize` だけを理由に CPU スキニングへ fallback する必要はなくなった。
+
+v0.2 では import 前の early CPU skinning fallback と、import 後の oversized skeleton CPU fallback を削除し、babylon-mmd / Babylon.js の GPU skinning 経路を優先する。
+高ボーン数モデルでは `GPU bone texture: ...` diagnostic を出し、2D bone matrix texture のサイズを確認する。
+
+以下は v0.1 系の旧メモ。
 
 ## 概要
 

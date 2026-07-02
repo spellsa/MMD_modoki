@@ -36,6 +36,7 @@ if (isDev) {
 }
 
 const APP_LOG_NAME = 'MMD_modoki';
+const ENABLE_ELECTRON_LOG_CONSOLE = process.env.MMD_MODOKI_CONSOLE_LOG === '1';
 const appLogSessionId = `${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}-${randomUUID().slice(0, 4)}`;
 
 const createLogErrorData = (err: unknown): AppLogData => {
@@ -108,7 +109,7 @@ const configureAppLogging = (): void => {
     const logDir = isDev ? path.join(baseLogDir, 'dev') : baseLogDir;
     return path.join(logDir, log.transports.file.fileName);
   };
-  log.transports.console.level = isDev ? 'debug' : 'info';
+  log.transports.console.level = ENABLE_ELECTRON_LOG_CONSOLE ? (isDev ? 'debug' : 'info') : false;
   log.scope.defaultLabel = 'main';
 };
 
@@ -181,6 +182,12 @@ const SMOKE_TEST_TIMEOUT_MS = Math.max(
 );
 const SMOKE_TEST_REQUIRE_WEBGPU = process.env.MMD_MODOKI_SMOKE_REQUIRE_WEBGPU !== '0';
 const SMOKE_TEST_RESULT_PATH = process.env.MMD_MODOKI_SMOKE_RESULT_PATH ?? null;
+const SMOKE_TEST_SCREENSHOT_PATH = process.env.MMD_MODOKI_SMOKE_SCREENSHOT_PATH ?? null;
+const SMOKE_TEST_SCREENSHOT_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(process.env.MMD_MODOKI_SMOKE_SCREENSHOT_DELAY_MS ?? '500', 10) || 0,
+);
+const SMOKE_TEST_MODEL_PATH = process.env.MMD_MODOKI_SMOKE_MODEL_PATH ?? null;
 
 const pngSequenceExportJobMap = new Map<string, PngSequenceExportRequest>();
 const pngSequenceExportActiveCountByOwner = new Map<number, number>();
@@ -462,8 +469,33 @@ const isAllowedAppUrl = (targetUrl: string): boolean => {
   }
 };
 
+const appendResponseHeaderValue = (
+  headers: Record<string, string[]>,
+  name: string,
+  value: string,
+): void => {
+  const existingKey = Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase());
+  if (existingKey) {
+    headers[existingKey] = [value];
+    return;
+  }
+  headers[name] = [value];
+};
+
+const configureCrossOriginIsolationHeaders = (): void => {
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['*://*/*', 'file://*/*'] }, (details, callback) => {
+    const responseHeaders = { ...(details.responseHeaders ?? {}) };
+    appendResponseHeaderValue(responseHeaders, 'Cross-Origin-Opener-Policy', 'same-origin');
+    appendResponseHeaderValue(responseHeaders, 'Cross-Origin-Embedder-Policy', 'require-corp');
+    appendResponseHeaderValue(responseHeaders, 'Cross-Origin-Resource-Policy', 'cross-origin');
+    callback({ responseHeaders });
+  });
+};
+
 const configureSessionSecurity = (): void => {
-  if (isDev) return;
+  if (isDev) {
+    return;
+  }
 
   const requestFilter = {
     urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'],
@@ -481,7 +513,10 @@ const configureSessionSecurity = (): void => {
         return;
       }
     } catch (err) {
-      console.error('Failed to resolve file request:', err);
+      writeAppLog('warn', 'ipc', 'failed to resolve file request', {
+        requestUrl: details.url,
+        ...createLogErrorData(err),
+      });
     }
     callback({});
   });
@@ -521,6 +556,37 @@ const finishSmokeTest = (success: boolean, reason: string, data?: AppLogData): v
     }
   }
   app.exit(success ? 0 : 1);
+};
+
+const wait = (milliseconds: number): Promise<void> => new Promise((resolve) => {
+  setTimeout(resolve, milliseconds);
+});
+
+const captureSmokeScreenshot = async (
+  mainWindow: BrowserWindow,
+  data: AppLogData,
+): Promise<AppLogData> => {
+  if (!SMOKE_TEST_SCREENSHOT_PATH) return data;
+
+  try {
+    if (SMOKE_TEST_SCREENSHOT_DELAY_MS > 0) {
+      await wait(SMOKE_TEST_SCREENSHOT_DELAY_MS);
+    }
+    const image = await mainWindow.webContents.capturePage();
+    await fs.promises.mkdir(path.dirname(SMOKE_TEST_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(SMOKE_TEST_SCREENSHOT_PATH, image.toPNG());
+    return {
+      ...data,
+      screenshotPath: SMOKE_TEST_SCREENSHOT_PATH,
+    };
+  } catch (err: unknown) {
+    const errorData = createLogErrorData(err);
+    writeAppLog('warn', 'main', 'failed to capture smoke screenshot', errorData);
+    return {
+      ...data,
+      screenshotError: errorData,
+    };
+  }
 };
 
 const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise<void>): void => {
@@ -592,20 +658,30 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
     if (event.sender.id !== mainWindow.webContents.id) return;
     const engine = typeof payload?.engine === 'string' ? payload.engine : 'unknown';
     const physicsBackend = typeof payload?.physicsBackend === 'string' ? payload.physicsBackend : 'unknown';
+    const crossOriginIsolated = payload?.crossOriginIsolated === true;
+    const sharedArrayBufferAvailable = payload?.sharedArrayBufferAvailable === true;
     if (SMOKE_TEST_REQUIRE_WEBGPU && engine !== 'WebGPU') {
       complete(false, 'renderer initialized without WebGPU', {
         engine,
         physicsBackend,
+        crossOriginIsolated,
+        sharedArrayBufferAvailable,
         requireWebGpu: SMOKE_TEST_REQUIRE_WEBGPU,
         webContentsId: mainWindow.webContents.id,
       });
       return;
     }
-    console.log(`[smoke] renderer ready: engine=${engine} physics=${physicsBackend}`);
-    complete(true, 'renderer runtime initialized', {
+    console.log(`[smoke] renderer ready: engine=${engine} physics=${physicsBackend} isolated=${crossOriginIsolated}`);
+    const successData = {
       engine,
       physicsBackend,
+      crossOriginIsolated,
+      sharedArrayBufferAvailable,
+      scenario: payload?.scenario,
       webContentsId: mainWindow.webContents.id,
+    };
+    void captureSmokeScreenshot(mainWindow, successData).then((data) => {
+      complete(true, 'renderer runtime initialized', data);
     });
   };
 
@@ -652,7 +728,10 @@ const createWindow = () => {
   });
 
   // Load the app
-  const loadPromise = loadEditorWindow(mainWindow);
+  const smokeQuery = isSmokeMode && SMOKE_TEST_MODEL_PATH
+    ? { smokeModelPath: SMOKE_TEST_MODEL_PATH }
+    : undefined;
+  const loadPromise = loadEditorWindow(mainWindow, smokeQuery);
   setupSmokeTestLifecycle(mainWindow, loadPromise);
   void loadPromise;
 
@@ -693,6 +772,9 @@ app.on('ready', () => {
   writeAppLog('info', 'main', 'app ready', {
     logFilePath: log.transports.file.getFile().path,
   });
+  if (isDev) {
+    configureCrossOriginIsolationHeaders();
+  }
   configureSessionSecurity();
   createWindow();
 });
@@ -784,7 +866,6 @@ ipcMain.handle('dialog:saveWebm', async (_event, defaultFileName?: string) => {
       : `${result.filePath}.webm`;
   } catch (err) {
     writeAppLog('error', 'webm', 'failed to choose WebM save path', createLogErrorData(err));
-    console.error('Failed to choose WebM save path:', err);
     return null;
   }
 });
@@ -807,7 +888,10 @@ ipcMain.handle('file:readBinary', async (_event, filePath: string) => {
     const buffer = fs.readFileSync(filePath);
     return buffer;
   } catch (err) {
-    console.error('Failed to read file:', err);
+    writeAppLog('error', 'ipc', 'failed to read binary file', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -822,8 +906,19 @@ ipcMain.handle('file:getInfo', async (_event, filePath: string) => {
       extension: path.extname(filePath).toLowerCase(),
     };
   } catch (err) {
-    console.error('Failed to get file info:', err);
+    writeAppLog('error', 'ipc', 'failed to get file info', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
+  }
+});
+
+ipcMain.handle('file:exists', async (_event, filePath: string): Promise<boolean> => {
+  try {
+    return fs.existsSync(filePath);
+  } catch {
+    return false;
   }
 });
 
@@ -915,7 +1010,11 @@ ipcMain.handle('file:findNearby', async (_event, baseDirectoryPath: string, targ
   try {
     return findNearbyFileSync(baseDirectoryPath, targetPath);
   } catch (err) {
-    console.error('Failed to find nearby file:', err);
+    writeAppLog('error', 'ipc', 'failed to find nearby file', {
+      baseDirectoryPath,
+      targetPath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -924,7 +1023,10 @@ ipcMain.handle('file:readText', async (_event, filePath: string) => {
   try {
     return fs.readFileSync(filePath, 'utf-8');
   } catch (err) {
-    console.error('Failed to read text file:', err);
+    writeAppLog('error', 'ipc', 'failed to read text file', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -965,7 +1067,7 @@ ipcMain.handle('file:listBundledWgslFiles', async (): Promise<{ name: string; pa
 
     return Array.from(uniqueByPath.values()).sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
-    console.error('Failed to list bundled WGSL files:', err);
+    writeAppLog('error', 'ipc', 'failed to list bundled WGSL files', createLogErrorData(err));
     return [];
   }
 });
@@ -998,7 +1100,7 @@ ipcMain.handle(
       fs.writeFileSync(result.filePath, content, 'utf-8');
       return result.filePath;
     } catch (err) {
-      console.error('Failed to save text file:', err);
+      writeAppLog('error', 'ipc', 'failed to save text file', createLogErrorData(err));
       return null;
     }
   },
@@ -1012,7 +1114,10 @@ ipcMain.handle('file:writeTextToPath', async (_event, filePath: string, content:
     await fs.promises.writeFile(filePath, content, 'utf-8');
     return true;
   } catch (err) {
-    console.error('Failed to write text file to path:', err);
+    writeAppLog('error', 'ipc', 'failed to write text file to path', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return false;
   }
 });
@@ -1038,10 +1143,131 @@ ipcMain.handle('file:savePng', async (_event, dataUrl: string, defaultFileName?:
     fs.writeFileSync(result.filePath, base64, 'base64');
     return result.filePath;
   } catch (err) {
-    console.error('Failed to save PNG:', err);
+    writeAppLog('error', 'ipc', 'failed to save PNG', {
+      defaultFileName,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
+
+function encodeRgbaToPngBytes(rgbaData: Uint8Array, width: number, height: number): Buffer | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+
+  const pngWidth = Math.max(1, Math.floor(width));
+  const pngHeight = Math.max(1, Math.floor(height));
+  const expectedByteLength = pngWidth * pngHeight * 4;
+  if (!(rgbaData instanceof Uint8Array) || rgbaData.byteLength !== expectedByteLength) {
+    return null;
+  }
+
+  const bgraData = Buffer.from(rgbaData);
+  for (let i = 0; i < bgraData.length; i += 4) {
+    const r = bgraData[i];
+    bgraData[i] = bgraData[i + 2];
+    bgraData[i + 2] = r;
+  }
+  const image = nativeImage.createFromBitmap(bgraData, {
+    width: pngWidth,
+    height: pngHeight,
+  });
+  return image.toPNG();
+}
+
+ipcMain.handle(
+  'file:savePngRgba',
+  async (
+    _event,
+    rgbaData: Uint8Array,
+    width: number,
+    height: number,
+    defaultFileName?: string,
+  ) => {
+    try {
+      const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
+        ? defaultFileName
+        : `${defaultFileName ?? 'mmd_capture'}.png`;
+      const pngBytes = encodeRgbaToPngBytes(rgbaData, width, height);
+      if (!pngBytes) return null;
+
+      const result = await dialog.showSaveDialog({
+        title: 'Save PNG Image',
+        defaultPath: path.join(app.getPath('pictures'), safeName),
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+
+      await fs.promises.writeFile(result.filePath, pngBytes);
+      return result.filePath;
+    } catch (err) {
+      writeAppLog('error', 'ipc', 'failed to save RGBA PNG', {
+        defaultFileName,
+        width,
+        height,
+        ...createLogErrorData(err),
+      });
+      return null;
+    }
+  },
+);
+
+ipcMain.handle(
+  'file:saveCanvasSnapshotPng',
+  async (
+    event,
+    rect: { x: number; y: number; width: number; height: number },
+    outputWidth: number,
+    outputHeight: number,
+    defaultFileName?: string,
+  ) => {
+    try {
+      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!ownerWindow) return null;
+
+      const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
+        ? defaultFileName
+        : `${defaultFileName ?? 'mmd_capture'}.png`;
+      const captureRect = {
+        x: Math.max(0, Math.floor(rect?.x ?? 0)),
+        y: Math.max(0, Math.floor(rect?.y ?? 0)),
+        width: Math.max(1, Math.floor(rect?.width ?? 1)),
+        height: Math.max(1, Math.floor(rect?.height ?? 1)),
+      };
+      const pngWidth = Math.max(1, Math.floor(outputWidth));
+      const pngHeight = Math.max(1, Math.floor(outputHeight));
+
+      const snapshot = await ownerWindow.webContents.capturePage(captureRect);
+      const outputImage = pngWidth !== captureRect.width || pngHeight !== captureRect.height
+        ? snapshot.resize({ width: pngWidth, height: pngHeight, quality: 'best' })
+        : snapshot;
+      const pngBytes = outputImage.toPNG();
+
+      const result = await dialog.showSaveDialog(ownerWindow, {
+        title: 'Save PNG Image',
+        defaultPath: path.join(app.getPath('pictures'), safeName),
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+
+      await fs.promises.writeFile(result.filePath, pngBytes);
+      return result.filePath;
+    } catch (err) {
+      writeAppLog('error', 'ipc', 'failed to save canvas snapshot PNG', {
+        defaultFileName,
+        outputWidth,
+        outputHeight,
+        ...createLogErrorData(err),
+      });
+      return null;
+    }
+  },
+);
 
 ipcMain.handle('file:savePngToPath', async (_event, dataUrl: string, directoryPath: string, fileName: string) => {
   try {
@@ -1057,7 +1283,11 @@ ipcMain.handle('file:savePngToPath', async (_event, dataUrl: string, directoryPa
     await fs.promises.writeFile(filePath, base64, 'base64');
     return filePath;
   } catch (err) {
-    console.error('Failed to save PNG to path:', err);
+    writeAppLog('error', 'ipc', 'failed to save PNG to path', {
+      directoryPath,
+      fileName,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1076,32 +1306,21 @@ ipcMain.handle(
       if (!directoryPath || !fileName) return null;
       const safeFileName = path.basename(fileName);
       if (!safeFileName.toLowerCase().endsWith('.png')) return null;
-      if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-
-      const pngWidth = Math.max(1, Math.floor(width));
-      const pngHeight = Math.max(1, Math.floor(height));
-      const expectedByteLength = pngWidth * pngHeight * 4;
-      if (!(rgbaData instanceof Uint8Array) || rgbaData.byteLength !== expectedByteLength) {
-        return null;
-      }
+      const pngBytes = encodeRgbaToPngBytes(rgbaData, width, height);
+      if (!pngBytes) return null;
 
       await ensureDirectoryExists(directoryPath);
       const filePath = path.join(directoryPath, safeFileName);
-      const bgraData = Buffer.from(rgbaData);
-      for (let i = 0; i < bgraData.length; i += 4) {
-        const r = bgraData[i];
-        bgraData[i] = bgraData[i + 2];
-        bgraData[i + 2] = r;
-      }
-      const image = nativeImage.createFromBitmap(bgraData, {
-        width: pngWidth,
-        height: pngHeight,
-      });
-      const pngBytes = image.toPNG();
       await fs.promises.writeFile(filePath, pngBytes);
       return filePath;
     } catch (err) {
-      console.error('Failed to save RGBA PNG to path:', err);
+      writeAppLog('error', 'ipc', 'failed to save RGBA PNG to path', {
+        directoryPath,
+        fileName,
+        width,
+        height,
+        ...createLogErrorData(err),
+      });
       return null;
     }
   },
@@ -1116,7 +1335,10 @@ ipcMain.handle('file:saveWebmToPath', async (_event, bytes: Uint8Array, filePath
     await fs.promises.writeFile(safeFilePath, Buffer.from(bytes));
     return safeFilePath;
   } catch (err) {
-    console.error('Failed to save WebM to path:', err);
+    writeAppLog('error', 'webm', 'failed to save WebM to path', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1131,7 +1353,10 @@ ipcMain.handle('file:beginWebmStreamSave', async (_event, filePath: string) => {
     webmSaveSessionMap.set(saveId, { filePath: safeFilePath, handle });
     return { saveId, filePath: safeFilePath };
   } catch (err) {
-    console.error('Failed to begin streamed WebM save:', err);
+    writeAppLog('error', 'webm', 'failed to begin streamed WebM save', {
+      filePath,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1148,7 +1373,12 @@ ipcMain.handle('file:writeWebmStreamChunk', async (_event, saveId: string, bytes
     }
     return true;
   } catch (err) {
-    console.error('Failed to write streamed WebM chunk:', err);
+    writeAppLog('error', 'webm', 'failed to write streamed WebM chunk', {
+      saveId,
+      position,
+      byteLength: bytes?.byteLength ?? null,
+      ...createLogErrorData(err),
+    });
     return false;
   }
 });
@@ -1162,7 +1392,10 @@ ipcMain.handle('file:finishWebmStreamSave', async (_event, saveId: string) => {
     await session.handle.close();
     return session.filePath;
   } catch (err) {
-    console.error('Failed to finish streamed WebM save:', err);
+    writeAppLog('error', 'webm', 'failed to finish streamed WebM save', {
+      saveId,
+      ...createLogErrorData(err),
+    });
     return null;
   }
 });
@@ -1177,7 +1410,10 @@ ipcMain.handle('file:cancelWebmStreamSave', async (_event, saveId: string) => {
     await fs.promises.unlink(session.filePath).catch(() => undefined);
     return true;
   } catch (err) {
-    console.error('Failed to cancel streamed WebM save:', err);
+    writeAppLog('error', 'webm', 'failed to cancel streamed WebM save', {
+      saveId,
+      ...createLogErrorData(err),
+    });
     return false;
   }
 });
@@ -1259,7 +1495,7 @@ ipcMain.handle(
       if (exportWindow && !exportWindow.isDestroyed()) {
         exportWindow.close();
       }
-      console.error('Failed to start PNG sequence export window:', err);
+      writeAppLog('error', 'ipc', 'failed to start PNG sequence export window', createLogErrorData(err));
       return null;
     }
   },
@@ -1366,7 +1602,6 @@ ipcMain.handle(
         exportWindow.close();
       }
       writeAppLog('error', 'webm', 'failed to start WebM export window', createLogErrorData(err));
-      console.error('Failed to start WebM export window:', err);
       return null;
     }
   },

@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type LensEffectElements = {
     distortionInput: HTMLInputElement | null;
@@ -11,6 +12,8 @@ type LensEffectElements = {
 type LensEffectPanelElements = {
     chromaticInput: HTMLInputElement;
     chromaticValue: HTMLElement;
+    frameGraphChromaticInput: HTMLInputElement | null;
+    frameGraphChromaticValue: HTMLElement | null;
     influenceInput: HTMLInputElement;
     influenceValue: HTMLElement;
     edgeBlurInput: HTMLInputElement | null;
@@ -21,6 +24,7 @@ export type LensEffectControllerDeps = {
     mmdManager: MmdManager;
     syncRangeNumberInput: (slider: HTMLInputElement) => void;
     isRangeInputEditing: (slider: HTMLInputElement) => boolean;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveLensEffectElements(): LensEffectElements {
@@ -35,6 +39,8 @@ function resolveLensEffectElements(): LensEffectElements {
 function queryPanelElements(root: ParentNode): LensEffectPanelElements | null {
     const chromaticInput = root.querySelector<HTMLInputElement>('input[data-postfx="chromatic-aberration"]');
     const chromaticValue = root.querySelector<HTMLElement>('span[data-postfx-val="chromatic-aberration"]');
+    const frameGraphChromaticInput = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-chromatic-aberration"]');
+    const frameGraphChromaticValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-chromatic-aberration"]');
     const influenceInput = root.querySelector<HTMLInputElement>('input[data-postfx="distortion-influence"]');
     const influenceValue = root.querySelector<HTMLElement>('span[data-postfx-val="distortion-influence"]');
     const edgeBlurInput = root.querySelector<HTMLInputElement>('input[data-postfx="lens-edge-blur"]');
@@ -52,6 +58,8 @@ function queryPanelElements(root: ParentNode): LensEffectPanelElements | null {
     return {
         chromaticInput,
         chromaticValue,
+        frameGraphChromaticInput,
+        frameGraphChromaticValue,
         influenceInput,
         influenceValue,
         edgeBlurInput,
@@ -64,12 +72,14 @@ export class LensEffectController {
     private readonly mmdManager: MmdManager;
     private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
     private readonly isRangeInputEditing: (slider: HTMLInputElement) => boolean;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: LensEffectControllerDeps) {
         this.elements = resolveLensEffectElements();
         this.mmdManager = deps.mmdManager;
         this.syncRangeNumberInput = deps.syncRangeNumberInput;
         this.isRangeInputEditing = deps.isRangeInputEditing;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupStaticControls();
     }
@@ -81,14 +91,40 @@ export class LensEffectController {
         }
 
         const applyChromaticAberration = (): void => {
-            this.mmdManager.postEffectChromaticAberration = Number(elements.chromaticInput.value);
-            elements.chromaticValue.textContent = this.mmdManager.postEffectChromaticAberration > 0.000001
+            const value = Number(elements.chromaticInput.value);
+            if (this.dispatchAction?.({ type: "effect.setChromaticAberration", source: "panel", value })) return;
+            this.setChromaticAberration(value);
+            syncChromaticAberrationUi();
+        };
+
+        const applyFrameGraphChromaticAberration = (): void => {
+            if (!elements.frameGraphChromaticInput) {
+                return;
+            }
+            const value = Number(elements.frameGraphChromaticInput.value);
+            if (this.dispatchAction?.({ type: "effect.setChromaticAberration", source: "panel", value })) return;
+            this.setChromaticAberration(value);
+            syncChromaticAberrationUi();
+        };
+
+        const syncChromaticAberrationUi = (): void => {
+            const value = String(Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectChromaticAberration))));
+            const label = this.mmdManager.postEffectChromaticAberration > 0.000001
                 ? this.mmdManager.postEffectChromaticAberration.toFixed(0)
                 : t("status.off");
+            elements.chromaticInput.value = value;
+            elements.chromaticValue.textContent = label;
+            if (elements.frameGraphChromaticInput && elements.frameGraphChromaticValue) {
+                elements.frameGraphChromaticInput.value = value;
+                elements.frameGraphChromaticValue.textContent = label;
+            }
         };
 
         const applyDistortionInfluence = (): void => {
-            this.applyDistortionInfluenceInput(elements.influenceInput);
+            const percent = Number(elements.influenceInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensDistortionInfluence", source: "panel", percent })) {
+                this.setLensDistortionInfluencePercent(percent);
+            }
             this.refreshDistortionInfluenceValue(elements.influenceInput, elements.influenceValue);
             this.refreshStaticDistortionControls();
         };
@@ -97,21 +133,28 @@ export class LensEffectController {
             if (!elements.edgeBlurInput || !elements.edgeBlurValue) {
                 return;
             }
-            this.mmdManager.dofLensEdgeBlur = Number(elements.edgeBlurInput.value) / 100;
+            const percent = Number(elements.edgeBlurInput.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensEdgeBlur", source: "panel", percent })) {
+                this.setLensEdgeBlurPercent(percent);
+            }
             this.refreshEdgeBlurValue(elements.edgeBlurInput, elements.edgeBlurValue);
         };
 
         elements.chromaticInput.value = String(
             Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectChromaticAberration))),
         );
+        if (elements.frameGraphChromaticInput) {
+            elements.frameGraphChromaticInput.value = elements.chromaticInput.value;
+        }
         this.refreshDistortionInfluenceValue(elements.influenceInput, elements.influenceValue);
         this.refreshEdgeBlurValue(elements.edgeBlurInput, elements.edgeBlurValue);
 
-        applyChromaticAberration();
+        syncChromaticAberrationUi();
         applyDistortionInfluence();
         applyEdgeBlur();
 
         elements.chromaticInput.addEventListener("input", applyChromaticAberration);
+        elements.frameGraphChromaticInput?.addEventListener("input", applyFrameGraphChromaticAberration);
         elements.influenceInput.addEventListener("input", applyDistortionInfluence);
         elements.edgeBlurInput?.addEventListener("input", applyEdgeBlur);
         return true;
@@ -122,12 +165,16 @@ export class LensEffectController {
 
         const panelElements = queryPanelElements(document);
         if (panelElements) {
-            panelElements.chromaticInput.value = String(
-                Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectChromaticAberration))),
-            );
-            panelElements.chromaticValue.textContent = this.mmdManager.postEffectChromaticAberration > 0.000001
+            const value = String(Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectChromaticAberration))));
+            const label = this.mmdManager.postEffectChromaticAberration > 0.000001
                 ? this.mmdManager.postEffectChromaticAberration.toFixed(0)
                 : t("status.off");
+            panelElements.chromaticInput.value = value;
+            panelElements.chromaticValue.textContent = label;
+            if (panelElements.frameGraphChromaticInput && panelElements.frameGraphChromaticValue) {
+                panelElements.frameGraphChromaticInput.value = value;
+                panelElements.frameGraphChromaticValue.textContent = label;
+            }
             this.refreshDistortionInfluenceValue(panelElements.influenceInput, panelElements.influenceValue);
             this.refreshEdgeBlurValue(panelElements.edgeBlurInput, panelElements.edgeBlurValue);
         }
@@ -164,8 +211,10 @@ export class LensEffectController {
                 this.refreshAutoReadout();
                 return;
             }
-            const scale = Number(input.value) / 100;
-            this.mmdManager.dofLensDistortion = scale;
+            const percent = Number(input.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensDistortion", source: "panel", percent })) {
+                this.setLensDistortionPercent(percent);
+            }
             value.textContent = `${Math.round(this.mmdManager.dofLensDistortion * 100)}%`;
         };
 
@@ -187,7 +236,10 @@ export class LensEffectController {
         }
 
         const applyLensDistortionInfluence = (): void => {
-            this.applyDistortionInfluenceInput(input);
+            const percent = Number(input.value);
+            if (!this.dispatchAction?.({ type: "effect.setLensDistortionInfluence", source: "panel", percent })) {
+                this.setLensDistortionInfluencePercent(percent);
+            }
             this.refreshDistortionInfluenceValue(input, value);
             this.refreshAutoReadout();
 
@@ -202,9 +254,20 @@ export class LensEffectController {
         input.addEventListener("input", applyLensDistortionInfluence);
     }
 
-    private applyDistortionInfluenceInput(input: HTMLInputElement): void {
-        const scale = Number(input.value) / 100;
-        this.mmdManager.dofLensDistortionInfluence = scale;
+    public setChromaticAberration(value: number): void {
+        this.mmdManager.postEffectChromaticAberration = value;
+    }
+
+    public setLensDistortionPercent(percent: number): void {
+        this.mmdManager.dofLensDistortion = percent / 100;
+    }
+
+    public setLensDistortionInfluencePercent(percent: number): void {
+        this.mmdManager.dofLensDistortionInfluence = percent / 100;
+    }
+
+    public setLensEdgeBlurPercent(percent: number): void {
+        this.mmdManager.dofLensEdgeBlur = percent / 100;
     }
 
     private refreshStaticControls(): void {

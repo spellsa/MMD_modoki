@@ -1,0 +1,147 @@
+# FrameGraph Post Stack 現行仕様メモ 2026-07-01
+
+## 目的
+
+FrameGraph / PostFX まわりは、DoF / Bloom / LUT / SSAO / SSR に加えて、Luminous、Offset Shadow、Offset Rim などのカスタム効果が増えた。加えて、効果の順序入れ替え、個別 ON/OFF、プロジェクト保存、WebGPU FrameGraph の再構築条件も絡むようになった。
+
+このメモは、2026-07-01 時点の実装上の前提と、次に触るときに壊しやすい点をまとめる。
+
+実装修正前の短い注意点は [FrameGraph / PostFX 危険メモ 2026-07-01](./framegraph-postfx-risk-note-2026-07-01.md) を先に見る。
+
+## 現行の基本方針
+
+- 既存の MMD scene render は維持し、FrameGraph は主に post effect stack の backend として扱う。
+- UI の効果一覧は `frameGraphPostStack` を持ち、各 entry は `{ id, enabled }` で管理する。
+- 効果パラメーターと ON/OFF は分離する。チェックを外しても、色、強度、オフセット量などの値は保持する。
+- プロジェクト保存 / 読み込みでは、stack の順序と enabled 状態を `effects.frameGraphPostStack` として復元する。
+- 旧 project などで stack がない場合は、既存の各 post effect state から canonical order で復元する。
+
+## Stack 対象
+
+2026-07-01 時点で、FrameGraph stack から扱う主な効果は次の通り。
+
+- `ssr`
+- `ssao`
+- `offsetShadow`
+- `offsetHighlight` / UI 表示は Offset Rim
+- `dof`
+- `luminous`
+- `bloom`
+- `lut`
+- `sharpen`
+- `grain`
+- `chromatic`
+- `vignette`
+- `edgeBlur`
+- `distortion`
+
+`offsetHighlight` は初期実装名の名残があり、UI 上は Offset Rim として扱っている。今後 rename する場合は project 互換を残す必要がある。
+
+## 順序の扱い
+
+UI の stack order が runtime order になる。たとえば `Offset Rim -> Bloom` の順に並べると、Offset Rim の白いリムに Bloom がかかる。これは 2026-07-01 に実機で確認済み。
+
+WebGPU FrameGraph では、task の `sourceTexture` / `outputTexture` の依存関係は build 後に固定される。そのため、順序変更や enabled 状態変更は、既存 task の入力 texture を `execute()` 中に差し替えるのではなく、FrameGraph post backend を再構築する。
+
+過去に live reconnect 的に texture を差し替える実装を入れたところ、同一 sync scope 内で `TextureBinding` と `RenderAttachment` が衝突する WebGPU validation warning が出た。再発防止として、stack order / enabled 変更は rebuild に寄せる。
+
+## 個別 ON/OFF
+
+個別 ON/OFF は効果パラメーターの `enabled` を直接消すのではなく、stack entry の `enabled` を見る。
+
+これにより、次の挙動を守る。
+
+- OFF にしても row は残る。
+- OFF のまま順序を入れ替えられる。
+- ON に戻したとき、以前の色や強度が復元される。
+- project save/load 後も順序と ON/OFF が維持される。
+
+UI 側で enabled を切り替えたときは、`MmdManager` 側の stack state 変更が FrameGraph backend rebuild を要求する。UI controller 側でさらに重複 rebuild を呼ばない。
+
+## Offset Shadow
+
+Offset Shadow は、深度を画面方向にずらして差分を取り、カメラから見て手前の形が奥に落ちるような影を作る実験的 post effect。
+
+主な調整値:
+
+- `color`
+- `strength`
+- `offsetX`
+- `offsetY`
+- `minDepth`
+- `maxDepth`
+- `depthScale`
+- `thickness`
+- `softness`
+
+`maxDepth` は段差判定の上限として使う。加えて、遠方背景へ大きく影が落ちるのを抑えるため、現在は receiver 側にも緩い深度ガードを入れている。
+
+```text
+maxReceiverDepth = max(10.0, maxDepth * 20.0)
+currentDepth > maxReceiverDepth の場合は shadow mask を 0 にする
+```
+
+これはモデル判定ではなく深度ベースの抑制なので、床や背景に完全にかからない保証ではない。将来的により厳密に分けるなら、model/object mask または render layer mask を追加するのが候補。
+
+## Offset Rim
+
+Offset Rim は、参考にした offset rim light に近い見た目を目指した実験的 post effect。深度をオフセットした差分から、輪郭の外側にずれたリムを作る。
+
+主な調整値:
+
+- `color`
+- `strength`
+- `offsetX`
+- `offsetY`
+- `depthEdge`
+- `depthScale`
+- `thickness`
+
+デフォルトは、白リムをやや下方向にずらす設定にしている。Bloom より前に置くと、リムを Bloom の入力にできる。
+
+既知の制約:
+
+- 完全な material rim / mesh extrusion ではなく post effect なので、背景や床の強い深度差にも反応しうる。
+- 画面下側や手前床が強く光るケースがあり、現在は depth guard と thickness のバランスで抑えている。
+- thickness を大きくすると、複数サンプルの線がにじんだように見えることがある。
+
+## Luminous と Bloom
+
+Luminous は AutoLuminous 寄せの材質発光系として扱い、Bloom とは役割を分ける。
+
+- Luminous: 材質側の発光情報 / luminous mask をもとに光らせる。
+- Bloom: stack のその時点の入力画像から明るい部分をにじませる。
+
+ライトブルームに色を乗せたいケースは Bloom 側の色パラメーターで扱う。Luminous は材質色由来の発光として考える。
+
+## Resource / rebuild の注意
+
+SSAO / SSR / Offset Shadow / Offset Rim / DoF などは、depth / normal / camera 情報に依存する。これらは stack の有効状態と、各効果の active threshold から必要性を判定して resource plan を作る。
+
+注意点:
+
+- WebGPU FrameGraph では build 後の task 依存を軽く扱えない。
+- stack order / enabled の変更は rebuild が必要。
+- rapid reorder / rapid toggle では、今後 debounce を入れた方がよい可能性がある。
+- あるパラメーター値をまたいだときに resource が新たに必要になる効果は、threshold 変更時の rebuild 条件も確認対象にする。
+
+## 確認済み
+
+直近の FrameGraph stack 変更では、次を確認した。
+
+```powershell
+npm.cmd run test:unit -- --run src/project/project-importer.test.ts src/project/project-serializer.test.ts src/render/frame-graph-resource-plan.test.ts src/shared/frame-graph-post-effect-stack.test.ts
+npm.cmd run lint
+npm.cmd run smoke:launch
+npm.cmd run log:errors
+```
+
+加えて、手動確認で `Offset Rim -> Bloom` の順にしたとき、Offset Rim の白リムに Bloom がかかることを確認した。
+
+## 未解決 / 次に見ること
+
+- Offset Shadow / Offset Rim をモデルだけに限定する model mask の検討。
+- stack order / enabled 変更時の rebuild debounce。
+- active threshold をまたぐパラメーター変更時の resource rebuild 条件整理。
+- Offset Rim の thickness 増加時に出る線のぶれを抑えるサンプル方式。
+- UI 表示名 Offset Rim と internal id `offsetHighlight` の命名整理。ただし project 互換を壊さないこと。

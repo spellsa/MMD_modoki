@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('file:readText', filePath),
     getFileInfo: (filePath: string) =>
         ipcRenderer.invoke('file:getInfo', filePath),
+    fileExists: (filePath: string) =>
+        ipcRenderer.invoke('file:exists', filePath),
     findNearbyFile: (baseDirectoryPath: string, targetPath: string) =>
         ipcRenderer.invoke('file:findNearby', baseDirectoryPath, targetPath),
     saveTextFile: (
@@ -50,6 +52,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('file:writeTextToPath', filePath, content),
     savePngFile: (dataUrl: string, defaultFileName?: string) =>
         ipcRenderer.invoke('file:savePng', dataUrl, defaultFileName),
+    savePngRgbaFile: (
+        rgbaData: Uint8Array,
+        width: number,
+        height: number,
+        defaultFileName?: string,
+    ) => ipcRenderer.invoke('file:savePngRgba', rgbaData, width, height, defaultFileName),
+    saveCanvasSnapshotPngFile: (
+        rect: { x: number; y: number; width: number; height: number },
+        outputWidth: number,
+        outputHeight: number,
+        defaultFileName?: string,
+    ) => ipcRenderer.invoke('file:saveCanvasSnapshotPng', rect, outputWidth, outputHeight, defaultFileName),
     savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) =>
         ipcRenderer.invoke('file:savePngToPath', dataUrl, directoryPath, fileName),
     savePngRgbaFileToPath: (

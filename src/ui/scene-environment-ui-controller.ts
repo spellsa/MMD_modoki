@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type ToastType = "success" | "error" | "info";
 
@@ -16,6 +17,7 @@ export type SceneEnvironmentUiControllerDeps = {
     mmdManager: MmdManager;
     setStatus: (text: string, loading?: boolean) => void;
     showToast: (message: string, type?: ToastType) => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveSceneEnvironmentUiElements(): SceneEnvironmentUiElements {
@@ -41,12 +43,14 @@ export class SceneEnvironmentUiController {
     private readonly mmdManager: MmdManager;
     private readonly setStatus: (text: string, loading?: boolean) => void;
     private readonly showToast: (message: string, type?: ToastType) => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: SceneEnvironmentUiControllerDeps) {
         this.elements = resolveSceneEnvironmentUiElements();
         this.mmdManager = deps.mmdManager;
         this.setStatus = deps.setStatus;
         this.showToast = deps.showToast;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupEventListeners();
     }
@@ -69,6 +73,18 @@ export class SceneEnvironmentUiController {
             enabled ? t("toast.background.black") : t("toast.background.default"),
             "info"
         );
+    }
+
+    public toggleBackgroundMedia(): void {
+        const visible = this.mmdManager.toggleBackgroundMediaVisible();
+        this.updateBackgroundToggleButton();
+        this.showToast(visible ? t("toast.backgroundMedia.on") : t("toast.backgroundMedia.off"), "info");
+    }
+
+    public toggleSkydome(): void {
+        const visible = this.mmdManager.toggleSkydomeVisible();
+        this.updateSkydomeToggleButton(visible);
+        this.showToast(visible ? t("toast.sky.on") : t("toast.sky.off"), "info");
     }
 
     public async applyBackgroundImage(filePath: string): Promise<void> {
@@ -103,17 +119,16 @@ export class SceneEnvironmentUiController {
 
     private setupEventListeners(): void {
         this.elements.btnToggleGround?.addEventListener("click", () => {
+            if (this.dispatchAction?.({ type: "viewport.toggleGround", source: "button" })) return;
             this.toggleGround();
         });
         this.elements.btnToggleBackground?.addEventListener("click", () => {
-            const visible = this.mmdManager.toggleBackgroundMediaVisible();
-            this.updateBackgroundToggleButton();
-            this.showToast(visible ? t("toast.backgroundMedia.on") : t("toast.backgroundMedia.off"), "info");
+            if (this.dispatchAction?.({ type: "viewport.toggleBackgroundMedia", source: "button" })) return;
+            this.toggleBackgroundMedia();
         });
         this.elements.btnToggleSkydome?.addEventListener("click", () => {
-            const visible = this.mmdManager.toggleSkydomeVisible();
-            this.updateSkydomeToggleButton(visible);
-            this.showToast(visible ? t("toast.sky.on") : t("toast.sky.off"), "info");
+            if (this.dispatchAction?.({ type: "viewport.toggleSkydome", source: "button" })) return;
+            this.toggleSkydome();
         });
     }
 

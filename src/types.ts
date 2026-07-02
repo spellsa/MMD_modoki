@@ -1,3 +1,5 @@
+import type { FrameGraphPostEffectStackEntry } from "./shared/frame-graph-post-effect-stack";
+
 export interface ElectronAPI {
     openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
     openDirectoryDialog: () => Promise<string | null>;
@@ -7,6 +9,7 @@ export interface ElectronAPI {
     readBinaryFile: (filePath: string) => Promise<Buffer | null>;
     readTextFile: (filePath: string) => Promise<string | null>;
     getFileInfo: (filePath: string) => Promise<{ name: string; path: string; size: number; extension: string } | null>;
+    fileExists: (filePath: string) => Promise<boolean>;
     findNearbyFile: (baseDirectoryPath: string, targetPath: string) => Promise<string | null>;
     saveTextFile: (
         content: string,
@@ -16,6 +19,18 @@ export interface ElectronAPI {
     listBundledWgslFiles: () => Promise<{ name: string; path: string }[]>;
     writeTextFileToPath: (filePath: string, content: string) => Promise<boolean>;
     savePngFile: (dataUrl: string, defaultFileName?: string) => Promise<string | null>;
+    savePngRgbaFile: (
+        rgbaData: Uint8Array,
+        width: number,
+        height: number,
+        defaultFileName?: string,
+    ) => Promise<string | null>;
+    saveCanvasSnapshotPngFile: (
+        rect: { x: number; y: number; width: number; height: number },
+        outputWidth: number,
+        outputHeight: number,
+        defaultFileName?: string,
+    ) => Promise<string | null>;
     savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) => Promise<string | null>;
     savePngRgbaFileToPath: (
         rgbaData: Uint8Array,
@@ -67,6 +82,8 @@ export type AppLogScope =
     | "timeline"
     | "webm"
     | "physics"
+    | "performance"
+    | "render"
     | "shader"
     | "project"
     | "ui";
@@ -76,6 +93,9 @@ export type AppLogData = Record<string, unknown>;
 export interface SmokeRendererReadyPayload {
     engine: string;
     physicsBackend: string;
+    crossOriginIsolated?: boolean;
+    sharedArrayBufferAvailable?: boolean;
+    scenario?: AppLogData;
 }
 
 export interface SmokeRendererFailurePayload {
@@ -110,6 +130,13 @@ declare global {
             ) => void;
             apply: (root?: ParentNode) => void;
         };
+        mmdModokiDiagnostics?: {
+            dumpPerformanceSnapshot: () => Record<string, unknown>;
+        };
+        mmdModokiDebug?: {
+            enableAlphaTextureView: () => boolean;
+            disableAlphaTextureView: () => void;
+        };
     }
 }
 
@@ -119,6 +146,7 @@ export interface ModelInfo {
     vertexCount: number;
     boneCount: number;
     boneNames: string[];
+    physicsBoneNames?: string[];
     boneControlInfos?: BoneControlInfo[];
     morphCount: number;
     morphNames: string[];
@@ -160,6 +188,12 @@ export interface KeyframeTrack {
     category: TrackCategory;
     /** Frame numbers that have keyframes (sorted ascending) */
     frames: Uint32Array;
+    /** Bone keyframes whose physics toggle is ON. Drawn as MMD-style x markers. */
+    physicsOnFrames?: Uint32Array;
+    /** Non-editable physics ON markers shown only as timeline defaults. */
+    virtualPhysicsOnFrames?: Uint32Array;
+    /** True when the row is included by the physics-bone timeline display filter. */
+    physicsBone?: boolean;
 }
 
 export interface TimelineRotationOverlay {
@@ -225,6 +259,7 @@ export interface ProjectModelMaterialShaderState {
 export interface ProjectModelState {
     path: string;
     visible: boolean;
+    castsShadow?: boolean;
     motionImports: ProjectMotionImport[];
     materialShaders?: ProjectModelMaterialShaderState[];
     animation?: ProjectSerializedModelAnimation | null;
@@ -257,11 +292,24 @@ export interface ProjectLightingState {
     shadowColor?: ProjectRgbColor;
     toonShadowInfluence?: number;
     shadowEnabled: boolean;
+    shadowMode?: "cascaded" | "standard";
     shadowDarkness: number;
     shadowFrustumSize?: number;
     shadowMaxZ?: number;
     shadowBias?: number;
     shadowNormalBias?: number;
+    shadowFilteringQuality?: number;
+    shadowBlurKernel?: number;
+    shadowPenumbraEnabled?: boolean;
+    shadowPenumbraSize?: number;
+    transparentShadowEnabled?: boolean;
+    softTransparentShadowEnabled?: boolean;
+    iblShadowsEnabled?: boolean;
+    iblShadowOpacity?: number;
+    iblShadowDistanceScale?: number;
+    characterContactShadowEnabled?: boolean;
+    characterContactShadowOpacity?: number;
+    characterContactShadowScale?: number;
     shadowEdgeSoftness?: number;
     selfShadowEdgeSoftness?: number;
     occlusionShadowEdgeSoftness?: number;
@@ -271,6 +319,11 @@ export interface ProjectViewportState {
     groundVisible: boolean;
     skydomeVisible: boolean;
     antialiasEnabled: boolean;
+    mirroringFloorEnabled?: boolean;
+    mirroringFloorReflectance?: number;
+    mirroringFloorSize?: number;
+    mirroringFloorHeight?: number;
+    mirroringFloorResolution?: number;
     backgroundImagePath?: string | null;
     backgroundVideoPath?: string | null;
 }
@@ -299,6 +352,8 @@ export interface ProjectEffectState {
     dofLensDistortion?: number;
     dofLensDistortionInfluence: number;
     modelEdgeWidth: number;
+    modelEdgeColorOverrideEnabled?: boolean;
+    modelEdgeColor?: { r: number; g: number; b: number };
     contrast?: number;
     gamma: number;
     exposure?: number;
@@ -312,6 +367,7 @@ export interface ProjectEffectState {
     bloomWeight?: number;
     bloomThreshold?: number;
     bloomKernel?: number;
+    bloomColor?: ProjectRgbColor;
     chromaticAberration?: number;
     grainIntensity?: number;
     sharpenEdge?: number;
@@ -320,6 +376,29 @@ export interface ProjectEffectState {
     ssaoRadius?: number;
     ssaoFadeEnd?: number;
     ssaoDebugView?: boolean;
+    offsetShadowEnabled?: boolean;
+    offsetShadowStrength?: number;
+    offsetShadowOffsetX?: number;
+    offsetShadowOffsetY?: number;
+    offsetShadowDepthBias?: number;
+    offsetShadowMaxDepth?: number;
+    offsetShadowDepthScale?: number;
+    offsetShadowThickness?: number;
+    offsetShadowSoftness?: number;
+    offsetShadowNormalInfluence?: number;
+    offsetShadowColor?: ProjectRgbColor;
+    offsetShadowDebugView?: boolean;
+    offsetHighlightEnabled?: boolean;
+    offsetHighlightStrength?: number;
+    offsetHighlightOffsetX?: number;
+    offsetHighlightOffsetY?: number;
+    offsetHighlightDepthThreshold?: number;
+    offsetHighlightNormalThreshold?: number;
+    offsetHighlightThickness?: number;
+    offsetHighlightSoftness?: number;
+    offsetHighlightDepthScale?: number;
+    offsetHighlightColor?: ProjectRgbColor;
+    offsetHighlightDebugView?: boolean;
     colorCurvesEnabled?: boolean;
     colorCurvesHue?: number;
     colorCurvesDensity?: number;
@@ -327,7 +406,12 @@ export interface ProjectEffectState {
     colorCurvesExposure?: number;
     glowEnabled?: boolean;
     glowIntensity?: number;
+    glowThreshold?: number;
     glowKernel?: number;
+    glowGlareCount?: number;
+    glowGlareLength?: number;
+    glowGlareAngle?: number;
+    glowGlarePower?: number;
     lutEnabled?: boolean;
     lutIntensity?: number;
     lutPreset?: string;
@@ -352,6 +436,7 @@ export interface ProjectEffectState {
     fogDensity?: number;
     fogOpacity?: number;
     fogColor?: ProjectRgbColor;
+    frameGraphPostStack?: FrameGraphPostEffectStackEntry[];
     gammaEncodingVersion?: 2;
 }
 

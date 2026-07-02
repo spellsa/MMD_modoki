@@ -1,6 +1,7 @@
 import { t } from "../i18n";
 import { normalizeLutFile } from "../lut-file";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 import {
     buildProjectLutSavePlan,
     getCurrentLutPresetSelectValue,
@@ -31,6 +32,7 @@ export type LutPanelControllerDeps = {
     setStatus: (text: string, loading: boolean) => void;
     showToast: (message: string, type?: ToastType) => void;
     refreshShaderPanel: () => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function queryRequired<T extends Element>(root: ParentNode, selector: string): T | null {
@@ -101,10 +103,12 @@ export class LutPanelController {
     private readonly setStatus: (text: string, loading: boolean) => void;
     private readonly showToast: (message: string, type?: ToastType) => void;
     private readonly refreshShaderPanel: () => void;
+    private readonly dispatchAction?: (action: EditorAction) => boolean;
     private postFxLutExternalPath: string | null = null;
     private postFxLutExternalText: string | null = null;
     private postFxLutExternalRuntimeText: string | null = null;
     private readonly customLutEntriesByPath = new Map<string, ImportedLutRegistryEntry>();
+    private elements: LutPanelElements | null = null;
 
     constructor(deps: LutPanelControllerDeps) {
         this.mmdManager = deps.mmdManager;
@@ -112,6 +116,7 @@ export class LutPanelController {
         this.setStatus = deps.setStatus;
         this.showToast = deps.showToast;
         this.refreshShaderPanel = deps.refreshShaderPanel;
+        this.dispatchAction = deps.dispatchAction;
     }
 
     public connect(root: ParentNode): boolean {
@@ -119,74 +124,12 @@ export class LutPanelController {
         if (!elements) {
             return false;
         }
-
-        const chooseExternalLut = async (): Promise<void> => {
-            const lutPath = await window.electronAPI.openFileDialog([
-                { name: t("shader.group.lutFiles"), extensions: ["3dl", "cube"] },
-                { name: t("option.allFiles"), extensions: ["*"] },
-            ]);
-            if (!lutPath) return;
-
-            this.setStatus(t("status.loadingLut"), true);
-            if (await this.importExternalLutFile(lutPath, "dialog")) {
-                this.setStatus(t("status.lutLoaded"), false);
-            } else {
-                this.setStatus(t("status.lutLoadFailed"), false);
-            }
-        };
+        this.elements = elements;
 
         const applyLut = (): void => {
-            const selectedPresetValue = elements.presetSelect.value;
-            const resolution = resolveLutSelection({
-                selectedPresetValue,
-                requestedSourceMode: elements.sourceSelect.value,
-                getImportedEntry: (filePath) => this.getImportedLutEntry(filePath),
-            });
-            const selectedMode = resolution.selectedMode;
-            const selectedImportedEntry = resolution.selectedImportedEntry;
-            const hasLutSource = resolution.hasLutSource;
-
-            if (elements.sourceSelect.value !== selectedMode) {
-                elements.sourceSelect.value = selectedMode;
+            if (!this.dispatchAction?.({ type: "effect.applyLut", source: "panel" })) {
+                this.applyLutFromPanel();
             }
-
-            if (selectedImportedEntry) {
-                elements.enabledInput.checked = true;
-                this.postFxLutExternalPath = selectedImportedEntry.sourcePath;
-                this.postFxLutExternalText = selectedImportedEntry.rawText;
-                this.postFxLutExternalRuntimeText = selectedImportedEntry.runtimeText;
-                this.mmdManager.setPostEffectExternalLut(
-                    selectedImportedEntry.sourcePath,
-                    selectedImportedEntry.runtimeText,
-                    selectedImportedEntry.sourceFormat,
-                );
-            } else {
-                this.postFxLutExternalPath = null;
-                this.postFxLutExternalText = null;
-                this.postFxLutExternalRuntimeText = null;
-                this.mmdManager.setPostEffectExternalLut(null, null, null);
-                this.mmdManager.postEffectLutPreset = selectedPresetValue;
-            }
-
-            this.mmdManager.postEffectLutSourceMode = selectedMode;
-            this.mmdManager.postEffectLutIntensity = Number(elements.intensityInput.value) / 100;
-            this.mmdManager.postEffectLutEnabled = elements.enabledInput.checked
-                && hasLutSource
-                && this.mmdManager.postEffectLutIntensity > 0.000001;
-
-            elements.intensityInput.disabled = !elements.enabledInput.checked || !hasLutSource;
-            elements.sourceValue.textContent = lutModeToLabel(selectedMode);
-            elements.fileValue.textContent = this.postFxLutExternalPath
-                ? this.getBaseNameForRenderer(this.postFxLutExternalPath)
-                : t("option.none");
-            elements.enabledValue.textContent = this.mmdManager.postEffectLutEnabled
-                ? (selectedImportedEntry
-                    ? this.getBaseNameForRenderer(selectedImportedEntry.sourcePath)
-                    : this.mmdManager.postEffectLutPreset)
-                : t("status.off");
-            elements.intensityValue.textContent = this.mmdManager.postEffectLutEnabled
-                ? this.mmdManager.postEffectLutIntensity.toFixed(2)
-                : t("status.off");
         };
 
         if (!this.postFxLutExternalPath && this.mmdManager.postEffectLutExternalPath) {
@@ -210,13 +153,88 @@ export class LutPanelController {
 
         elements.sourceSelect.addEventListener("change", applyLut);
         elements.fileButton.addEventListener("click", () => {
-            void chooseExternalLut();
+            if (!this.dispatchAction?.({ type: "effect.chooseExternalLut", source: "button" })) {
+                void this.chooseExternalLut();
+            }
         });
         elements.enabledInput.addEventListener("input", applyLut);
         elements.presetSelect.addEventListener("change", applyLut);
         elements.intensityInput.addEventListener("input", applyLut);
 
         return true;
+    }
+
+    public async chooseExternalLut(): Promise<void> {
+        const lutPath = await window.electronAPI.openFileDialog([
+            { name: t("shader.group.lutFiles"), extensions: ["3dl", "cube"] },
+            { name: t("option.allFiles"), extensions: ["*"] },
+        ]);
+        if (!lutPath) return;
+
+        this.setStatus(t("status.loadingLut"), true);
+        if (await this.importExternalLutFile(lutPath, "dialog")) {
+            this.setStatus(t("status.lutLoaded"), false);
+        } else {
+            this.setStatus(t("status.lutLoadFailed"), false);
+        }
+    }
+
+    public applyLutFromPanel(): void {
+        const elements = this.elements;
+        if (!elements) {
+            return;
+        }
+        const selectedPresetValue = elements.presetSelect.value;
+        const resolution = resolveLutSelection({
+            selectedPresetValue,
+            requestedSourceMode: elements.sourceSelect.value,
+            getImportedEntry: (filePath) => this.getImportedLutEntry(filePath),
+        });
+        const selectedMode = resolution.selectedMode;
+        const selectedImportedEntry = resolution.selectedImportedEntry;
+        const hasLutSource = resolution.hasLutSource;
+
+        if (elements.sourceSelect.value !== selectedMode) {
+            elements.sourceSelect.value = selectedMode;
+        }
+
+        if (selectedImportedEntry) {
+            elements.enabledInput.checked = true;
+            this.postFxLutExternalPath = selectedImportedEntry.sourcePath;
+            this.postFxLutExternalText = selectedImportedEntry.rawText;
+            this.postFxLutExternalRuntimeText = selectedImportedEntry.runtimeText;
+            this.mmdManager.setPostEffectExternalLut(
+                selectedImportedEntry.sourcePath,
+                selectedImportedEntry.runtimeText,
+                selectedImportedEntry.sourceFormat,
+            );
+        } else {
+            this.postFxLutExternalPath = null;
+            this.postFxLutExternalText = null;
+            this.postFxLutExternalRuntimeText = null;
+            this.mmdManager.setPostEffectExternalLut(null, null, null);
+            this.mmdManager.postEffectLutPreset = selectedPresetValue;
+        }
+
+        this.mmdManager.postEffectLutSourceMode = selectedMode;
+        this.mmdManager.postEffectLutIntensity = Number(elements.intensityInput.value) / 100;
+        this.mmdManager.postEffectLutEnabled = elements.enabledInput.checked
+            && hasLutSource
+            && this.mmdManager.postEffectLutIntensity > 0.000001;
+
+        elements.intensityInput.disabled = !elements.enabledInput.checked || !hasLutSource;
+        elements.sourceValue.textContent = lutModeToLabel(selectedMode);
+        elements.fileValue.textContent = this.postFxLutExternalPath
+            ? this.getBaseNameForRenderer(this.postFxLutExternalPath)
+            : t("option.none");
+        elements.enabledValue.textContent = this.mmdManager.postEffectLutEnabled
+            ? (selectedImportedEntry
+                ? this.getBaseNameForRenderer(selectedImportedEntry.sourcePath)
+                : this.mmdManager.postEffectLutPreset)
+            : t("status.off");
+        elements.intensityValue.textContent = this.mmdManager.postEffectLutEnabled
+            ? this.mmdManager.postEffectLutIntensity.toFixed(2)
+            : t("status.off");
     }
 
     public buildPresetOptionsHtml(): string {

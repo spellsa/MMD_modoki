@@ -112,3 +112,9 @@ Bullet backend の初期化に失敗し、Ammo fallback で起動しています
 2. Electron アプリを完全終了して再起動する
 3. それでも直らない場合は `node_modules/.vite` を消して再起動する
 4. `spr/index_bg.wasm` の解決失敗や `object is not extensible` など、Bullet 初期化例外の内容を確認する
+
+## 起動直後だけモデルの色が濃い
+
+FrameGraph backend 有効時に、PostFX が無効でも `scene.imageProcessingConfiguration.applyByPostProcess` が残ると発生することがあります。
+
+詳しくは [FrameGraph ImageProcessing 初期化順 再発防止メモ](./framegraph-image-processing-init-regression-2026-06-17.md) を参照してください。

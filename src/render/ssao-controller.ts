@@ -2,13 +2,68 @@ import { DepthRenderer } from "@babylonjs/core/Rendering/depthRenderer";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { SSAO2RenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/ssao2RenderingPipeline";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import type { Camera } from "@babylonjs/core/Cameras/camera";
+import type { Scene } from "@babylonjs/core/scene";
 import {
     getExternalWgslToonShaderPathForMaterial as getExternalWgslToonShaderPathForMaterialImpl,
     getWgslMaterialShaderPresetForMaterial as getWgslMaterialShaderPresetForMaterialImpl,
 } from "../scene/material-shader-service";
 
-export function syncShaderContactAoState(host: any): void {
-    const previousEnabled = host.constructor.toonContactAoEnabled;
+type SsaoHostStatics = {
+    DEFAULT_WGSL_MATERIAL_SHADER_PRESET: string;
+    toonContactAoEnabled: boolean;
+    toonContactAoStrength: number;
+    toonContactAoRadius: number;
+    toonContactAoFadeStartMeters: number;
+    toonContactAoFadeEndMeters: number;
+    toonContactAoDebugView: boolean;
+    toonContactAoDepthRenderer: DepthRenderer | null;
+};
+
+type SsaoSceneModel = {
+    mesh: object;
+    materials: Array<{ material: object }>;
+};
+
+type SsaoHost = {
+    constructor: unknown;
+    scene: Scene;
+    camera: Camera & {
+        radius: number;
+        customRenderTargets: Texture[];
+    };
+    engine: {
+        getRenderWidth(): number;
+        getRenderHeight(): number;
+    };
+    postEffectBackend: "classic" | "frameGraph" | "experimental";
+    postEffectSsaoEnabledValue: boolean;
+    postEffectSsaoStrengthValue: number;
+    postEffectSsaoRadiusValue: number;
+    postEffectSsaoFadeEndValue: number;
+    postEffectSsaoDebugViewValue: boolean;
+    ssaoDepthRenderer: DepthRenderer | null;
+    ssaoRenderingPipeline: SSAO2RenderingPipeline | null;
+    ssaoPostProcess: PostProcess | null;
+    sceneModels: SsaoSceneModel[];
+    isWebGpuEngine(): boolean;
+    enforceFinalPostProcessOrder(): void;
+    disablePrePassRendererIfSupported(): void;
+    addRuntimeDiagnostic(message: string): void;
+    hasPrePassRendererSupport(): boolean;
+    getEngineType(): string;
+    ensureSimpleSsaoShader(): void;
+    getPostProcessShaderLanguage(): unknown;
+    getModelVisibility(mesh: object): boolean;
+};
+
+function getSsaoHostStatics(host: SsaoHost): SsaoHostStatics {
+    return host.constructor as SsaoHostStatics;
+}
+
+export function syncShaderContactAoState(host: SsaoHost): void {
+    const hostStatics = getSsaoHostStatics(host);
+    const previousEnabled = hostStatics.toonContactAoEnabled;
     const shouldUseFullscreenSsao = host.isWebGpuEngine()
         && host.postEffectSsaoEnabledValue
         && host.postEffectSsaoStrengthValue > 0.00001;
@@ -20,27 +75,53 @@ export function syncShaderContactAoState(host: any): void {
 
     const fadeEnd = host.postEffectSsaoFadeEndValue;
     const fadeStart = Math.max(2, Math.min(fadeEnd - 0.5, fadeEnd * 0.55));
-    host.constructor.toonContactAoEnabled = shouldEnable;
-    host.constructor.toonContactAoStrength = host.constructor.toonContactAoEnabled
+    hostStatics.toonContactAoEnabled = shouldEnable;
+    hostStatics.toonContactAoStrength = hostStatics.toonContactAoEnabled
         ? host.postEffectSsaoStrengthValue
         : 0;
-    host.constructor.toonContactAoRadius = host.constructor.toonContactAoEnabled
+    hostStatics.toonContactAoRadius = hostStatics.toonContactAoEnabled
         ? host.postEffectSsaoRadiusValue
         : 0.8;
-    host.constructor.toonContactAoFadeStartMeters = fadeStart;
-    host.constructor.toonContactAoFadeEndMeters = fadeEnd;
-    host.constructor.toonContactAoDebugView = host.constructor.toonContactAoEnabled
+    hostStatics.toonContactAoFadeStartMeters = fadeStart;
+    hostStatics.toonContactAoFadeEndMeters = fadeEnd;
+    hostStatics.toonContactAoDebugView = hostStatics.toonContactAoEnabled
         && host.postEffectSsaoDebugViewValue;
-    host.constructor.toonContactAoDepthRenderer = host.constructor.toonContactAoEnabled
+    hostStatics.toonContactAoDepthRenderer = hostStatics.toonContactAoEnabled
         ? host.ssaoDepthRenderer
         : null;
 
-    if (previousEnabled !== host.constructor.toonContactAoEnabled) {
+    if (previousEnabled !== hostStatics.toonContactAoEnabled) {
         host.scene.markAllMaterialsAsDirty(127);
     }
 }
 
-export function applySsaoSettings(host: any): void {
+export function applySsaoSettings(host: SsaoHost): void {
+    const hostStatics = getSsaoHostStatics(host);
+    if (host.postEffectBackend === "frameGraph") {
+        const previousEnabled = hostStatics.toonContactAoEnabled;
+        hostStatics.toonContactAoEnabled = false;
+        hostStatics.toonContactAoStrength = 0;
+        hostStatics.toonContactAoRadius = 0.8;
+        hostStatics.toonContactAoDebugView = false;
+        hostStatics.toonContactAoDepthRenderer = null;
+        if (previousEnabled) {
+            host.scene.markAllMaterialsAsDirty(127);
+        }
+        if (host.ssaoRenderingPipeline) {
+            host.ssaoRenderingPipeline.dispose(true);
+            host.ssaoRenderingPipeline = null;
+        }
+        if (host.ssaoPostProcess) {
+            host.ssaoPostProcess.dispose(host.camera);
+            host.ssaoPostProcess = null;
+        }
+        if (host.ssaoDepthRenderer) {
+            disposeSsaoDepthRenderer(host);
+        }
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
     if (host.isWebGpuEngine()) {
         if (host.ssaoRenderingPipeline) {
             host.ssaoRenderingPipeline.dispose(true);
@@ -63,11 +144,11 @@ export function applySsaoSettings(host: any): void {
         return;
     }
 
-    host.constructor.toonContactAoEnabled = false;
-    host.constructor.toonContactAoStrength = 0;
-    host.constructor.toonContactAoRadius = 0.8;
-    host.constructor.toonContactAoDebugView = false;
-    host.constructor.toonContactAoDepthRenderer = null;
+    hostStatics.toonContactAoEnabled = false;
+    hostStatics.toonContactAoStrength = 0;
+    hostStatics.toonContactAoRadius = 0.8;
+    hostStatics.toonContactAoDebugView = false;
+    hostStatics.toonContactAoDepthRenderer = null;
     if (host.ssaoDepthRenderer) {
         disposeSsaoDepthRenderer(host);
     }
@@ -153,7 +234,7 @@ export function applySsaoSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function ensureSsaoFallbackPostProcess(host: any, initialDepthMap?: Texture | null): void {
+export function ensureSsaoFallbackPostProcess(host: SsaoHost, initialDepthMap?: Texture | null): void {
     if (!host.ssaoDepthRenderer) {
         configureSsaoDepthRenderer(host);
     }
@@ -199,7 +280,8 @@ export function ensureSsaoFallbackPostProcess(host: any, initialDepthMap?: Textu
     }
 }
 
-export function shouldUseToonTintedSsaoComposite(host: any): boolean {
+export function shouldUseToonTintedSsaoComposite(host: SsaoHost): boolean {
+    const hostStatics = getSsaoHostStatics(host);
     let hasVisibleSceneModel = false;
 
     for (const entry of host.sceneModels) {
@@ -210,7 +292,7 @@ export function shouldUseToonTintedSsaoComposite(host: any): boolean {
             if (getExternalWgslToonShaderPathForMaterialImpl(host, materialEntry.material)) {
                 return false;
             }
-            if (getWgslMaterialShaderPresetForMaterialImpl(host, materialEntry.material) !== host.constructor.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
+            if (getWgslMaterialShaderPresetForMaterialImpl(host, materialEntry.material) !== hostStatics.DEFAULT_WGSL_MATERIAL_SHADER_PRESET) {
                 return false;
             }
         }
@@ -219,7 +301,7 @@ export function shouldUseToonTintedSsaoComposite(host: any): boolean {
     return hasVisibleSceneModel;
 }
 
-export function getSsaoPostProcessScale(host: any): number {
+export function getSsaoPostProcessScale(host: SsaoHost): number {
     const renderWidth = Math.max(1, host.engine.getRenderWidth());
     const renderHeight = Math.max(1, host.engine.getRenderHeight());
     const shortSide = Math.max(1, Math.min(renderWidth, renderHeight));
@@ -227,7 +309,7 @@ export function getSsaoPostProcessScale(host: any): number {
     return Math.max(0.45, Math.min(1, targetShortSide / shortSide));
 }
 
-export function configureSsaoDepthRenderer(host: any): void {
+export function configureSsaoDepthRenderer(host: SsaoHost): void {
     if (host.ssaoDepthRenderer) {
         return;
     }
@@ -248,7 +330,7 @@ export function configureSsaoDepthRenderer(host: any): void {
     }
 }
 
-export function disposeSsaoDepthRenderer(host: any): void {
+export function disposeSsaoDepthRenderer(host: SsaoHost): void {
     if (!host.ssaoDepthRenderer) {
         return;
     }

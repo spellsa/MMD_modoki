@@ -1,5 +1,16 @@
 import type { AppLogData, AppLogScope } from "./types";
 
+export type AppDebugLogKey =
+    | "modelLoad"
+    | "motionLoad"
+    | "accessoryLoad"
+    | "overlay"
+    | "keyframeFlow"
+    | "performance"
+    | "shaderTrace"
+    | "postfx"
+    | "renderStability";
+
 export function toLogErrorData(err: unknown): AppLogData {
     if (err instanceof Error) {
         return {
@@ -15,6 +26,15 @@ export function toLogErrorData(err: unknown): AppLogData {
             message: String(err),
         },
     };
+}
+
+export function isDebugLogEnabled(key: AppDebugLogKey): boolean {
+    try {
+        const value = globalThis.localStorage?.getItem(`mmd_modoki.debug.${key}`);
+        return value === "1" || value === "true";
+    } catch {
+        return false;
+    }
 }
 
 function writeRendererLog(
@@ -48,4 +68,14 @@ export function logWarn(scope: AppLogScope, message: string, data?: AppLogData):
 
 export function logError(scope: AppLogScope, message: string, data?: AppLogData): void {
     writeRendererLog("error", scope, message, data);
+}
+
+export function logDebugIfEnabled(
+    key: AppDebugLogKey,
+    scope: AppLogScope,
+    message: string,
+    data?: AppLogData,
+): void {
+    if (!isDebugLogEnabled(key)) return;
+    logDebug(scope, message, data);
 }

@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 import type { ExportUiController } from "./export-ui-controller";
 
 type ToastType = "success" | "error" | "info";
@@ -13,6 +14,8 @@ type LayoutUiElements = {
     fullscreenUiToggleText: HTMLElement | null;
     viewportContainer: HTMLElement | null;
     renderCanvas: HTMLCanvasElement | null;
+    viewportTopBar: HTMLElement | null;
+    viewportBottomBar: HTMLElement | null;
     timelinePanel: HTMLElement | null;
     timelineResizer: HTMLElement | null;
     shaderResizer: HTMLElement | null;
@@ -25,6 +28,7 @@ export type LayoutUiControllerDeps = {
     mmdManager: MmdManager;
     exportUiController: ExportUiController;
     showToast: (message: string, type?: ToastType) => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 const MIN_TIMELINE_WIDTH = 160;
@@ -43,6 +47,8 @@ function resolveLayoutUiElements(): LayoutUiElements {
         fullscreenUiToggleText: document.getElementById("fullscreen-ui-toggle-text"),
         viewportContainer: document.getElementById("viewport-container"),
         renderCanvas: document.getElementById("render-canvas") as HTMLCanvasElement | null,
+        viewportTopBar: document.getElementById("viewport-top-bar"),
+        viewportBottomBar: document.getElementById("viewport-bottom-bar"),
         timelinePanel: document.getElementById("timeline-panel"),
         timelineResizer: document.getElementById("timeline-resizer"),
         shaderResizer: document.getElementById("shader-resizer"),
@@ -57,6 +63,7 @@ export class LayoutUiController {
     private readonly mmdManager: MmdManager;
     private readonly exportUiController: ExportUiController;
     private readonly showToast: (message: string, type?: ToastType) => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
     private viewportAspectResizeObserver: ResizeObserver | null = null;
     private isTimelineResizing = false;
     private isShaderResizing = false;
@@ -76,6 +83,7 @@ export class LayoutUiController {
         this.mmdManager = deps.mmdManager;
         this.exportUiController = deps.exportUiController;
         this.showToast = deps.showToast;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupEventListeners();
         this.setupTimelineResizer();
@@ -112,6 +120,12 @@ export class LayoutUiController {
         this.enterUiFullscreenMode();
     }
 
+    public toggleShaderPanel(): void {
+        const nextVisible = !this.isShaderPanelExpanded();
+        this.setShaderPanelVisible(nextVisible);
+        this.showToast(nextVisible ? t("toast.fx.shown") : t("toast.fx.hidden"), "info");
+    }
+
     public exitUiFullscreenMode(): void {
         this.setUiFullscreenVisualState(false);
     }
@@ -119,18 +133,28 @@ export class LayoutUiController {
     public applyViewportAspectPresentation(): void {
         if (!this.elements.renderCanvas || !this.elements.viewportContainer) return;
 
+        const containerWidth = Math.max(1, Math.floor(this.elements.viewportContainer.clientWidth));
+        const topBarHeight = this.elements.viewportTopBar && this.isElementVisible(this.elements.viewportTopBar)
+            ? this.elements.viewportTopBar.getBoundingClientRect().height
+            : 0;
+        const bottomBarHeight = this.elements.viewportBottomBar
+            && this.isElementVisible(this.elements.viewportBottomBar)
+            && !this.isElementOverlay(this.elements.viewportBottomBar)
+            ? this.elements.viewportBottomBar.getBoundingClientRect().height
+            : 0;
+        const containerHeight = Math.max(
+            1,
+            Math.floor(this.elements.viewportContainer.clientHeight - topBarHeight - bottomBarHeight),
+        );
         const selectedAspect = this.exportUiController.getSelectedAspectPreset();
         if (selectedAspect === "viewport") {
             this.elements.renderCanvas.style.width = "100%";
-            this.elements.renderCanvas.style.height = "100%";
+            this.elements.renderCanvas.style.height = `${containerHeight}px`;
             this.mmdManager.resize();
             return;
         }
 
         const ratio = this.exportUiController.resolveSelectedOutputAspectRatio();
-        const containerWidth = Math.max(1, Math.floor(this.elements.viewportContainer.clientWidth));
-        const containerHeight = Math.max(1, Math.floor(this.elements.viewportContainer.clientHeight));
-
         let renderWidth = containerWidth;
         let renderHeight = Math.max(1, Math.round(renderWidth / Math.max(0.1, ratio)));
         if (renderHeight > containerHeight) {
@@ -155,13 +179,22 @@ export class LayoutUiController {
         void window.electronAPI.snapMainWindowContentAspect(ratio);
     }
 
+    private isElementVisible(element: HTMLElement): boolean {
+        return element.getClientRects().length > 0 && getComputedStyle(element).display !== "none";
+    }
+
+    private isElementOverlay(element: HTMLElement): boolean {
+        const position = getComputedStyle(element).position;
+        return position === "absolute" || position === "fixed";
+    }
+
     private setupEventListeners(): void {
         this.elements.btnToggleShaderPanel?.addEventListener("click", () => {
-            const nextVisible = !this.isShaderPanelExpanded();
-            this.setShaderPanelVisible(nextVisible);
-            this.showToast(nextVisible ? t("toast.fx.shown") : t("toast.fx.hidden"), "info");
+            if (this.dispatchAction?.({ type: "layout.shaderPanel.toggle", source: "button" })) return;
+            this.toggleShaderPanel();
         });
         this.elements.btnToggleFullscreenUi?.addEventListener("click", () => {
+            if (this.dispatchAction?.({ type: "layout.fullscreen.toggle", source: "button" })) return;
             this.toggleUiFullscreenMode();
         });
     }

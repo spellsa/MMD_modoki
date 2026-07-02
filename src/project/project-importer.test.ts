@@ -77,6 +77,7 @@ function createHost() {
         applyCameraTrackPose: vi.fn(),
         setActiveModelByIndex: vi.fn(),
         setActiveModelVisibility: vi.fn(),
+        setModelCastsShadowByIndex: vi.fn(),
         setModelMotionImports: vi.fn(),
         applyImportedMaterialShaderStates: vi.fn(),
         setGroundVisible: vi.fn(),
@@ -88,20 +89,58 @@ function createHost() {
         setLightColor: vi.fn(),
         setShadowColor: vi.fn(),
         setShadowEnabled: vi.fn(),
+        shadowMode: "cascaded" as "cascaded" | "standard",
+        shadowBlurKernel: 0,
+        shadowPenumbraEnabled: false,
+        shadowPenumbraSize: 0.035,
+        transparentShadowEnabled: true,
         setPhysicsSimulationRateHz: vi.fn(),
         setPhysicsGravityAcceleration: vi.fn(),
         setPhysicsGravityDirection: vi.fn(),
         setPhysicsEnabled: vi.fn(),
+        isPhysicsAvailable: vi.fn(() => false),
         setDofFocusTargetByPath: vi.fn(),
+        setModelEdgeColor: vi.fn(),
+        modelEdgeColorOverrideEnabled: false,
         updateEditorDofFocusAndFStop: vi.fn(),
         applyEditorDofSettings: vi.fn(),
         applyDofLensBlurSettings: vi.fn(),
         applyLightColorTemperature: vi.fn(),
         applyToonShadowInfluenceToAllModels: vi.fn(),
         syncLuminousGlowLayer: vi.fn(),
+        postEffectGlowGlareCount: 0,
+        postEffectGlowGlareLength: 48,
+        postEffectGlowGlareAngle: 0,
+        postEffectGlowGlarePower: 0.4,
+        setPostEffectBloomColor: vi.fn(),
+        postEffectOffsetShadowEnabled: false,
+        postEffectOffsetShadowStrength: 0.35,
+        postEffectOffsetShadowOffsetX: 0,
+        postEffectOffsetShadowOffsetY: -30,
+        postEffectOffsetShadowDepthBias: 0.1,
+        postEffectOffsetShadowMaxDepth: 2,
+        postEffectOffsetShadowDepthScale: 1,
+        postEffectOffsetShadowThickness: 1,
+        postEffectOffsetShadowSoftness: 0,
+        postEffectOffsetShadowNormalInfluence: 0,
+        setPostEffectOffsetShadowColor: vi.fn(),
+        postEffectOffsetShadowDebugView: false,
+        postEffectOffsetHighlightEnabled: false,
+        postEffectOffsetHighlightStrength: 1,
+        postEffectOffsetHighlightOffsetX: 0,
+        postEffectOffsetHighlightOffsetY: -100,
+        postEffectOffsetHighlightDepthThreshold: 0.1,
+        postEffectOffsetHighlightNormalThreshold: 0,
+        postEffectOffsetHighlightThickness: 1,
+        postEffectOffsetHighlightSoftness: 0,
+        postEffectOffsetHighlightDepthScale: 1,
+        setPostEffectOffsetHighlightColor: vi.fn(),
+        postEffectOffsetHighlightDebugView: false,
         setPostEffectExternalLut: vi.fn(),
         setExternalWgslToonShader: vi.fn(),
         setPostEffectFogColor: vi.fn(),
+        setFrameGraphPostEffectStackIds: vi.fn(),
+        setFrameGraphPostEffectStackEntries: vi.fn(),
         refreshTotalFramesFromContent: vi.fn(),
         setRenderFpsLimit: vi.fn(),
         seekTo: vi.fn(),
@@ -151,6 +190,167 @@ describe("importProjectState", () => {
         expect(host.postEffectSsaoRadius).toBe(0.75);
         expect(host.postEffectSsaoFadeEnd).toBe(42);
         expect(host.postEffectSsaoDebugView).toBe(true);
+    });
+
+    it("restores model edge color settings", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                modelEdgeColorOverrideEnabled: true,
+                modelEdgeColor: { r: 0.2, g: 0.3, b: 0.4 },
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.modelEdgeColorOverrideEnabled).toBe(true);
+        expect(host.setModelEdgeColor).toHaveBeenCalledWith(0.2, 0.3, 0.4);
+    });
+
+    it("restores normalized FrameGraph post effect stack order", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                frameGraphPostStack: [
+                    { id: "lut", enabled: true },
+                    { id: "bad" as "lut", enabled: true },
+                    { id: "bloom", enabled: false },
+                    { id: "lut", enabled: false },
+                ],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.setFrameGraphPostEffectStackEntries).toHaveBeenCalledWith([
+            { id: "lut", enabled: true },
+            { id: "bloom", enabled: false },
+        ]);
+    });
+
+    it("restores FrameGraph Luminous effect values", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                glowEnabled: true,
+                bloomColor: { r: 1, g: 0.42, b: 0.12 },
+                offsetShadowEnabled: true,
+                offsetShadowStrength: 0.55,
+                offsetShadowOffsetX: 2,
+                offsetShadowOffsetY: 9,
+                offsetShadowDepthBias: 0.02,
+                offsetShadowMaxDepth: 0.7,
+                offsetShadowDepthScale: 0.8,
+                offsetShadowThickness: 0.32,
+                offsetShadowSoftness: 2.5,
+                offsetShadowNormalInfluence: 0.6,
+                offsetShadowColor: { r: 0.25, g: 0.18, b: 0.12 },
+                offsetShadowDebugView: true,
+                offsetHighlightEnabled: true,
+                offsetHighlightStrength: 0.65,
+                offsetHighlightOffsetX: -6,
+                offsetHighlightOffsetY: -10,
+                offsetHighlightDepthThreshold: 0.03,
+                offsetHighlightNormalThreshold: 0.2,
+                offsetHighlightThickness: 0.42,
+                offsetHighlightSoftness: 1.5,
+                offsetHighlightDepthScale: 0.75,
+                offsetHighlightColor: { r: 1, g: 0.8, b: 0.6 },
+                offsetHighlightDebugView: true,
+                glowIntensity: 1.25,
+                glowThreshold: 0.18,
+                glowKernel: 48,
+                glowGlareCount: 6,
+                glowGlareLength: 96,
+                glowGlareAngle: 15,
+                glowGlarePower: 0.75,
+                frameGraphPostStack: [
+                    { id: "luminous", enabled: true },
+                    { id: "offsetShadow", enabled: true },
+                    { id: "offsetHighlight", enabled: true },
+                    { id: "bloom", enabled: false },
+                ],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.postEffectGlowEnabled).toBe(true);
+        expect(host.postEffectGlowIntensity).toBe(1.25);
+        expect(host.postEffectGlowThreshold).toBe(0.18);
+        expect(host.postEffectGlowKernel).toBe(48);
+        expect(host.postEffectGlowGlareCount).toBe(6);
+        expect(host.postEffectGlowGlareLength).toBe(96);
+        expect(host.postEffectGlowGlareAngle).toBe(15);
+        expect(host.postEffectGlowGlarePower).toBe(0.75);
+        expect(host.setPostEffectBloomColor).toHaveBeenCalledWith(1, 0.42, 0.12);
+        expect(host.postEffectOffsetShadowEnabled).toBe(true);
+        expect(host.postEffectOffsetShadowStrength).toBe(0.55);
+        expect(host.postEffectOffsetShadowOffsetX).toBe(2);
+        expect(host.postEffectOffsetShadowOffsetY).toBe(9);
+        expect(host.postEffectOffsetShadowDepthBias).toBe(0.02);
+        expect(host.postEffectOffsetShadowMaxDepth).toBe(0.7);
+        expect(host.postEffectOffsetShadowDepthScale).toBe(0.8);
+        expect(host.postEffectOffsetShadowThickness).toBe(0.32);
+        expect(host.postEffectOffsetShadowSoftness).toBe(2.5);
+        expect(host.postEffectOffsetShadowNormalInfluence).toBe(0.6);
+        expect(host.setPostEffectOffsetShadowColor).toHaveBeenCalledWith(0.25, 0.18, 0.12);
+        expect(host.postEffectOffsetShadowDebugView).toBe(true);
+        expect(host.postEffectOffsetHighlightEnabled).toBe(true);
+        expect(host.postEffectOffsetHighlightStrength).toBe(0.65);
+        expect(host.postEffectOffsetHighlightOffsetX).toBe(-6);
+        expect(host.postEffectOffsetHighlightOffsetY).toBe(-10);
+        expect(host.postEffectOffsetHighlightDepthThreshold).toBe(0.03);
+        expect(host.postEffectOffsetHighlightNormalThreshold).toBe(0.2);
+        expect(host.postEffectOffsetHighlightThickness).toBe(0.42);
+        expect(host.postEffectOffsetHighlightSoftness).toBe(1.5);
+        expect(host.postEffectOffsetHighlightDepthScale).toBe(0.75);
+        expect(host.setPostEffectOffsetHighlightColor).toHaveBeenCalledWith(1, 0.8, 0.6);
+        expect(host.postEffectOffsetHighlightDebugView).toBe(true);
+        expect(host.setFrameGraphPostEffectStackEntries).toHaveBeenCalledWith([
+            { id: "luminous", enabled: true },
+            { id: "offsetShadow", enabled: true },
+            { id: "offsetHighlight", enabled: true },
+            { id: "bloom", enabled: false },
+        ]);
+    });
+
+    it("restores mirroring floor viewport values", async () => {
+        const host = createHost();
+        const project = createProject({
+            viewport: {
+                ...createProject().viewport,
+                mirroringFloorEnabled: true,
+                mirroringFloorReflectance: 0.48,
+                mirroringFloorSize: 64,
+                mirroringFloorHeight: 0.03,
+                mirroringFloorResolution: 1024,
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.mirroringFloorEnabled).toBe(true);
+        expect(host.mirroringFloorReflectance).toBe(0.48);
+        expect(host.mirroringFloorSize).toBe(64);
+        expect(host.mirroringFloorHeight).toBe(0.03);
+        expect(host.mirroringFloorResolution).toBe(1024);
+    });
+
+    it("uses mirroring floor defaults for projects saved before the setting existed", async () => {
+        const host = createHost();
+        const project = createProject();
+
+        await importProjectState(host, project);
+
+        expect(host.mirroringFloorEnabled).toBe(false);
+        expect(host.mirroringFloorReflectance).toBe(0.35);
+        expect(host.mirroringFloorSize).toBe(40);
+        expect(host.mirroringFloorHeight).toBe(0);
+        expect(host.mirroringFloorResolution).toBe(512);
     });
 
     it("restores embedded camera animation through the runtime camera path", async () => {

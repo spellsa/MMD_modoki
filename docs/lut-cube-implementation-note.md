@@ -258,7 +258,7 @@ Babylon 向けの既存実装として `babylon-cube-luts` があるが、今回
 
 ## 関連ファイル
 
-- [src/lut-file.ts](/d:/DevTools/Projects/MMD_modoki/src/lut-file.ts)
-- [src/ui-controller.ts](/d:/DevTools/Projects/MMD_modoki/src/ui-controller.ts)
-- [src/render/post-process-controller.ts](/d:/DevTools/Projects/MMD_modoki/src/render/post-process-controller.ts)
-- [docs/lut-wgsl-file-handling.md](/d:/DevTools/Projects/MMD_modoki/docs/lut-wgsl-file-handling.md)
+- [src/lut-file.ts](../src/lut-file.ts)
+- [src/ui-controller.ts](../src/ui-controller.ts)
+- [src/render/post-process-controller.ts](../src/render/post-process-controller.ts)
+- [docs/lut-wgsl-file-handling.md](./lut-wgsl-file-handling.md)

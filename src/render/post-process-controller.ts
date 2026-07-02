@@ -11,10 +11,210 @@ import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
+import type { Camera } from "@babylonjs/core/Cameras/camera";
 
 const STANDALONE_BLOOM_SCALE = 0.5;
 
-function disposeStandaloneBloomEffect(host: any): void {
+type PostProcessBackend = "classic" | "frameGraph" | "experimental";
+
+type PostProcessEffectLike = {
+    setTexture(name: string, texture: unknown): void;
+    setFloat(name: string, value: number): void;
+    setFloat2(name: string, x: number, y: number): void;
+    setColor3(name: string, value: unknown): void;
+    setVector3(name: string, value: Vector3): void;
+    setMatrix(name: string, value: unknown): void;
+};
+
+type DepthRendererLike = {
+    useOnlyInActiveCamera: boolean;
+    forceDepthWriteTransparentMeshes: boolean;
+    getDepthMap(): Texture;
+};
+
+type PostProcessCameraLike = Camera & {
+    _postProcesses: Array<PostProcess | null>;
+    globalPosition: Vector3;
+    position: Vector3;
+    fov: number;
+    minZ: number;
+    maxZ: number;
+    detachPostProcess(postProcess: PostProcess): void;
+    attachPostProcess(postProcess: PostProcess): void;
+    getViewMatrix(): unknown;
+    getTransformationMatrix(): { clone(): { invert(): void } };
+};
+
+type PostProcessSceneLike = Scene & {
+    imageProcessingConfiguration: {
+        exposure: number;
+        toneMappingEnabled: boolean;
+        toneMappingType: number;
+        ditheringEnabled: boolean;
+        ditheringIntensity: number;
+        vignetteEnabled: boolean;
+        vignetteWeight: number;
+        vignetteColor: { set(r: number, g: number, b: number, a: number): void };
+        colorCurves: ColorCurves | null;
+        colorCurvesEnabled: boolean;
+        colorGradingEnabled: boolean;
+        colorGradingTexture: ColorGradingTexture | null;
+        isEnabled: boolean;
+    };
+    fogMode: number;
+    fogColor: { set(r: number, g: number, b: number): void };
+    enableDepthRenderer(
+        camera: Camera,
+        storeNonLinearDepth?: boolean,
+        force32bitsFloat?: boolean,
+        samplingMode?: number,
+        storeCameraSpaceZ?: boolean,
+    ): DepthRendererLike;
+};
+
+type PostProcessHostStatics = {
+    POST_EFFECT_LUT_PRESETS: ReadonlyArray<{ id: string; label: string }>;
+    POST_EFFECT_LUT_TEXT_BY_ID: Record<string, string | undefined>;
+};
+
+type PostProcessHost = {
+    constructor: unknown;
+    scene: PostProcessSceneLike;
+    camera: PostProcessCameraLike;
+    engine: {
+        getRenderWidth(): number;
+        getRenderHeight(): number;
+    };
+    dirLight: { position: Vector3 } | null;
+    postEffectBackend: PostProcessBackend;
+    defaultRenderingPipeline: DefaultRenderingPipeline | null;
+    lensRenderingPipeline: { dispose(doNotRebuild?: boolean): void } | null;
+    ssrRenderingPipeline: SSRRenderingPipeline | null;
+    standaloneBloomEffect: (BloomEffect & { _effects?: PostProcess[] }) | null;
+    standaloneLensBlurPostProcess: PostProcess | null;
+    standaloneEdgeBlurPostProcess: PostProcess | null;
+    volumetricLightPostProcess: VolumetricLightScatteringPostProcess | null;
+    originFogPostProcess: PostProcess | null;
+    motionBlurPostProcess: PostProcess | null;
+    finalLensDistortionPostProcess: PostProcess | null;
+    finalAntialiasPostProcess: PostProcess | null;
+    dofPostProcess: PostProcess | null;
+    depthRenderer: DepthRendererLike | null;
+    motionBlurPreviousCameraPosition: Vector3 | null;
+    motionBlurScreenDirection: Vector2;
+    motionBlurScreenAmount: number;
+    postEffectBloomEnabledValue: boolean;
+    postEffectBloomWeightValue: number;
+    postEffectBloomThresholdValue: number;
+    postEffectBloomKernelValue: number;
+    postEffectMotionBlurEnabledValue: boolean;
+    postEffectMotionBlurStrengthValue: number;
+    postEffectMotionBlurSamplesValue: number;
+    postEffectVlsEnabledValue: boolean;
+    postEffectVlsExposureValue: number;
+    postEffectVlsDecayValue: number;
+    postEffectVlsWeightValue: number;
+    postEffectVlsDensityValue: number;
+    postEffectFogEnabledValue: boolean;
+    postEffectFogModeValue: number;
+    postEffectFogStartValue: number;
+    postEffectFogEndValue: number;
+    postEffectFogDensityValue: number;
+    postEffectFogOpacityValue: number;
+    postEffectFogColorValue: { r: number; g: number; b: number };
+    dofLensDistortionValue: number;
+    antialiasEnabledValue: boolean;
+    farDofEnabled: boolean;
+    postEffectFarDofStrengthValue: number;
+    postEffectToneMappingEnabledValue: boolean;
+    postEffectDitheringEnabledValue: boolean;
+    postEffectVignetteEnabledValue: boolean;
+    postEffectColorCurvesEnabledValue: boolean;
+    postEffectLutEnabledValue: boolean;
+    postEffectExposureValue: number;
+    postEffectToneMappingTypeValue: number;
+    postEffectDitheringIntensityValue: number;
+    postEffectVignetteWeightValue: number;
+    postEffectColorCurvesHueValue: number;
+    postEffectColorCurvesDensityValue: number;
+    postEffectColorCurvesSaturationValue: number;
+    postEffectColorCurvesExposureValue: number;
+    postEffectLutSourceModeValue: "builtin" | "external-absolute" | "project-relative";
+    postEffectLutPresetValue: string;
+    postEffectLutExternalTextValue: string | null;
+    postEffectLutExternalPathValue: string | null;
+    postEffectLutExternalSourceFormatValue: "3dl" | "cube" | null;
+    postEffectLutExternalRevision: number;
+    postEffectLutTexture: ColorGradingTexture | null;
+    postEffectLutTextureKey: string | null;
+    postEffectLutPresetBlobUrlById: Map<string, string>;
+    postEffectLutExternalBlobUrl: string | null;
+    postEffectChromaticAberrationValue: number;
+    postEffectGrainIntensityValue: number;
+    postEffectSharpenEdgeValue: number;
+    postEffectSsrEnabledValue: boolean;
+    postEffectSsrStrengthValue: number;
+    postEffectSsrStepValue: number;
+    dofEnabledValue: boolean;
+    dofBlurLevelValue: number;
+    dofLensBlurEnabledValue: boolean;
+    dofLensBlurStrengthValue: number;
+    dofFocusDistanceMmValue: number;
+    dofFocalLengthValue: number;
+    dofLensSizeValue: number;
+    dofEffectiveFStopValue: number;
+    dofLensHighlightsBaseGain: number;
+    dofLensHighlightsGainRange: number;
+    dofLensHighlightsBaseThreshold: number;
+    dofLensHighlightsThresholdRange: number;
+    dofFocalLengthFollowsCameraFov: boolean;
+    dofLensDistortionFollowsCameraFov: boolean;
+    dofAutoFocusToCameraTarget: boolean;
+    dofAutoFocusNearOffsetMmValue: number;
+    dofFStopValue: number;
+    dofLensDistortionMinTeleFovDeg: number;
+    dofLensDistortionNeutralFovDeg: number;
+    dofLensDistortionMaxWideFovDeg: number;
+    dofLensDistortionInfluenceValue: number;
+    dofFovLinkSensorWidthMm: number;
+    dofFocalLengthDistanceInvertedValue: boolean;
+    dofAutoFocusInFocusRadiusMm: number;
+    dofNearSuppressionScaleValue: number;
+    dofAutoFocusLensCompensationExponent: number;
+    dofAutoFocusCocAtRangeEdge: number;
+    dofLensEdgeBlurValue: number;
+    farDofFocusSharpRadiusMm: number;
+    setupEditorDofPipeline(): void;
+    setupFarDofPostProcess(): void;
+    disablePrePassRendererIfSupported(): void;
+    applyImageProcessingSettings(): void;
+    applyDefaultPipelinePostProcessSettings(): void;
+    applySsrSettings(): void;
+    applyFogSettings(): void;
+    configureDofDepthRenderer(): void;
+    updateDofLensDistortionFromCameraFov(): void;
+    setupLensHighlightsPipeline(): void;
+    applyEditorDofSettings(): void;
+    setupFinalLensDistortionPostProcess(): void;
+    applyAntialiasSettings(): void;
+    applyVolumetricLightSettings(): void;
+    applyMotionBlurSettings(): void;
+    enforceFinalPostProcessOrder(): void;
+    ensureSimpleMotionBlurShader(): void;
+    getPostProcessShaderLanguage(): unknown;
+    getEngineType(): string;
+    addRuntimeDiagnostic(message: string): void;
+    setupOriginFogPostProcess(): void;
+    hasPrePassRendererSupport(): boolean;
+    syncLuminousGlowLayer?: () => void;
+    getDofAutoFocusDistanceMm(): number;
+};
+
+function getPostProcessHostStatics(host: PostProcessHost): PostProcessHostStatics {
+    return host.constructor as PostProcessHostStatics;
+}
+
+function disposeStandaloneBloomEffect(host: PostProcessHost): void {
     if (!host.standaloneBloomEffect) {
         return;
     }
@@ -23,11 +223,11 @@ function disposeStandaloneBloomEffect(host: any): void {
     host.standaloneBloomEffect = null;
 }
 
-function getStandaloneBloomPostProcesses(host: any): PostProcess[] {
+function getStandaloneBloomPostProcesses(host: PostProcessHost): PostProcess[] {
     return host.standaloneBloomEffect?._effects ?? [];
 }
 
-function disposeStandaloneLensBlurPostProcess(host: any): void {
+function disposeStandaloneLensBlurPostProcess(host: PostProcessHost): void {
     if (!host.standaloneLensBlurPostProcess) {
         return;
     }
@@ -36,11 +236,11 @@ function disposeStandaloneLensBlurPostProcess(host: any): void {
     host.standaloneLensBlurPostProcess = null;
 }
 
-function getStandaloneLensBlurPostProcesses(host: any): PostProcess[] {
+function getStandaloneLensBlurPostProcesses(host: PostProcessHost): PostProcess[] {
     return host.standaloneLensBlurPostProcess ? [host.standaloneLensBlurPostProcess] : [];
 }
 
-function disposeStandaloneEdgeBlurPostProcess(host: any): void {
+function disposeStandaloneEdgeBlurPostProcess(host: PostProcessHost): void {
     if (!host.standaloneEdgeBlurPostProcess) {
         return;
     }
@@ -49,7 +249,7 @@ function disposeStandaloneEdgeBlurPostProcess(host: any): void {
     host.standaloneEdgeBlurPostProcess = null;
 }
 
-function getStandaloneEdgeBlurPostProcesses(host: any): PostProcess[] {
+function getStandaloneEdgeBlurPostProcesses(host: PostProcessHost): PostProcess[] {
     return host.standaloneEdgeBlurPostProcess ? [host.standaloneEdgeBlurPostProcess] : [];
 }
 
@@ -588,13 +788,13 @@ function ensureStandaloneLensBlurShader(): void {
     }
 }
 
-function applyStandaloneBloomSettings(host: any): void {
+function applyStandaloneBloomSettings(host: PostProcessHost): void {
     const pipeline = host.defaultRenderingPipeline as DefaultRenderingPipeline | null;
     if (pipeline) {
         pipeline.bloomEnabled = false;
     }
 
-    if (!host.postEffectBloomEnabledValue || !pipeline) {
+    if (host.postEffectBackend === "frameGraph" || !host.postEffectBloomEnabledValue || !pipeline) {
         disposeStandaloneBloomEffect(host);
         host.enforceFinalPostProcessOrder();
         return;
@@ -615,7 +815,7 @@ function applyStandaloneBloomSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function updateSimpleMotionBlurState(host: any, deltaMs: number): void {
+export function updateSimpleMotionBlurState(host: PostProcessHost, deltaMs: number): void {
     if (!host.motionBlurPostProcess || !host.postEffectMotionBlurEnabledValue) {
         return;
     }
@@ -659,7 +859,7 @@ export function updateSimpleMotionBlurState(host: any, deltaMs: number): void {
     host.motionBlurScreenAmount = host.motionBlurScreenAmount * (1 - smooth) + targetAmount * smooth;
 }
 
-export function applyMotionBlurSettings(host: any): void {
+export function applyMotionBlurSettings(host: PostProcessHost): void {
     const postProcesses = [...host.camera._postProcesses];
     for (const postProcess of postProcesses) {
         if (postProcess && postProcess !== host.motionBlurPostProcess && postProcess.name === "motionBlur") {
@@ -695,7 +895,7 @@ export function applyMotionBlurSettings(host: any): void {
                 shaderLanguage: host.getPostProcessShaderLanguage(),
             },
         );
-        host.motionBlurPostProcess.onApplyObservable.add((effect: any) => {
+        host.motionBlurPostProcess.onApplyObservable.add((effect: PostProcessEffectLike) => {
             const sampleScale = Math.max(0.25, Math.min(2, host.postEffectMotionBlurSamplesValue / 32));
             const blurAmount = host.motionBlurScreenAmount * host.postEffectMotionBlurStrengthValue * sampleScale;
             effect.setFloat2("blurDirection", host.motionBlurScreenDirection.x, host.motionBlurScreenDirection.y);
@@ -709,7 +909,7 @@ export function applyMotionBlurSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-function updateVolumetricLightPosition(host: any): void {
+function updateVolumetricLightPosition(host: PostProcessHost): void {
     if (!host.volumetricLightPostProcess || !host.dirLight) {
         return;
     }
@@ -721,7 +921,7 @@ function updateVolumetricLightPosition(host: any): void {
     }
 }
 
-export function applyVolumetricLightSettings(host: any): void {
+export function applyVolumetricLightSettings(host: PostProcessHost): void {
     if (!host.postEffectVlsEnabledValue || !host.dirLight) {
         if (host.volumetricLightPostProcess) {
             host.volumetricLightPostProcess.dispose(host.camera);
@@ -764,7 +964,7 @@ export function applyVolumetricLightSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function applyFogSettings(host: any): void {
+export function applyFogSettings(host: PostProcessHost): void {
     host.scene.fogMode = Scene.FOGMODE_NONE;
     host.scene.fogColor.set(
         host.postEffectFogColorValue.r,
@@ -776,7 +976,7 @@ export function applyFogSettings(host: any): void {
     }
 }
 
-export function setupOriginFogPostProcess(host: any): void {
+export function setupOriginFogPostProcess(host: PostProcessHost): void {
     if (host.originFogPostProcess || !host.depthRenderer) {
         return;
     }
@@ -926,7 +1126,7 @@ export function setupOriginFogPostProcess(host: any): void {
             shaderLanguage: host.getPostProcessShaderLanguage(),
         },
     );
-    host.originFogPostProcess.onApplyObservable.add((effect: any) => {
+    host.originFogPostProcess.onApplyObservable.add((effect: PostProcessEffectLike) => {
         const depthMap = host.depthRenderer?.getDepthMap();
         if (!depthMap) {
             return;
@@ -949,7 +1149,16 @@ export function setupOriginFogPostProcess(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function setupFinalLensDistortionPostProcess(host: any): void {
+export function setupFinalLensDistortionPostProcess(host: PostProcessHost): void {
+    if (host.postEffectBackend === "frameGraph") {
+        if (host.finalLensDistortionPostProcess) {
+            host.finalLensDistortionPostProcess.dispose(host.camera);
+            host.finalLensDistortionPostProcess = null;
+        }
+        host.enforceFinalPostProcessOrder();
+        return;
+    }
+
     const shaderKey = "mmdFinalLensDistortionFragmentShader";
     if (!Effect.ShadersStore[shaderKey]) {
         Effect.ShadersStore[shaderKey] = `
@@ -1040,16 +1249,20 @@ export function setupFinalLensDistortionPostProcess(host: any): void {
             shaderLanguage: host.getPostProcessShaderLanguage(),
         },
     );
-    host.finalLensDistortionPostProcess.onApplyObservable.add((effect: any) => {
+    host.finalLensDistortionPostProcess.onApplyObservable.add((effect: PostProcessEffectLike) => {
         effect.setFloat("distortion", host.dofLensDistortionValue);
     });
     host.enforceFinalPostProcessOrder();
 }
 
-export function applyAntialiasSettings(host: any): void {
+export function applyAntialiasSettings(host: PostProcessHost): void {
     if (host.finalAntialiasPostProcess) {
         host.finalAntialiasPostProcess.dispose(host.camera);
         host.finalAntialiasPostProcess = null;
+    }
+    if (host.postEffectBackend === "frameGraph") {
+        host.enforceFinalPostProcessOrder();
+        return;
     }
     if (!host.antialiasEnabledValue) {
         host.enforceFinalPostProcessOrder();
@@ -1066,7 +1279,7 @@ export function applyAntialiasSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function enforceFinalPostProcessOrder(host: any): void {
+export function enforceFinalPostProcessOrder(host: PostProcessHost): void {
     const tail: PostProcess[] = [];
     if (host.originFogPostProcess) tail.push(host.originFogPostProcess);
     // Keep fog before the additive light tail so distant haze is established
@@ -1085,7 +1298,7 @@ export function enforceFinalPostProcessOrder(host: any): void {
     for (const postProcess of tail) host.camera.attachPostProcess(postProcess);
 }
 
-export function initializePostProcessRenderSystem(host: any): void {
+export function initializePostProcessRenderSystem(host: PostProcessHost): void {
     host.setupEditorDofPipeline();
     if (host.farDofEnabled) {
         host.setupFarDofPostProcess();
@@ -1094,7 +1307,7 @@ export function initializePostProcessRenderSystem(host: any): void {
     }
 }
 
-export function setupEditorDofPipeline(host: any): void {
+export function setupEditorDofPipeline(host: PostProcessHost): void {
     if (host.defaultRenderingPipeline) {
         host.defaultRenderingPipeline.dispose();
         host.defaultRenderingPipeline = null;
@@ -1138,7 +1351,9 @@ export function setupEditorDofPipeline(host: any): void {
     host.applyDefaultPipelinePostProcessSettings();
     host.applySsrSettings();
     host.applyFogSettings();
-    host.configureDofDepthRenderer();
+    if (host.postEffectBackend === "classic") {
+        host.configureDofDepthRenderer();
+    }
     host.setupOriginFogPostProcess();
     if (host.dofLensDistortionFollowsCameraFov) {
         host.updateDofLensDistortionFromCameraFov();
@@ -1153,17 +1368,17 @@ export function setupEditorDofPipeline(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function isImageProcessingEffectsEnabled(host: any): boolean {
+export function isImageProcessingEffectsEnabled(host: PostProcessHost): boolean {
     const epsilon = 1e-4;
     return host.postEffectToneMappingEnabledValue
         || host.postEffectDitheringEnabledValue
         || host.postEffectVignetteEnabledValue
         || host.postEffectColorCurvesEnabledValue
-        || (host.postEffectLutEnabledValue && isLutSourceReady(host))
+        || (host.postEffectBackend !== "frameGraph" && host.postEffectLutEnabledValue && isLutSourceReady(host))
         || Math.abs(host.postEffectExposureValue - 1) > epsilon;
 }
 
-export function applyImageProcessingSettings(host: any): void {
+export function applyImageProcessingSettings(host: PostProcessHost): void {
     const imageProcessing = host.scene.imageProcessingConfiguration;
     imageProcessing.exposure = host.postEffectExposureValue;
     imageProcessing.toneMappingEnabled = host.postEffectToneMappingEnabledValue;
@@ -1188,6 +1403,14 @@ export function applyImageProcessingSettings(host: any): void {
 
     const shouldEnable = isImageProcessingEffectsEnabled(host);
     const pipeline = host.defaultRenderingPipeline;
+    if (host.postEffectBackend === "frameGraph") {
+        imageProcessing.isEnabled = shouldEnable;
+        imageProcessing.applyByPostProcess = shouldEnable;
+        if (pipeline) {
+            pipeline.imageProcessingEnabled = false;
+        }
+        return;
+    }
     if (pipeline) {
         pipeline.imageProcessingEnabled = shouldEnable;
     } else {
@@ -1195,15 +1418,26 @@ export function applyImageProcessingSettings(host: any): void {
     }
 }
 
-export function isLutSourceReady(host: any): boolean {
+export function isLutSourceReady(host: PostProcessHost): boolean {
     if (host.postEffectLutSourceModeValue === "builtin") {
-        return host.constructor.POST_EFFECT_LUT_PRESETS.some((preset: any) => preset.id === host.postEffectLutPresetValue);
+        return getPostProcessHostStatics(host).POST_EFFECT_LUT_PRESETS.some((preset) => preset.id === host.postEffectLutPresetValue);
     }
     return host.postEffectLutExternalTextValue !== null;
 }
 
-export function applyLutSettings(host: any): void {
+export function applyLutSettings(host: PostProcessHost): void {
     const imageProcessing = host.scene.imageProcessingConfiguration;
+    if (host.postEffectBackend === "frameGraph") {
+        imageProcessing.colorGradingEnabled = false;
+        imageProcessing.colorGradingTexture = null;
+        if (host.postEffectLutTexture) {
+            host.postEffectLutTexture.dispose();
+            host.postEffectLutTexture = null;
+        }
+        host.postEffectLutTextureKey = null;
+        return;
+    }
+
     const mode = host.postEffectLutSourceModeValue;
     const enabled = host.postEffectLutEnabledValue && isLutSourceReady(host);
     if (!enabled) {
@@ -1257,13 +1491,13 @@ export function applyLutSettings(host: any): void {
     imageProcessing.colorGradingEnabled = true;
 }
 
-export function getOrCreateLutPresetBlobUrl(host: any, presetId: string): string {
+export function getOrCreateLutPresetBlobUrl(host: PostProcessHost, presetId: string): string {
     const existing = host.postEffectLutPresetBlobUrlById.get(presetId);
     if (existing) {
         return existing;
     }
 
-    const lutText = host.constructor.POST_EFFECT_LUT_TEXT_BY_ID[presetId];
+    const lutText = getPostProcessHostStatics(host).POST_EFFECT_LUT_TEXT_BY_ID[presetId];
     if (!lutText) {
         throw new Error(`Unknown built-in LUT preset: ${presetId}`);
     }
@@ -1273,7 +1507,7 @@ export function getOrCreateLutPresetBlobUrl(host: any, presetId: string): string
     return blobUrl;
 }
 
-export function getOrCreateExternalLutBlobUrl(host: any): string {
+export function getOrCreateExternalLutBlobUrl(host: PostProcessHost): string {
     if (!host.postEffectLutExternalTextValue) {
         throw new Error("External LUT text is empty");
     }
@@ -1287,7 +1521,7 @@ export function getOrCreateExternalLutBlobUrl(host: any): string {
     return blobUrl;
 }
 
-export function applyDefaultPipelinePostProcessSettings(host: any): void {
+export function applyDefaultPipelinePostProcessSettings(host: PostProcessHost): void {
     const pipeline = host.defaultRenderingPipeline;
     if (!pipeline) {
         disposeStandaloneBloomEffect(host);
@@ -1298,7 +1532,9 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
 
     pipeline.glowLayerEnabled = false;
 
-    pipeline.chromaticAberrationEnabled = host.postEffectChromaticAberrationValue > 1e-4;
+    const useClassicDefaultPipelineEffects = host.postEffectBackend === "classic";
+
+    pipeline.chromaticAberrationEnabled = useClassicDefaultPipelineEffects && host.postEffectChromaticAberrationValue > 1e-4;
     if (pipeline.chromaticAberration) {
         pipeline.chromaticAberration.aberrationAmount = host.postEffectChromaticAberrationValue;
         pipeline.chromaticAberration.radialIntensity = 2.2;
@@ -1308,19 +1544,19 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
         pipeline.chromaticAberration.screenHeight = host.engine.getRenderHeight();
     }
 
-    pipeline.grainEnabled = host.postEffectGrainIntensityValue > 1e-4;
+    pipeline.grainEnabled = useClassicDefaultPipelineEffects && host.postEffectGrainIntensityValue > 1e-4;
     if (pipeline.grain) {
         pipeline.grain.intensity = host.postEffectGrainIntensityValue;
         pipeline.grain.animated = false;
     }
 
-    pipeline.sharpenEnabled = host.postEffectSharpenEdgeValue > 1e-4;
+    pipeline.sharpenEnabled = useClassicDefaultPipelineEffects && host.postEffectSharpenEdgeValue > 1e-4;
     if (pipeline.sharpen) {
         pipeline.sharpen.edgeAmount = host.postEffectSharpenEdgeValue;
         pipeline.sharpen.colorAmount = 1;
     }
 
-    if (host.dofEnabledValue) {
+    if (host.postEffectBackend === "classic" && host.dofEnabledValue) {
         configureDofDepthRenderer(host);
         applyEditorDofSettings(host);
     }
@@ -1328,7 +1564,15 @@ export function applyDefaultPipelinePostProcessSettings(host: any): void {
     host.syncLuminousGlowLayer?.();
 }
 
-export function applySsrSettings(host: any): void {
+export function applySsrSettings(host: PostProcessHost): void {
+    if (host.postEffectBackend === "frameGraph") {
+        if (host.ssrRenderingPipeline) {
+            host.ssrRenderingPipeline.dispose(false);
+            host.ssrRenderingPipeline = null;
+        }
+        return;
+    }
+
     if (!host.postEffectSsrEnabledValue) {
         if (host.ssrRenderingPipeline) {
             host.ssrRenderingPipeline.dispose(false);
@@ -1393,7 +1637,7 @@ export function applySsrSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function applyEditorDofSettings(host: any): void {
+export function applyEditorDofSettings(host: PostProcessHost): void {
     if (!host.defaultRenderingPipeline) return;
     const dof = host.defaultRenderingPipeline.depthOfField;
     if (host.depthRenderer) {
@@ -1402,14 +1646,15 @@ export function applyEditorDofSettings(host: any): void {
     dof.lensSize = host.dofLensSizeValue;
     dof.focalLength = host.dofFocalLengthValue;
     updateEditorDofFocusAndFStop(host);
-    host.defaultRenderingPipeline.depthOfFieldEnabled = host.dofEnabledValue;
+    host.defaultRenderingPipeline.depthOfFieldEnabled = host.postEffectBackend === "classic" && host.dofEnabledValue;
     applyDofLensBlurSettings(host);
 }
 
-export function applyDofLensBlurSettings(host: any): void {
+export function applyDofLensBlurSettings(host: PostProcessHost): void {
     const isEnabled = Boolean(
         host.defaultRenderingPipeline
         && host.depthRenderer
+        && host.postEffectBackend === "classic"
         && host.dofEnabledValue
         && host.dofLensBlurEnabledValue
         && host.dofLensBlurStrengthValue > 0.0001,
@@ -1451,7 +1696,7 @@ export function applyDofLensBlurSettings(host: any): void {
                 shaderLanguage: host.getPostProcessShaderLanguage(),
             },
         );
-        host.standaloneLensBlurPostProcess.onApplyObservable.add((effect: any) => {
+        host.standaloneLensBlurPostProcess.onApplyObservable.add((effect: PostProcessEffectLike) => {
             const depthMap = host.depthRenderer?.getDepthMap();
             if (!depthMap) {
                 return;
@@ -1489,7 +1734,7 @@ export function applyDofLensBlurSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function updateEditorDofFocusAndFStop(host: any): void {
+export function updateEditorDofFocusAndFStop(host: PostProcessHost): void {
     if (host.dofFocalLengthFollowsCameraFov) {
         updateDofFocalLengthFromCameraFov(host);
     }
@@ -1518,7 +1763,7 @@ export function updateEditorDofFocusAndFStop(host: any): void {
     applyDofLensBlurSettings(host);
 }
 
-export function updateDofLensDistortionFromCameraFov(host: any): void {
+export function updateDofLensDistortionFromCameraFov(host: PostProcessHost): void {
     const fovDeg = (host.camera.fov * 180) / Math.PI;
     const minTele = host.dofLensDistortionMinTeleFovDeg;
     const neutral = host.dofLensDistortionNeutralFovDeg;
@@ -1539,7 +1784,7 @@ export function updateDofLensDistortionFromCameraFov(host: any): void {
     applyDofLensOpticsSettings(host);
 }
 
-export function updateDofFocalLengthFromCameraFov(host: any): void {
+export function updateDofFocalLengthFromCameraFov(host: PostProcessHost): void {
     const fovRad = Math.max(0.01, host.camera.fov);
     const baseFocalLengthMm = (0.5 * host.dofFovLinkSensorWidthMm) / Math.tan(fovRad * 0.5);
     let focalLengthMm = baseFocalLengthMm;
@@ -1558,7 +1803,7 @@ export function updateDofFocalLengthFromCameraFov(host: any): void {
     }
 }
 
-export function computeAdjustedAutoMinFStop(host: any, baseFStop: number, autoMinFStop: number, focusDistanceMm: number): number {
+export function computeAdjustedAutoMinFStop(host: PostProcessHost, baseFStop: number, autoMinFStop: number, focusDistanceMm: number): number {
     if (autoMinFStop <= baseFStop) {
         return autoMinFStop;
     }
@@ -1575,7 +1820,7 @@ export function computeAdjustedAutoMinFStop(host: any, baseFStop: number, autoMi
     return Math.min(baseFStop + maxCompensationBoost, softenedAutoMinFStop);
 }
 
-export function computeAutoFocusMinFStop(host: any, focusDistanceMm: number): number {
+export function computeAutoFocusMinFStop(host: PostProcessHost, focusDistanceMm: number): number {
     const focalLengthMm = Math.max(1, host.dofFocalLengthValue);
     const lensSizeMm = Math.max(0.001, host.dofLensSizeValue);
     const safeFocusDistanceMm = Math.max(focalLengthMm + 1, focusDistanceMm);
@@ -1591,19 +1836,23 @@ export function computeAutoFocusMinFStop(host: any, focusDistanceMm: number): nu
     return Math.max(0.01, Math.min(32, numerator / denominator));
 }
 
-export function configureDofDepthRenderer(host: any): void {
+export function configureDofDepthRenderer(host: PostProcessHost): void {
+    if (host.depthRenderer && host.postEffectBackend !== "frameGraph") {
+        return;
+    }
     const depthRenderer = host.scene.enableDepthRenderer(
         host.camera,
         false,
         false,
         Texture.NEAREST_SAMPLINGMODE,
+        host.postEffectBackend === "frameGraph",
     );
     depthRenderer.useOnlyInActiveCamera = true;
     depthRenderer.forceDepthWriteTransparentMeshes = true;
     host.depthRenderer = depthRenderer;
 }
 
-export function setupFarDofPostProcess(host: any): void {
+export function setupFarDofPostProcess(host: PostProcessHost): void {
     if (!host.farDofEnabled) {
         host.postEffectFarDofStrengthValue = 0;
         return;
@@ -1819,7 +2068,7 @@ export function setupFarDofPostProcess(host: any): void {
         },
     );
 
-    host.dofPostProcess.onApplyObservable.add((effect: any) => {
+    host.dofPostProcess.onApplyObservable.add((effect: PostProcessEffectLike) => {
         const depthMap = host.depthRenderer?.getDepthMap();
         if (!depthMap) return;
 
@@ -1836,7 +2085,7 @@ export function setupFarDofPostProcess(host: any): void {
     });
 }
 
-export function applyDofLensOpticsSettings(host: any): void {
+export function applyDofLensOpticsSettings(host: PostProcessHost): void {
     const normalizedStrength = Math.max(0, Math.min(1, host.dofLensEdgeBlurValue / 3));
     if (normalizedStrength <= 0.0001) {
         disposeStandaloneEdgeBlurPostProcess(host);
@@ -1868,7 +2117,7 @@ export function applyDofLensOpticsSettings(host: any): void {
                 shaderLanguage: host.getPostProcessShaderLanguage(),
             },
         );
-        host.standaloneEdgeBlurPostProcess.onApplyObservable.add((effect: any) => {
+        host.standaloneEdgeBlurPostProcess.onApplyObservable.add((effect: PostProcessEffectLike) => {
             const width = Math.max(1, host.standaloneEdgeBlurPostProcess?.width ?? host.engine.getRenderWidth());
             const height = Math.max(1, host.standaloneEdgeBlurPostProcess?.height ?? host.engine.getRenderHeight());
             effect.setFloat2("texelSize", 1 / width, 1 / height);
@@ -1884,10 +2133,11 @@ export function applyDofLensOpticsSettings(host: any): void {
     host.enforceFinalPostProcessOrder();
 }
 
-export function setupLensHighlightsPipeline(host: any): void {
+export function setupLensHighlightsPipeline(host: PostProcessHost): void {
     if (host.lensRenderingPipeline) {
         host.lensRenderingPipeline.dispose(false);
         host.lensRenderingPipeline = null;
     }
     applyDofLensBlurSettings(host);
 }
+

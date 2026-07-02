@@ -1,5 +1,7 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
+import { createPanelNumberGrid, installEnterCommitNumberInput } from "./panel-control-helpers";
 
 type AccessoryTransformSliderKey = "px" | "py" | "pz" | "rx" | "ry" | "rz" | "s";
 type ToastType = "success" | "error" | "info";
@@ -10,15 +12,16 @@ type AccessoryPanelElements = {
     parentBoneSelect: HTMLSelectElement | null;
     btnVisibility: HTMLButtonElement | null;
     btnDelete: HTMLButtonElement | null;
+    transformGrid: HTMLElement | null;
     emptyState: HTMLElement | null;
 };
 
 export type AccessoryPanelControllerDeps = {
     mmdManager: MmdManager;
     showToast: (message: string, type?: ToastType) => void;
-    syncRangeNumberInput: (slider: HTMLInputElement) => void;
     onAccessoryTransformChanged: (accessoryIndex: number) => void;
     onSelectionChanged: () => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveAccessoryPanelElements(): AccessoryPanelElements {
@@ -28,6 +31,7 @@ function resolveAccessoryPanelElements(): AccessoryPanelElements {
         parentBoneSelect: document.getElementById("accessory-parent-bone") as HTMLSelectElement | null,
         btnVisibility: document.getElementById("btn-accessory-visibility") as HTMLButtonElement | null,
         btnDelete: document.getElementById("btn-accessory-delete") as HTMLButtonElement | null,
+        transformGrid: document.getElementById("accessory-transform-grid"),
         emptyState: document.getElementById("accessory-empty-state"),
     };
 }
@@ -36,11 +40,10 @@ export class AccessoryPanelController {
     private readonly elements: AccessoryPanelElements;
     private readonly mmdManager: MmdManager;
     private readonly showToast: (message: string, type?: ToastType) => void;
-    private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
     private readonly onAccessoryTransformChanged: (accessoryIndex: number) => void;
     private readonly onSelectionChanged: () => void;
-    private readonly transformSliders = new Map<AccessoryTransformSliderKey, HTMLInputElement>();
-    private readonly transformValueEls = new Map<AccessoryTransformSliderKey, HTMLElement>();
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
+    private readonly transformInputs = new Map<AccessoryTransformSliderKey, HTMLInputElement>();
     private isSyncingTransformUi = false;
     private isSyncingParentUi = false;
 
@@ -48,9 +51,9 @@ export class AccessoryPanelController {
         this.elements = resolveAccessoryPanelElements();
         this.mmdManager = deps.mmdManager;
         this.showToast = deps.showToast;
-        this.syncRangeNumberInput = deps.syncRangeNumberInput;
         this.onAccessoryTransformChanged = deps.onAccessoryTransformChanged;
         this.onSelectionChanged = deps.onSelectionChanged;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupControls();
     }
@@ -100,6 +103,67 @@ export class AccessoryPanelController {
         return parsed;
     }
 
+    public selectAccessory(): void {
+        this.syncTransformSlidersFromSelection();
+        this.syncParentControlsFromSelection();
+        this.updateActionButtons();
+        this.onSelectionChanged();
+    }
+
+    public setParentModelFromPanel(): void {
+        if (this.isSyncingParentUi) return;
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+
+        const modelIndex = this.parseParentModelIndex();
+        this.refreshParentBoneOptions(modelIndex, null);
+        this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, null);
+    }
+
+    public setParentBoneFromPanel(): void {
+        if (this.isSyncingParentUi) return;
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+
+        const modelIndex = this.parseParentModelIndex();
+        if (modelIndex === null) {
+            this.mmdManager.setAccessoryParent(selectedIndex, null, null);
+            return;
+        }
+
+        const boneName = this.elements.parentBoneSelect?.value || null;
+        this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, boneName);
+    }
+
+    public toggleSelectedAccessoryVisibility(): void {
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+        const visible = this.mmdManager.toggleAccessoryVisibility(selectedIndex);
+        this.updateActionButtons();
+        this.showToast(visible ? "Accessory visible" : "Accessory hidden", "info");
+    }
+
+    public deleteSelectedAccessory(): void {
+        const selectedIndex = this.getSelectedAccessoryIndex();
+        if (selectedIndex === null) return;
+
+        const accessories = this.mmdManager.getLoadedAccessories();
+        const current = accessories.find((item) => item.index === selectedIndex);
+        const targetName = current?.name ?? "Accessory";
+
+        const ok = window.confirm(`Delete accessory '${targetName}'?`);
+        if (!ok) return;
+
+        const removed = this.mmdManager.removeAccessory(selectedIndex);
+        if (!removed) {
+            this.showToast("Failed to delete accessory", "error");
+            return;
+        }
+
+        this.refresh();
+        this.showToast(`Accessory deleted: ${targetName}`, "success");
+    }
+
     private setupControls(): void {
         const select = this.elements.select;
         const parentModelSelect = this.elements.parentModelSelect;
@@ -107,111 +171,92 @@ export class AccessoryPanelController {
         const btnVisibility = this.elements.btnVisibility;
         const btnDelete = this.elements.btnDelete;
 
-        this.registerSlider("px", "accessory-pos-x", "accessory-pos-x-val");
-        this.registerSlider("py", "accessory-pos-y", "accessory-pos-y-val");
-        this.registerSlider("pz", "accessory-pos-z", "accessory-pos-z-val");
-        this.registerSlider("rx", "accessory-rot-x", "accessory-rot-x-val");
-        this.registerSlider("ry", "accessory-rot-y", "accessory-rot-y-val");
-        this.registerSlider("rz", "accessory-rot-z", "accessory-rot-z-val");
-        this.registerSlider("s", "accessory-scale", "accessory-scale-val");
+        this.renderTransformInputs();
+        this.registerTransformInput("px", "accessory-pos-x");
+        this.registerTransformInput("py", "accessory-pos-y");
+        this.registerTransformInput("pz", "accessory-pos-z");
+        this.registerTransformInput("rx", "accessory-rot-x");
+        this.registerTransformInput("ry", "accessory-rot-y");
+        this.registerTransformInput("rz", "accessory-rot-z");
+        this.registerTransformInput("s", "accessory-scale");
 
         select?.addEventListener("change", () => {
-            this.syncTransformSlidersFromSelection();
-            this.syncParentControlsFromSelection();
-            this.updateActionButtons();
-            this.onSelectionChanged();
+            if (this.dispatchAction?.({ type: "accessory.select", source: "panel" })) return;
+            this.selectAccessory();
         });
 
         parentModelSelect?.addEventListener("change", () => {
-            if (this.isSyncingParentUi) return;
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const modelIndex = this.parseParentModelIndex();
-            this.refreshParentBoneOptions(modelIndex, null);
-            this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, null);
+            if (this.dispatchAction?.({ type: "accessory.setParentModel", source: "panel" })) return;
+            this.setParentModelFromPanel();
         });
 
         parentBoneSelect?.addEventListener("change", () => {
-            if (this.isSyncingParentUi) return;
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const modelIndex = this.parseParentModelIndex();
-            if (modelIndex === null) {
-                this.mmdManager.setAccessoryParent(selectedIndex, null, null);
-                return;
-            }
-
-            const boneName = parentBoneSelect.value || null;
-            this.mmdManager.setAccessoryParent(selectedIndex, modelIndex, boneName);
+            if (this.dispatchAction?.({ type: "accessory.setParentBone", source: "panel" })) return;
+            this.setParentBoneFromPanel();
         });
 
         btnVisibility?.addEventListener("click", () => {
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-            const visible = this.mmdManager.toggleAccessoryVisibility(selectedIndex);
-            this.updateActionButtons();
-            this.showToast(visible ? "Accessory visible" : "Accessory hidden", "info");
+            if (this.dispatchAction?.({ type: "accessory.toggleVisibility", source: "button" })) return;
+            this.toggleSelectedAccessoryVisibility();
         });
 
         btnDelete?.addEventListener("click", () => {
-            const selectedIndex = this.getSelectedAccessoryIndex();
-            if (selectedIndex === null) return;
-
-            const accessories = this.mmdManager.getLoadedAccessories();
-            const current = accessories.find((item) => item.index === selectedIndex);
-            const targetName = current?.name ?? "Accessory";
-
-            const ok = window.confirm(`Delete accessory '${targetName}'?`);
-            if (!ok) return;
-
-            const removed = this.mmdManager.removeAccessory(selectedIndex);
-            if (!removed) {
-                this.showToast("Failed to delete accessory", "error");
-                return;
-            }
-
-            this.refresh();
-            this.showToast(`Accessory deleted: ${targetName}`, "success");
+            if (this.dispatchAction?.({ type: "accessory.deleteSelected", source: "button" })) return;
+            this.deleteSelectedAccessory();
         });
 
-        this.updateValueLabelsFromSliders();
+        this.updateTransformInputsFromCurrentValues();
         this.setTransformControlsEnabled(false);
         this.setParentControlsEnabled(false);
         this.updateActionButtons();
         this.onSelectionChanged();
     }
 
-    private registerSlider(
-        key: AccessoryTransformSliderKey,
-        sliderId: string,
-        valueId: string,
-    ): void {
-        const slider = document.getElementById(sliderId) as HTMLInputElement | null;
-        const valueEl = document.getElementById(valueId);
-        if (!slider || !valueEl) return;
-        this.transformSliders.set(key, slider);
-        this.transformValueEls.set(key, valueEl);
+    private renderTransformInputs(): void {
+        const container = this.elements.transformGrid;
+        if (!container) return;
 
-        slider.addEventListener("input", () => {
-            this.updateValueLabelsFromSliders();
+        const grid = createPanelNumberGrid([
+            { key: "px", id: "accessory-pos-x", label: "X", min: -100, max: 100, step: 1, value: "0.0" },
+            { key: "py", id: "accessory-pos-y", label: "Y", min: -100, max: 100, step: 1, value: "0.0" },
+            { key: "pz", id: "accessory-pos-z", label: "Z", min: -100, max: 100, step: 1, value: "0.0" },
+            { key: "rx", id: "accessory-rot-x", label: "Rx", min: -180, max: 180, step: 1, value: "0.0" },
+            { key: "ry", id: "accessory-rot-y", label: "Ry", min: -180, max: 180, step: 1, value: "0.0" },
+            { key: "rz", id: "accessory-rot-z", label: "Rz", min: -180, max: 180, step: 1, value: "0.0" },
+            { key: "s", id: "accessory-scale", label: "Si", min: 1, max: 5000, step: 1, value: "100" },
+            { key: "tr", id: "accessory-tr", label: "Tr", min: 0, max: 1, step: 0.01, value: "0.00", disabled: true },
+        ], "accessory-transform");
+
+        container.className = grid.element.className;
+        container.replaceChildren(...Array.from(grid.element.children));
+    }
+
+    private registerTransformInput(
+        key: AccessoryTransformSliderKey,
+        inputId: string,
+    ): void {
+        const input = document.getElementById(inputId) as HTMLInputElement | null;
+        if (!input) return;
+        this.transformInputs.set(key, input);
+
+        const apply = (): void => {
+            this.normalizeTransformInput(input, key);
             if (this.isSyncingTransformUi) return;
 
             const selectedIndex = this.getSelectedAccessoryIndex();
             if (selectedIndex === null) return;
 
             const position = {
-                x: Number(this.transformSliders.get("px")?.value ?? 0),
-                y: Number(this.transformSliders.get("py")?.value ?? 0),
-                z: Number(this.transformSliders.get("pz")?.value ?? 0),
+                x: this.getTransformInputNumber("px", 0),
+                y: this.getTransformInputNumber("py", 0),
+                z: this.getTransformInputNumber("pz", 0),
             };
             const rotationDeg = {
-                x: Number(this.transformSliders.get("rx")?.value ?? 0),
-                y: Number(this.transformSliders.get("ry")?.value ?? 0),
-                z: Number(this.transformSliders.get("rz")?.value ?? 0),
+                x: this.getTransformInputNumber("rx", 0),
+                y: this.getTransformInputNumber("ry", 0),
+                z: this.getTransformInputNumber("rz", 0),
             };
-            const scalePercent = Number(this.transformSliders.get("s")?.value ?? 100);
+            const scalePercent = this.getTransformInputNumber("s", 100);
 
             this.mmdManager.setAccessoryTransform(selectedIndex, {
                 position,
@@ -219,13 +264,17 @@ export class AccessoryPanelController {
                 scale: scalePercent / 100,
             });
             this.onAccessoryTransformChanged(selectedIndex);
+        };
+
+        installEnterCommitNumberInput(input, {
+            commit: apply,
+            revert: () => this.syncTransformSlidersFromSelection(),
         });
     }
 
     private setTransformControlsEnabled(enabled: boolean): void {
-        for (const slider of this.transformSliders.values()) {
-            slider.disabled = !enabled;
-            this.syncRangeNumberInput(slider);
+        for (const input of this.transformInputs.values()) {
+            input.disabled = !enabled;
         }
     }
 
@@ -356,14 +405,13 @@ export class AccessoryPanelController {
 
         this.isSyncingTransformUi = true;
         try {
-            this.setSliderValueClamped("px", transform.position.x);
-            this.setSliderValueClamped("py", transform.position.y);
-            this.setSliderValueClamped("pz", transform.position.z);
-            this.setSliderValueClamped("rx", transform.rotationDeg.x);
-            this.setSliderValueClamped("ry", transform.rotationDeg.y);
-            this.setSliderValueClamped("rz", transform.rotationDeg.z);
-            this.setSliderValueClamped("s", transform.scale * 100);
-            this.updateValueLabelsFromSliders();
+            this.setTransformInputValueClamped("px", transform.position.x);
+            this.setTransformInputValueClamped("py", transform.position.y);
+            this.setTransformInputValueClamped("pz", transform.position.z);
+            this.setTransformInputValueClamped("rx", transform.rotationDeg.x);
+            this.setTransformInputValueClamped("ry", transform.rotationDeg.y);
+            this.setTransformInputValueClamped("rz", transform.rotationDeg.z);
+            this.setTransformInputValueClamped("s", transform.scale * 100);
         } finally {
             this.isSyncingTransformUi = false;
         }
@@ -372,55 +420,54 @@ export class AccessoryPanelController {
     private resetTransformSliders(): void {
         this.isSyncingTransformUi = true;
         try {
-            this.setSliderValueClamped("px", 0);
-            this.setSliderValueClamped("py", 0);
-            this.setSliderValueClamped("pz", 0);
-            this.setSliderValueClamped("rx", 0);
-            this.setSliderValueClamped("ry", 0);
-            this.setSliderValueClamped("rz", 0);
-            this.setSliderValueClamped("s", 100);
-            this.updateValueLabelsFromSliders();
+            this.setTransformInputValueClamped("px", 0);
+            this.setTransformInputValueClamped("py", 0);
+            this.setTransformInputValueClamped("pz", 0);
+            this.setTransformInputValueClamped("rx", 0);
+            this.setTransformInputValueClamped("ry", 0);
+            this.setTransformInputValueClamped("rz", 0);
+            this.setTransformInputValueClamped("s", 100);
         } finally {
             this.isSyncingTransformUi = false;
         }
     }
 
-    private setSliderValueClamped(key: AccessoryTransformSliderKey, value: number): void {
-        const slider = this.transformSliders.get(key);
-        if (!slider || !Number.isFinite(value)) return;
-        const min = Number(slider.min);
-        const max = Number(slider.max);
+    private setTransformInputValueClamped(key: AccessoryTransformSliderKey, value: number): void {
+        const input = this.transformInputs.get(key);
+        if (!input || !Number.isFinite(value)) return;
+        const min = Number(input.min);
+        const max = Number(input.max);
         const clamped = Math.max(min, Math.min(max, value));
-        slider.value = String(clamped);
-        this.syncRangeNumberInput(slider);
+        input.value = this.formatTransformInputValue(key, clamped);
     }
 
-    private updateValueLabelsFromSliders(): void {
-        const getValue = (key: AccessoryTransformSliderKey): number =>
-            Number(this.transformSliders.get(key)?.value ?? 0);
-
-        const px = getValue("px");
-        const py = getValue("py");
-        const pz = getValue("pz");
-        const rx = getValue("rx");
-        const ry = getValue("ry");
-        const rz = getValue("rz");
-        const s = getValue("s");
-
-        const setText = (key: AccessoryTransformSliderKey, text: string): void => {
-            const valueEl = this.transformValueEls.get(key);
-            if (valueEl) valueEl.textContent = text;
-        };
-
-        setText("px", px.toFixed(2));
-        setText("py", py.toFixed(2));
-        setText("pz", pz.toFixed(2));
-        setText("rx", `${rx.toFixed(1)}°`);
-        setText("ry", `${ry.toFixed(1)}°`);
-        setText("rz", `${rz.toFixed(1)}°`);
-        setText("s", `${Math.round(s)}%`);
+    private updateTransformInputsFromCurrentValues(): void {
+        for (const [key, input] of this.transformInputs) {
+            this.normalizeTransformInput(input, key);
+        }
     }
 
+    private getTransformInputNumber(key: AccessoryTransformSliderKey, fallback: number): number {
+        const input = this.transformInputs.get(key);
+        if (!input) return fallback;
+        const value = Number(input.value);
+        return Number.isFinite(value) ? value : fallback;
+    }
+
+    private normalizeTransformInput(input: HTMLInputElement, key: AccessoryTransformSliderKey): void {
+        const parsed = Number(input.value);
+        const fallback = key === "s" ? 100 : 0;
+        const value = Number.isFinite(parsed) ? parsed : fallback;
+        const min = input.min === "" ? Number.NEGATIVE_INFINITY : Number(input.min);
+        const max = input.max === "" ? Number.POSITIVE_INFINITY : Number(input.max);
+        const clamped = Math.max(min, Math.min(max, value));
+        input.value = this.formatTransformInputValue(key, clamped);
+    }
+
+    private formatTransformInputValue(key: AccessoryTransformSliderKey, value: number): string {
+        if (key === "s") return String(Math.round(value));
+        return value.toFixed(1);
+    }
     private updateActionButtons(): void {
         const btnVisibility = this.elements.btnVisibility;
         const btnDelete = this.elements.btnDelete;

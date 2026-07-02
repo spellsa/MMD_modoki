@@ -1,5 +1,5 @@
 import type { MmdManager } from "./mmd-manager";
-import type { Timeline } from "./timeline";
+import type { Timeline, TimelineBoneTrackSelectionRef, TimelineKeySelectionRef } from "./timeline";
 import type { BottomPanel } from "./bottom-panel";
 import { applyI18nToDom, getLocale, setLocale, t } from "./i18n";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -18,21 +18,55 @@ import type {
     TimelineInterpolationPreview,
 } from "./types";
 import { AccessoryPanelController } from "./ui/accessory-panel-controller";
+import { AppMenuController } from "./ui/app-menu-controller";
 import { BloomToneMapController } from "./ui/bloom-tone-map-controller";
+import { BottomPanelLayoutController } from "./ui/bottom-panel-layout-controller";
 import { CameraPanelController } from "./ui/camera-panel-controller";
 import { ColorPostFxController } from "./ui/color-postfx-controller";
 import { DofPanelController } from "./ui/dof-panel-controller";
 import { ExperimentalPostFxController } from "./ui/experimental-postfx-controller";
 import { ExportUiController } from "./ui/export-ui-controller";
+import { EffectPanelShellController } from "./ui/effect-panel-shell-controller";
 import { FogPanelController } from "./ui/fog-panel-controller";
 import { LayoutUiController } from "./ui/layout-ui-controller";
 import { LensEffectController } from "./ui/lens-effect-controller";
 import { LutPanelController } from "./ui/lut-panel-controller";
 import { ModelInfoPanelController, MODEL_INFO_CAMERA_SELECT_VALUE, type ModelInfoSelectState } from "./ui/model-info-panel-controller";
 import { ModelEdgeController } from "./ui/model-edge-controller";
+import { installEnterCommitNumberInput } from "./ui/panel-control-helpers";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
 import { ShaderPanelController } from "./ui/shader-panel-controller";
+import { ViewportSeekBarController } from "./ui/viewport-bottom-bar-controller";
+import { ViewportAxisHandleController } from "./ui/viewport-axis-handle-controller";
+import { ViewportTopBarController, type ViewportTopBarCameraTransform } from "./ui/viewport-top-bar-controller";
+import { ActionDispatcher } from "./actions/action-dispatcher";
+import type { ActionSource } from "./actions/types";
+import { executeCommand, type CommandExecutionContext } from "./actions/command-executor";
+import { HistoryManager } from "./actions/history-manager";
+import {
+    buildKeyframeCommand,
+    createCommandTrackKey,
+    type KeyframeCommandSnapshot,
+} from "./actions/keyframe-command-builder";
+import { buildBoneTransformCommand } from "./actions/bone-transform-command-builder";
+import { buildCameraTransformCommand } from "./actions/camera-transform-command-builder";
+import type { BoneTransformCommandSnapshot, BuiltCommand, CameraTransformCommandSnapshot, CommandTrackRef } from "./actions/command-types";
+import type { BoneKeyframePayload, CameraKeyframePayload, MovableBoneKeyframePayload, TimelineKeyframePayload } from "./editor/timeline-edit-service";
+import {
+    buildMirrorPasteItems,
+    type MirrorPasteClipboardItem,
+} from "./editor/mirror-paste-service";
+import {
+    POST_EFFECT_BACKEND_STORAGE_KEY,
+    normalizePostEffectBackend,
+    type PostEffectBackend,
+} from "./render/post-effect-backend";
+import {
+    addFrameGraphPostEffectId,
+    isFrameGraphPostEffectId,
+    type FrameGraphPostEffectId,
+} from "./shared/frame-graph-post-effect-stack";
 
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
@@ -44,6 +78,36 @@ type SelectedBonePoseSnapshot = {
     distance?: number;
     fov?: number;
 };
+
+type PendingBoneTransformCommand = {
+    boneName: string;
+    frame: number;
+    before: BoneTransformCommandSnapshot;
+};
+
+type SingleKeyframeClipboard = {
+    version: 1;
+    mode: "single";
+    sourceTarget: "model" | "camera";
+    sourceFrame: number;
+    track: CommandTrackRef;
+    payload: TimelineKeyframePayload;
+};
+
+type BatchKeyframeClipboard = {
+    version: 2;
+    mode: "batch";
+    sourceTarget: "model" | "camera";
+    sourceBaseFrame: number;
+    items: {
+        track: CommandTrackRef;
+        sourceFrame: number;
+        frameOffset: number;
+        payload: TimelineKeyframePayload;
+    }[];
+};
+
+type KeyframeClipboard = SingleKeyframeClipboard | BatchKeyframeClipboard;
 
 type RuntimeMovableBoneTrackLike = {
     name: string;
@@ -143,6 +207,111 @@ type InterpolationCurveClipboard = {
     sourceChannelCount: number;
 };
 
+type FrameGraphPostAddEffectId = FrameGraphPostEffectId;
+
+type FrameGraphPostAddEffect = {
+    id: FrameGraphPostAddEffectId;
+    label: string;
+    isActive: (manager: MmdManager) => boolean;
+    setActive: (manager: MmdManager, active: boolean) => void;
+};
+
+const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
+    {
+        id: "ssr",
+        label: "SSR",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("ssr"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssr", active); },
+    },
+    {
+        id: "ssao",
+        label: "SSAO",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("ssao"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssao", active); },
+    },
+    {
+        id: "offsetShadow",
+        label: "Offset Shadow",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("offsetShadow"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("offsetShadow", active); },
+    },
+    {
+        id: "offsetHighlight",
+        label: "Offset Rim",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("offsetHighlight"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("offsetHighlight", active); },
+    },
+    {
+        id: "dof",
+        label: "DoF",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("dof"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("dof", active); },
+    },
+    {
+        id: "luminous",
+        label: "Luminous",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("luminous"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("luminous", active); },
+    },
+    {
+        id: "bloom",
+        label: "Bloom",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("bloom"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("bloom", active); },
+    },
+    {
+        id: "lut",
+        label: "LUT",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("lut"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("lut", active); },
+    },
+    {
+        id: "sharpen",
+        label: "Sharpen",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("sharpen"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("sharpen", active); },
+    },
+    {
+        id: "grain",
+        label: "Grain",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("grain"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("grain", active); },
+    },
+    {
+        id: "chromatic",
+        label: "Chroma",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("chromatic"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("chromatic", active); },
+    },
+    {
+        id: "vignette",
+        label: "Vignette",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("vignette"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("vignette", active); },
+    },
+    {
+        id: "edgeBlur",
+        label: "EdgeBlur",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("edgeBlur"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("edgeBlur", active); },
+    },
+    {
+        id: "distortion",
+        label: "Distort",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("distortion"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("distortion", active); },
+    },
+];
+
+const FRAME_GRAPH_STACK_LUT_PRESETS = [
+    { id: "anime-soft", label: "Anime Soft" },
+    { id: "anime-cool", label: "Anime Cool" },
+    { id: "anime-dramatic", label: "Anime Dramatic" },
+    { id: "monotone", label: "Monotone" },
+    { id: "sepia", label: "Sepia" },
+    { id: "teal-orange", label: "Teal Orange" },
+] as const;
+
 type MmdManagerInternalView = {
     currentModel: (object & RuntimeAnimatableLike) | null;
     modelSourceAnimationsByModel: WeakMap<object, RuntimeModelAnimationLike>;
@@ -151,23 +320,46 @@ type MmdManagerInternalView = {
     cameraAnimationHandle: unknown | null;
 };
 
+function getRequiredElement<T extends HTMLElement>(id: string): T {
+    const element = document.getElementById(id);
+    if (!element) {
+        throw new Error(`Required element not found: #${id}`);
+    }
+    return element as T;
+}
+
+function queryRequiredElement<T extends HTMLElement>(selector: string): T {
+    const element = document.querySelector(selector);
+    if (!element) {
+        throw new Error(`Required element not found: ${selector}`);
+    }
+    return element as T;
+}
+
 export class UIController {
     private static readonly DEBUG_KEYFRAME_FLOW = false;
     private static readonly INTERP_CURVE_VIEWBOX_WIDTH = 120;
     private static readonly INTERP_CURVE_VIEWBOX_HEIGHT = 120;
     private static readonly TIMELINE_WAVEFORM_FPS = 30;
+    private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
+    private static readonly AUTO_KEY_STORAGE_KEY = "mmd_modoki.autoKey.enabled";
     private mmdManager: MmdManager;
     private timeline: Timeline;
     private bottomPanel: BottomPanel;
+    private bottomPanelLayoutController: BottomPanelLayoutController | null = null;
+    private viewportSeekBarController: ViewportSeekBarController | null = null;
+    private viewportAxisHandleController: ViewportAxisHandleController | null = null;
+    private viewportTopBarController: ViewportTopBarController | null = null;
 
     // Button elements
     private btnLoadFile: HTMLElement;
     private btnSaveProject: HTMLElement;
     private btnLoadProject: HTMLElement;
-    private btnExportPng: HTMLElement;
+    private btnExportPng: HTMLElement | null = null;
     private btnExportPngSeq: HTMLElement | null = null;
     private btnExportWebm: HTMLElement | null = null;
     private toolbarLocaleSelect: HTMLSelectElement | null = null;
+    private toolbarRuntimeModeSelect: HTMLSelectElement | null = null;
     private btnPlay: HTMLElement;
     private btnPause: HTMLElement;
     private btnStop: HTMLElement | null;
@@ -179,7 +371,11 @@ export class UIController {
     private statusDot: HTMLElement;
     private viewportOverlay: HTMLElement;
     private btnKeyframeAdd: HTMLButtonElement;
+    private btnKeyframeCopy: HTMLButtonElement;
+    private btnKeyframePaste: HTMLButtonElement;
+    private btnKeyframeMirrorPaste: HTMLButtonElement;
     private btnKeyframeDelete: HTMLButtonElement;
+    private btnAutoKey: HTMLButtonElement;
     private btnKeyframeNudgeLeft: HTMLButtonElement;
     private btnKeyframeNudgeRight: HTMLButtonElement;
     private btnFrameStepLeft: HTMLButtonElement;
@@ -202,9 +398,18 @@ export class UIController {
     private shaderResetButton: HTMLButtonElement | null = null;
     private shaderPanelNote: HTMLElement | null = null;
     private shaderMaterialList: HTMLElement | null = null;
+    private postEffectPanelHost: HTMLElement | null = null;
+    private postEffectStackList: HTMLElement | null = null;
+    private postEffectAddPanel: HTMLElement | null = null;
+    private postEffectAddButton: HTMLButtonElement | null = null;
+    private postEffectEnableFrameGraphButton: HTMLButtonElement | null = null;
+    private expandedFrameGraphPostEffectId: FrameGraphPostAddEffectId | null = null;
+    private draggingFrameGraphPostEffectId: FrameGraphPostAddEffectId | null = null;
     private btnInfoKeyframe: HTMLButtonElement | null = null;
     private btnInterpolationKeyframe: HTMLButtonElement | null = null;
     private btnBoneKeyframe: HTMLButtonElement | null = null;
+    private btnPhysicsKeyframe: HTMLButtonElement | null = null;
+    private physicsKeyframeInputMode: 0 | 1 = 1;
     private btnMorphKeyframe: HTMLButtonElement | null = null;
     private btnAccessoryKeyframe: HTMLButtonElement | null = null;
     private shortcutEdgeWidthRestore = 1;
@@ -223,13 +428,16 @@ export class UIController {
     private interpolationDragState: InterpolationDragState | null = null;
     private currentInterpolationPreview: TimelineInterpolationPreview | null = null;
     private interpolationCurveClipboard: InterpolationCurveClipboard | null = null;
+    private keyframeClipboard: KeyframeClipboard | null = null;
     private timelineWaveformRequestId = 0;
     private lastObservedFrame: number | null = null;
     private accessoryPanelController: AccessoryPanelController | null = null;
+    private appMenuController: AppMenuController | null = null;
     private bloomToneMapController: BloomToneMapController | null = null;
     private cameraPanelController: CameraPanelController | null = null;
     private colorPostFxController: ColorPostFxController | null = null;
     private dofPanelController: DofPanelController | null = null;
+    private effectPanelShellController: EffectPanelShellController | null = null;
     private experimentalPostFxController: ExperimentalPostFxController | null = null;
     private exportUiController: ExportUiController | null = null;
     private fogPanelController: FogPanelController | null = null;
@@ -241,11 +449,18 @@ export class UIController {
     private runtimeFeatureUiController: RuntimeFeatureUiController | null = null;
     private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
     private shaderPanelController: ShaderPanelController | null = null;
+    private readonly actionDispatcher = new ActionDispatcher();
+    private readonly commandHistory = new HistoryManager();
+    private pendingBoneTransformCommand: PendingBoneTransformCommand | null = null;
+    private autoKeyEnabled = false;
     private postFxWgslToonPath: string | null = null;
     private postFxWgslToonText: string | null = null;
     private currentProjectFilePath: string | null = null;
     private readonly onLocaleChanged = (): void => {
         this.applyLocalizedUiState();
+        this.viewportSeekBarController?.refreshLocale();
+        this.viewportAxisHandleController?.refreshLocale();
+        this.viewportTopBarController?.refreshLocale();
         this.dofPanelController?.refreshFocusTargetControls();
         this.refreshShaderPanel();
     };
@@ -267,25 +482,30 @@ export class UIController {
         this.bottomPanel.onRangeSliderSynced = (slider) => this.syncRangeNumberInput(slider);
 
         // Get DOM elements
-        this.btnLoadFile = document.getElementById("btn-load-file")!;
-        this.btnSaveProject = document.getElementById("btn-save-project")!;
-        this.btnLoadProject = document.getElementById("btn-load-project")!;
-        this.btnExportPng = document.getElementById("btn-export-png")!;
+        this.btnLoadFile = getRequiredElement("btn-load-file");
+        this.btnSaveProject = getRequiredElement("btn-save-project");
+        this.btnLoadProject = getRequiredElement("btn-load-project");
+        this.btnExportPng = document.getElementById("btn-export-png");
         this.btnExportPngSeq = document.getElementById("btn-export-png-seq");
         this.btnExportWebm = document.getElementById("btn-export-webm");
         this.toolbarLocaleSelect = document.getElementById("toolbar-locale-select") as HTMLSelectElement | null;
-        this.btnPlay = document.getElementById("btn-play")!;
-        this.btnPause = document.getElementById("btn-pause")!;
+        this.toolbarRuntimeModeSelect = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
+        this.btnPlay = getRequiredElement("btn-play");
+        this.btnPause = getRequiredElement("btn-pause");
         this.btnStop = document.getElementById("btn-stop");
-        this.btnSkipStart = document.getElementById("btn-skip-start")!;
-        this.btnSkipEnd = document.getElementById("btn-skip-end")!;
+        this.btnSkipStart = getRequiredElement("btn-skip-start");
+        this.btnSkipEnd = getRequiredElement("btn-skip-end");
         this.currentFrameEl = document.getElementById("current-frame") as HTMLInputElement;
-        this.totalFramesEl = document.getElementById("total-frames")!;
-        this.statusText = document.getElementById("status-text")!;
-        this.statusDot = document.querySelector(".status-dot")!;
-        this.viewportOverlay = document.getElementById("viewport-overlay")!;
+        this.totalFramesEl = getRequiredElement("total-frames");
+        this.statusText = getRequiredElement("status-text");
+        this.statusDot = queryRequiredElement(".status-dot");
+        this.viewportOverlay = getRequiredElement("viewport-overlay");
         this.btnKeyframeAdd = document.getElementById("btn-kf-add") as HTMLButtonElement;
+        this.btnKeyframeCopy = document.getElementById("btn-kf-copy") as HTMLButtonElement;
+        this.btnKeyframePaste = document.getElementById("btn-kf-paste") as HTMLButtonElement;
+        this.btnKeyframeMirrorPaste = document.getElementById("btn-kf-mirror-paste") as HTMLButtonElement;
         this.btnKeyframeDelete = document.getElementById("btn-kf-delete") as HTMLButtonElement;
+        this.btnAutoKey = document.getElementById("btn-auto-key") as HTMLButtonElement;
         this.btnKeyframeNudgeLeft = document.getElementById("btn-kf-nudge-left") as HTMLButtonElement;
         this.btnKeyframeNudgeRight = document.getElementById("btn-kf-nudge-right") as HTMLButtonElement;
         this.btnFrameStepLeft = document.getElementById("btn-frame-step-left") as HTMLButtonElement;
@@ -293,11 +513,11 @@ export class UIController {
         this.btnFrameRangeStart = document.getElementById("btn-frame-range-start") as HTMLButtonElement;
         this.btnFrameRangeEnd = document.getElementById("btn-frame-range-end") as HTMLButtonElement;
         this.timelineSelectionLabel = document.getElementById("timeline-selection-label");
-        this.interpolationTrackNameLabel = document.getElementById("interp-track-name")!;
-        this.interpolationFrameLabel = document.getElementById("interp-frame")!;
+        this.interpolationTrackNameLabel = getRequiredElement("interp-track-name");
+        this.interpolationFrameLabel = getRequiredElement("interp-frame");
         this.interpolationTypeSelect = document.getElementById("interp-type") as HTMLSelectElement;
-        this.interpolationStatusLabel = document.getElementById("interp-status")!;
-        this.interpolationCurveList = document.getElementById("interp-curve-list")!;
+        this.interpolationStatusLabel = getRequiredElement("interp-status");
+        this.interpolationCurveList = getRequiredElement("interp-curve-list");
         this.btnInterpolationCopy = document.getElementById("btn-interp-copy") as HTMLButtonElement | null;
         this.btnInterpolationPaste = document.getElementById("btn-interp-paste") as HTMLButtonElement | null;
         this.btnInterpolationLinear = document.getElementById("btn-interp-linear") as HTMLButtonElement | null;
@@ -308,21 +528,29 @@ export class UIController {
         this.shaderResetButton = document.getElementById("btn-shader-reset") as HTMLButtonElement | null;
         this.shaderPanelNote = document.getElementById("shader-panel-note");
         this.shaderMaterialList = document.getElementById("shader-material-list");
+        this.postEffectPanelHost = document.getElementById("effect-post-host");
+        this.postEffectStackList = document.getElementById("effect-post-stack-list");
+        this.postEffectAddPanel = document.getElementById("effect-post-add-panel");
+        this.postEffectAddButton = document.getElementById("btn-effect-add-post") as HTMLButtonElement | null;
+        this.postEffectEnableFrameGraphButton = document.getElementById("btn-effect-enable-framegraph") as HTMLButtonElement | null;
 
         this.modelEdgeController = new ModelEdgeController({
             mmdManager: this.mmdManager,
             syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.lensEffectController = new LensEffectController({
             mmdManager: this.mmdManager,
             syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.fogPanelController = new FogPanelController({
             mmdManager: this.mmdManager,
             syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             normalizeRangeInputValue: (slider, value) => this.normalizeRangeInputValue(slider, value),
             formatRangeInputValue: (slider, value) => this.formatRangeInputValue(slider, value),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.modelInfoPanelController = new ModelInfoPanelController({
             mmdManager: this.mmdManager,
@@ -343,19 +571,16 @@ export class UIController {
                 this.refreshModelSelector();
                 this.refreshShaderPanel();
             },
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.cameraPanelController = new CameraPanelController({
             mmdManager: this.mmdManager,
-            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
-            normalizeRangeInputValue: (slider, value) => this.normalizeRangeInputValue(slider, value),
-            formatRangeInputValue: (slider, value) => this.formatRangeInputValue(slider, value),
-            isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
-            onCameraEdited: () => this.handleCameraControlEdited(),
+            onCameraEdited: () => {
+                this.actionDispatcher.dispatch({ type: "edit.cameraTransformChanged", source: "panel" });
+            },
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
-        this.setupEventListeners();
-        this.setupCallbacks();
-        this.setupKeyboard();
-        this.setupFileDrop();
+        this.setupActionHandlers();
         this.exportUiController = new ExportUiController({
             mmdManager: this.mmdManager,
             buildProjectState: () => this.buildProjectStateForPersistence(),
@@ -371,51 +596,214 @@ export class UIController {
                 this.layoutUiController?.applyViewportAspectPresentation();
                 this.layoutUiController?.syncMainWindowPresentationAspect();
             },
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
+        this.appMenuController = new AppMenuController({
+            mmdManager: this.mmdManager,
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
+            setStatus: (text, loading) => this.setStatus(text, loading ?? false),
+            showToast: (message, type) => this.showToast(message, type),
+            refreshEnvironmentUi: () => this.sceneEnvironmentUiController?.refresh(),
+            refreshCameraUi: () => this.cameraPanelController?.refresh(true),
+            refreshRuntimeUi: () => this.runtimeFeatureUiController?.refresh(),
+            refreshModelEdgeUi: () => this.modelEdgeController?.refresh(),
+            refreshLightingUi: () => this.refreshLightingUiFromRuntime(),
+            createWebmExportSettingsAdapter: () => this.exportUiController?.createWebmExportSettingsAdapter() ?? {
+                getState: () => ({
+                    aspectPreset: "16:9",
+                    sizePreset: "1920",
+                    width: 1920,
+                    height: 1080,
+                    lockAspect: false,
+                    qualityScale: 1,
+                    fps: 30,
+                    includeAudio: false,
+                    preferredVideoCodec: "vp8",
+                    captureMode: "webgpu-copy",
+                    usePlaybackRange: false,
+                    startFrame: 0,
+                    endFrame: 0,
+                }),
+                setAspectPreset: () => undefined,
+                setSizePreset: () => undefined,
+                setWidth: () => undefined,
+                setHeight: () => undefined,
+                setFps: () => undefined,
+                setIncludeAudio: () => undefined,
+                setUsePlaybackRange: () => undefined,
+                setStartFrame: () => undefined,
+                setEndFrame: () => undefined,
+                setCaptureMode: () => undefined,
+            },
+        });
+        this.setupEventListeners();
+        this.setAutoKeyEnabled(false, { persist: false, toast: false });
+        this.setupCallbacks();
+        this.setupKeyboard();
+        this.setupFileDrop();
+        this.viewportSeekBarController = new ViewportSeekBarController({
+            onSeekFrame: (frame, phase) => this.actionDispatcher.dispatch({
+                type: "timeline.seekFrame",
+                source: "bottomBar",
+                frame,
+                phase,
+            }),
+            onCommitCurrentFrame: (frame) => this.actionDispatcher.dispatch({
+                type: "playback.seekFrame",
+                source: "bottomBar",
+                frame,
+            }),
+            onTogglePlayback: () => this.actionDispatcher.dispatch({ type: "playback.toggle", source: "bottomBar" }),
+            onStepFrame: (deltaFrames) => this.actionDispatcher.dispatch({
+                type: "playback.stepFrame",
+                source: "bottomBar",
+                deltaFrames,
+            }),
+            onSeekBoundary: (boundary) => this.actionDispatcher.dispatch({
+                type: boundary === "start" ? "playback.seekStart" : "playback.seekEnd",
+                source: "bottomBar",
+            }),
+            onSeekAdjacentKeyframe: (direction) => this.actionDispatcher.dispatch({
+                type: "playback.seekAdjacentKeyframe",
+                source: "bottomBar",
+                direction,
+            }),
+            onRangeFrameChange: (boundary, frame, phase) => {
+                this.exportUiController?.setPlaybackFrameRangeBoundary(boundary, frame);
+                if (phase === "commit") {
+                    this.exportUiController?.sanitizeOutputFrameRange(boundary);
+                }
+                this.refreshViewportBottomBar();
+            },
+            onRangeToggle: (kind, enabled) => {
+                this.exportUiController?.setPlaybackFrameToggle(kind, enabled);
+                this.refreshViewportBottomBar();
+            },
+            onExportPng: () => this.actionDispatcher.dispatch({ type: "project.exportPng", source: "bottomBar" }),
+            onToggleUi: () => this.actionDispatcher.dispatch({ type: "layout.fullscreen.toggle", source: "bottomBar" }),
+        });
+        this.viewportAxisHandleController = new ViewportAxisHandleController({
+            onPreviewBoneTransform: (value) => this.previewBottomBarBoneTransform(
+                this.bottomPanel.getSelectedBone(),
+                value.position,
+                value.rotation,
+            ),
+            onPreviewCameraTransform: (value) => this.previewBottomBarCameraTransform(
+                value.target,
+                value.rotation,
+                value.distance,
+                value.fov,
+            ),
+            onCommitBoneTransform: (value, before) => this.actionDispatcher.dispatch({
+                type: "edit.setBoneTransformFromBottomBar",
+                source: "bottomBar",
+                boneName: this.bottomPanel.getSelectedBone(),
+                position: value.position,
+                rotation: value.rotation,
+                before,
+            }),
+            onCommitCameraTransform: (value, before) => this.actionDispatcher.dispatch({
+                type: "edit.setCameraTransformFromBottomBar",
+                source: "bottomBar",
+                target: value.target,
+                rotation: value.rotation,
+                distance: value.distance,
+                fov: value.fov,
+                before,
+            }),
+        });
+        this.viewportTopBarController = new ViewportTopBarController({
+            getCameraTransform: () => this.captureCameraTransformCommandSnapshot(),
+            onToggleMode: () => {
+                if (this.mmdManager.getTimelineTarget() === "model") {
+                    this.switchToCameraMode();
+                    return;
+                }
+                this.switchViewportBottomBarToModel();
+            },
+            onPreviewCameraTransform: (value) => this.previewBottomBarCameraTransform(
+                value.target,
+                value.rotation,
+                value.distance,
+                value.fov,
+            ),
+            onPreviewCameraPan: (before, deltaX, deltaY) => this.previewTopBarCameraPan(before, deltaX, deltaY),
+            onCommitCameraTransform: (value, before) => this.actionDispatcher.dispatch({
+                type: "edit.setCameraTransformFromBottomBar",
+                source: "viewport",
+                target: value.target,
+                rotation: value.rotation,
+                distance: value.distance,
+                fov: value.fov,
+                before,
+            }),
+            onTogglePerspective: (enabled) => {
+                this.mmdManager.setPerspectiveEnabled(enabled);
+                this.refreshViewportBottomBar();
+            },
+            onViewPreset: (view) => this.actionDispatcher.dispatch({
+                type: "camera.setViewPreset",
+                source: "viewport",
+                view,
+            }),
+        });
+        this.bottomPanelLayoutController = new BottomPanelLayoutController();
+        this.bottomPanelLayoutController.applyMode(this.mmdManager.getTimelineTarget() === "model" ? "model" : "camera");
         this.layoutUiController = new LayoutUiController({
             mmdManager: this.mmdManager,
             exportUiController: this.exportUiController,
             showToast: (message, type) => this.showToast(message, type),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.sceneEnvironmentUiController = new SceneEnvironmentUiController({
             mmdManager: this.mmdManager,
             setStatus: (text, loading) => this.setStatus(text, loading),
             showToast: (message, type) => this.showToast(message, type),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.runtimeFeatureUiController = new RuntimeFeatureUiController({
             mmdManager: this.mmdManager,
             showToast: (message, type) => this.showToast(message, type),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.accessoryPanelController = new AccessoryPanelController({
             mmdManager: this.mmdManager,
             showToast: (message, type) => this.showToast(message, type),
-            syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             onAccessoryTransformChanged: (accessoryIndex) => {
                 this.markSectionKeyframeDirty("accessory", this.getAccessoryKeyframeContextKey(accessoryIndex));
                 this.updateSectionKeyframeButtons();
             },
             onSelectionChanged: () => this.updateSectionKeyframeButtons(),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.colorPostFxController = new ColorPostFxController({
             mmdManager: this.mmdManager,
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.bloomToneMapController = new BloomToneMapController({
             mmdManager: this.mmdManager,
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.experimentalPostFxController = new ExperimentalPostFxController({
             mmdManager: this.mmdManager,
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.dofPanelController = new DofPanelController({
             mmdManager: this.mmdManager,
             syncRangeNumberInput: (slider) => this.syncRangeNumberInput(slider),
             isRangeInputEditing: (slider) => this.isRangeInputEditing(slider),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
+        this.effectPanelShellController = new EffectPanelShellController();
+        this.effectPanelShellController.setActiveTab("post");
+        this.setupPostEffectAddControls();
         this.lutPanelController = new LutPanelController({
             mmdManager: this.mmdManager,
             getBaseNameForRenderer: (filePath) => this.getBaseNameForRenderer(filePath),
             setStatus: (text, loading) => this.setStatus(text, loading),
             showToast: (message, type) => this.showToast(message, type),
             refreshShaderPanel: () => this.refreshShaderPanel(),
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.shaderPanelController = new ShaderPanelController({
             mmdManager: this.mmdManager,
@@ -429,6 +817,7 @@ export class UIController {
                 this.postFxWgslToonPath = path;
                 this.postFxWgslToonText = text;
             },
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.setupPerfDisplay();
         this.showStartupRenderingDiagnostics();
@@ -444,6 +833,7 @@ export class UIController {
         this.timeline.setWaveformPeaks(null);
         this.shortcutEdgeWidthRestore = Math.max(0.01, this.mmdManager.modelEdgeWidth || 1);
         this.applyLocalizedUiState();
+        this.refreshViewportBottomBar();
         document.addEventListener("app:locale-changed", this.onLocaleChanged as EventListener);
 
         window.addEventListener("beforeunload", (event) => {
@@ -461,23 +851,33 @@ export class UIController {
     private setupEventListeners(): void {
         // File loading
         this.btnLoadFile.addEventListener("click", () => {
-            void this.loadFileFromDialog();
+            this.actionDispatcher.dispatch({ type: "project.openFile", source: "button" });
         });
-        this.btnSaveProject.addEventListener("click", () => this.saveProject(true));
-        this.btnLoadProject.addEventListener("click", () => this.loadProject());
-        this.btnExportPng.addEventListener("click", () => {
-            void this.exportUiController?.exportPNG();
+        this.btnSaveProject.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "project.save", source: "button", forceChoosePath: true });
+        });
+        this.btnLoadProject.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "project.load", source: "button" });
+        });
+        this.btnExportPng?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "project.exportPng", source: "button" });
         });
         this.btnExportPngSeq?.addEventListener("click", () => {
-            void this.exportUiController?.exportPNGSequence();
+            this.actionDispatcher.dispatch({ type: "project.exportPngSequence", source: "button" });
         });
         this.btnExportWebm?.addEventListener("click", () => {
-            void this.exportUiController?.exportWebm();
+            this.actionDispatcher.dispatch({ type: "project.exportWebm", source: "button" });
         });
         this.interpolationTypeSelect.addEventListener("change", () => this.updateTimelineEditState());
-        this.btnInterpolationCopy?.addEventListener("click", () => this.copyInterpolationCurves());
-        this.btnInterpolationPaste?.addEventListener("click", () => this.pasteInterpolationCurves());
-        this.btnInterpolationLinear?.addEventListener("click", () => this.resetInterpolationCurvesToLinear());
+        this.btnInterpolationCopy?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "interpolation.copy", source: "button" });
+        });
+        this.btnInterpolationPaste?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "interpolation.paste", source: "button" });
+        });
+        this.btnInterpolationLinear?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "interpolation.applyLinear", source: "button" });
+        });
         this.toolbarLocaleSelect?.addEventListener("change", () => {
             const nextLocale = this.getSelectedToolbarLocale();
             if (!nextLocale || nextLocale === getLocale()) {
@@ -486,113 +886,167 @@ export class UIController {
             }
             setLocale(nextLocale);
         });
+        this.toolbarRuntimeModeSelect?.addEventListener("change", () => {
+            const nextMode = this.getSelectedRuntimeMode();
+            if (!nextMode) {
+                this.syncRuntimeModeSelect();
+                return;
+            }
+            const currentMode = this.getConfiguredRuntimeMode();
+            if (nextMode === currentMode) return;
+
+            try {
+                localStorage.setItem(UIController.RUNTIME_MODE_STORAGE_KEY, nextMode);
+            } catch {
+                this.syncRuntimeModeSelect();
+                this.showToast("Runtime mode setting could not be saved", "error");
+                return;
+            }
+
+            this.setStatus(`Runtime: ${nextMode.toUpperCase()} / reloading...`, true);
+            window.setTimeout(() => {
+                window.location.reload();
+            }, 120);
+        });
         // Playback
-        this.btnPlay.addEventListener("click", () => this.play());
-        this.btnPause.addEventListener("click", () => this.pause());
-        this.btnStop?.addEventListener("click", () => this.stop());
+        this.btnPlay.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "playback.play", source: "button" });
+        });
+        this.btnPause.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "playback.pause", source: "button" });
+        });
+        this.btnStop?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "playback.stop", source: "button" });
+        });
         this.btnSkipStart.addEventListener("click", () => {
-            const { startFrame } = this.getPlaybackFrameRange();
-            this.mmdManager.seekToBoundary(startFrame);
+            this.actionDispatcher.dispatch({ type: "playback.seekStart", source: "button" });
         });
         this.btnSkipEnd.addEventListener("click", () => {
-            const { endFrame } = this.getPlaybackFrameRange();
-            this.mmdManager.seekToBoundary(endFrame);
+            this.actionDispatcher.dispatch({ type: "playback.seekEnd", source: "button" });
         });
         this.currentFrameEl.addEventListener("focus", () => {
             this.currentFrameEl.select();
         });
-        this.currentFrameEl.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                this.commitCurrentFrameInput();
-                this.currentFrameEl.blur();
-                return;
-            }
-            if (event.key === "Escape") {
-                event.preventDefault();
+        installEnterCommitNumberInput(this.currentFrameEl, {
+            commit: () => this.commitCurrentFrameInput(),
+            revert: () => {
                 this.currentFrameEl.value = String(this.mmdManager.currentFrame);
-                this.currentFrameEl.blur();
-            }
-        });
-        this.currentFrameEl.addEventListener("blur", () => {
-            this.commitCurrentFrameInput();
+            },
         });
 
         this.btnInfoKeyframe = document.getElementById("btn-info-keyframe") as HTMLButtonElement | null;
         this.btnInterpolationKeyframe = document.getElementById("btn-interpolation-keyframe") as HTMLButtonElement | null;
         this.btnBoneKeyframe = document.getElementById("btn-bone-keyframe") as HTMLButtonElement | null;
+        this.btnPhysicsKeyframe = document.querySelector(".timeline-edit-btn--physics-toggle") as HTMLButtonElement | null;
         this.btnMorphKeyframe = document.getElementById("btn-morph-keyframe") as HTMLButtonElement | null;
         this.btnAccessoryKeyframe = document.getElementById("btn-accessory-keyframe") as HTMLButtonElement | null;
-        this.btnInfoKeyframe?.addEventListener("click", () => this.registerInfoKeyframe());
-        this.btnInterpolationKeyframe?.addEventListener("click", () => this.addKeyframeAtCurrentFrame());
-        this.btnBoneKeyframe?.addEventListener("click", () => this.registerBoneKeyframeAtCurrentFrame());
-        this.btnMorphKeyframe?.addEventListener("click", () => this.registerMorphKeyframesAtCurrentFrame());
-        this.btnAccessoryKeyframe?.addEventListener("click", () => this.registerAccessoryTransformKeyframe());
+        this.btnInfoKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.registerInfo", source: "button" });
+        });
+        this.btnInterpolationKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.addCurrent", source: "button" });
+        });
+        this.btnBoneKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.registerBone", source: "button" });
+        });
+        this.btnPhysicsKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.togglePhysicsInputMode", source: "button" });
+        });
+        this.btnMorphKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.registerMorph", source: "button" });
+        });
+        this.btnAccessoryKeyframe?.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.registerAccessoryTransform", source: "button" });
+        });
 
-        // Timeline seek
-        this.timeline.onSeek = (frame) => {
-            this.mmdManager.seekToBoundary(frame);
-            this.updateSectionKeyframeButtons();
-        };
         this.timeline.onSelectionChanged = (track) => {
-            this.syncBoneVisualizerSelection(track);
-            this.syncBottomBoneSelectionFromTimeline(track);
-            this.refreshSelectedTrackRotationOverlay();
-            this.updateTimelineEditState();
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({
+                type: "timeline.selectionChanged",
+                source: "timeline",
+                track,
+                frame: this.timeline.getSelectedFrame(),
+            });
         };
         this.bottomPanel.onBoneSelectionChanged = (boneName) => {
-            this.syncTimelineBoneSelectionFromBottomPanel(boneName);
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({ type: "selection.setBone", source: "panel", boneName });
+            this.refreshViewportBottomBar();
         };
         this.bottomPanel.onMorphFrameSelectionChanged = () => {
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({ type: "selection.setMorphFrame", source: "panel" });
+        };
+        this.bottomPanel.onBoneTransformEditStarted = (boneName) => {
+            this.beginBoneTransformCommand(boneName);
         };
         this.bottomPanel.onBoneTransformEdited = (boneName) => {
-            this.rememberEditedBonePoseSnapshot(boneName, this.bottomPanel.getSelectedBoneTransformSnapshot());
-            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
-            this.syncBottomPanelBoneFromEditedPose(boneName);
-            this.refreshCameraUiFromRuntime();
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({ type: "edit.boneTransformChanged", source: "panel", boneName });
+            this.refreshViewportBottomBar();
+        };
+        this.bottomPanel.onBoneTransformEditCommitted = (boneName) => {
+            this.commitBoneTransformCommand(boneName);
+        };
+        this.mmdManager.onBoneTransformEditStarted = (boneName) => {
+            this.beginBoneTransformCommand(boneName);
         };
         this.mmdManager.onBoneTransformEdited = (boneName) => {
-            this.rememberEditedBonePoseSnapshot(boneName, this.mmdManager.getBoneTransform(boneName));
-            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
-            this.syncBottomPanelBoneFromEditedPose(boneName);
-            this.refreshCameraUiFromRuntime();
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({ type: "edit.boneTransformChanged", source: "viewport", boneName });
+            this.refreshViewportBottomBar();
+        };
+        this.mmdManager.onBoneTransformEditCommitted = (boneName) => {
+            this.commitBoneTransformCommand(boneName);
         };
         this.mmdManager.onCameraTransformEdited = () => {
-            const cameraSelected = this.bottomPanel.getSelectedBone() === "Camera"
-                || this.mmdManager.getTimelineTarget() === "camera";
-            if (cameraSelected) {
-                this.rememberEditedBonePoseSnapshot("Camera", this.captureCurrentBonePoseSnapshot("Camera"));
-                this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
-                this.syncBottomPanelBoneFromEditedPose("Camera");
-            }
-            this.refreshCameraUiFromRuntime();
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({ type: "edit.cameraTransformChanged", source: "viewport" });
+            this.refreshViewportBottomBar();
         };
         this.bottomPanel.onMorphValueEdited = (frameIndex) => {
-            this.markSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(frameIndex));
-            this.updateSectionKeyframeButtons();
+            this.actionDispatcher.dispatch({ type: "edit.morphValueChanged", source: "panel", frameIndex });
+        };
+        this.bottomPanel.onMorphValueEditCommitted = (morph) => {
+            this.registerAutoKeyForEditedMorph(morph);
+        };
+        this.bottomPanel.onMorphKeyframeRequested = (morph) => {
+            this.registerSingleMorphKeyframeAtCurrentFrame(morph);
         };
 
-        this.btnKeyframeAdd.addEventListener("click", () => this.addKeyframeAtCurrentFrame());
-        this.btnKeyframeDelete.addEventListener("click", () => this.deleteSelectedKeyframe());
-        this.btnKeyframeNudgeLeft.addEventListener("click", () => this.seekToAdjacentKeyframePoint(-1));
-        this.btnKeyframeNudgeRight.addEventListener("click", () => this.seekToAdjacentKeyframePoint(1));
+        this.btnKeyframeAdd.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.addCurrent", source: "button" });
+        });
+        this.btnKeyframeCopy.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.copySelected", source: "button" });
+        });
+        this.btnKeyframePaste.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.paste", source: "button" });
+        });
+        this.btnKeyframeMirrorPaste.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.mirrorPaste", source: "button" });
+        });
+        this.btnKeyframeDelete.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.deleteSelected", source: "button" });
+        });
+        this.btnAutoKey.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "keyframe.toggleAutoKey", source: "button" });
+        });
+        this.btnKeyframeNudgeLeft.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "playback.seekAdjacentKeyframe", source: "button", direction: -1 });
+        });
+        this.btnKeyframeNudgeRight.addEventListener("click", () => {
+            this.actionDispatcher.dispatch({ type: "playback.seekAdjacentKeyframe", source: "button", direction: 1 });
+        });
         this.btnFrameStepLeft.addEventListener("click", () => {
-            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame - 1);
+            this.actionDispatcher.dispatch({ type: "playback.stepFrame", source: "button", deltaFrames: -1 });
         });
         this.btnFrameStepRight.addEventListener("click", () => {
-            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame + 1);
+            this.actionDispatcher.dispatch({ type: "playback.stepFrame", source: "button", deltaFrames: 1 });
         });
         this.btnFrameRangeStart.addEventListener("click", () => {
-            this.mmdManager.seekToBoundary(0);
+            this.actionDispatcher.dispatch({ type: "playback.seekFrame", source: "button", frame: 0 });
         });
         this.btnFrameRangeEnd.addEventListener("click", () => {
-            this.mmdManager.seekToBoundary(this.mmdManager.totalFrames);
+            this.actionDispatcher.dispatch({
+                type: "playback.seekFrame",
+                source: "button",
+                frame: this.mmdManager.totalFrames,
+            });
         });
 
         // Lighting controls
@@ -609,6 +1063,14 @@ export class UIController {
         const elShadow = document.getElementById("light-shadow") as HTMLInputElement;
         const elShadowFrustumSize = document.getElementById("light-shadow-frustum-size") as HTMLInputElement;
         const elShadowMaxZ = document.getElementById("light-shadow-max-z") as HTMLInputElement;
+        const elShadowFilteringQuality = document.getElementById("light-shadow-filter-quality") as HTMLInputElement;
+        const elSoftTransparentShadow = document.getElementById("light-soft-transparent-shadow") as HTMLInputElement;
+        const elIblShadows = document.getElementById("light-ibl-shadows") as HTMLInputElement;
+        const elIblShadowOpacity = document.getElementById("light-ibl-shadow-opacity") as HTMLInputElement;
+        const elIblShadowRange = document.getElementById("light-ibl-shadow-range") as HTMLInputElement;
+        const elCharacterContactShadow = document.getElementById("light-character-contact-shadow") as HTMLInputElement;
+        const elCharacterContactShadowOpacity = document.getElementById("light-character-contact-shadow-opacity") as HTMLInputElement;
+        const elCharacterContactShadowScale = document.getElementById("light-character-contact-shadow-scale") as HTMLInputElement;
         const elShadowBias = document.getElementById("light-shadow-bias") as HTMLInputElement;
         const elShadowNormalBias = document.getElementById("light-shadow-normal-bias") as HTMLInputElement;
         const elShadowColorR = document.getElementById("light-shadow-color-r") as HTMLInputElement;
@@ -618,27 +1080,35 @@ export class UIController {
         const elSelfShadowSoftness = document.getElementById("light-self-shadow-softness") as HTMLInputElement;
         const elOcclusionShadowSoftness = document.getElementById("light-occlusion-shadow-softness") as HTMLInputElement;
         const elLightMode = document.getElementById("light-mode-select") as HTMLSelectElement | null;
-        const valLightDirectionX = document.getElementById("light-direction-x-val")!;
-        const valLightDirectionY = document.getElementById("light-direction-y-val")!;
-        const valLightDirectionZ = document.getElementById("light-direction-z-val")!;
-        const valInt = document.getElementById("light-intensity-val")!;
-        const valAmb = document.getElementById("light-ambient-val")!;
-        const valLightColorR = document.getElementById("light-color-r-val")!;
-        const valLightColorG = document.getElementById("light-color-g-val")!;
-        const valLightColorB = document.getElementById("light-color-b-val")!;
-        const valLightFlatStrength = document.getElementById("light-flat-strength-val")!;
-        const valLightFlatColorInfluence = document.getElementById("light-flat-color-influence-val")!;
-        const valSh = document.getElementById("light-shadow-val")!;
-        const valShadowFrustumSize = document.getElementById("light-shadow-frustum-size-val")!;
-        const valShadowMaxZ = document.getElementById("light-shadow-max-z-val")!;
-        const valShadowBias = document.getElementById("light-shadow-bias-val")!;
-        const valShadowNormalBias = document.getElementById("light-shadow-normal-bias-val")!;
-        const valShadowColorR = document.getElementById("light-shadow-color-r-val")!;
-        const valShadowColorG = document.getElementById("light-shadow-color-g-val")!;
-        const valShadowColorB = document.getElementById("light-shadow-color-b-val")!;
-        const valToonShadowInfluence = document.getElementById("light-toon-shadow-influence-val")!;
-        const valSelfShSoftness = document.getElementById("light-self-shadow-softness-val")!;
-        const valOcclusionShSoftness = document.getElementById("light-occlusion-shadow-softness-val")!;
+        const valLightDirectionX = getRequiredElement("light-direction-x-val");
+        const valLightDirectionY = getRequiredElement("light-direction-y-val");
+        const valLightDirectionZ = getRequiredElement("light-direction-z-val");
+        const valInt = getRequiredElement("light-intensity-val");
+        const valAmb = getRequiredElement("light-ambient-val");
+        const valLightColorR = getRequiredElement("light-color-r-val");
+        const valLightColorG = getRequiredElement("light-color-g-val");
+        const valLightColorB = getRequiredElement("light-color-b-val");
+        const valLightFlatStrength = getRequiredElement("light-flat-strength-val");
+        const valLightFlatColorInfluence = getRequiredElement("light-flat-color-influence-val");
+        const valSh = getRequiredElement("light-shadow-val");
+        const valShadowFrustumSize = getRequiredElement("light-shadow-frustum-size-val");
+        const valShadowMaxZ = getRequiredElement("light-shadow-max-z-val");
+        const valShadowFilteringQuality = getRequiredElement("light-shadow-filter-quality-val");
+        const valSoftTransparentShadow = getRequiredElement("light-soft-transparent-shadow-val");
+        const valIblShadows = getRequiredElement("light-ibl-shadows-val");
+        const valIblShadowOpacity = getRequiredElement("light-ibl-shadow-opacity-val");
+        const valIblShadowRange = getRequiredElement("light-ibl-shadow-range-val");
+        const valCharacterContactShadow = getRequiredElement("light-character-contact-shadow-val");
+        const valCharacterContactShadowOpacity = getRequiredElement("light-character-contact-shadow-opacity-val");
+        const valCharacterContactShadowScale = getRequiredElement("light-character-contact-shadow-scale-val");
+        const valShadowBias = getRequiredElement("light-shadow-bias-val");
+        const valShadowNormalBias = getRequiredElement("light-shadow-normal-bias-val");
+        const valShadowColorR = getRequiredElement("light-shadow-color-r-val");
+        const valShadowColorG = getRequiredElement("light-shadow-color-g-val");
+        const valShadowColorB = getRequiredElement("light-shadow-color-b-val");
+        const valToonShadowInfluence = getRequiredElement("light-toon-shadow-influence-val");
+        const valSelfShSoftness = getRequiredElement("light-self-shadow-softness-val");
+        const valOcclusionShSoftness = getRequiredElement("light-occlusion-shadow-softness-val");
         const lightRows = Array.from(document.querySelectorAll(".light-row--light"));
         const shadowRows = Array.from(document.querySelectorAll(".light-row--shadow"));
         const elEffectColorTemp = document.getElementById("effect-color-temp") as HTMLInputElement | null;
@@ -655,10 +1125,21 @@ export class UIController {
             valLightDirectionX.textContent = x.toFixed(2);
             valLightDirectionY.textContent = y.toFixed(2);
             valLightDirectionZ.textContent = z.toFixed(2);
-            this.mmdManager.setLightDirection(x, y, z);
+            if (!this.actionDispatcher.dispatch({ type: "effect.setLightDirection", source: "panel", x, y, z })) {
+                this.mmdManager.setLightDirection(x, y, z);
+            }
         };
 
         const applyLightMode = () => {
+            if (!elLightMode) {
+                for (const row of lightRows) {
+                    row.classList.remove("light-row--hidden");
+                }
+                for (const row of shadowRows) {
+                    row.classList.remove("light-row--hidden");
+                }
+                return;
+            }
             const mode = elLightMode?.value === "shadow" ? "shadow" : "light";
             for (const row of lightRows) {
                 row.classList.toggle("light-row--hidden", mode !== "light");
@@ -687,18 +1168,24 @@ export class UIController {
         elIntensity.addEventListener("input", () => {
             const v = Number(elIntensity.value) / 100;
             valInt.textContent = v.toFixed(1);
-            this.mmdManager.lightIntensity = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setLightIntensity", source: "panel", value: v })) {
+                this.mmdManager.lightIntensity = v;
+            }
         });
         elAmbient.addEventListener("input", () => {
             const v = Number(elAmbient.value) / 100;
             valAmb.textContent = v.toFixed(1);
-            this.mmdManager.ambientIntensity = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setAmbientIntensity", source: "panel", value: v })) {
+                this.mmdManager.ambientIntensity = v;
+            }
         });
         const applyLightColor = () => {
             const r = Number(elLightColorR.value) / 127.5;
             const g = Number(elLightColorG.value) / 127.5;
             const b = Number(elLightColorB.value) / 127.5;
-            this.mmdManager.setLightColor(r, g, b);
+            if (!this.actionDispatcher.dispatch({ type: "effect.setLightColor", source: "panel", r, g, b })) {
+                this.mmdManager.setLightColor(r, g, b);
+            }
             valLightColorR.textContent = `${Math.round(r * 100)}%`;
             valLightColorG.textContent = `${Math.round(g * 100)}%`;
             valLightColorB.textContent = `${Math.round(b * 100)}%`;
@@ -708,13 +1195,17 @@ export class UIController {
         elLightColorB.addEventListener("input", applyLightColor);
         const applyLightFlatStrength = () => {
             const v = Number(elLightFlatStrength.value) / 100;
-            this.mmdManager.lightFlatStrength = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setLightFlatStrength", source: "panel", value: v })) {
+                this.mmdManager.lightFlatStrength = v;
+            }
             valLightFlatStrength.textContent = `${Math.round(v * 100)}%`;
         };
         elLightFlatStrength.addEventListener("input", applyLightFlatStrength);
         const applyLightFlatColorInfluence = () => {
             const v = Number(elLightFlatColorInfluence.value) / 100;
-            this.mmdManager.lightFlatColorInfluence = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setLightFlatColorInfluence", source: "panel", value: v })) {
+                this.mmdManager.lightFlatColorInfluence = v;
+            }
             valLightFlatColorInfluence.textContent = `${Math.round(v * 100)}%`;
         };
         elLightFlatColorInfluence.addEventListener("input", applyLightFlatColorInfluence);
@@ -737,33 +1228,107 @@ export class UIController {
         elShadow.addEventListener("input", () => {
             const v = Number(elShadow.value) / 100;
             valSh.textContent = v.toFixed(2);
-            this.mmdManager.shadowDarkness = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowDarkness", source: "panel", value: v })) {
+                this.mmdManager.shadowDarkness = v;
+            }
         });
         elShadowFrustumSize.addEventListener("input", () => {
             const v = Number(elShadowFrustumSize.value);
             valShadowFrustumSize.textContent = String(Math.round(v));
-            this.mmdManager.shadowFrustumSize = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowFrustumSize", source: "panel", value: v })) {
+                this.mmdManager.shadowFrustumSize = v;
+            }
         });
         elShadowMaxZ.addEventListener("input", () => {
             const v = Number(elShadowMaxZ.value);
             valShadowMaxZ.textContent = String(Math.round(v));
-            this.mmdManager.shadowMaxZ = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowMaxZ", source: "panel", value: v })) {
+                this.mmdManager.shadowMaxZ = v;
+            }
+        });
+        const formatShadowFilteringQuality = (quality: number): string => {
+            if (quality <= 0) return "High";
+            if (quality >= 2) return "Low";
+            return "Med";
+        };
+        elShadowFilteringQuality.addEventListener("input", () => {
+            const v = Number(elShadowFilteringQuality.value);
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowFilteringQuality", source: "panel", value: v })) {
+                this.mmdManager.shadowFilteringQuality = v;
+            }
+            valShadowFilteringQuality.textContent = formatShadowFilteringQuality(this.mmdManager.shadowFilteringQuality);
+        });
+        elSoftTransparentShadow.addEventListener("input", () => {
+            const enabled = Number(elSoftTransparentShadow.value) > 0;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setSoftTransparentShadow", source: "panel", enabled })) {
+                this.mmdManager.softTransparentShadowEnabled = enabled;
+            }
+            valSoftTransparentShadow.textContent = enabled ? "Soft" : "Hard";
+        });
+        elIblShadows.addEventListener("input", () => {
+            const enabled = Number(elIblShadows.value) > 0;
+            const dispatched = this.actionDispatcher.dispatch({ type: "effect.setIblShadows", source: "panel", enabled });
+            const applied = dispatched || this.mmdManager.setIblShadowsEnabled(enabled);
+            const actual = applied ? this.mmdManager.iblShadowsEnabled : false;
+            elIblShadows.value = actual ? "1" : "0";
+            valIblShadows.textContent = actual ? "On" : "Off";
+        });
+        elIblShadowOpacity.addEventListener("input", () => {
+            const opacity = Number(elIblShadowOpacity.value) / 100;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setIblShadowOpacity", source: "panel", value: opacity })) {
+                this.mmdManager.iblShadowOpacity = opacity;
+            }
+            valIblShadowOpacity.textContent = `${Math.round(this.mmdManager.iblShadowOpacity * 100)}%`;
+        });
+        elIblShadowRange.addEventListener("input", () => {
+            const range = Number(elIblShadowRange.value) / 100;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setIblShadowDistanceScale", source: "panel", value: range })) {
+                this.mmdManager.iblShadowDistanceScale = range;
+            }
+            valIblShadowRange.textContent = this.mmdManager.iblShadowDistanceScale.toFixed(1);
+        });
+        elCharacterContactShadow.addEventListener("input", () => {
+            const enabled = Number(elCharacterContactShadow.value) > 0;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setCharacterContactShadow", source: "panel", enabled })) {
+                this.mmdManager.characterContactShadowEnabled = enabled;
+            }
+            valCharacterContactShadow.textContent = enabled ? "On" : "Off";
+        });
+        elCharacterContactShadowOpacity.addEventListener("input", () => {
+            const opacity = Number(elCharacterContactShadowOpacity.value) / 100;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setCharacterContactShadowOpacity", source: "panel", value: opacity })) {
+                this.mmdManager.characterContactShadowOpacity = opacity;
+            }
+            valCharacterContactShadowOpacity.textContent = `${Math.round(this.mmdManager.characterContactShadowOpacity * 100)}%`;
+        });
+        elCharacterContactShadowScale.addEventListener("input", () => {
+            const scale = Number(elCharacterContactShadowScale.value) / 100;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setCharacterContactShadowScale", source: "panel", value: scale })) {
+                this.mmdManager.characterContactShadowScale = scale;
+            }
+            valCharacterContactShadowScale.textContent = this.mmdManager.characterContactShadowScale.toFixed(2);
         });
         elShadowBias.addEventListener("input", () => {
             const v = Number(elShadowBias.value) / 1_000_000;
             valShadowBias.textContent = v.toFixed(5);
-            this.mmdManager.shadowBias = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowBias", source: "panel", value: v })) {
+                this.mmdManager.shadowBias = v;
+            }
         });
         elShadowNormalBias.addEventListener("input", () => {
             const v = Number(elShadowNormalBias.value) / 100_000;
             valShadowNormalBias.textContent = v.toFixed(5);
-            this.mmdManager.shadowNormalBias = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowNormalBias", source: "panel", value: v })) {
+                this.mmdManager.shadowNormalBias = v;
+            }
         });
         const applyShadowColor = () => {
             const r = Number(elShadowColorR.value) / 255;
             const g = Number(elShadowColorG.value) / 255;
             const b = Number(elShadowColorB.value) / 255;
-            this.mmdManager.setShadowColor(r, g, b);
+            if (!this.actionDispatcher.dispatch({ type: "effect.setShadowColor", source: "panel", r, g, b })) {
+                this.mmdManager.setShadowColor(r, g, b);
+            }
             valShadowColorR.textContent = String(Math.round(r * 255));
             valShadowColorG.textContent = String(Math.round(g * 255));
             valShadowColorB.textContent = String(Math.round(b * 255));
@@ -773,19 +1338,25 @@ export class UIController {
         elShadowColorB.addEventListener("input", applyShadowColor);
         const applyToonShadowInfluence = () => {
             const influence = Number(elToonShadowInfluence.value) / 100;
-            this.mmdManager.toonShadowInfluence = influence;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setToonShadowInfluence", source: "panel", value: influence })) {
+                this.mmdManager.toonShadowInfluence = influence;
+            }
             valToonShadowInfluence.textContent = `${Math.round(influence * 100)}%`;
         };
         elToonShadowInfluence.addEventListener("input", applyToonShadowInfluence);
         elSelfShadowSoftness.addEventListener("input", () => {
             const v = Number(elSelfShadowSoftness.value) / 1000;
             valSelfShSoftness.textContent = v.toFixed(3);
-            this.mmdManager.selfShadowEdgeSoftness = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setSelfShadowSoftness", source: "panel", value: v })) {
+                this.mmdManager.selfShadowEdgeSoftness = v;
+            }
         });
         elOcclusionShadowSoftness.addEventListener("input", () => {
             const v = Number(elOcclusionShadowSoftness.value) / 1000;
             valOcclusionShSoftness.textContent = v.toFixed(3);
-            this.mmdManager.occlusionShadowEdgeSoftness = v;
+            if (!this.actionDispatcher.dispatch({ type: "effect.setOcclusionShadowSoftness", source: "panel", value: v })) {
+                this.mmdManager.occlusionShadowEdgeSoftness = v;
+            }
         });
 
         elShadow.value = String(Math.round(this.mmdManager.shadowDarkness * 100));
@@ -794,6 +1365,22 @@ export class UIController {
         valShadowFrustumSize.textContent = String(Math.round(this.mmdManager.shadowFrustumSize));
         elShadowMaxZ.value = String(Math.round(this.mmdManager.shadowMaxZ));
         valShadowMaxZ.textContent = String(Math.round(this.mmdManager.shadowMaxZ));
+        elShadowFilteringQuality.value = String(this.mmdManager.shadowFilteringQuality);
+        valShadowFilteringQuality.textContent = formatShadowFilteringQuality(this.mmdManager.shadowFilteringQuality);
+        elSoftTransparentShadow.value = this.mmdManager.softTransparentShadowEnabled ? "1" : "0";
+        valSoftTransparentShadow.textContent = this.mmdManager.softTransparentShadowEnabled ? "Soft" : "Hard";
+        elIblShadows.value = this.mmdManager.iblShadowsEnabled ? "1" : "0";
+        valIblShadows.textContent = this.mmdManager.iblShadowsEnabled ? "On" : "Off";
+        elIblShadowOpacity.value = String(Math.round(this.mmdManager.iblShadowOpacity * 100));
+        valIblShadowOpacity.textContent = `${Math.round(this.mmdManager.iblShadowOpacity * 100)}%`;
+        elIblShadowRange.value = String(Math.round(this.mmdManager.iblShadowDistanceScale * 100));
+        valIblShadowRange.textContent = this.mmdManager.iblShadowDistanceScale.toFixed(1);
+        elCharacterContactShadow.value = this.mmdManager.characterContactShadowEnabled ? "1" : "0";
+        valCharacterContactShadow.textContent = this.mmdManager.characterContactShadowEnabled ? "On" : "Off";
+        elCharacterContactShadowOpacity.value = String(Math.round(this.mmdManager.characterContactShadowOpacity * 100));
+        valCharacterContactShadowOpacity.textContent = `${Math.round(this.mmdManager.characterContactShadowOpacity * 100)}%`;
+        elCharacterContactShadowScale.value = String(Math.round(this.mmdManager.characterContactShadowScale * 100));
+        valCharacterContactShadowScale.textContent = this.mmdManager.characterContactShadowScale.toFixed(2);
         elShadowBias.value = String(Math.round(this.mmdManager.shadowBias * 1_000_000));
         valShadowBias.textContent = this.mmdManager.shadowBias.toFixed(5);
         elShadowNormalBias.value = String(Math.round(this.mmdManager.shadowNormalBias * 100_000));
@@ -813,7 +1400,9 @@ export class UIController {
         if (elEffectColorTemp && valEffectColorTemp) {
             const applyColorTemperature = () => {
                 const kelvin = Number(elEffectColorTemp.value);
-                this.mmdManager.lightColorTemperature = kelvin;
+                if (!this.actionDispatcher.dispatch({ type: "effect.setLightColorTemperature", source: "panel", kelvin })) {
+                    this.mmdManager.lightColorTemperature = kelvin;
+                }
                 valEffectColorTemp.textContent = `${Math.round(this.mmdManager.lightColorTemperature)} K`;
             };
             elEffectColorTemp.value = String(Math.round(this.mmdManager.lightColorTemperature));
@@ -824,8 +1413,9 @@ export class UIController {
         if (elEffectContrast && valEffectContrast) {
             const applyContrast = () => {
                 const offsetPercent = Number(elEffectContrast.value);
-                const contrast = 1 + offsetPercent / 100;
-                this.mmdManager.postEffectContrast = contrast;
+                if (!this.actionDispatcher.dispatch({ type: "effect.setContrastOffset", source: "panel", offsetPercent })) {
+                    this.mmdManager.postEffectContrast = 1 + offsetPercent / 100;
+                }
                 const roundedOffset = Math.round((this.mmdManager.postEffectContrast - 1) * 100);
                 valEffectContrast.textContent = `${roundedOffset}%`;
             };
@@ -837,9 +1427,10 @@ export class UIController {
         if (elEffectGamma && valEffectGamma) {
             const applyGamma = () => {
                 const offsetPercent = Number(elEffectGamma.value);
-                // 0% is neutral (gamma=1.0). Positive values brighten, negative values darken.
-                const gammaPower = Math.pow(2, -offsetPercent / 100);
-                this.mmdManager.postEffectGamma = gammaPower;
+                if (!this.actionDispatcher.dispatch({ type: "effect.setGammaOffset", source: "panel", offsetPercent })) {
+                    // 0% is neutral (gamma=1.0). Positive values brighten, negative values darken.
+                    this.mmdManager.postEffectGamma = Math.pow(2, -offsetPercent / 100);
+                }
                 const roundedOffset = Math.round(-Math.log2(this.mmdManager.postEffectGamma) * 100);
                 valEffectGamma.textContent = `${roundedOffset}%`;
             };
@@ -872,8 +1463,8 @@ export class UIController {
             });
             if (frameChanged) {
                 this.clearTransientEditingStateForFrameChange();
-                if (this.timeline.getSelectedFrame() !== null) {
-                    this.timeline.setSelectedFrame(null);
+                if (this.timeline.getSelectedKeys().length > 0) {
+                    this.timeline.clearSelectedKeys({ keepActiveTrack: true });
                 }
             }
             this.updateTimelineEditState();
@@ -899,6 +1490,7 @@ export class UIController {
             this.dofPanelController?.refreshAutoFocusReadout();
             this.lensEffectController?.refreshAutoReadout();
             this.exportUiController?.syncFrameRangeFromTimeline();
+            this.refreshViewportBottomBar();
 
             const { endFrame } = this.getPlaybackFrameRange();
             if (this.mmdManager.isPlaying && this.isPlaybackFrameStopEnabled() && frame >= endFrame) {
@@ -997,11 +1589,13 @@ export class UIController {
             this.runtimeFeatureUiController?.refreshGi();
         };
 
-        this.mmdManager.onBoneVisualizerBonePicked = (boneName: string) => {
-            if (this.mmdManager.getTimelineTarget() !== "model") return;
-            const selected = this.bottomPanel.setSelectedBone(boneName);
-            if (!selected) return;
-            this.syncTimelineBoneSelectionFromBottomPanel(boneName);
+        this.mmdManager.onBoneVisualizerBonePicked = (pick) => {
+            this.actionDispatcher.dispatch({
+                type: "selection.pickBone",
+                source: "viewport",
+                boneName: pick.boneName,
+                additive: pick.additive,
+            });
         };
 
         this.mmdManager.onMaterialShaderStateChanged = () => {
@@ -1182,20 +1776,32 @@ export class UIController {
                     return;
                 }
 
-                for (const entry of entries) {
-                    const filePath = entry.filePath;
-                    if (!filePath) continue;
-                    await this.loadFileByPath(filePath, "drop");
-                }
+                this.actionDispatcher.dispatch({
+                    type: "project.dropFiles",
+                    source: "drop",
+                    filePaths: entries.map((entry) => entry.filePath),
+                });
             })();
         });
+    }
+
+    private async loadDroppedFiles(filePaths: readonly string[]): Promise<void> {
+        if (this.hasBackgroundExportActive()) {
+            this.showToast("Cannot load files during background export", "error");
+            return;
+        }
+
+        for (const filePath of filePaths) {
+            if (!filePath) continue;
+            await this.loadFileByPath(filePath, "drop");
+        }
     }
 
     private setupKeyboard(): void {
         document.addEventListener("keydown", (e) => {
             if (e.key === "Escape" && this.layoutUiController?.isUiFullscreenModeActive()) {
                 e.preventDefault();
-                this.layoutUiController.exitUiFullscreenMode();
+                this.actionDispatcher.dispatch({ type: "layout.fullscreen.exit", source: "shortcut" });
                 return;
             }
 
@@ -1210,10 +1816,17 @@ export class UIController {
             const lowerKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
             const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
 
+            if (!hasModifier && e.key === "Escape" && this.timeline.getSelectedKeys().length > 0) {
+                e.preventDefault();
+                this.timeline.clearSelectedKeys({ keepActiveTrack: true });
+                this.updateTimelineEditState();
+                return;
+            }
+
             // Alt+Enter: MMD-like fullscreen toggle (mapped to UI fullscreen mode).
             if (!e.ctrlKey && !e.metaKey && e.altKey && e.key === "Enter") {
                 e.preventDefault();
-                this.layoutUiController?.toggleUiFullscreenMode();
+                this.actionDispatcher.dispatch({ type: "layout.fullscreen.toggle", source: "shortcut" });
                 return;
             }
 
@@ -1224,16 +1837,48 @@ export class UIController {
                 return;
             }
 
+            if (!e.metaKey && !e.altKey && e.ctrlKey && !e.shiftKey && lowerKey === "z") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "history.undo", source: "shortcut" });
+                return;
+            }
+
+            if (!e.altKey && (e.ctrlKey || e.metaKey) && !e.shiftKey && lowerKey === "c") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "keyframe.copySelected", source: "shortcut" });
+                return;
+            }
+
+            if (!e.altKey && (e.ctrlKey || e.metaKey) && !e.shiftKey && lowerKey === "v") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "keyframe.paste", source: "shortcut" });
+                return;
+            }
+
+            if (!e.metaKey && !e.altKey && e.ctrlKey && !e.shiftKey && lowerKey === "y") {
+                e.preventDefault();
+                this.actionDispatcher.dispatch({ type: "history.redo", source: "shortcut" });
+                return;
+            }
+
             // Ctrl + arrow: jump to previous/next keyframe point
             if (!e.metaKey && !e.altKey && e.ctrlKey) {
                 if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
                     e.preventDefault();
-                    this.seekToAdjacentKeyframePoint(-1);
+                    this.actionDispatcher.dispatch({
+                        type: "playback.seekAdjacentKeyframe",
+                        source: "shortcut",
+                        direction: -1,
+                    });
                     return;
                 }
                 if (e.key === "ArrowRight" || e.key === "ArrowDown") {
                     e.preventDefault();
-                    this.seekToAdjacentKeyframePoint(1);
+                    this.actionDispatcher.dispatch({
+                        type: "playback.seekAdjacentKeyframe",
+                        source: "shortcut",
+                        direction: 1,
+                    });
                     return;
                 }
             }
@@ -1249,32 +1894,36 @@ export class UIController {
                 );
             if (isAddKeyShortcut) {
                 e.preventDefault();
-                this.addKeyframeAtCurrentFrame();
+                this.actionDispatcher.dispatch({ type: "keyframe.addCurrent", source: "shortcut" });
                 return;
             }
 
             if (!hasModifier && e.key === "Delete") {
                 e.preventDefault();
-                this.deleteSelectedKeyframe();
+                this.actionDispatcher.dispatch({ type: "keyframe.deleteSelected", source: "shortcut" });
                 return;
             }
 
             // Tab / Shift+Tab / めE IntlRo ) : cycle active model
             if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "Tab" || e.code === "IntlRo")) {
                 e.preventDefault();
-                this.cycleActiveModelByShortcut(e.shiftKey ? -1 : 1);
+                this.actionDispatcher.dispatch({
+                    type: "selection.cycleActiveModel",
+                    source: "shortcut",
+                    direction: e.shiftKey ? -1 : 1,
+                });
                 return;
             }
 
             if (e.altKey && e.key === "ArrowLeft") {
                 e.preventDefault();
-                this.nudgeSelectedKeyframe(-1);
+                this.actionDispatcher.dispatch({ type: "keyframe.nudgeSelected", source: "shortcut", deltaFrames: -1 });
                 return;
             }
 
             if (e.altKey && e.key === "ArrowRight") {
                 e.preventDefault();
-                this.nudgeSelectedKeyframe(1);
+                this.actionDispatcher.dispatch({ type: "keyframe.nudgeSelected", source: "shortcut", deltaFrames: 1 });
                 return;
             }
 
@@ -1282,29 +1931,25 @@ export class UIController {
             if (!hasModifier) {
                 if (lowerKey === "p") {
                     e.preventDefault();
-                    if (this.mmdManager.isPlaying) {
-                        this.pause();
-                    } else {
-                        this.play();
-                    }
+                    this.actionDispatcher.dispatch({ type: "playback.toggle", source: "shortcut" });
                     return;
                 }
 
                 if (lowerKey === "g") {
                     e.preventDefault();
-                    this.sceneEnvironmentUiController?.toggleGround();
+                    this.actionDispatcher.dispatch({ type: "viewport.toggleGround", source: "shortcut" });
                     return;
                 }
 
                 if (lowerKey === "e") {
                     e.preventDefault();
-                    this.toggleEdgeWidthByShortcut();
+                    this.actionDispatcher.dispatch({ type: "viewport.toggleEdge", source: "shortcut" });
                     return;
                 }
 
                 if (lowerKey === "b") {
                     e.preventDefault();
-                    this.sceneEnvironmentUiController?.toggleBackgroundBlack();
+                    this.actionDispatcher.dispatch({ type: "viewport.toggleBackgroundBlack", source: "shortcut" });
                     return;
                 }
             }
@@ -1312,67 +1957,587 @@ export class UIController {
             switch (e.key) {
                 case " ":
                     e.preventDefault();
-                    if (this.mmdManager.isPlaying) {
-                        this.pause();
-                    } else {
-                        this.play();
-                    }
+                    this.actionDispatcher.dispatch({ type: "playback.toggle", source: "shortcut" });
                     break;
                 case "Home":
-                    this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().startFrame);
+                    this.actionDispatcher.dispatch({ type: "playback.seekStart", source: "shortcut" });
                     break;
                 case "End":
-                    this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().endFrame);
+                    this.actionDispatcher.dispatch({ type: "playback.seekEnd", source: "shortcut" });
                     break;
                 case "ArrowLeft":
-                    this.mmdManager.seekToBoundary(this.mmdManager.currentFrame - (e.shiftKey ? 10 : 1));
+                    this.actionDispatcher.dispatch({
+                        type: "playback.stepFrame",
+                        source: "shortcut",
+                        deltaFrames: e.shiftKey ? -10 : -1,
+                    });
                     break;
                 case "ArrowRight":
-                    this.mmdManager.seekToBoundary(this.mmdManager.currentFrame + (e.shiftKey ? 10 : 1));
+                    this.actionDispatcher.dispatch({
+                        type: "playback.stepFrame",
+                        source: "shortcut",
+                        deltaFrames: e.shiftKey ? 10 : 1,
+                    });
                     break;
             }
 
             // Ctrl+Alt+O = open project file
             if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === "O" || e.key === "o")) {
                 e.preventDefault();
-                this.loadProject();
+                this.actionDispatcher.dispatch({ type: "project.load", source: "shortcut" });
             }
 
             // Ctrl+Alt+S = save project as
             if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === "S" || e.key === "s")) {
                 e.preventDefault();
-                void this.saveProject(true);
+                this.actionDispatcher.dispatch({ type: "project.save", source: "shortcut", forceChoosePath: true });
             }
 
             // Ctrl+O = open PMX/PMD
             if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "O" || e.key === "o")) {
                 e.preventDefault();
-                this.loadPMX();
+                this.actionDispatcher.dispatch({ type: "project.openModel", source: "shortcut" });
             }
 
             // Ctrl+M = open VMD/VPD
             if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "M" || e.key === "m")) {
                 e.preventDefault();
-                this.loadVMD();
+                this.actionDispatcher.dispatch({ type: "project.openMotion", source: "shortcut" });
             }
 
             // Ctrl+Shift+M = open camera VMD
             if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "M" || e.key === "m")) {
                 e.preventDefault();
-                this.loadCameraVMD();
+                this.actionDispatcher.dispatch({ type: "project.openCameraMotion", source: "shortcut" });
             }
 
             // Ctrl+Shift+A = open MP3
             if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "A" || e.key === "a")) {
                 e.preventDefault();
-                this.loadMP3();
+                this.actionDispatcher.dispatch({ type: "project.openAudio", source: "shortcut" });
             }
 
             // Ctrl+Shift+S = export PNG
             if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "S" || e.key === "s")) {
                 e.preventDefault();
-                void this.exportUiController?.exportPNG();
+                this.actionDispatcher.dispatch({ type: "project.exportPng", source: "shortcut" });
             }
+        });
+    }
+
+    private setupActionHandlers(): void {
+        this.actionDispatcher.register("playback.play", () => this.play());
+        this.actionDispatcher.register("playback.pause", () => this.pause());
+        this.actionDispatcher.register("playback.stop", () => this.stop());
+        this.actionDispatcher.register("playback.toggle", () => {
+            if (this.mmdManager.isPlaying) {
+                this.pause();
+                return;
+            }
+            this.play();
+        });
+        this.actionDispatcher.register("playback.seekFrame", (action) => {
+            this.mmdManager.seekToBoundary(action.frame);
+        });
+        this.actionDispatcher.register("playback.stepFrame", (action) => {
+            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame + action.deltaFrames);
+        });
+        this.actionDispatcher.register("playback.seekStart", () => {
+            this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().startFrame);
+        });
+        this.actionDispatcher.register("playback.seekEnd", () => {
+            this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().endFrame);
+        });
+        this.actionDispatcher.register("playback.seekAdjacentKeyframe", (action) => {
+            this.seekToAdjacentKeyframePoint(action.direction);
+        });
+        this.actionDispatcher.register("keyframe.addCurrent", (action) => this.addKeyframeAtCurrentFrame(null, action.source));
+        this.actionDispatcher.register("keyframe.copySelected", () => this.copySelectedKeyframe());
+        this.actionDispatcher.register("keyframe.paste", () => this.pasteKeyframeClipboard());
+        this.actionDispatcher.register("keyframe.mirrorPaste", () => this.pasteMirroredKeyframeClipboard());
+        this.actionDispatcher.register("keyframe.deleteSelected", (action) => this.deleteSelectedKeyframe(action.source));
+        this.actionDispatcher.register("keyframe.nudgeSelected", (action) => {
+            this.nudgeSelectedKeyframe(action.deltaFrames);
+        });
+        this.actionDispatcher.register("keyframe.toggleAutoKey", () => {
+            this.setAutoKeyEnabled(!this.autoKeyEnabled, { persist: true, toast: true });
+        });
+        this.actionDispatcher.register("keyframe.togglePhysicsInputMode", () => {
+            this.physicsKeyframeInputMode = this.physicsKeyframeInputMode === 1 ? 0 : 1;
+            this.updatePhysicsKeyframeButtonState();
+        });
+        this.actionDispatcher.register("history.undo", () => this.undoLastCommand());
+        this.actionDispatcher.register("history.redo", () => this.redoLastCommand());
+        this.actionDispatcher.register("keyframe.registerInfo", () => this.registerInfoKeyframe());
+        this.actionDispatcher.register("keyframe.registerBone", () => this.registerBoneKeyframeAtCurrentFrame());
+        this.actionDispatcher.register("keyframe.registerMorph", () => this.registerMorphKeyframesAtCurrentFrame());
+        this.actionDispatcher.register("keyframe.registerAccessoryTransform", () => {
+            this.registerAccessoryTransformKeyframe();
+        });
+        this.actionDispatcher.register("interpolation.copy", () => this.copyInterpolationCurves());
+        this.actionDispatcher.register("interpolation.paste", () => this.pasteInterpolationCurves());
+        this.actionDispatcher.register("interpolation.applyLinear", () => this.resetInterpolationCurvesToLinear());
+        this.actionDispatcher.register("interpolation.updateHandle", (action) => {
+            this.updateInterpolationCurveHandle(action.channelId, action.pointIndex, action.x, action.y);
+        });
+        this.actionDispatcher.register("interpolation.finishHandleDrag", (action) => {
+            if (!action.changed) return;
+            this.refreshRuntimeAnimationFromInterpolationEdit();
+            this.updateTimelineEditState();
+        });
+        this.actionDispatcher.register("selection.cycleActiveModel", (action) => {
+            this.cycleActiveModelByShortcut(action.direction);
+        });
+        this.actionDispatcher.register("selection.pickBone", (action) => {
+            if (this.mmdManager.getTimelineTarget() !== "model") return;
+            if (action.additive === true) {
+                if (!this.timeline.selectBoneTrackByName(action.boneName, { additive: true })) return;
+                this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
+                this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
+                this.refreshSelectedTrackRotationOverlay();
+                this.updateTimelineEditState();
+                this.updateSectionKeyframeButtons();
+                return;
+            }
+
+            const selected = this.bottomPanel.setSelectedBone(action.boneName);
+            if (!selected) return;
+            this.syncTimelineBoneSelectionFromBottomPanel(action.boneName);
+        });
+        this.actionDispatcher.register("selection.setBone", (action) => {
+            this.syncTimelineBoneSelectionFromBottomPanel(action.boneName);
+            this.updateSectionKeyframeButtons();
+        });
+        this.actionDispatcher.register("selection.setMorphFrame", () => {
+            this.updateSectionKeyframeButtons();
+        });
+        this.actionDispatcher.register("viewport.toggleGround", () => {
+            this.sceneEnvironmentUiController?.toggleGround();
+        });
+        this.actionDispatcher.register("viewport.toggleEdge", () => this.toggleEdgeWidthByShortcut());
+        this.actionDispatcher.register("viewport.toggleBackgroundMedia", () => {
+            this.sceneEnvironmentUiController?.toggleBackgroundMedia();
+        });
+        this.actionDispatcher.register("viewport.toggleBackgroundBlack", () => {
+            this.sceneEnvironmentUiController?.toggleBackgroundBlack();
+        });
+        this.actionDispatcher.register("viewport.toggleSkydome", () => {
+            this.sceneEnvironmentUiController?.toggleSkydome();
+        });
+        this.actionDispatcher.register("timeline.togglePhysicsBones", () => {
+            const visible = this.mmdManager.toggleShowPhysicsBonesInTimeline();
+            this.showToast(visible ? "Physics bones shown in timeline" : "Physics bones hidden in timeline", "info");
+            this.updateTimelineEditState();
+            this.appMenuController?.refresh();
+        });
+        this.actionDispatcher.register("project.openFile", () => {
+            void this.loadFileFromDialog();
+        });
+        this.actionDispatcher.register("project.dropFiles", (action) => {
+            void this.loadDroppedFiles(action.filePaths);
+        });
+        this.actionDispatcher.register("project.openModel", () => this.loadPMX());
+        this.actionDispatcher.register("project.openMotion", () => this.loadVMD());
+        this.actionDispatcher.register("project.openCameraMotion", () => this.loadCameraVMD());
+        this.actionDispatcher.register("project.openAudio", () => this.loadMP3());
+        this.actionDispatcher.register("project.save", (action) => {
+            void this.saveProject(action.forceChoosePath ?? false);
+        });
+        this.actionDispatcher.register("project.load", () => this.loadProject());
+        this.actionDispatcher.register("project.exportPng", () => {
+            void this.exportUiController?.exportPNG();
+        });
+        this.actionDispatcher.register("project.exportPngSequence", () => {
+            void this.exportUiController?.exportPNGSequence();
+        });
+        this.actionDispatcher.register("project.exportWebm", () => {
+            void this.exportUiController?.exportWebm();
+        });
+        this.actionDispatcher.register("layout.fullscreen.toggle", () => {
+            this.layoutUiController?.toggleUiFullscreenMode();
+        });
+        this.actionDispatcher.register("layout.fullscreen.exit", () => {
+            this.layoutUiController?.exitUiFullscreenMode();
+        });
+        this.actionDispatcher.register("layout.shaderPanel.toggle", () => {
+            this.layoutUiController?.toggleShaderPanel();
+        });
+        this.actionDispatcher.register("runtime.toggleAntialias", () => {
+            this.runtimeFeatureUiController?.toggleAntialias();
+        });
+        this.actionDispatcher.register("runtime.togglePhysics", () => {
+            this.runtimeFeatureUiController?.togglePhysics();
+        });
+        this.actionDispatcher.register("runtime.toggleShadow", () => {
+            this.runtimeFeatureUiController?.toggleShadow();
+        });
+        this.actionDispatcher.register("runtime.toggleRigidBodies", () => {
+            this.runtimeFeatureUiController?.toggleRigidBodies();
+        });
+        this.actionDispatcher.register("runtime.toggleGlobalIllumination", () => {
+            this.runtimeFeatureUiController?.toggleGlobalIllumination();
+        });
+        this.actionDispatcher.register("model.selectTimelineTarget", (action) => {
+            this.modelInfoPanelController?.selectTimelineTarget(action.value, action.showToast);
+        });
+        this.actionDispatcher.register("model.toggleActiveVisibility", () => {
+            this.modelInfoPanelController?.toggleActiveModelVisibility();
+        });
+        this.actionDispatcher.register("model.setActiveShadow", (action) => {
+            this.modelInfoPanelController?.setActiveModelCastsShadow(action.castShadow);
+        });
+        this.actionDispatcher.register("model.deleteActive", () => {
+            this.modelInfoPanelController?.deleteActiveModel();
+        });
+        this.actionDispatcher.register("shader.selectModelTarget", (action) => {
+            this.shaderPanelController?.selectModelTarget(action.value, action.showToast);
+        });
+        this.actionDispatcher.register("shader.applySelected", () => {
+            void this.shaderPanelController?.applySelectedShaderPreset();
+        });
+        this.actionDispatcher.register("shader.applyAll", () => {
+            void this.shaderPanelController?.applyShaderPresetToAll();
+        });
+        this.actionDispatcher.register("shader.reset", () => {
+            void this.shaderPanelController?.resetShaderPreset();
+        });
+        this.actionDispatcher.register("accessory.select", () => {
+            this.accessoryPanelController?.selectAccessory();
+        });
+        this.actionDispatcher.register("accessory.setParentModel", () => {
+            this.accessoryPanelController?.setParentModelFromPanel();
+        });
+        this.actionDispatcher.register("accessory.setParentBone", () => {
+            this.accessoryPanelController?.setParentBoneFromPanel();
+        });
+        this.actionDispatcher.register("accessory.toggleVisibility", () => {
+            this.accessoryPanelController?.toggleSelectedAccessoryVisibility();
+        });
+        this.actionDispatcher.register("accessory.deleteSelected", () => {
+            this.accessoryPanelController?.deleteSelectedAccessory();
+        });
+        this.actionDispatcher.register("camera.setViewPreset", (action) => {
+            this.cameraPanelController?.setCameraViewPreset(action.view);
+        });
+        this.actionDispatcher.register("camera.setMirroringFloorEnabled", (action) => {
+            this.mmdManager.mirroringFloorEnabled = action.enabled;
+            this.sceneEnvironmentUiController?.refresh();
+            this.cameraPanelController?.refresh(true);
+        });
+        this.actionDispatcher.register("camera.setMirroringFloorResolution", (action) => {
+            this.mmdManager.mirroringFloorResolution = action.resolution;
+            this.sceneEnvironmentUiController?.refresh();
+            this.cameraPanelController?.refresh(true);
+        });
+        this.actionDispatcher.register("output.applyPreset", () => {
+            this.exportUiController?.applyOutputPreset();
+        });
+        this.actionDispatcher.register("output.syncDimension", (action) => {
+            this.exportUiController?.syncOutputDimensionWithLock(action.dimension);
+        });
+        this.actionDispatcher.register("output.setLockAspect", (action) => {
+            this.exportUiController?.setOutputLockAspect(action.locked);
+        });
+        this.actionDispatcher.register("output.markFrameRangeCustomized", () => {
+            this.exportUiController?.markOutputFrameRangeCustomized();
+            this.refreshViewportBottomBar();
+        });
+        this.actionDispatcher.register("output.sanitizeFrameRange", (action) => {
+            this.exportUiController?.sanitizeOutputFrameRange(action.boundary);
+            this.refreshViewportBottomBar();
+        });
+        this.actionDispatcher.register("timeline.selectionChanged", (action) => {
+            this.syncBoneVisualizerSelection(action.track);
+            this.syncBottomBoneSelectionFromTimeline(action.track);
+            this.refreshSelectedTrackRotationOverlay();
+            this.updateTimelineEditState();
+            this.updateSectionKeyframeButtons();
+        });
+        this.actionDispatcher.register("timeline.seekFrame", (action) => {
+            this.mmdManager.seekToBoundary(action.frame);
+            this.updateSectionKeyframeButtons();
+        });
+        this.actionDispatcher.register("edit.boneTransformChanged", (action) => {
+            this.handleBoneTransformChanged(action.boneName, action.source);
+        });
+        this.actionDispatcher.register("edit.setBoneTransformFromBottomBar", (action) => {
+            this.applyBottomBarBoneTransform(action.boneName, action.position, action.rotation, action.before);
+        });
+        this.actionDispatcher.register("edit.setCameraTransformFromBottomBar", (action) => {
+            this.applyBottomBarCameraTransform(action.target, action.rotation, action.distance, action.fov, action.before);
+        });
+        this.actionDispatcher.register("edit.cameraTransformChanged", (action) => {
+            this.handleCameraTransformChanged(action.source);
+        });
+        this.actionDispatcher.register("edit.morphValueChanged", (action) => {
+            this.markSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(action.frameIndex));
+            this.updateSectionKeyframeButtons();
+        });
+        this.actionDispatcher.register("effect.setModelEdgeWidth", (action) => {
+            this.modelEdgeController?.setModelEdgeWidthPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setModelEdgeColorOverride", (action) => {
+            this.mmdManager.modelEdgeColorOverrideEnabled = action.enabled;
+            this.modelEdgeController?.refresh();
+        });
+        this.actionDispatcher.register("effect.setModelEdgeColor", (action) => {
+            this.mmdManager.setModelEdgeColor(action.r, action.g, action.b);
+            this.modelEdgeController?.refresh();
+        });
+        this.actionDispatcher.register("effect.setContrastOffset", (action) => {
+            this.colorPostFxController?.setContrastOffsetPercent(action.offsetPercent);
+        });
+        this.actionDispatcher.register("effect.setGammaOffset", (action) => {
+            this.colorPostFxController?.setGammaOffsetPercent(action.offsetPercent);
+        });
+        this.actionDispatcher.register("effect.setExposure", (action) => {
+            this.colorPostFxController?.setExposure(action.value);
+        });
+        this.actionDispatcher.register("effect.setDitheringIntensity", (action) => {
+            this.colorPostFxController?.setDitheringIntensity(action.value);
+        });
+        this.actionDispatcher.register("effect.setVignetteWeight", (action) => {
+            this.colorPostFxController?.setVignetteWeight(action.value);
+        });
+        this.actionDispatcher.register("effect.setGrainIntensity", (action) => {
+            this.colorPostFxController?.setGrainIntensity(action.value);
+        });
+        this.actionDispatcher.register("effect.setSharpenEdge", (action) => {
+            this.colorPostFxController?.setSharpenEdgePercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setColorCurvesSaturation", (action) => {
+            this.colorPostFxController?.setColorCurvesSaturation(action.value);
+        });
+        this.actionDispatcher.register("effect.setToneMappingType", (action) => {
+            this.bloomToneMapController?.setToneMappingType(action.value);
+        });
+        this.actionDispatcher.register("effect.setBloom", (action) => {
+            this.bloomToneMapController?.setBloom(
+                action.enabled,
+                action.weightPercent,
+                action.thresholdSlider,
+                action.kernel,
+            );
+        });
+        this.actionDispatcher.register("effect.setGlowIntensity", (action) => {
+            this.bloomToneMapController?.setGlowIntensityPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setDofEnabled", (action) => {
+            this.dofPanelController?.setDofEnabled(action.enabled);
+        });
+        this.actionDispatcher.register("effect.setDofQuality", (action) => {
+            this.dofPanelController?.setDofQuality(action.level);
+        });
+        this.actionDispatcher.register("effect.setDofFocusDistance", (action) => {
+            this.dofPanelController?.setDofFocusDistanceMm(action.millimeters);
+        });
+        this.actionDispatcher.register("effect.setDofFocusOffset", (action) => {
+            this.dofPanelController?.setDofFocusOffsetMm(action.millimeters);
+        });
+        this.actionDispatcher.register("effect.setDofFStop", (action) => {
+            this.dofPanelController?.setDofFStop(action.value);
+        });
+        this.actionDispatcher.register("effect.setDofNearSuppression", (action) => {
+            this.dofPanelController?.setDofNearSuppressionPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setDofFocalInvert", (action) => {
+            this.dofPanelController?.setDofFocalInvert(action.enabled);
+        });
+        this.actionDispatcher.register("effect.setDofLensBlur", (action) => {
+            this.dofPanelController?.setDofLensBlurPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setDofLensSize", (action) => {
+            this.dofPanelController?.setDofLensSize(action.value);
+        });
+        this.actionDispatcher.register("effect.setDofFocalLength", (action) => {
+            this.dofPanelController?.setDofFocalLength(action.value);
+        });
+        this.actionDispatcher.register("effect.setDofTargetModel", (action) => {
+            this.dofPanelController?.setDofTargetModel(action.modelIndex);
+        });
+        this.actionDispatcher.register("effect.setDofTargetBone", (action) => {
+            this.dofPanelController?.setDofTargetBone(action.modelIndex, action.boneName);
+        });
+        this.actionDispatcher.register("effect.setMotionBlurStrength", (action) => {
+            this.experimentalPostFxController?.setMotionBlurStrengthPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setSsrStrength", (action) => {
+            this.experimentalPostFxController?.setSsrStrengthPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setVlsExposure", (action) => {
+            this.experimentalPostFxController?.setVlsExposurePercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setFrameGraphSsao", (action) => {
+            this.mmdManager.postEffectSsaoEnabled = action.enabled;
+            this.mmdManager.postEffectSsaoStrength = action.strengthPercent / 100;
+            this.mmdManager.postEffectSsaoRadius = action.radiusPercent / 100;
+            this.mmdManager.postEffectSsaoDebugView = false;
+        });
+        this.actionDispatcher.register("effect.setFrameGraphSsr", (action) => {
+            this.mmdManager.postEffectSsrEnabled = action.enabled;
+            this.mmdManager.postEffectSsrStrength = action.strengthPercent / 100;
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofEnabled", (action) => {
+            this.mmdManager.dofEnabled = action.enabled;
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofFocusDistance", (action) => {
+            if (!this.mmdManager.dofAutoFocusEnabled) {
+                this.mmdManager.dofFocusDistanceMm = action.millimeters;
+            }
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofFocusOffset", (action) => {
+            this.mmdManager.dofAutoFocusNearOffsetMm = action.millimeters;
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofFStop", (action) => {
+            this.mmdManager.dofFStop = action.value;
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofLensSize", (action) => {
+            this.mmdManager.dofLensSize = action.value;
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofFocalLength", (action) => {
+            if (!this.mmdManager.dofFocalLengthLinkedToCameraFov) {
+                this.mmdManager.dofFocalLength = action.value;
+            }
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofTargetModel", (action) => {
+            if (action.modelIndex === null) {
+                this.mmdManager.setDofFocusTargetByIndex(null, null);
+                return;
+            }
+            this.mmdManager.setDofFocusTargetByIndex(
+                action.modelIndex,
+                this.mmdManager.getPreferredDofFocusBoneName(action.modelIndex),
+            );
+        });
+        this.actionDispatcher.register("effect.setFrameGraphDofTargetBone", (action) => {
+            if (action.modelIndex === null) {
+                this.mmdManager.setDofFocusTargetByIndex(null, null);
+                return;
+            }
+            this.mmdManager.setDofFocusTargetByIndex(action.modelIndex, action.boneName);
+        });
+        this.actionDispatcher.register("effect.setLightDirection", (action) => {
+            this.mmdManager.setLightDirection(action.x, action.y, action.z);
+        });
+        this.actionDispatcher.register("effect.setLightIntensity", (action) => {
+            this.mmdManager.lightIntensity = action.value;
+        });
+        this.actionDispatcher.register("effect.setAmbientIntensity", (action) => {
+            this.mmdManager.ambientIntensity = action.value;
+        });
+        this.actionDispatcher.register("effect.setLightColor", (action) => {
+            this.mmdManager.setLightColor(action.r, action.g, action.b);
+        });
+        this.actionDispatcher.register("effect.setLightFlatStrength", (action) => {
+            this.mmdManager.lightFlatStrength = action.value;
+        });
+        this.actionDispatcher.register("effect.setLightFlatColorInfluence", (action) => {
+            this.mmdManager.lightFlatColorInfluence = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowMode", (action) => {
+            this.mmdManager.shadowMode = action.mode;
+        });
+        this.actionDispatcher.register("effect.setShadowDarkness", (action) => {
+            this.mmdManager.shadowDarkness = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowFrustumSize", (action) => {
+            this.mmdManager.shadowFrustumSize = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowMaxZ", (action) => {
+            this.mmdManager.shadowMaxZ = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowFilteringQuality", (action) => {
+            this.mmdManager.shadowFilteringQuality = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowBlurKernel", (action) => {
+            this.mmdManager.shadowBlurKernel = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowPenumbra", (action) => {
+            this.mmdManager.shadowPenumbraEnabled = action.enabled;
+        });
+        this.actionDispatcher.register("effect.setShadowPenumbraSize", (action) => {
+            this.mmdManager.shadowPenumbraSize = action.value;
+        });
+        this.actionDispatcher.register("effect.setTransparentShadow", (action) => {
+            this.mmdManager.transparentShadowEnabled = action.enabled;
+        });
+        this.actionDispatcher.register("effect.setSoftTransparentShadow", (action) => {
+            this.mmdManager.softTransparentShadowEnabled = action.enabled;
+        });
+        this.actionDispatcher.register("effect.setIblShadows", (action) => {
+            this.mmdManager.setIblShadowsEnabled(action.enabled);
+        });
+        this.actionDispatcher.register("effect.setIblShadowOpacity", (action) => {
+            this.mmdManager.iblShadowOpacity = action.value;
+        });
+        this.actionDispatcher.register("effect.setIblShadowDistanceScale", (action) => {
+            this.mmdManager.iblShadowDistanceScale = action.value;
+        });
+        this.actionDispatcher.register("effect.setCharacterContactShadow", (action) => {
+            this.mmdManager.characterContactShadowEnabled = action.enabled;
+        });
+        this.actionDispatcher.register("effect.setCharacterContactShadowOpacity", (action) => {
+            this.mmdManager.characterContactShadowOpacity = action.value;
+        });
+        this.actionDispatcher.register("effect.setCharacterContactShadowScale", (action) => {
+            this.mmdManager.characterContactShadowScale = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowBias", (action) => {
+            this.mmdManager.shadowBias = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowNormalBias", (action) => {
+            this.mmdManager.shadowNormalBias = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowColor", (action) => {
+            this.mmdManager.setShadowColor(action.r, action.g, action.b);
+        });
+        this.actionDispatcher.register("effect.setToonShadowInfluence", (action) => {
+            this.mmdManager.toonShadowInfluence = action.value;
+        });
+        this.actionDispatcher.register("effect.setSelfShadowSoftness", (action) => {
+            this.mmdManager.selfShadowEdgeSoftness = action.value;
+        });
+        this.actionDispatcher.register("effect.setOcclusionShadowSoftness", (action) => {
+            this.mmdManager.occlusionShadowEdgeSoftness = action.value;
+        });
+        this.actionDispatcher.register("effect.setLightColorTemperature", (action) => {
+            this.mmdManager.lightColorTemperature = action.kelvin;
+        });
+        this.actionDispatcher.register("effect.setFogEnabled", (action) => {
+            this.fogPanelController?.setFogEnabled(action.enabled);
+        });
+        this.actionDispatcher.register("effect.setFogStart", (action) => {
+            this.fogPanelController?.setFogStart(action.value);
+        });
+        this.actionDispatcher.register("effect.setFogEnd", (action) => {
+            this.fogPanelController?.setFogEnd(action.value);
+        });
+        this.actionDispatcher.register("effect.setFogDensity", (action) => {
+            this.fogPanelController?.setFogDensity(action.value);
+        });
+        this.actionDispatcher.register("effect.setFogOpacity", (action) => {
+            this.fogPanelController?.setFogOpacity(action.value);
+        });
+        this.actionDispatcher.register("effect.setFogColor", (action) => {
+            this.fogPanelController?.setFogColor(action.r, action.g, action.b);
+        });
+        this.actionDispatcher.register("effect.setChromaticAberration", (action) => {
+            this.lensEffectController?.setChromaticAberration(action.value);
+        });
+        this.actionDispatcher.register("effect.setLensDistortion", (action) => {
+            this.lensEffectController?.setLensDistortionPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setLensDistortionInfluence", (action) => {
+            this.lensEffectController?.setLensDistortionInfluencePercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.setLensEdgeBlur", (action) => {
+            this.lensEffectController?.setLensEdgeBlurPercent(action.percent);
+        });
+        this.actionDispatcher.register("effect.applyLut", () => {
+            this.lutPanelController?.applyLutFromPanel();
+        });
+        this.actionDispatcher.register("effect.chooseExternalLut", () => {
+            void this.lutPanelController?.chooseExternalLut();
         });
     }
 
@@ -1399,7 +2564,7 @@ export class UIController {
 
         const nextFrame = Math.max(0, parsedFrame);
         this.currentFrameEl.value = String(nextFrame);
-        this.mmdManager.seekToBoundary(nextFrame);
+        this.actionDispatcher.dispatch({ type: "playback.seekFrame", source: "panel", frame: nextFrame });
     }
 
     private cycleActiveModelByShortcut(direction: 1 | -1): void {
@@ -1473,61 +2638,37 @@ export class UIController {
     }
 
     private setupPerfDisplay(): void {
-        const fpsEl = document.getElementById("fps-value")!;
-        const engineEl = document.getElementById("engine-type-badge")!;
-        const shaderEl = document.getElementById("shader-type-badge")!;
-        const physicsEl = document.getElementById("physics-type-badge")!;
+        const fpsEl = getRequiredElement("fps-value");
+        const engineEl = getRequiredElement("engine-type-badge");
+        const shaderEl = getRequiredElement("shader-type-badge");
+        const physicsEl = getRequiredElement("physics-type-badge");
 
         const updatePerfBadges = (): void => {
             const engineType = this.mmdManager.getEngineType();
             const shaderType = this.mmdManager.getShaderRuntimeLabel();
             const physicsType = this.mmdManager.getPhysicsBackendLabel();
-            const shaderBadgeLabel = shaderType === "WGSL-first" ? "WGSL" : shaderType;
+            const applyMutedBadgeStyle = (element: HTMLElement): void => {
+                element.style.background = "rgba(255,255,255,0.045)";
+                element.style.color = "#9a9aa3";
+                element.style.borderColor = "rgba(255,255,255,0.08)";
+            };
+            const shaderBadgeLabel = shaderType === "WGSL-first"
+                ? "WGSL"
+                : shaderType === "WGSL-custom"
+                    ? "WGSL+"
+                    : shaderType;
             engineEl.textContent = engineType;
             shaderEl.textContent = shaderBadgeLabel;
             physicsEl.textContent = physicsType;
+            shaderEl.title = shaderType === "WGSL-custom"
+                ? "WGSL renderer with custom material presets or external WGSL toon shaders"
+                : shaderType === "WGSL-first"
+                    ? "WGSL renderer with standard MMD material presets"
+                    : "GLSL renderer";
 
-            if (engineType === "WebGPU") {
-                engineEl.style.background = "rgba(139,92,246,0.15)";
-                engineEl.style.color = "#a78bfa";
-                engineEl.style.borderColor = "rgba(139,92,246,0.3)";
-            } else if (engineType === "WebGL1") {
-                engineEl.style.background = "rgba(245,158,11,0.15)";
-                engineEl.style.color = "#fbbf24";
-                engineEl.style.borderColor = "rgba(245,158,11,0.3)";
-            } else {
-                engineEl.style.background = "";
-                engineEl.style.color = "";
-                engineEl.style.borderColor = "";
-            }
-
-            if (shaderType === "WGSL-first") {
-                shaderEl.style.background = "rgba(34,197,94,0.15)";
-                shaderEl.style.color = "#86efac";
-                shaderEl.style.borderColor = "rgba(34,197,94,0.3)";
-            } else if (shaderType === "Mixed") {
-                shaderEl.style.background = "rgba(245,158,11,0.15)";
-                shaderEl.style.color = "#fbbf24";
-                shaderEl.style.borderColor = "rgba(245,158,11,0.3)";
-            } else {
-                shaderEl.style.background = "rgba(56,189,248,0.12)";
-                shaderEl.style.color = "#7dd3fc";
-                shaderEl.style.borderColor = "rgba(56,189,248,0.24)";
-            }
-
-            if (physicsType === "Bullet") {
-                physicsEl.style.background = "rgba(34,197,94,0.15)";
-                physicsEl.style.color = "#86efac";
-                physicsEl.style.borderColor = "rgba(34,197,94,0.3)";
-            } else if (physicsType === "Ammo") {
-                physicsEl.style.background = "rgba(245,158,11,0.15)";
-                physicsEl.style.color = "#fbbf24";
-                physicsEl.style.borderColor = "rgba(245,158,11,0.3)";
-            } else {
-                physicsEl.style.background = "rgba(148,163,184,0.14)";
-                physicsEl.style.color = "#cbd5e1";
-                physicsEl.style.borderColor = "rgba(148,163,184,0.24)";
-            }
+            applyMutedBadgeStyle(engineEl);
+            applyMutedBadgeStyle(shaderEl);
+            applyMutedBadgeStyle(physicsEl);
         };
 
         updatePerfBadges();
@@ -1536,37 +2677,33 @@ export class UIController {
         setInterval(() => {
             const fps = this.mmdManager.getFps();
             fpsEl.textContent = String(fps);
-            fpsEl.style.color = fps >= 55 ? "var(--accent-green)"
-                : fps >= 30 ? "var(--accent-amber)"
-                    : "var(--accent-red)";
+            fpsEl.style.color = "#ff4fa3";
             updatePerfBadges();
             this.dofPanelController?.refreshAutoFocusReadout();
         }, 1000);
 
         // Volume fader
-        const slider = document.getElementById("volume-slider") as HTMLInputElement;
-        const volLabel = document.getElementById("volume-value")!;
-        const muteBtn = document.getElementById("btn-mute")!;
-        const iconOn = document.getElementById("icon-volume-on")!;
-        const iconOff = document.getElementById("icon-volume-off")!;
+        const slider = document.getElementById("viewport-volume-slider") as HTMLInputElement | null;
+        const muteBtn = document.getElementById("viewport-volume-mute");
+        const iconOn = document.getElementById("viewport-icon-volume-on");
+        const iconOff = document.getElementById("viewport-icon-volume-off");
 
         const updateVolumeUI = (isMuted: boolean) => {
-            const pct = Number(slider.value);
-            volLabel.textContent = `${pct}%`;
-            iconOn.style.display = isMuted ? "none" : "";
-            iconOff.style.display = isMuted ? "" : "none";
-            muteBtn.classList.toggle("muted", isMuted);
+            if (iconOn) iconOn.style.display = isMuted ? "none" : "";
+            if (iconOff) iconOff.style.display = isMuted ? "" : "none";
+            muteBtn?.classList.toggle("muted", isMuted);
         };
 
-        slider.addEventListener("input", () => {
+        slider?.addEventListener("input", () => {
             this.mmdManager.volume = Number(slider.value) / 100;
             updateVolumeUI(this.mmdManager.muted);
         });
 
-        muteBtn.addEventListener("click", async () => {
+        muteBtn?.addEventListener("click", async () => {
             await this.mmdManager.toggleMute();
             updateVolumeUI(this.mmdManager.muted);
         });
+        updateVolumeUI(this.mmdManager.muted);
     }
 
     private showStartupRenderingDiagnostics(): void {
@@ -1631,6 +2768,9 @@ export class UIController {
         }
         if (typeof lighting.shadowMaxZ === "number" && Number.isFinite(lighting.shadowMaxZ)) {
             this.mmdManager.shadowMaxZ = lighting.shadowMaxZ;
+        }
+        if (lighting.shadowMode === "standard" || lighting.shadowMode === "cascaded") {
+            this.mmdManager.shadowMode = lighting.shadowMode;
         }
     }
 
@@ -2074,6 +3214,9 @@ export class UIController {
         this.refreshCameraUiFromRuntime(true);
         this.mmdManager.setBoneVisualizerSelectedBone(null);
         this.updateInfoActionButtons();
+        this.bottomPanelLayoutController?.applyMode("camera");
+        this.effectPanelShellController?.setActiveTab("post");
+        this.refreshViewportBottomBar();
     }
 
     private applyActiveModelSelectionUI(): void {
@@ -2087,6 +3230,8 @@ export class UIController {
         this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
         this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
         this.updateInfoActionButtons();
+        this.bottomPanelLayoutController?.applyMode("model");
+        this.refreshViewportBottomBar();
     }
 
     private updateInfoActionButtons(): void {
@@ -2100,6 +3245,77 @@ export class UIController {
         this.updateInfoActionButtons();
         this.runtimeFeatureUiController?.refreshRigidBodies();
         this.accessoryPanelController?.refresh();
+        this.refreshViewportBottomBar();
+    }
+
+    private refreshViewportBottomBar(): void {
+        const hasLoadedModels = this.mmdManager.getLoadedModels().length > 0;
+        const target = hasLoadedModels ? this.mmdManager.getTimelineTarget() : "camera";
+        this.refreshToolbarTimelineTargetSwitch(target === "model" ? "model" : "camera", hasLoadedModels);
+        this.viewportSeekBarController?.refresh({
+            currentFrame: this.mmdManager.currentFrame,
+            totalFrames: this.mmdManager.totalFrames,
+            isPlaying: this.mmdManager.isPlaying,
+            playbackRange: {
+                ...this.getPlaybackFrameRange(),
+                frameStartEnabled: this.isPlaybackFrameStartEnabled(),
+                frameStopEnabled: this.isPlaybackFrameStopEnabled(),
+            },
+        });
+        this.viewportAxisHandleController?.applyMode(target === "model" ? "model" : "camera");
+
+        if (target === "model") {
+            const boneName = this.bottomPanel.getSelectedBone();
+            const transform = boneName && boneName !== "Camera"
+                ? this.mmdManager.getBoneTransform(boneName)
+                : null;
+            this.viewportAxisHandleController?.updateModelTransform(transform);
+            return;
+        }
+
+        this.viewportAxisHandleController?.updateCameraTransform({
+            target: this.mmdManager.getCameraTarget(),
+            rotation: this.mmdManager.getCameraRotation(),
+            distance: this.mmdManager.getCameraDistance(),
+            fov: this.mmdManager.getCameraFov(),
+        });
+    }
+
+    private refreshToolbarTimelineTargetSwitch(mode: "model" | "camera", canSwitchToModel: boolean): void {
+        this.viewportTopBarController?.refresh({
+            mode,
+            canSwitchToModel,
+            perspectiveEnabled: this.mmdManager.getPerspectiveEnabled(),
+        });
+    }
+
+    private switchViewportBottomBarToModel(): void {
+        const hasLoadedModels = this.mmdManager.getLoadedModels().length > 0;
+        if (!hasLoadedModels) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+        const models = this.mmdManager.getLoadedModels();
+        const target = models.find((model) => model.active) ?? models[0] ?? null;
+        if (!target) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+        this.actionDispatcher.dispatch({
+            type: "model.selectTimelineTarget",
+            source: "button",
+            value: String(target.index),
+            showToast: true,
+        });
+    }
+
+    private switchToCameraMode(): void {
+        this.actionDispatcher.dispatch({
+            type: "model.selectTimelineTarget",
+            source: "button",
+            value: MODEL_INFO_CAMERA_SELECT_VALUE,
+            showToast: true,
+        });
     }
 
     private getInfoModelSelectState(): ModelInfoSelectState {
@@ -2111,11 +3327,37 @@ export class UIController {
     }
 
     private handleModelTargetSelection(value: string, showToast: boolean): void {
+        const frameGraphDofEnabledBeforeTargetSwitch = this.getConfiguredPostEffectBackend() === "frameGraph"
+            ? this.mmdManager.dofEnabled
+            : null;
+        const frameGraphSsaoEnabledBeforeTargetSwitch = this.getConfiguredPostEffectBackend() === "frameGraph"
+            ? this.mmdManager.postEffectSsaoEnabled
+            : null;
+        const restoreFrameGraphPostEffectEnabledStates = (): boolean => {
+            let changed = false;
+            if (frameGraphDofEnabledBeforeTargetSwitch === null) return false;
+            if (this.mmdManager.dofEnabled !== frameGraphDofEnabledBeforeTargetSwitch) {
+                this.mmdManager.dofEnabled = frameGraphDofEnabledBeforeTargetSwitch;
+                changed = true;
+            }
+            if (
+                frameGraphSsaoEnabledBeforeTargetSwitch !== null &&
+                this.mmdManager.postEffectSsaoEnabled !== frameGraphSsaoEnabledBeforeTargetSwitch
+            ) {
+                this.mmdManager.postEffectSsaoEnabled = frameGraphSsaoEnabledBeforeTargetSwitch;
+                changed = true;
+            }
+            return changed;
+        };
+
         if (value === MODEL_INFO_CAMERA_SELECT_VALUE) {
             this.mmdManager.setTimelineTarget("camera");
             this.applyCameraSelectionUI();
             this.refreshModelSelector();
             this.refreshShaderPanel();
+            if (restoreFrameGraphPostEffectEnabledStates()) {
+                this.refreshShaderPanel();
+            }
             if (showToast) {
                 this.showToast("Timeline target: Camera", "success");
             }
@@ -2136,6 +3378,7 @@ export class UIController {
         this.applyActiveModelSelectionUI();
         this.refreshModelSelector();
         this.refreshShaderPanel();
+        restoreFrameGraphPostEffectEnabledStates();
         if (showToast) {
             this.showToast("Active model switched", "success");
         }
@@ -2143,7 +3386,7 @@ export class UIController {
 
     private installRangeNumberInputs(root: ParentNode = document): void {
         const sliders = root.querySelectorAll<HTMLInputElement>(
-            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].accessory-slider, input[type="range"].effect-slider',
+            'input[type="range"].bone-slider, .morph-slider-row input[type="range"], input[type="range"].cam-slider, input[type="range"].light-slider, input[type="range"].effect-slider, input[type="range"].effect-layer-control-slider',
         );
 
         for (const slider of sliders) {
@@ -2166,7 +3409,7 @@ export class UIController {
             numberInput.step = this.formatRangeDisplayValue(slider, slider.step && slider.step !== "any" ? Number(slider.step) : 1);
             numberInput.disabled = slider.disabled;
 
-            const labelText = parent.querySelector("label, .light-label, .effect-label, .accessory-label")?.textContent?.trim();
+            const labelText = parent.querySelector("label, .light-label, .effect-label, .effect-layer-control-label, .accessory-label")?.textContent?.trim();
             if (labelText) {
                 numberInput.setAttribute("aria-label", `${labelText} value`);
             }
@@ -2197,12 +3440,9 @@ export class UIController {
 
             slider.addEventListener("input", () => this.syncRangeNumberInput(slider));
             slider.addEventListener("change", () => this.syncRangeNumberInput(slider));
-            numberInput.addEventListener("change", commit);
-            numberInput.addEventListener("blur", commit);
-            numberInput.addEventListener("keydown", (event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                numberInput.blur();
+            installEnterCommitNumberInput(numberInput, {
+                commit,
+                revert: () => this.syncRangeNumberInput(slider),
             });
 
             this.syncRangeNumberInput(slider);
@@ -2304,7 +3544,7 @@ export class UIController {
             !this.shaderApplyAllButton ||
             !this.shaderResetButton ||
             !this.shaderPanelNote ||
-            !this.shaderMaterialList
+            !this.postEffectPanelHost
         ) {
             return;
         }
@@ -2322,18 +3562,27 @@ export class UIController {
         this.shaderPanelNote.textContent = t("shader.camera.note");
         const lutPresetOptionsHtml = this.lutPanelController?.buildPresetOptionsHtml() ?? "";
 
-        this.shaderMaterialList.innerHTML = `
+        this.postEffectPanelHost.innerHTML = `
             <div class="shader-postfx-controls">
-                <div class="effect-row" style="display:none;">
+                <div class="effect-row">
+                    <span class="effect-label">Backend</span>
+                    <select data-postfx-select="backend" class="effect-select" title="Post effect backend を切り替える。変更後に自動で再読み込みします">
+                        <option value="classic">Classic</option>
+                        <option value="frameGraph">Frame Graph PoC</option>
+                    </select>
+                    <span data-postfx-val="backend" class="effect-value">Classic</span>
+                </div>
+                <div class="effect-row" data-postfx-classic-only="color">
                     <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
                     <input data-postfx="contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
                     <span data-postfx-val="contrast" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row">
+                <div class="effect-row" data-postfx-classic-only="color">
                     <span class="effect-label" data-i18n="shader.postfx.gamma">Gamma</span>
                     <input data-postfx="gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
                     <span data-postfx-val="gamma" class="effect-value">0%</span>
                 </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row" style="display:none;">
                     <span class="effect-label" data-i18n="shader.postfx.exposure">Exposure</span>
                     <input data-postfx="exposure" type="range" class="effect-slider" min="0" max="8" value="1" step="0.01">
@@ -2418,22 +3667,8 @@ export class UIController {
                     <input data-postfx="edge-width" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
                     <span data-postfx-val="edge-width" class="effect-value">0%</span>
                 </div>
-                <div class="effect-row effect-row-check">
-                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
-                    <label class="effect-check-wrap">
-                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
-                        <span data-i18n="status.on">On</span>
-                    </label>
-                    <select data-postfx-select="lut-preset" class="effect-select">
-                        ${lutPresetOptionsHtml}
-                    </select>
-                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
                 </div>
-                <div class="effect-row">
-                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
-                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
-                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
-                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row effect-row-toggle">
                     <span class="effect-label" data-i18n="shader.postfx.bloom">Bloom</span>
                     <label class="effect-check-wrap">
@@ -2457,6 +3692,8 @@ export class UIController {
                     <input data-postfx="bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="100" step="1">
                     <span data-postfx-val="bloom-kernel" class="effect-value">100</span>
                 </div>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="classic">
                 <div class="effect-row">
                     <span class="effect-label" data-i18n="shader.postfx.toneMap">ToneMap</span>
                     <select data-postfx-select="tone-mapping-type" class="effect-select">
@@ -2467,11 +3704,188 @@ export class UIController {
                     </select>
                     <span data-postfx-val="tone-mapping" class="effect-value" data-i18n="option.none">None</span>
                 </div>
+                </div>
+                <div class="effect-row effect-row-check">
+                    <span class="effect-label" data-i18n="shader.postfx.lut">LUT</span>
+                    <label class="effect-check-wrap">
+                        <input data-postfx-check="lut" type="checkbox" class="effect-check">
+                        <span data-i18n="status.on">On</span>
+                    </label>
+                    <select data-postfx-select="lut-preset" class="effect-select">
+                        ${lutPresetOptionsHtml}
+                    </select>
+                    <span data-postfx-val="lut" class="effect-value" data-i18n="status.off">OFF</span>
+                </div>
+                <div class="effect-row">
+                    <span class="effect-label" data-i18n="shader.postfx.lutIntensity">LUTInt</span>
+                    <input data-postfx="lut-intensity" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
+                    <span data-postfx-val="lut-intensity" class="effect-value">1.00</span>
+                </div>
+                <div class="postfx-backend-panel" data-postfx-backend-panel="frameGraph" hidden>
+                    <div class="postfx-backend-note">
+                        <strong>Frame Graph</strong><br>
+                        Experimental backend. Gamma / Contrast, LUT, SSAO2, DoF, Bloom, Sharpen, Grain, Chroma, Vignette, EdgeBlur, Distortion, and FXAA are available above.
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">Pass</span>
+                        <span class="effect-value">Image</span>
+                        <span class="effect-value">SSR</span>
+                        <span class="effect-value">SSAO</span>
+                        <span class="effect-value">DoF</span>
+                        <span class="effect-value">Bloom</span>
+                        <span class="effect-value">LUT</span>
+                        <span class="effect-value">Color</span>
+                        <span class="effect-value">Sharp</span>
+                        <span class="effect-value">Grain</span>
+                        <span class="effect-value">Chroma</span>
+                        <span class="effect-value">Vignette</span>
+                        <span class="effect-value">EdgeBlur</span>
+                        <span class="effect-value">Distort</span>
+                        <span class="effect-value">FXAA</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.contrast">Contrast</span>
+                        <input data-postfx="frame-graph-contrast" type="range" class="effect-slider" min="-100" max="200" value="0" step="1">
+                        <span data-postfx-val="frame-graph-contrast" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.gamma">Gamma</span>
+                        <input data-postfx="frame-graph-gamma" type="range" class="effect-slider" min="-100" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-gamma" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.chroma">Chroma</span>
+                        <input data-postfx="frame-graph-chromatic-aberration" type="range" class="effect-slider" min="0" max="200" value="0" step="1">
+                        <span data-postfx-val="frame-graph-chromatic-aberration" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.vignette">Vignette</span>
+                        <input data-postfx="frame-graph-vignette-weight" type="range" class="effect-slider" min="0" max="4" value="0" step="0.01">
+                        <span data-postfx-val="frame-graph-vignette-weight" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.edgeBlur">EdgeBlur</span>
+                        <input data-postfx="frame-graph-edge-blur" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-edge-blur" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.distortion">Distortion</span>
+                        <input data-postfx="frame-graph-distortion-influence" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-distortion-influence" class="effect-value">0%</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.grain">Grain</span>
+                        <input data-postfx="frame-graph-grain-intensity" type="range" class="effect-slider" min="0" max="100" value="0" step="1">
+                        <span data-postfx-val="frame-graph-grain-intensity" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.sharpen">Sharpen</span>
+                        <input data-postfx="frame-graph-sharpen-edge" type="range" class="effect-slider" min="0" max="400" value="0" step="1">
+                        <span data-postfx-val="frame-graph-sharpen-edge" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label">SSR</span>
+                        <label class="effect-check-wrap">
+                            <input data-frame-graph-ssr-check="enabled" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-frame-graph-ssr-val="enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">SSR Strength</span>
+                        <input data-frame-graph-ssr="strength" type="range" class="effect-slider" min="0" max="200" value="30" step="1">
+                        <span data-frame-graph-ssr-val="strength" class="effect-value">0.30</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label">SSAO</span>
+                        <label class="effect-check-wrap">
+                            <input data-frame-graph-ssao-check="enabled" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-frame-graph-ssao-val="enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">SSAO Strength</span>
+                        <input data-frame-graph-ssao="strength" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
+                        <span data-frame-graph-ssao-val="strength" class="effect-value">1.00</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">SSAO Radius</span>
+                        <input data-frame-graph-ssao="radius" type="range" class="effect-slider" min="1" max="100" value="100" step="1">
+                        <span data-frame-graph-ssao-val="radius" class="effect-value">1.00</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label">DoF</span>
+                        <label class="effect-check-wrap">
+                            <input data-frame-graph-dof-check="enabled" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-frame-graph-dof-val="enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoFフォーカス</span>
+                        <input data-frame-graph-dof="focus" type="range" class="effect-slider" min="100" max="300000" value="55000" step="100">
+                        <span data-frame-graph-dof-val="focus" class="effect-value">55.0m</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF中心モデル</span>
+                        <select data-frame-graph-dof-select="target-model" class="effect-select"></select>
+                        <span class="effect-value"></span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF中心ボーン</span>
+                        <select data-frame-graph-dof-select="target-bone" class="effect-select"></select>
+                        <span class="effect-value"></span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">前後補正</span>
+                        <input data-frame-graph-dof="focus-offset" type="range" class="effect-slider" min="-20000" max="20000" value="0" step="100">
+                        <span data-frame-graph-dof-val="focus-offset" class="effect-value">0.0m</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF F-stop</span>
+                        <input data-frame-graph-dof="fstop" type="range" class="effect-slider" min="0" max="400" value="280" step="1">
+                        <span data-frame-graph-dof-val="fstop" class="effect-value">2.80</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF lens</span>
+                        <input data-frame-graph-dof="lens-size" type="range" class="effect-slider" min="1" max="4096" value="30" step="1">
+                        <span data-frame-graph-dof-val="lens-size" class="effect-value">30</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label">DoF focal</span>
+                        <input data-frame-graph-dof="focal-length" type="range" class="effect-slider" min="1" max="300" value="50" step="1">
+                        <span data-frame-graph-dof-val="focal-length" class="effect-value">50</span>
+                    </div>
+                    <div class="effect-row effect-row-toggle">
+                        <span class="effect-label" data-i18n="shader.postfx.bloom">Bloom</span>
+                        <label class="effect-check-wrap">
+                            <input data-postfx-check="frame-graph-bloom" type="checkbox" class="effect-check">
+                            <span data-i18n="status.on">On</span>
+                        </label>
+                        <span data-postfx-val="frame-graph-bloom-enabled" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="label.bloomStrength">Bloom・ｽ・ｽ・ｽx</span>
+                        <input data-postfx="frame-graph-bloom-weight" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                        <span data-postfx-val="frame-graph-bloom-weight" class="effect-value" data-i18n="status.off">OFF</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.bloomThreshold">BloomTh</span>
+                        <input data-postfx="frame-graph-bloom-threshold" type="range" class="effect-slider" min="0" max="200" value="100" step="1">
+                        <span data-postfx-val="frame-graph-bloom-threshold" class="effect-value">1.00</span>
+                    </div>
+                    <div class="effect-row">
+                        <span class="effect-label" data-i18n="shader.postfx.bloomKernel">BloomK</span>
+                        <input data-postfx="frame-graph-bloom-kernel" type="range" class="effect-slider" min="1" max="256" value="100" step="1">
+                        <span data-postfx-val="frame-graph-bloom-kernel" class="effect-value">100</span>
+                    </div>
+                </div>
             </div>
         `;
-        applyI18nToDom(this.shaderMaterialList);
+        applyI18nToDom(this.postEffectPanelHost);
 
-        const postFxControls = this.shaderMaterialList.querySelector<HTMLElement>(".shader-postfx-controls");
+        const postFxControls = this.postEffectPanelHost.querySelector<HTMLElement>(".shader-postfx-controls");
         if (
             !postFxControls ||
             !this.colorPostFxController?.connect(postFxControls) ||
@@ -2484,7 +3898,13 @@ export class UIController {
             return;
         }
         this.dofPanelController?.attachControlsToShaderPanel(postFxControls);
+        this.installPostEffectBackendControls(postFxControls);
+        this.installFrameGraphLensEffectControls(postFxControls);
+        this.installFrameGraphSsrControls(postFxControls);
+        this.installFrameGraphSsaoControls(postFxControls);
+        this.installFrameGraphDofControls(postFxControls);
         this.installRangeNumberInputs(postFxControls);
+        this.refreshFrameGraphPostAddUi();
     }
 
     private applyLocalizedUiState(): void {
@@ -2495,6 +3915,8 @@ export class UIController {
         this.exportUiController?.refreshLocalizedState();
         this.fogPanelController?.refresh();
         this.syncToolbarLocaleSelect();
+        this.syncRuntimeModeSelect();
+        this.syncPostEffectBackendSelect();
     }
 
     private getSelectedToolbarLocale(): UiLocale | null {
@@ -2514,6 +3936,1718 @@ export class UIController {
         const locale = getLocale();
         if (this.toolbarLocaleSelect.value !== locale) {
             this.toolbarLocaleSelect.value = locale;
+        }
+    }
+
+    private getSelectedRuntimeMode(): "classic" | "wasm" | null {
+        if (!this.toolbarRuntimeModeSelect) return null;
+        const value = this.toolbarRuntimeModeSelect.value;
+        return value === "classic" || value === "wasm" ? value : null;
+    }
+
+    private getConfiguredRuntimeMode(): "classic" | "wasm" {
+        try {
+            return localStorage.getItem(UIController.RUNTIME_MODE_STORAGE_KEY) === "wasm" ? "wasm" : "classic";
+        } catch {
+            return "classic";
+        }
+    }
+
+    private syncRuntimeModeSelect(): void {
+        if (!this.toolbarRuntimeModeSelect) return;
+        const mode = this.getConfiguredRuntimeMode();
+        if (this.toolbarRuntimeModeSelect.value !== mode) {
+            this.toolbarRuntimeModeSelect.value = mode;
+        }
+    }
+
+    private getSelectedPostEffectBackend(select: HTMLSelectElement | null = null): PostEffectBackend | null {
+        const targetSelect = select ?? this.getPostEffectBackendSelectElement();
+        if (!targetSelect) return null;
+        const value = targetSelect.value;
+        if (value === "classic" || value === "frameGraph") {
+            return value;
+        }
+        return null;
+    }
+
+    private getConfiguredPostEffectBackend(): PostEffectBackend {
+        try {
+            return normalizePostEffectBackend(localStorage.getItem(POST_EFFECT_BACKEND_STORAGE_KEY));
+        } catch {
+            return "classic";
+        }
+    }
+
+    private syncPostEffectBackendSelect(): void {
+        const select = this.getPostEffectBackendSelectElement();
+        const backend = this.getConfiguredPostEffectBackend();
+        if (select && select.value !== backend) {
+            select.value = backend;
+        }
+        this.applyPostEffectBackendPanelState(
+            select?.closest(".shader-postfx-controls") as HTMLElement | null,
+            backend,
+        );
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private getPostEffectBackendSelectElement(): HTMLSelectElement | null {
+        return this.postEffectPanelHost?.querySelector<HTMLSelectElement>('select[data-postfx-select="backend"]') ?? null;
+    }
+
+    private setupPostEffectAddControls(): void {
+        this.postEffectAddButton?.addEventListener("click", () => {
+            if (!this.postEffectAddPanel) return;
+            this.postEffectAddPanel.hidden = !this.postEffectAddPanel.hidden;
+            this.refreshFrameGraphPostAddUi();
+        });
+
+        this.postEffectEnableFrameGraphButton?.addEventListener("click", () => {
+            this.switchPostEffectBackendToFrameGraph();
+        });
+
+        this.postEffectAddPanel?.querySelectorAll<HTMLButtonElement>("[data-effect-add-post]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const effectId = button.dataset.effectAddPost ?? "";
+                if (!this.isFrameGraphPostAddEffectId(effectId)) return;
+                this.addFrameGraphPostEffect(effectId);
+            });
+        });
+
+        this.postEffectStackList?.addEventListener("change", (event) => {
+            const input = event.target instanceof HTMLInputElement ? event.target : null;
+            const effectId = input?.dataset.effectStackToggle ?? "";
+            if (!input || !this.isFrameGraphPostAddEffectId(effectId)) return;
+            this.setFrameGraphPostEffectEnabled(effectId, input.checked);
+        });
+
+        this.postEffectStackList?.addEventListener("input", (event) => {
+            const control = event.target instanceof HTMLInputElement ? event.target : null;
+            if (!control?.dataset.effectStackControl) return;
+            this.applyFrameGraphPostStackControl(control, false);
+        });
+
+        this.postEffectStackList?.addEventListener("change", (event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const control = target?.closest<HTMLInputElement | HTMLSelectElement>("[data-effect-stack-control]") ?? null;
+            if (!control) return;
+            this.applyFrameGraphPostStackControl(control, true);
+        });
+
+        this.postEffectStackList?.addEventListener("click", (event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const detailTarget = target?.closest<HTMLButtonElement>("[data-effect-stack-item]") ?? null;
+            if (detailTarget) {
+                const effectId = detailTarget.dataset.effectStackItem ?? "";
+                if (!this.isFrameGraphPostAddEffectId(effectId)) return;
+                this.expandedFrameGraphPostEffectId = this.expandedFrameGraphPostEffectId === effectId ? null : effectId;
+                this.refreshFrameGraphPostAddUi();
+                return;
+            }
+
+            const actionButton = target?.closest<HTMLButtonElement>("[data-effect-stack-action]") ?? null;
+            if (actionButton) {
+                const action = actionButton.dataset.effectStackAction ?? "";
+                void this.applyFrameGraphPostStackAction(action);
+            }
+        });
+
+        this.postEffectStackList?.addEventListener("dragstart", (event) => {
+            const target = event.target instanceof Element ? event.target : null;
+            const handle = target?.closest<HTMLElement>("[data-effect-stack-drag]") ?? null;
+            const effectId = handle?.dataset.effectStackDrag ?? "";
+            if (!handle || !this.isFrameGraphPostAddEffectId(effectId)) {
+                return;
+            }
+            this.draggingFrameGraphPostEffectId = effectId;
+            event.dataTransfer?.setData("text/plain", effectId);
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+            }
+        });
+
+        this.postEffectStackList?.addEventListener("dragover", (event) => {
+            if (!this.draggingFrameGraphPostEffectId) return;
+            const row = this.getFrameGraphPostStackDropRow(event.target);
+            if (!row) return;
+            event.preventDefault();
+            if (event.dataTransfer) {
+                event.dataTransfer.dropEffect = "move";
+            }
+            this.updateFrameGraphPostStackDropMarker(row, event);
+        });
+
+        this.postEffectStackList?.addEventListener("drop", (event) => {
+            const draggedId = this.draggingFrameGraphPostEffectId
+                ?? event.dataTransfer?.getData("text/plain")
+                ?? "";
+            const row = this.getFrameGraphPostStackDropRow(event.target);
+            const targetId = row?.dataset.effectStackRow ?? "";
+            if (!this.isFrameGraphPostAddEffectId(draggedId) || !this.isFrameGraphPostAddEffectId(targetId)) {
+                this.clearFrameGraphPostStackDropMarkers();
+                return;
+            }
+            event.preventDefault();
+            const placement = this.getFrameGraphPostStackDropPlacement(row, event);
+            this.moveFrameGraphPostEffectToDisplayPosition(draggedId, targetId, placement);
+            this.clearFrameGraphPostStackDropMarkers();
+            this.draggingFrameGraphPostEffectId = null;
+        });
+
+        this.postEffectStackList?.addEventListener("dragend", () => {
+            this.draggingFrameGraphPostEffectId = null;
+            this.clearFrameGraphPostStackDropMarkers();
+        });
+
+        this.postEffectStackList?.addEventListener("dragleave", (event) => {
+            const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+            if (related && this.postEffectStackList?.contains(related)) {
+                return;
+            }
+            this.clearFrameGraphPostStackDropMarkers();
+        });
+
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private isFrameGraphPostAddEffectId(value: string): value is FrameGraphPostAddEffectId {
+        return isFrameGraphPostEffectId(value);
+    }
+
+    private switchPostEffectBackendToFrameGraph(): void {
+        if (this.getConfiguredPostEffectBackend() === "frameGraph") {
+            this.refreshFrameGraphPostAddUi();
+            return;
+        }
+
+        try {
+            localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, "frameGraph");
+        } catch {
+            this.showToast("FrameGraph backend setting could not be saved", "error");
+            return;
+        }
+
+        this.setStatus("PostFX: Frame Graph / reloading...", true);
+        window.setTimeout(() => {
+            window.location.reload();
+        }, 120);
+    }
+
+    private applyFrameGraphPostEffectDefaultValues(effectId: FrameGraphPostAddEffectId): void {
+        switch (effectId) {
+            case "bloom":
+                this.mmdManager.postEffectBloomWeight = Math.max(this.mmdManager.postEffectBloomWeight, 1);
+                this.mmdManager.postEffectBloomThreshold = Math.max(this.mmdManager.postEffectBloomThreshold, 1);
+                this.mmdManager.postEffectBloomKernel = Math.max(this.mmdManager.postEffectBloomKernel, 128);
+                break;
+            case "dof":
+                this.mmdManager.dofFStop = Math.min(this.mmdManager.dofFStop, 2.8);
+                this.mmdManager.dofLensSize = Math.max(this.mmdManager.dofLensSize, 30);
+                this.mmdManager.dofFocalLength = Math.max(this.mmdManager.dofFocalLength, 50);
+                break;
+            case "luminous":
+                this.mmdManager.postEffectGlowIntensity = Math.max(this.mmdManager.postEffectGlowIntensity, 1.0);
+                this.mmdManager.postEffectGlowThreshold = Math.min(this.mmdManager.postEffectGlowThreshold, 0.15);
+                this.mmdManager.postEffectGlowKernel = Math.max(this.mmdManager.postEffectGlowKernel, 48);
+                break;
+            case "lut":
+                this.mmdManager.postEffectLutIntensity = Math.max(this.mmdManager.postEffectLutIntensity, 1);
+                break;
+            case "ssao":
+                this.mmdManager.postEffectSsaoStrength = Math.max(this.mmdManager.postEffectSsaoStrength, 1);
+                this.mmdManager.postEffectSsaoRadius = Math.max(this.mmdManager.postEffectSsaoRadius, 1);
+                this.mmdManager.postEffectSsaoFadeEnd = Math.min(this.mmdManager.postEffectSsaoFadeEnd, 100);
+                this.mmdManager.postEffectSsaoDebugView = false;
+                break;
+            case "offsetShadow":
+                this.mmdManager.postEffectOffsetShadowStrength = 0.35;
+                this.mmdManager.postEffectOffsetShadowOffsetX = 0;
+                this.mmdManager.postEffectOffsetShadowOffsetY = -30;
+                this.mmdManager.postEffectOffsetShadowDepthBias = 0.1;
+                this.mmdManager.postEffectOffsetShadowMaxDepth = 2;
+                this.mmdManager.postEffectOffsetShadowDepthScale = 1;
+                this.mmdManager.postEffectOffsetShadowThickness = 1;
+                this.mmdManager.postEffectOffsetShadowSoftness = 0;
+                this.mmdManager.postEffectOffsetShadowNormalInfluence = 0;
+                break;
+            case "offsetHighlight":
+                this.mmdManager.postEffectOffsetHighlightStrength = 1;
+                this.mmdManager.postEffectOffsetHighlightOffsetX = 0;
+                this.mmdManager.postEffectOffsetHighlightOffsetY = -100;
+                this.mmdManager.postEffectOffsetHighlightDepthThreshold = 0.1;
+                this.mmdManager.postEffectOffsetHighlightNormalThreshold = 0;
+                this.mmdManager.postEffectOffsetHighlightThickness = 1;
+                this.mmdManager.postEffectOffsetHighlightSoftness = 0;
+                this.mmdManager.postEffectOffsetHighlightDepthScale = 1;
+                this.mmdManager.setPostEffectOffsetHighlightColor(1, 1, 1);
+                this.mmdManager.postEffectOffsetHighlightDebugView = false;
+                break;
+            case "ssr":
+                this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 1);
+                this.mmdManager.postEffectSsrStep = Math.max(this.mmdManager.postEffectSsrStep, 4);
+                break;
+            case "vignette":
+                this.mmdManager.postEffectVignetteWeight = Math.max(this.mmdManager.postEffectVignetteWeight, 2);
+                break;
+            case "grain":
+                this.mmdManager.postEffectGrainIntensity = Math.max(this.mmdManager.postEffectGrainIntensity, 50);
+                break;
+            case "sharpen":
+                this.mmdManager.postEffectSharpenEdge = Math.max(this.mmdManager.postEffectSharpenEdge, 2);
+                break;
+            case "chromatic":
+                this.mmdManager.postEffectChromaticAberration = Math.max(this.mmdManager.postEffectChromaticAberration, 100);
+                break;
+            case "edgeBlur":
+                this.mmdManager.dofLensEdgeBlur = Math.max(this.mmdManager.dofLensEdgeBlur, 0.5);
+                break;
+            case "distortion":
+                this.mmdManager.dofLensDistortionInfluence = Math.max(this.mmdManager.dofLensDistortionInfluence, 0.5);
+                break;
+        }
+    }
+
+    private addFrameGraphPostEffect(effectId: FrameGraphPostAddEffectId): void {
+        if (this.getConfiguredPostEffectBackend() !== "frameGraph") {
+            this.showToast("FrameGraph backend is required", "info");
+            this.refreshFrameGraphPostAddUi();
+            return;
+        }
+
+        const wasActive = this.mmdManager.isFrameGraphPostEffectActive(effectId);
+        const previousStackIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()];
+        this.applyFrameGraphPostEffectDefaultValues(effectId);
+        switch (effectId) {
+            case "bloom":
+                this.mmdManager.postEffectBloomEnabled = true;
+                break;
+            case "dof":
+                this.mmdManager.dofEnabled = true;
+                break;
+            case "luminous":
+                this.mmdManager.postEffectGlowEnabled = true;
+                break;
+            case "lut":
+                this.mmdManager.postEffectLutEnabled = true;
+                break;
+            case "ssao":
+                this.mmdManager.postEffectSsaoEnabled = true;
+                break;
+            case "offsetShadow":
+                this.mmdManager.postEffectOffsetShadowEnabled = true;
+                break;
+            case "offsetHighlight":
+                this.mmdManager.postEffectOffsetHighlightEnabled = true;
+                break;
+            case "ssr":
+                this.mmdManager.postEffectSsrEnabled = true;
+                break;
+            case "vignette":
+                this.mmdManager.postEffectVignetteEnabled = true;
+                break;
+            case "grain":
+                break;
+            case "sharpen":
+                break;
+            case "chromatic":
+                break;
+            case "edgeBlur":
+                break;
+            case "distortion":
+                break;
+        }
+        const nextStackIds = addFrameGraphPostEffectId(previousStackIds, effectId);
+        const stackChanged = !this.areFrameGraphPostEffectIdsEqual(previousStackIds, nextStackIds);
+        this.mmdManager.setFrameGraphPostEffectStackIds(nextStackIds);
+        if (!stackChanged && wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
+            this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();
+        }
+
+        this.expandedFrameGraphPostEffectId = effectId;
+        this.refreshFrameGraphPostAddUi();
+        this.showToast(`FrameGraph effect added: ${this.getFrameGraphPostEffectLabel(effectId)}`, "success");
+    }
+
+    private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
+        const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
+        if (!effect) return;
+        effect.setActive(this.mmdManager, enabled);
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private getFrameGraphPostEffectLabel(effectId: FrameGraphPostAddEffectId): string {
+        return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.label ?? effectId;
+    }
+
+    private areFrameGraphPostEffectIdsEqual(
+        a: readonly FrameGraphPostEffectId[],
+        b: readonly FrameGraphPostEffectId[],
+    ): boolean {
+        return a.length === b.length && a.every((id, index) => id === b[index]);
+    }
+
+    private getFrameGraphPostStackDropRow(target: EventTarget | null): HTMLElement | null {
+        return target instanceof Element
+            ? target.closest<HTMLElement>("[data-effect-stack-row]")
+            : null;
+    }
+
+    private getFrameGraphPostStackDropPlacement(row: HTMLElement, event: DragEvent): "before" | "after" {
+        const rect = row.getBoundingClientRect();
+        return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    }
+
+    private updateFrameGraphPostStackDropMarker(row: HTMLElement, event: DragEvent): void {
+        const placement = this.getFrameGraphPostStackDropPlacement(row, event);
+        this.clearFrameGraphPostStackDropMarkers();
+        row.classList.toggle("effect-layer-placeholder--drop-before", placement === "before");
+        row.classList.toggle("effect-layer-placeholder--drop-after", placement === "after");
+    }
+
+    private clearFrameGraphPostStackDropMarkers(): void {
+        this.postEffectStackList
+            ?.querySelectorAll<HTMLElement>(".effect-layer-placeholder--drop-before, .effect-layer-placeholder--drop-after")
+            .forEach((row) => {
+                row.classList.remove("effect-layer-placeholder--drop-before", "effect-layer-placeholder--drop-after");
+            });
+    }
+
+    private moveFrameGraphPostEffectToDisplayPosition(
+        draggedId: FrameGraphPostAddEffectId,
+        targetId: FrameGraphPostAddEffectId,
+        placement: "before" | "after",
+    ): void {
+        if (draggedId === targetId) {
+            return;
+        }
+        const displayIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()].reverse();
+        const withoutDragged = displayIds.filter((id) => id !== draggedId);
+        const targetIndex = withoutDragged.indexOf(targetId);
+        if (targetIndex < 0) {
+            return;
+        }
+        const insertIndex = placement === "before" ? targetIndex : targetIndex + 1;
+        withoutDragged.splice(insertIndex, 0, draggedId);
+        this.mmdManager.setFrameGraphPostEffectStackIds(withoutDragged.reverse());
+        this.expandedFrameGraphPostEffectId = draggedId;
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private refreshFrameGraphPostAddUi(): void {
+        const backend = this.getConfiguredPostEffectBackend();
+        const frameGraphReady = backend === "frameGraph";
+
+        this.postEffectEnableFrameGraphButton?.toggleAttribute("hidden", frameGraphReady);
+        this.postEffectAddPanel?.querySelectorAll<HTMLButtonElement>("[data-effect-add-post]").forEach((button) => {
+            const effectId = button.dataset.effectAddPost ?? "";
+            const known = this.isFrameGraphPostAddEffectId(effectId);
+            button.disabled = !frameGraphReady || (known && this.isFrameGraphPostEffectInStack(effectId));
+        });
+
+        this.renderFrameGraphPostStack(frameGraphReady);
+        if (this.postEffectStackList) {
+            this.installRangeNumberInputs(this.postEffectStackList);
+        }
+    }
+
+    private isFrameGraphPostEffectActive(effectId: FrameGraphPostAddEffectId): boolean {
+        return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.isActive(this.mmdManager) ?? false;
+    }
+
+    private isFrameGraphPostEffectInStack(effectId: FrameGraphPostAddEffectId): boolean {
+        return this.mmdManager.getFrameGraphPostEffectStackIds().includes(effectId)
+            || this.isFrameGraphPostEffectActive(effectId);
+    }
+
+    private escapeEffectStackHtml(value: string): string {
+        return value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    private toEffectStackHexColor(color: { r: number; g: number; b: number }): string {
+        const toHex = (value: number): string => {
+            const byte = Math.max(0, Math.min(255, Math.round(value * 255)));
+            return byte.toString(16).padStart(2, "0");
+        };
+        return `#${toHex(color.r)}${toHex(color.g)}${toHex(color.b)}`;
+    }
+
+    private readEffectStackHexColor(value: string): { r: number; g: number; b: number } | null {
+        const match = /^#([0-9a-f]{6})$/i.exec(value);
+        if (!match) return null;
+        const hex = match[1];
+        return {
+            r: Number.parseInt(hex.slice(0, 2), 16) / 255,
+            g: Number.parseInt(hex.slice(2, 4), 16) / 255,
+            b: Number.parseInt(hex.slice(4, 6), 16) / 255,
+        };
+    }
+
+    private getFrameGraphPostStackLutSourceLabel(): string {
+        switch (this.mmdManager.postEffectLutSourceMode) {
+            case "external-absolute":
+                return "External";
+            case "project-relative":
+                return "Project";
+            default:
+                return "Builtin";
+        }
+    }
+
+    private buildFrameGraphPostStackLutPresetOptionsHtml(): string {
+        const currentValue = this.mmdManager.postEffectLutSourceMode === "builtin"
+            ? this.mmdManager.postEffectLutPreset
+            : (this.mmdManager.postEffectLutExternalPath ?? this.mmdManager.postEffectLutPreset);
+        const optionsHtml = this.lutPanelController?.buildPresetOptionsHtml()
+            ?? FRAME_GRAPH_STACK_LUT_PRESETS
+                .map((preset) => `<option value="${preset.id}">${preset.label}</option>`)
+                .join("");
+
+        return optionsHtml.replace(
+            `value="${this.escapeEffectStackHtml(currentValue)}"`,
+            `value="${this.escapeEffectStackHtml(currentValue)}" selected`,
+        );
+    }
+
+    private getFrameGraphPostStackLutPresetLabel(): string {
+        if (this.mmdManager.postEffectLutSourceMode !== "builtin" && this.mmdManager.postEffectLutExternalPath) {
+            return this.getBaseNameForRenderer(this.mmdManager.postEffectLutExternalPath);
+        }
+        return this.mmdManager.postEffectLutPreset;
+    }
+
+    private getFrameGraphPostStackDofResolvedModel(): { index: number; name: string; path: string } | null {
+        const targetPath = this.mmdManager.getDofFocusTargetModelPath();
+        if (!targetPath) return null;
+        return this.mmdManager.getLoadedModels().find((model) => model.path === targetPath) ?? null;
+    }
+
+    private buildFrameGraphPostStackDofTargetModelOptionsHtml(): string {
+        const resolvedModel = this.getFrameGraphPostStackDofResolvedModel();
+        const cameraSelected = resolvedModel === null ? " selected" : "";
+        const modelOptions = this.mmdManager.getLoadedModels()
+            .map((model) => {
+                const selected = resolvedModel?.index === model.index ? " selected" : "";
+                return `<option value="${model.index}"${selected}>${this.escapeEffectStackHtml(model.name)}</option>`;
+            })
+            .join("");
+        return `<option value=""${cameraSelected}>Camera</option>${modelOptions}`;
+    }
+
+    private buildFrameGraphPostStackDofTargetBoneOptionsHtml(): string {
+        const resolvedModel = this.getFrameGraphPostStackDofResolvedModel();
+        if (!resolvedModel) {
+            return `<option value="" selected>${this.escapeEffectStackHtml(t("option.none"))}</option>`;
+        }
+
+        const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
+        const boneNames = this.mmdManager.getModelBoneNames(resolvedModel.index);
+        if (boneNames.length === 0) {
+            return `<option value="" selected>${this.escapeEffectStackHtml(t("option.none"))}</option>`;
+        }
+        const selectedBoneName = targetBoneName && boneNames.includes(targetBoneName)
+            ? targetBoneName
+            : this.mmdManager.getPreferredDofFocusBoneName(resolvedModel.index);
+
+        return boneNames.map((boneName) => {
+            const selected = boneName === selectedBoneName ? " selected" : "";
+            return `<option value="${this.escapeEffectStackHtml(boneName)}"${selected}>${this.escapeEffectStackHtml(boneName)}</option>`;
+        }).join("");
+    }
+
+    private getFrameGraphPostStackDofTargetModelLabel(): string {
+        return this.getFrameGraphPostStackDofResolvedModel()?.name ?? "Camera";
+    }
+
+    private getFrameGraphPostStackDofTargetBoneLabel(): string {
+        return this.mmdManager.getDofFocusTargetBoneName() ?? "-";
+    }
+
+    private async applyFrameGraphPostStackAction(action: string): Promise<void> {
+        if (action !== "lutFile") return;
+        await this.lutPanelController?.chooseExternalLut();
+        this.mmdManager.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(
+            this.mmdManager.getFrameGraphPostEffectStackIds(),
+            "lut",
+        ));
+        this.expandedFrameGraphPostEffectId = "lut";
+        this.refreshFrameGraphPostAddUi();
+    }
+
+    private renderFrameGraphPostEffectDetails(effect: FrameGraphPostAddEffect): string {
+        const rows: string[] = [];
+        const controlsDisabled = !effect.isActive(this.mmdManager);
+        const disabledAttr = controlsDisabled ? " disabled" : "";
+        const range = (
+            field: string,
+            label: string,
+            min: number,
+            max: number,
+            value: number,
+            displayValue: string,
+            step = 1,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <input class="effect-layer-control-slider" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-effect-stack-control="${field}"${disabledAttr}>
+                <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
+            </div>
+        `;
+        const select = (
+            field: string,
+            label: string,
+            optionsHtml: string,
+            displayValue: string,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <select class="effect-layer-control-select" data-effect-stack-control="${field}"${disabledAttr}>
+                    ${optionsHtml}
+                </select>
+                <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
+            </div>
+        `;
+        const button = (
+            action: string,
+            label: string,
+            buttonLabel: string,
+            displayValue: string,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <button class="effect-layer-control-button" type="button" data-effect-stack-action="${action}"${disabledAttr}>${buttonLabel}</button>
+                <span class="effect-layer-control-value" data-effect-stack-value="${action}">${displayValue}</span>
+            </div>
+        `;
+        const color = (
+            field: string,
+            label: string,
+            value: string,
+            displayValue: string,
+        ): string => `
+            <div class="effect-layer-control-row">
+                <span class="effect-layer-control-label">${label}</span>
+                <input class="effect-layer-control-color" type="color" value="${value}" data-effect-stack-control="${field}"${disabledAttr}>
+                <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
+            </div>
+        `;
+
+        switch (effect.id) {
+            case "bloom": {
+                const bloomColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectBloomColor());
+                rows.push(
+                    color("bloomColor", "Color", bloomColor, bloomColor),
+                    range("bloomWeight", "Weight", 0, 200, Math.round(this.mmdManager.postEffectBloomWeight * 100), this.mmdManager.postEffectBloomWeight.toFixed(2)),
+                    range("bloomThreshold", "Threshold", 0, 200, Math.round(this.mmdManager.postEffectBloomThreshold * 100), this.mmdManager.postEffectBloomThreshold.toFixed(2)),
+                    range("bloomKernel", "Kernel", 1, 256, Math.round(this.mmdManager.postEffectBloomKernel), String(Math.round(this.mmdManager.postEffectBloomKernel))),
+                );
+                break;
+            }
+            case "luminous":
+                rows.push(
+                    range("luminousIntensity", "Intensity", 0, 200, Math.round(this.mmdManager.postEffectGlowIntensity * 100), this.mmdManager.postEffectGlowIntensity.toFixed(2)),
+                    range("luminousThreshold", "Threshold", 0, 150, Math.round(this.mmdManager.postEffectGlowThreshold * 100), this.mmdManager.postEffectGlowThreshold.toFixed(2)),
+                    range("luminousRadius", "Radius", 1, 128, Math.round(this.mmdManager.postEffectGlowKernel), `${Math.round(this.mmdManager.postEffectGlowKernel)}px`),
+                );
+                break;
+            case "dof":
+                rows.push(
+                    select(
+                        "dofTargetModel",
+                        "Target",
+                        this.buildFrameGraphPostStackDofTargetModelOptionsHtml(),
+                        this.getFrameGraphPostStackDofTargetModelLabel(),
+                    ),
+                    select(
+                        "dofTargetBone",
+                        "Bone",
+                        this.buildFrameGraphPostStackDofTargetBoneOptionsHtml(),
+                        this.getFrameGraphPostStackDofTargetBoneLabel(),
+                    ),
+                    range("dofFocus", "Focus", 100, 300000, Math.round(this.mmdManager.dofFocusDistanceMm), `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`, 100),
+                    range("dofFocusOffset", "Offset", -20000, 20000, Math.round(this.mmdManager.dofAutoFocusNearOffsetMm), `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`, 100),
+                    range("dofFStop", "F-Stop", 0, 400, Math.round(this.mmdManager.dofFStop * 100), this.mmdManager.dofFStop.toFixed(2)),
+                    range("dofLensSize", "Lens", 1, 4096, Math.round(this.mmdManager.dofLensSize), String(Math.round(this.mmdManager.dofLensSize))),
+                    range("dofFocalLength", "Focal", 1, 300, Math.round(this.mmdManager.dofFocalLength), String(Math.round(this.mmdManager.dofFocalLength))),
+                );
+                break;
+            case "lut":
+                rows.push(select(
+                    "lutSource",
+                    "Source",
+                    `
+                        <option value="builtin"${this.mmdManager.postEffectLutSourceMode === "builtin" ? " selected" : ""}>Builtin</option>
+                        <option value="external-absolute"${this.mmdManager.postEffectLutSourceMode === "external-absolute" ? " selected" : ""}>External</option>
+                        <option value="project-relative"${this.mmdManager.postEffectLutSourceMode === "project-relative" ? " selected" : ""}>Project</option>
+                    `,
+                    this.getFrameGraphPostStackLutSourceLabel(),
+                ));
+                rows.push(button(
+                    "lutFile",
+                    "File",
+                    "Load",
+                    this.mmdManager.postEffectLutExternalPath
+                        ? this.getBaseNameForRenderer(this.mmdManager.postEffectLutExternalPath)
+                        : t("option.none"),
+                ));
+                rows.push(`
+                    <div class="effect-layer-control-row">
+                        <span class="effect-layer-control-label">Preset</span>
+                        <select class="effect-layer-control-select" data-effect-stack-control="lutPreset"${disabledAttr}>
+                            ${this.buildFrameGraphPostStackLutPresetOptionsHtml()}
+                        </select>
+                        <span class="effect-layer-control-value" data-effect-stack-value="lutPreset">${this.getFrameGraphPostStackLutPresetLabel()}</span>
+                    </div>
+                `);
+                rows.push(range("lutIntensity", "Intensity", 0, 100, Math.round(this.mmdManager.postEffectLutIntensity * 100), this.mmdManager.postEffectLutIntensity.toFixed(2)));
+                break;
+            case "ssao":
+                rows.push(
+                    range("ssaoStrength", "Strength", 0, 100, Math.round(this.mmdManager.postEffectSsaoStrength * 100), this.mmdManager.postEffectSsaoStrength.toFixed(2)),
+                    range("ssaoRadius", "Radius", 1, 100, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
+                    range("ssaoFadeEnd", "FadeEnd", 4, 200, Math.round(this.mmdManager.postEffectSsaoFadeEnd), `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`),
+                );
+                break;
+            case "offsetShadow": {
+                const offsetShadowColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
+                rows.push(
+                    color("offsetShadowColor", "Color", offsetShadowColor, offsetShadowColor),
+                    range("offsetShadowStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowStrength * 100), this.mmdManager.postEffectOffsetShadowStrength.toFixed(2)),
+                    range("offsetShadowOffsetX", "Offset X", -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetX), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`),
+                    range("offsetShadowOffsetY", "Offset Y", -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetY), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`),
+                    range("offsetShadowDepthBias", "Min Depth", 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowDepthBias * 1000), this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3)),
+                    range("offsetShadowMaxDepth", "Max Depth", 1, 4000, Math.round(this.mmdManager.postEffectOffsetShadowMaxDepth * 1000), this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3)),
+                    range("offsetShadowDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetShadowDepthScale * 100), this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2)),
+                    range("offsetShadowThickness", "Thickness", 1, 100, Math.round(this.mmdManager.postEffectOffsetShadowThickness * 100), this.mmdManager.postEffectOffsetShadowThickness.toFixed(2)),
+                    range("offsetShadowSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetShadowSoftness * 10), `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`),
+                );
+                break;
+            }
+            case "offsetHighlight": {
+                const offsetHighlightColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetHighlightColor());
+                rows.push(
+                    color("offsetHighlightColor", "Color", offsetHighlightColor, offsetHighlightColor),
+                    range("offsetHighlightStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightStrength * 100), this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2)),
+                    range("offsetHighlightOffsetX", "Offset X", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`),
+                    range("offsetHighlightOffsetY", "Offset Y", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`),
+                    range("offsetHighlightDepthThreshold", "Depth Edge", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightDepthThreshold * 1000), this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3)),
+                    range("offsetHighlightDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightDepthScale * 100), this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2)),
+                    range("offsetHighlightThickness", "Thickness", 1, 300, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
+                    range("offsetHighlightSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetHighlightSoftness * 10), `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`),
+                );
+                break;
+            }
+            case "ssr":
+                rows.push(
+                    range("ssrStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectSsrStrength * 100), this.mmdManager.postEffectSsrStrength.toFixed(2)),
+                    range("ssrStep", "Step", 1, 8, Math.round(this.mmdManager.postEffectSsrStep), String(Math.round(this.mmdManager.postEffectSsrStep))),
+                );
+                break;
+            case "vignette":
+                rows.push(range("vignetteWeight", "Weight", 0, 400, Math.round(this.mmdManager.postEffectVignetteWeight * 100), this.mmdManager.postEffectVignetteWeight.toFixed(2)));
+                break;
+            case "grain":
+                rows.push(range("grainIntensity", "Intensity", 0, 100, Math.round(this.mmdManager.postEffectGrainIntensity), `${Math.round(this.mmdManager.postEffectGrainIntensity)}%`));
+                break;
+            case "sharpen":
+                rows.push(range("sharpenEdge", "Edge", 0, 400, Math.round(this.mmdManager.postEffectSharpenEdge * 100), this.mmdManager.postEffectSharpenEdge.toFixed(2)));
+                break;
+            case "chromatic":
+                rows.push(range("chromaticAberration", "Offset", 0, 200, Math.round(this.mmdManager.postEffectChromaticAberration), `${Math.round(this.mmdManager.postEffectChromaticAberration)}px`));
+                break;
+            case "edgeBlur":
+                rows.push(range("edgeBlur", "Strength", 0, 100, Math.round(this.mmdManager.dofLensEdgeBlur * 100), `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`));
+                break;
+            case "distortion":
+                rows.push(range("distortion", "Influence", 0, 100, Math.round(this.mmdManager.dofLensDistortionInfluence * 100), `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`));
+                break;
+        }
+
+        return `
+            <div class="effect-layer-detail-controls">
+                ${rows.join("")}
+            </div>
+        `;
+    }
+
+    private applyFrameGraphPostStackControl(control: HTMLInputElement | HTMLSelectElement, commit: boolean): void {
+        const field = control.dataset.effectStackControl ?? "";
+        const rawValue = control instanceof HTMLInputElement && control.type !== "color"
+            ? Number(control.value)
+            : control.value;
+        const effectId = this.getFrameGraphPostEffectIdForControlField(field);
+        const wasActive = effectId ? this.mmdManager.isFrameGraphPostEffectActive(effectId) : false;
+
+        switch (field) {
+            case "bloomWeight":
+                this.mmdManager.postEffectBloomWeight = Number(rawValue) / 100;
+                break;
+            case "bloomThreshold":
+                this.mmdManager.postEffectBloomThreshold = Number(rawValue) / 100;
+                break;
+            case "bloomKernel":
+                this.mmdManager.postEffectBloomKernel = Number(rawValue);
+                break;
+            case "bloomColor": {
+                const colorValue = this.readEffectStackHexColor(String(rawValue));
+                if (!colorValue) return;
+                this.mmdManager.setPostEffectBloomColor(colorValue.r, colorValue.g, colorValue.b);
+                break;
+            }
+            case "luminousIntensity":
+                this.mmdManager.postEffectGlowIntensity = Number(rawValue) / 100;
+                break;
+            case "luminousThreshold":
+                this.mmdManager.postEffectGlowThreshold = Number(rawValue) / 100;
+                break;
+            case "luminousRadius":
+                this.mmdManager.postEffectGlowKernel = Number(rawValue);
+                break;
+            case "luminousGlareCount":
+                this.mmdManager.postEffectGlowGlareCount = Number(rawValue);
+                break;
+            case "luminousGlareLength":
+                this.mmdManager.postEffectGlowGlareLength = Number(rawValue);
+                break;
+            case "luminousGlareAngle":
+                this.mmdManager.postEffectGlowGlareAngle = Number(rawValue);
+                break;
+            case "luminousGlarePower":
+                this.mmdManager.postEffectGlowGlarePower = Number(rawValue) / 100;
+                break;
+            case "dofFocus":
+                if (!this.mmdManager.dofAutoFocusEnabled) {
+                    this.mmdManager.dofFocusDistanceMm = Number(rawValue);
+                }
+                break;
+            case "dofTargetModel": {
+                const modelIndex = Number.parseInt(String(rawValue), 10);
+                if (Number.isNaN(modelIndex)) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                } else {
+                    this.mmdManager.setDofFocusTargetByIndex(
+                        modelIndex,
+                        this.mmdManager.getPreferredDofFocusBoneName(modelIndex),
+                    );
+                }
+                break;
+            }
+            case "dofTargetBone": {
+                const resolvedModel = this.getFrameGraphPostStackDofResolvedModel();
+                if (!resolvedModel) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                } else {
+                    this.mmdManager.setDofFocusTargetByIndex(resolvedModel.index, String(rawValue) || null);
+                }
+                break;
+            }
+            case "dofFocusOffset":
+                this.mmdManager.dofAutoFocusNearOffsetMm = Number(rawValue);
+                break;
+            case "dofFStop":
+                this.mmdManager.dofFStop = Number(rawValue) / 100;
+                break;
+            case "dofLensSize":
+                this.mmdManager.dofLensSize = Number(rawValue);
+                break;
+            case "dofFocalLength":
+                this.mmdManager.dofFocalLength = Number(rawValue);
+                break;
+            case "lutPreset":
+                if (this.mmdManager.postEffectLutSourceMode === "builtin") {
+                    this.mmdManager.postEffectLutPreset = String(rawValue);
+                }
+                break;
+            case "lutSource":
+                if (rawValue === "builtin" || rawValue === "external-absolute" || rawValue === "project-relative") {
+                    this.mmdManager.postEffectLutSourceMode = rawValue;
+                }
+                if (rawValue === "builtin") {
+                    this.mmdManager.setPostEffectExternalLut(null, null, null);
+                }
+                break;
+            case "lutIntensity":
+                this.mmdManager.postEffectLutIntensity = Number(rawValue) / 100;
+                break;
+            case "ssaoStrength":
+                this.mmdManager.postEffectSsaoStrength = Number(rawValue) / 100;
+                this.mmdManager.postEffectSsaoDebugView = false;
+                break;
+            case "ssaoRadius":
+                this.mmdManager.postEffectSsaoRadius = Number(rawValue) / 100;
+                break;
+            case "ssaoFadeEnd":
+                this.mmdManager.postEffectSsaoFadeEnd = Number(rawValue);
+                break;
+            case "offsetShadowStrength":
+                this.mmdManager.postEffectOffsetShadowStrength = Number(rawValue) / 100;
+                break;
+            case "offsetShadowOffsetX":
+                this.mmdManager.postEffectOffsetShadowOffsetX = Number(rawValue);
+                break;
+            case "offsetShadowOffsetY":
+                this.mmdManager.postEffectOffsetShadowOffsetY = Number(rawValue);
+                break;
+            case "offsetShadowDepthBias":
+                this.mmdManager.postEffectOffsetShadowDepthBias = Number(rawValue) / 1000;
+                break;
+            case "offsetShadowMaxDepth":
+                this.mmdManager.postEffectOffsetShadowMaxDepth = Number(rawValue) / 1000;
+                break;
+            case "offsetShadowDepthScale":
+                this.mmdManager.postEffectOffsetShadowDepthScale = Number(rawValue) / 100;
+                break;
+            case "offsetShadowThickness":
+                this.mmdManager.postEffectOffsetShadowThickness = Number(rawValue) / 100;
+                break;
+            case "offsetShadowSoftness":
+                this.mmdManager.postEffectOffsetShadowSoftness = Number(rawValue) / 10;
+                break;
+            case "offsetShadowNormalInfluence":
+                this.mmdManager.postEffectOffsetShadowNormalInfluence = Number(rawValue) / 100;
+                break;
+            case "offsetShadowColor": {
+                const colorValue = this.readEffectStackHexColor(String(rawValue));
+                if (!colorValue) return;
+                this.mmdManager.setPostEffectOffsetShadowColor(colorValue.r, colorValue.g, colorValue.b);
+                break;
+            }
+            case "offsetHighlightStrength":
+                this.mmdManager.postEffectOffsetHighlightStrength = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightOffsetX":
+                this.mmdManager.postEffectOffsetHighlightOffsetX = Number(rawValue);
+                break;
+            case "offsetHighlightOffsetY":
+                this.mmdManager.postEffectOffsetHighlightOffsetY = Number(rawValue);
+                break;
+            case "offsetHighlightDepthThreshold":
+                this.mmdManager.postEffectOffsetHighlightDepthThreshold = Number(rawValue) / 1000;
+                break;
+            case "offsetHighlightNormalThreshold":
+                this.mmdManager.postEffectOffsetHighlightNormalThreshold = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightDepthScale":
+                this.mmdManager.postEffectOffsetHighlightDepthScale = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightThickness":
+                this.mmdManager.postEffectOffsetHighlightThickness = Number(rawValue) / 100;
+                break;
+            case "offsetHighlightSoftness":
+                this.mmdManager.postEffectOffsetHighlightSoftness = Number(rawValue) / 10;
+                break;
+            case "offsetHighlightColor": {
+                const colorValue = this.readEffectStackHexColor(String(rawValue));
+                if (!colorValue) return;
+                this.mmdManager.setPostEffectOffsetHighlightColor(colorValue.r, colorValue.g, colorValue.b);
+                break;
+            }
+            case "ssrStrength":
+                this.mmdManager.postEffectSsrStrength = Number(rawValue) / 100;
+                break;
+            case "ssrStep":
+                this.mmdManager.postEffectSsrStep = Number(rawValue);
+                break;
+            case "vignetteWeight":
+                this.mmdManager.postEffectVignetteWeight = Number(rawValue) / 100;
+                this.mmdManager.postEffectVignetteEnabled = this.mmdManager.postEffectVignetteWeight > 0.0001;
+                break;
+            case "grainIntensity":
+                this.mmdManager.postEffectGrainIntensity = Number(rawValue);
+                break;
+            case "sharpenEdge":
+                this.mmdManager.postEffectSharpenEdge = Number(rawValue) / 100;
+                break;
+            case "chromaticAberration":
+                this.mmdManager.postEffectChromaticAberration = Number(rawValue);
+                break;
+            case "edgeBlur":
+                this.mmdManager.dofLensEdgeBlur = Number(rawValue) / 100;
+                break;
+            case "distortion":
+                this.mmdManager.dofLensDistortionInfluence = Number(rawValue) / 100;
+                break;
+            default:
+                return;
+        }
+
+        this.updateFrameGraphPostStackControlValue(control);
+        if (commit && effectId && wasActive !== this.mmdManager.isFrameGraphPostEffectActive(effectId)) {
+            this.mmdManager.refreshFrameGraphPostEffectsBackendForStackStateChange();
+        }
+        if (commit) {
+            this.refreshFrameGraphPostAddUi();
+        }
+    }
+
+    private getFrameGraphPostEffectIdForControlField(field: string): FrameGraphPostAddEffectId | null {
+        switch (field) {
+            case "bloomWeight":
+            case "bloomThreshold":
+            case "bloomKernel":
+            case "bloomColor":
+                return "bloom";
+            case "luminousIntensity":
+            case "luminousThreshold":
+            case "luminousRadius":
+            case "luminousGlareCount":
+            case "luminousGlareLength":
+            case "luminousGlareAngle":
+            case "luminousGlarePower":
+                return "luminous";
+            case "dofFocus":
+            case "dofTargetModel":
+            case "dofTargetBone":
+            case "dofFocusOffset":
+            case "dofFStop":
+            case "dofLensSize":
+            case "dofFocalLength":
+                return "dof";
+            case "lutPreset":
+            case "lutSource":
+            case "lutIntensity":
+                return "lut";
+            case "ssaoStrength":
+            case "ssaoRadius":
+            case "ssaoFadeEnd":
+                return "ssao";
+            case "offsetShadowStrength":
+            case "offsetShadowOffsetX":
+            case "offsetShadowOffsetY":
+            case "offsetShadowDepthBias":
+            case "offsetShadowMaxDepth":
+            case "offsetShadowDepthScale":
+            case "offsetShadowThickness":
+            case "offsetShadowSoftness":
+            case "offsetShadowNormalInfluence":
+            case "offsetShadowColor":
+                return "offsetShadow";
+            case "offsetHighlightStrength":
+            case "offsetHighlightOffsetX":
+            case "offsetHighlightOffsetY":
+            case "offsetHighlightDepthThreshold":
+            case "offsetHighlightNormalThreshold":
+            case "offsetHighlightDepthScale":
+            case "offsetHighlightThickness":
+            case "offsetHighlightSoftness":
+            case "offsetHighlightColor":
+                return "offsetHighlight";
+            case "ssrStrength":
+            case "ssrStep":
+                return "ssr";
+            case "vignetteWeight":
+                return "vignette";
+            case "grainIntensity":
+                return "grain";
+            case "sharpenEdge":
+                return "sharpen";
+            case "chromaticAberration":
+                return "chromatic";
+            case "edgeBlur":
+                return "edgeBlur";
+            case "distortion":
+                return "distortion";
+            default:
+                return null;
+        }
+    }
+
+    private updateFrameGraphPostStackControlValue(control: HTMLInputElement | HTMLSelectElement): void {
+        const field = control.dataset.effectStackControl ?? "";
+        const root = control.closest<HTMLElement>(".effect-layer-details");
+        const valueElement = root?.querySelector<HTMLElement>(`[data-effect-stack-value="${field}"]`) ?? null;
+        if (!valueElement) return;
+
+        switch (field) {
+            case "bloomWeight":
+                valueElement.textContent = this.mmdManager.postEffectBloomWeight.toFixed(2);
+                break;
+            case "bloomThreshold":
+                valueElement.textContent = this.mmdManager.postEffectBloomThreshold.toFixed(2);
+                break;
+            case "bloomKernel":
+                valueElement.textContent = String(Math.round(this.mmdManager.postEffectBloomKernel));
+                break;
+            case "bloomColor":
+                valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectBloomColor());
+                break;
+            case "luminousIntensity":
+                valueElement.textContent = this.mmdManager.postEffectGlowIntensity.toFixed(2);
+                break;
+            case "luminousThreshold":
+                valueElement.textContent = this.mmdManager.postEffectGlowThreshold.toFixed(2);
+                break;
+            case "luminousRadius":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowKernel)}px`;
+                break;
+            case "luminousGlareCount":
+                valueElement.textContent = String(Math.round(this.mmdManager.postEffectGlowGlareCount));
+                break;
+            case "luminousGlareLength":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowGlareLength)}px`;
+                break;
+            case "luminousGlareAngle":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGlowGlareAngle)}deg`;
+                break;
+            case "luminousGlarePower":
+                valueElement.textContent = this.mmdManager.postEffectGlowGlarePower.toFixed(2);
+                break;
+            case "dofFocus":
+                valueElement.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
+                break;
+            case "dofTargetModel":
+                valueElement.textContent = this.getFrameGraphPostStackDofTargetModelLabel();
+                break;
+            case "dofTargetBone":
+                valueElement.textContent = this.getFrameGraphPostStackDofTargetBoneLabel();
+                break;
+            case "dofFocusOffset":
+                valueElement.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
+                break;
+            case "dofFStop":
+                valueElement.textContent = this.mmdManager.dofFStop.toFixed(2);
+                break;
+            case "dofLensSize":
+                valueElement.textContent = String(Math.round(this.mmdManager.dofLensSize));
+                break;
+            case "dofFocalLength":
+                valueElement.textContent = String(Math.round(this.mmdManager.dofFocalLength));
+                break;
+            case "lutPreset":
+                valueElement.textContent = this.getFrameGraphPostStackLutPresetLabel();
+                break;
+            case "lutSource":
+                valueElement.textContent = this.getFrameGraphPostStackLutSourceLabel();
+                break;
+            case "lutIntensity":
+                valueElement.textContent = this.mmdManager.postEffectLutIntensity.toFixed(2);
+                break;
+            case "ssaoStrength":
+                valueElement.textContent = this.mmdManager.postEffectSsaoStrength.toFixed(2);
+                break;
+            case "ssaoRadius":
+                valueElement.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
+                break;
+            case "ssaoFadeEnd":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`;
+                break;
+            case "offsetShadowStrength":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowStrength.toFixed(2);
+                break;
+            case "offsetShadowOffsetX":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`;
+                break;
+            case "offsetShadowOffsetY":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`;
+                break;
+            case "offsetShadowDepthBias":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3);
+                break;
+            case "offsetShadowMaxDepth":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3);
+                break;
+            case "offsetShadowDepthScale":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2);
+                break;
+            case "offsetShadowThickness":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowThickness.toFixed(2);
+                break;
+            case "offsetShadowSoftness":
+                valueElement.textContent = `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`;
+                break;
+            case "offsetShadowNormalInfluence":
+                valueElement.textContent = this.mmdManager.postEffectOffsetShadowNormalInfluence.toFixed(2);
+                break;
+            case "offsetShadowColor":
+                valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
+                break;
+            case "offsetHighlightStrength":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2);
+                break;
+            case "offsetHighlightOffsetX":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`;
+                break;
+            case "offsetHighlightOffsetY":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`;
+                break;
+            case "offsetHighlightDepthThreshold":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3);
+                break;
+            case "offsetHighlightNormalThreshold":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightNormalThreshold.toFixed(2);
+                break;
+            case "offsetHighlightDepthScale":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2);
+                break;
+            case "offsetHighlightThickness":
+                valueElement.textContent = this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2);
+                break;
+            case "offsetHighlightSoftness":
+                valueElement.textContent = `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`;
+                break;
+            case "offsetHighlightColor":
+                valueElement.textContent = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetHighlightColor());
+                break;
+            case "ssrStrength":
+                valueElement.textContent = this.mmdManager.postEffectSsrStrength.toFixed(2);
+                break;
+            case "ssrStep":
+                valueElement.textContent = String(Math.round(this.mmdManager.postEffectSsrStep));
+                break;
+            case "vignetteWeight":
+                valueElement.textContent = this.mmdManager.postEffectVignetteWeight.toFixed(2);
+                break;
+            case "grainIntensity":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectGrainIntensity)}%`;
+                break;
+            case "sharpenEdge":
+                valueElement.textContent = this.mmdManager.postEffectSharpenEdge.toFixed(2);
+                break;
+            case "chromaticAberration":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectChromaticAberration)}px`;
+                break;
+            case "edgeBlur":
+                valueElement.textContent = `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`;
+                break;
+            case "distortion":
+                valueElement.textContent = `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`;
+                break;
+        }
+    }
+
+    private renderFrameGraphPostStack(frameGraphReady: boolean): void {
+        if (!this.postEffectStackList) return;
+        const stackEffectIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()];
+        const effectById = new Map(FRAME_GRAPH_POST_ADD_EFFECTS.map((effect) => [effect.id, effect]));
+        const stackEffects = stackEffectIds
+            .map((id) => effectById.get(id) ?? null)
+            .filter((effect): effect is FrameGraphPostAddEffect => effect !== null)
+            .reverse();
+
+        if (!frameGraphReady) {
+            this.expandedFrameGraphPostEffectId = null;
+            this.postEffectStackList.innerHTML = `
+                <div class="effect-layer-placeholder">
+                    <span class="effect-layer-name">FrameGraph backend</span>
+                    <span class="effect-status-badge effect-status-badge--experimental">classic</span>
+                </div>
+            `;
+            return;
+        }
+
+        if (stackEffects.length === 0) {
+            this.expandedFrameGraphPostEffectId = null;
+            this.postEffectStackList.innerHTML = `<div class="panel-empty-state">No post stack</div>`;
+            return;
+        }
+
+        if (!stackEffects.some((effect) => effect.id === this.expandedFrameGraphPostEffectId)) {
+            this.expandedFrameGraphPostEffectId = null;
+        }
+
+        this.postEffectStackList.innerHTML = stackEffects.map((effect) => {
+            const expanded = effect.id === this.expandedFrameGraphPostEffectId;
+            const enabled = effect.isActive(this.mmdManager);
+            return `
+                <div class="effect-layer-placeholder effect-layer-placeholder--active effect-layer-placeholder--check${enabled ? "" : " effect-layer-placeholder--off"}" data-effect-stack-row="${effect.id}">
+                    <div class="effect-layer-header">
+                        <label class="effect-layer-check-wrap" title="表示 / 非表示">
+                            <input class="effect-layer-check" type="checkbox" data-effect-stack-toggle="${effect.id}"${enabled ? " checked" : ""}>
+                        </label>
+                        <button class="effect-layer-main" type="button" data-effect-stack-item="${effect.id}" aria-expanded="${expanded ? "true" : "false"}">
+                            <span class="effect-layer-name">${effect.label}</span>
+                        </button>
+                        <button class="effect-layer-drag-handle" type="button" draggable="true" data-effect-stack-drag="${effect.id}" title="ドラッグして並べ替え" aria-label="ドラッグして並べ替え">
+                            <span class="effect-layer-drag-grip" aria-hidden="true"></span>
+                        </button>
+                    </div>
+                    ${expanded ? `
+                        <div class="effect-layer-details">
+                            ${this.renderFrameGraphPostEffectDetails(effect)}
+                        </div>
+                    ` : ""}
+                </div>
+            `;
+        }).join("");
+    }
+
+    private installPostEffectBackendControls(root: HTMLElement): void {
+        const select = root.querySelector<HTMLSelectElement>('select[data-postfx-select="backend"]');
+        if (!select) return;
+
+        this.syncPostEffectBackendSelect();
+        select.addEventListener("change", () => {
+            const nextBackend = this.getSelectedPostEffectBackend(select);
+            if (!nextBackend) {
+                this.syncPostEffectBackendSelect();
+                return;
+            }
+            const currentBackend = this.getConfiguredPostEffectBackend();
+            this.applyPostEffectBackendPanelState(root, nextBackend);
+            if (nextBackend === currentBackend) return;
+
+            try {
+                localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, nextBackend);
+            } catch {
+                this.syncPostEffectBackendSelect();
+                this.showToast("PostFX backend setting could not be saved", "error");
+                return;
+            }
+
+            this.setStatus(`PostFX: ${nextBackend === "frameGraph" ? "Frame Graph PoC" : "Classic"} / reloading...`, true);
+            window.setTimeout(() => {
+                window.location.reload();
+            }, 120);
+        });
+    }
+
+    private installFrameGraphLensEffectControls(root: HTMLElement): void {
+        const vignetteSlider = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-vignette-weight"]');
+        const vignetteValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-vignette-weight"]');
+        const edgeBlurSlider = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-edge-blur"]');
+        const edgeBlurValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-edge-blur"]');
+        const distortionSlider = root.querySelector<HTMLInputElement>('input[data-postfx="frame-graph-distortion-influence"]');
+        const distortionValue = root.querySelector<HTMLElement>('span[data-postfx-val="frame-graph-distortion-influence"]');
+        if (
+            !vignetteSlider ||
+            !vignetteValue ||
+            !edgeBlurSlider ||
+            !edgeBlurValue ||
+            !distortionSlider ||
+            !distortionValue
+        ) {
+            return;
+        }
+
+        const refreshValues = (): void => {
+            const vignetteWeight = this.mmdManager.postEffectVignetteEnabled
+                ? this.mmdManager.postEffectVignetteWeight
+                : 0;
+            vignetteSlider.value = Math.max(0, Math.min(4, vignetteWeight)).toFixed(2);
+            vignetteValue.textContent = vignetteWeight > 0.0001
+                ? this.mmdManager.postEffectVignetteWeight.toFixed(2)
+                : t("status.off");
+
+            const edgeBlurPercent = Math.max(0, Math.min(100, Math.round(this.mmdManager.dofLensEdgeBlur * 100)));
+            edgeBlurSlider.value = String(edgeBlurPercent);
+            edgeBlurValue.textContent = edgeBlurPercent > 0
+                ? `${edgeBlurPercent}%`
+                : t("status.off");
+
+            const distortionPercent = Math.max(0, Math.min(100, Math.round(this.mmdManager.dofLensDistortionInfluence * 100)));
+            distortionSlider.value = String(distortionPercent);
+            const currentDistortionPercent = Math.round(this.mmdManager.dofLensDistortion * 100);
+            distortionValue.textContent = distortionPercent > 0
+                ? `${distortionPercent}% (${currentDistortionPercent}%)`
+                : t("status.off");
+        };
+
+        vignetteSlider.addEventListener("input", () => {
+            const weight = Number(vignetteSlider.value);
+            this.mmdManager.postEffectVignetteWeight = weight;
+            this.mmdManager.postEffectVignetteEnabled = weight > 0.0001;
+            refreshValues();
+        });
+        edgeBlurSlider.addEventListener("input", () => {
+            this.mmdManager.dofLensEdgeBlur = Number(edgeBlurSlider.value) / 100;
+            refreshValues();
+        });
+        distortionSlider.addEventListener("input", () => {
+            this.mmdManager.dofLensDistortionInfluence = Number(distortionSlider.value) / 100;
+            refreshValues();
+        });
+        refreshValues();
+    }
+
+    private installFrameGraphSsaoControls(root: HTMLElement): void {
+        const enabledInput = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssao-check="enabled"]');
+        const enabledValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssao-val="enabled"]');
+        const strengthSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssao="strength"]');
+        const strengthValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssao-val="strength"]');
+        const radiusSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssao="radius"]');
+        const radiusValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssao-val="radius"]');
+        if (!enabledInput || !enabledValue || !strengthSlider || !strengthValue || !radiusSlider || !radiusValue) {
+            return;
+        }
+
+        if (this.getConfiguredPostEffectBackend() === "frameGraph") {
+            this.mmdManager.postEffectSsaoStrength = Math.min(this.mmdManager.postEffectSsaoStrength, 1);
+            this.mmdManager.postEffectSsaoRadius = Math.min(this.mmdManager.postEffectSsaoRadius, 1);
+        }
+
+        const refreshValues = (): void => {
+            const enabled = this.mmdManager.postEffectSsaoEnabled;
+            enabledInput.checked = enabled;
+            enabledValue.textContent = enabled ? t("status.on") : t("status.off");
+            strengthSlider.value = String(Math.max(0, Math.min(100, Math.round(this.mmdManager.postEffectSsaoStrength * 100))));
+            strengthValue.textContent = enabled
+                ? this.mmdManager.postEffectSsaoStrength.toFixed(2)
+                : t("status.off");
+            radiusSlider.value = String(Math.max(1, Math.min(100, Math.round(this.mmdManager.postEffectSsaoRadius * 100))));
+            radiusValue.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
+            strengthSlider.disabled = !enabled;
+            radiusSlider.disabled = !enabled;
+        };
+
+        const applyValues = (): void => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphSsao",
+                source: "panel",
+                enabled: enabledInput.checked,
+                strengthPercent: Number(strengthSlider.value),
+                radiusPercent: Number(radiusSlider.value),
+            })) {
+                this.mmdManager.postEffectSsaoEnabled = enabledInput.checked;
+                this.mmdManager.postEffectSsaoStrength = Number(strengthSlider.value) / 100;
+                this.mmdManager.postEffectSsaoRadius = Number(radiusSlider.value) / 100;
+                this.mmdManager.postEffectSsaoDebugView = false;
+            }
+            refreshValues();
+        };
+
+        enabledInput.addEventListener("change", applyValues);
+        strengthSlider.addEventListener("input", applyValues);
+        radiusSlider.addEventListener("input", applyValues);
+        refreshValues();
+    }
+
+    private installFrameGraphSsrControls(root: HTMLElement): void {
+        const enabledInput = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssr-check="enabled"]');
+        const enabledValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssr-val="enabled"]');
+        const strengthSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-ssr="strength"]');
+        const strengthValue = root.querySelector<HTMLElement>('span[data-frame-graph-ssr-val="strength"]');
+        if (!enabledInput || !enabledValue || !strengthSlider || !strengthValue) {
+            return;
+        }
+
+        const refreshValues = (): void => {
+            const enabled = this.mmdManager.postEffectSsrEnabled;
+            enabledInput.checked = enabled;
+            enabledValue.textContent = enabled ? t("status.on") : t("status.off");
+            strengthSlider.value = String(Math.max(0, Math.min(200, Math.round(this.mmdManager.postEffectSsrStrength * 100))));
+            strengthValue.textContent = enabled
+                ? this.mmdManager.postEffectSsrStrength.toFixed(2)
+                : t("status.off");
+            strengthSlider.disabled = !enabled;
+        };
+
+        const applyValues = (): void => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphSsr",
+                source: "panel",
+                enabled: enabledInput.checked,
+                strengthPercent: Number(strengthSlider.value),
+            })) {
+                this.mmdManager.postEffectSsrEnabled = enabledInput.checked;
+                this.mmdManager.postEffectSsrStrength = Number(strengthSlider.value) / 100;
+            }
+            refreshValues();
+        };
+
+        enabledInput.addEventListener("change", applyValues);
+        strengthSlider.addEventListener("input", applyValues);
+        refreshValues();
+    }
+
+    private installFrameGraphDofControls(root: HTMLElement): void {
+        const enabledInput = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof-check="enabled"]');
+        const enabledValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="enabled"]');
+        const focusSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="focus"]');
+        const focusValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="focus"]');
+        const targetModelSelect = root.querySelector<HTMLSelectElement>('select[data-frame-graph-dof-select="target-model"]');
+        const targetBoneSelect = root.querySelector<HTMLSelectElement>('select[data-frame-graph-dof-select="target-bone"]');
+        const focusOffsetSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="focus-offset"]');
+        const focusOffsetValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="focus-offset"]');
+        const fStopSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="fstop"]');
+        const fStopValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="fstop"]');
+        const lensSizeSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="lens-size"]');
+        const lensSizeValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="lens-size"]');
+        const focalLengthSlider = root.querySelector<HTMLInputElement>('input[data-frame-graph-dof="focal-length"]');
+        const focalLengthValue = root.querySelector<HTMLElement>('span[data-frame-graph-dof-val="focal-length"]');
+        if (
+            !enabledInput ||
+            !enabledValue ||
+            !focusSlider ||
+            !focusValue ||
+            !targetModelSelect ||
+            !targetBoneSelect ||
+            !focusOffsetSlider ||
+            !focusOffsetValue ||
+            !fStopSlider ||
+            !fStopValue ||
+            !lensSizeSlider ||
+            !lensSizeValue ||
+            !focalLengthSlider ||
+            !focalLengthValue
+        ) {
+            return;
+        }
+
+        const refreshTargetControls = (): void => {
+            const loadedModels = this.mmdManager.getLoadedModels();
+            const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
+            const targetBoneName = this.mmdManager.getDofFocusTargetBoneName();
+            const resolvedModel = targetModelPath
+                ? loadedModels.find((model) => model.path === targetModelPath) ?? null
+                : null;
+
+            targetModelSelect.innerHTML = "";
+            const cameraOption = document.createElement("option");
+            cameraOption.value = "";
+            cameraOption.textContent = t("option.cameraTarget");
+            targetModelSelect.appendChild(cameraOption);
+            for (const model of loadedModels) {
+                const option = document.createElement("option");
+                option.value = String(model.index);
+                option.textContent = model.name;
+                targetModelSelect.appendChild(option);
+            }
+            targetModelSelect.value = resolvedModel ? String(resolvedModel.index) : "";
+            targetModelSelect.disabled = loadedModels.length === 0;
+
+            targetBoneSelect.innerHTML = "";
+            if (!resolvedModel) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = t("option.none");
+                targetBoneSelect.appendChild(option);
+                targetBoneSelect.value = "";
+                targetBoneSelect.disabled = true;
+                return;
+            }
+            const boneNames = this.mmdManager.getModelBoneNames(resolvedModel.index);
+            for (const boneName of boneNames) {
+                const option = document.createElement("option");
+                option.value = boneName;
+                option.textContent = boneName;
+                targetBoneSelect.appendChild(option);
+            }
+            const fallbackBoneName =
+                targetBoneName && boneNames.includes(targetBoneName)
+                    ? targetBoneName
+                    : this.mmdManager.getPreferredDofFocusBoneName(resolvedModel.index);
+            targetBoneSelect.value = fallbackBoneName && boneNames.includes(fallbackBoneName)
+                ? fallbackBoneName
+                : (boneNames[0] ?? "");
+            targetBoneSelect.disabled = boneNames.length === 0;
+        };
+
+        const refreshValues = (): void => {
+            enabledInput.checked = this.mmdManager.dofEnabled;
+            enabledValue.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
+            focusSlider.value = String(Math.round(this.mmdManager.dofFocusDistanceMm));
+            focusValue.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
+            focusOffsetSlider.value = String(Math.round(this.mmdManager.dofAutoFocusNearOffsetMm));
+            focusOffsetValue.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
+            fStopSlider.value = String(Math.round(this.mmdManager.dofFStop * 100));
+            fStopValue.textContent = this.mmdManager.dofFStop.toFixed(2);
+            lensSizeSlider.value = String(Math.round(this.mmdManager.dofLensSize));
+            lensSizeValue.textContent = `${Math.round(this.mmdManager.dofLensSize)}`;
+            focalLengthSlider.value = String(Math.round(this.mmdManager.dofFocalLength));
+            focalLengthValue.textContent = `${Math.round(this.mmdManager.dofFocalLength)}`;
+            focusSlider.disabled = this.mmdManager.dofAutoFocusEnabled;
+            focalLengthSlider.disabled = this.mmdManager.dofFocalLengthLinkedToCameraFov;
+            refreshTargetControls();
+        };
+
+        enabledInput.addEventListener("change", () => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofEnabled",
+                source: "panel",
+                enabled: enabledInput.checked,
+            })) {
+                this.mmdManager.dofEnabled = enabledInput.checked;
+            }
+            refreshValues();
+        });
+        focusSlider.addEventListener("input", () => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofFocusDistance",
+                source: "panel",
+                millimeters: Number(focusSlider.value),
+            }) && !this.mmdManager.dofAutoFocusEnabled) {
+                this.mmdManager.dofFocusDistanceMm = Number(focusSlider.value);
+            }
+            refreshValues();
+        });
+        targetModelSelect.addEventListener("change", () => {
+            const modelIndex = Number.parseInt(targetModelSelect.value, 10);
+            const resolvedIndex = Number.isNaN(modelIndex) ? null : modelIndex;
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofTargetModel",
+                source: "panel",
+                modelIndex: resolvedIndex,
+            })) {
+                if (resolvedIndex === null) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                } else {
+                    this.mmdManager.setDofFocusTargetByIndex(
+                        resolvedIndex,
+                        this.mmdManager.getPreferredDofFocusBoneName(resolvedIndex),
+                    );
+                }
+            }
+            refreshValues();
+        });
+        targetBoneSelect.addEventListener("change", () => {
+            const modelIndex = Number.parseInt(targetModelSelect.value, 10);
+            const resolvedIndex = Number.isNaN(modelIndex) ? null : modelIndex;
+            const boneName = targetBoneSelect.value || null;
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofTargetBone",
+                source: "panel",
+                modelIndex: resolvedIndex,
+                boneName,
+            })) {
+                if (resolvedIndex === null) {
+                    this.mmdManager.setDofFocusTargetByIndex(null, null);
+                } else {
+                    this.mmdManager.setDofFocusTargetByIndex(resolvedIndex, boneName);
+                }
+            }
+            refreshValues();
+        });
+        focusOffsetSlider.addEventListener("input", () => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofFocusOffset",
+                source: "panel",
+                millimeters: Number(focusOffsetSlider.value),
+            })) {
+                this.mmdManager.dofAutoFocusNearOffsetMm = Number(focusOffsetSlider.value);
+            }
+            refreshValues();
+        });
+        fStopSlider.addEventListener("input", () => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofFStop",
+                source: "panel",
+                value: Number(fStopSlider.value) / 100,
+            })) {
+                this.mmdManager.dofFStop = Number(fStopSlider.value) / 100;
+            }
+            refreshValues();
+        });
+        lensSizeSlider.addEventListener("input", () => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofLensSize",
+                source: "panel",
+                value: Number(lensSizeSlider.value),
+            })) {
+                this.mmdManager.dofLensSize = Number(lensSizeSlider.value);
+            }
+            refreshValues();
+        });
+        focalLengthSlider.addEventListener("input", () => {
+            if (!this.actionDispatcher.dispatch({
+                type: "effect.setFrameGraphDofFocalLength",
+                source: "panel",
+                value: Number(focalLengthSlider.value),
+            }) && !this.mmdManager.dofFocalLengthLinkedToCameraFov) {
+                this.mmdManager.dofFocalLength = Number(focalLengthSlider.value);
+            }
+            refreshValues();
+        });
+        refreshValues();
+    }
+
+    private applyPostEffectBackendPanelState(root: HTMLElement | null, backend: PostEffectBackend): void {
+        if (!root) return;
+        const classicPanels = Array.from(root.querySelectorAll<HTMLElement>('[data-postfx-backend-panel="classic"]'));
+        const frameGraphPanel = root.querySelector<HTMLElement>('[data-postfx-backend-panel="frameGraph"]');
+        const backendValue = root.querySelector<HTMLElement>('span[data-postfx-val="backend"]');
+        const dofControls = root.querySelector<HTMLElement>(".shader-postfx-dof-controls");
+        const classicOnlyRows = Array.from(root.querySelectorAll<HTMLElement>("[data-postfx-classic-only]"));
+        const lutEnabledRow = root.querySelector<HTMLElement>('input[data-postfx-check="lut"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const lutIntensityRow = root.querySelector<HTMLElement>('input[data-postfx="lut-intensity"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const classicSsrRow = root.querySelector<HTMLElement>('input[data-postfx="ssr-strength"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const frameGraphSsrRow = root.querySelector<HTMLElement>('input[data-frame-graph-ssr-check="enabled"]')?.closest<HTMLElement>(".effect-row") ?? null;
+        const dofRowByControlId = (id: string): HTMLElement | null => {
+            return root.querySelector<HTMLElement>(`#${id}`)?.closest<HTMLElement>(".effect-row") ?? null;
+        };
+        const moveLutRowsBefore = (anchor: HTMLElement | null): void => {
+            if (!anchor || !anchor.parentElement || !lutEnabledRow || !lutIntensityRow) return;
+            anchor.parentElement.insertBefore(lutEnabledRow, anchor);
+            anchor.parentElement.insertBefore(lutIntensityRow, anchor);
+        };
+        const setFrameGraphDofRowState = (row: HTMLElement | null, visibleInFrameGraph: boolean): void => {
+            if (!row) return;
+            if (backend === "frameGraph") {
+                if (row.dataset.frameGraphPrevHidden === undefined) {
+                    row.dataset.frameGraphPrevHidden = row.hidden ? "true" : "false";
+                    row.dataset.frameGraphPrevDisplay = row.style.display;
+                }
+                row.hidden = !visibleInFrameGraph;
+                row.style.display = visibleInFrameGraph ? "grid" : "none";
+                return;
+            }
+            if (row.dataset.frameGraphPrevHidden !== undefined) {
+                row.hidden = row.dataset.frameGraphPrevHidden === "true";
+                row.style.display = row.dataset.frameGraphPrevDisplay ?? "";
+                delete row.dataset.frameGraphPrevHidden;
+                delete row.dataset.frameGraphPrevDisplay;
+            }
+        };
+
+        for (const classicPanel of classicPanels) {
+            classicPanel.hidden = backend !== "classic";
+        }
+        if (frameGraphPanel) frameGraphPanel.hidden = backend !== "frameGraph";
+        if (dofControls) {
+            const visible = backend === "classic";
+            dofControls.hidden = !visible;
+            dofControls.style.display = visible ? "" : "none";
+        }
+        const frameGraphDofVisibleControls = new Set([
+            "effect-dof-enabled",
+            "effect-dof-focus",
+            "effect-dof-target-model",
+            "effect-dof-target-bone",
+            "effect-dof-focus-offset",
+            "effect-dof-fstop",
+            "effect-dof-lens-size",
+            "effect-dof-focal-length",
+        ]);
+        const frameGraphDofControlledRows = [
+            "effect-dof-enabled",
+            "effect-dof-quality",
+            "effect-dof-focus",
+            "effect-dof-target-model",
+            "effect-dof-target-bone",
+            "effect-dof-focus-offset",
+            "effect-dof-fstop",
+            "effect-dof-near-suppression",
+            "effect-dof-focal-invert",
+            "effect-dof-lens-size",
+            "effect-dof-lens-blur",
+            "effect-fog-enabled",
+            "effect-fog-mode",
+            "effect-fog-start",
+            "effect-fog-end",
+            "effect-fog-density",
+            "effect-fog-opacity",
+            "effect-fog-color-r",
+            "effect-fog-color-g",
+            "effect-fog-color-b",
+            "effect-dof-focal-length",
+        ];
+        for (const controlId of frameGraphDofControlledRows) {
+            setFrameGraphDofRowState(
+                dofRowByControlId(controlId),
+                frameGraphDofVisibleControls.has(controlId),
+            );
+        }
+        for (const row of classicOnlyRows) {
+            row.hidden = backend !== "classic";
+            row.style.display = backend === "classic" ? "" : "none";
+        }
+        moveLutRowsBefore(backend === "frameGraph" ? frameGraphSsrRow : classicSsrRow);
+        if (backendValue) {
+            backendValue.textContent = backend === "frameGraph" ? "Frame Graph" : "Classic";
         }
     }
 
@@ -2557,6 +5691,18 @@ export class UIController {
         setSliderValue("light-shadow", "light-shadow-val", this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2));
         setSliderValue("light-shadow-frustum-size", "light-shadow-frustum-size-val", this.mmdManager.shadowFrustumSize, (value) => String(Math.round(value)));
         setSliderValue("light-shadow-max-z", "light-shadow-max-z-val", this.mmdManager.shadowMaxZ, (value) => String(Math.round(value)));
+        setSliderValue("light-shadow-filter-quality", "light-shadow-filter-quality-val", this.mmdManager.shadowFilteringQuality, (value) => {
+            if (value <= 0) return "High";
+            if (value >= 2) return "Low";
+            return "Med";
+        });
+        setSliderValue("light-soft-transparent-shadow", "light-soft-transparent-shadow-val", this.mmdManager.softTransparentShadowEnabled ? 1 : 0, (value) => value > 0 ? "Soft" : "Hard");
+        setSliderValue("light-ibl-shadows", "light-ibl-shadows-val", this.mmdManager.iblShadowsEnabled ? 1 : 0, (value) => value > 0 ? "On" : "Off");
+        setSliderValue("light-ibl-shadow-opacity", "light-ibl-shadow-opacity-val", this.mmdManager.iblShadowOpacity * 100, (value) => `${Math.round(value)}%`);
+        setSliderValue("light-ibl-shadow-range", "light-ibl-shadow-range-val", this.mmdManager.iblShadowDistanceScale * 100, (value) => (value / 100).toFixed(1));
+        setSliderValue("light-character-contact-shadow", "light-character-contact-shadow-val", this.mmdManager.characterContactShadowEnabled ? 1 : 0, (value) => value > 0 ? "On" : "Off");
+        setSliderValue("light-character-contact-shadow-opacity", "light-character-contact-shadow-opacity-val", this.mmdManager.characterContactShadowOpacity * 100, (value) => `${Math.round(value)}%`);
+        setSliderValue("light-character-contact-shadow-scale", "light-character-contact-shadow-scale-val", this.mmdManager.characterContactShadowScale * 100, (value) => (value / 100).toFixed(2));
         setSliderValue("light-shadow-bias", "light-shadow-bias-val", this.mmdManager.shadowBias * 1_000_000, (value) => (value / 1_000_000).toFixed(5));
         setSliderValue("light-shadow-normal-bias", "light-shadow-normal-bias-val", this.mmdManager.shadowNormalBias * 100_000, (value) => (value / 100_000).toFixed(5));
         setSliderValue("light-shadow-color-r", "light-shadow-color-r-val", shadowColor.r * 255, (value) => String(Math.round(value)));
@@ -2582,11 +5728,277 @@ export class UIController {
         );
     }
 
+    private handleBoneTransformChanged(boneName: string | null, source: ActionSource): void {
+        const poseSnapshot = source === "panel"
+            ? this.bottomPanel.getSelectedBoneTransformSnapshot()
+            : boneName
+                ? this.mmdManager.getBoneTransform(boneName)
+                : null;
+        this.rememberEditedBonePoseSnapshot(boneName, poseSnapshot);
+        this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
+        this.syncBottomPanelBoneFromEditedPose(boneName, source !== "panel");
+        this.refreshCameraUiFromRuntime();
+        this.refreshViewportBottomBar();
+        this.updateSectionKeyframeButtons();
+    }
+
+    private beginBoneTransformCommand(boneName: string | null): void {
+        if (!boneName || boneName === "Camera") return;
+        if (this.pendingBoneTransformCommand?.boneName === boneName) return;
+
+        const snapshot = this.captureBoneTransformCommandSnapshot(boneName);
+        if (!snapshot) return;
+
+        this.pendingBoneTransformCommand = {
+            boneName,
+            frame: this.mmdManager.currentFrame,
+            before: snapshot,
+        };
+    }
+
+    private commitBoneTransformCommand(boneName: string | null): void {
+        const pending = this.pendingBoneTransformCommand;
+        this.pendingBoneTransformCommand = null;
+        if (!pending) return;
+        if (!boneName || pending.boneName !== boneName) return;
+
+        const after = this.captureBoneTransformCommandSnapshot(boneName);
+        const command = buildBoneTransformCommand({
+            boneName,
+            frame: pending.frame,
+            before: pending.before,
+            after,
+        });
+        if (!command) return;
+
+        this.commandHistory.push(command);
+        this.registerAutoKeyForEditedBone(boneName);
+    }
+
+    private registerAutoKeyForEditedBone(boneName: string): void {
+        if (!this.autoKeyEnabled || boneName === "Camera") return;
+        this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "system");
+    }
+
+    private registerAutoKeyForEditedMorph(morph: { frameIndex: number; name: string; value: number }): void {
+        if (!this.autoKeyEnabled) return;
+        this.registerSingleMorphKeyframeAtCurrentFrame(morph, { toast: false });
+    }
+
+    private setAutoKeyEnabled(enabled: boolean, options: { persist: boolean; toast: boolean }): void {
+        this.autoKeyEnabled = enabled;
+        this.btnAutoKey.setAttribute("aria-pressed", enabled ? "true" : "false");
+        this.btnAutoKey.classList.toggle("is-active", enabled);
+        if (options.persist) {
+            try {
+                localStorage.setItem(UIController.AUTO_KEY_STORAGE_KEY, enabled ? "1" : "0");
+            } catch {
+                // localStorage can be unavailable in restricted test/browser contexts.
+            }
+        }
+        if (options.toast) {
+            this.showToast(enabled ? "Auto Key: ON" : "Auto Key: OFF", "info");
+        }
+    }
+
+    private applyBottomBarBoneTransform(
+        boneName: string | null,
+        position: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        beforeOverride?: BoneTransformCommandSnapshot,
+    ): void {
+        if (!boneName || boneName === "Camera") {
+            this.refreshViewportBottomBar();
+            return;
+        }
+
+        const before = beforeOverride ?? this.captureBoneTransformCommandSnapshot(boneName);
+        const after: BoneTransformCommandSnapshot = {
+            position: { ...position },
+            rotation: { ...rotation },
+        };
+        const command = buildBoneTransformCommand({
+            boneName,
+            frame: this.mmdManager.currentFrame,
+            before,
+            after,
+        });
+        if (!command) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+
+        const applied = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!applied) {
+            this.refreshViewportBottomBar();
+            this.showToast(`Bone edit failed: ${boneName}`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+    }
+
+    private previewBottomBarBoneTransform(
+        boneName: string | null,
+        position: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+    ): boolean {
+        if (!boneName || boneName === "Camera") {
+            this.refreshViewportBottomBar();
+            return false;
+        }
+        return this.applyBoneTransformSnapshotFromCommand(boneName, { position, rotation });
+    }
+
+    private applyBottomBarCameraTransform(
+        target: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        distance: number,
+        fov: number,
+        beforeOverride?: CameraTransformCommandSnapshot,
+    ): void {
+        const command = buildCameraTransformCommand({
+            frame: this.mmdManager.currentFrame,
+            before: beforeOverride ?? this.captureCameraTransformCommandSnapshot(),
+            after: {
+                target: { ...target },
+                rotation: { ...rotation },
+                distance,
+                fov,
+            },
+        });
+        if (!command) {
+            this.refreshViewportBottomBar();
+            return;
+        }
+
+        const applied = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!applied) {
+            this.refreshViewportBottomBar();
+            this.showToast("Camera edit failed", "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+    }
+
+    private previewBottomBarCameraTransform(
+        target: { x: number; y: number; z: number },
+        rotation: { x: number; y: number; z: number },
+        distance: number,
+        fov: number,
+    ): boolean {
+        return this.applyCameraTransformSnapshotFromCommand({
+            target,
+            rotation,
+            distance,
+            fov,
+        });
+    }
+
+    private previewTopBarCameraPan(
+        before: ViewportTopBarCameraTransform,
+        deltaX: number,
+        deltaY: number,
+    ): ViewportTopBarCameraTransform | null {
+        if (!this.applyCameraTransformSnapshotFromCommand(before)) {
+            return null;
+        }
+        this.mmdManager.panCameraByViewportDelta(deltaX, deltaY);
+        return this.captureCameraTransformCommandSnapshot();
+    }
+
+    private captureBoneTransformCommandSnapshot(boneName: string): BoneTransformCommandSnapshot | null {
+        const snapshot = this.captureCurrentBonePoseSnapshot(boneName);
+        if (!snapshot) return null;
+        return {
+            position: { ...snapshot.position },
+            rotation: { ...snapshot.rotation },
+        };
+    }
+
+    private captureCameraTransformCommandSnapshot(): CameraTransformCommandSnapshot {
+        return {
+            target: this.mmdManager.getCameraTarget(),
+            rotation: this.mmdManager.getCameraRotation(),
+            distance: this.mmdManager.getCameraDistance(),
+            fov: this.mmdManager.getCameraFov(),
+        };
+    }
+
+    private applyBoneTransformSnapshotFromCommand(
+        boneName: string,
+        snapshot: BoneTransformCommandSnapshot,
+    ): boolean {
+        if (!boneName || boneName === "Camera") return false;
+        if (!this.mmdManager.getBoneTransform(boneName)) return false;
+
+        this.mmdManager.setBoneTranslation(
+            boneName,
+            snapshot.position.x,
+            snapshot.position.y,
+            snapshot.position.z,
+            false,
+        );
+        this.mmdManager.setBoneRotation(
+            boneName,
+            snapshot.rotation.x,
+            snapshot.rotation.y,
+            snapshot.rotation.z,
+            false,
+        );
+        this.rememberEditedBonePoseSnapshot(boneName, snapshot);
+        this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(boneName));
+        this.syncBottomPanelBoneFromEditedPose(boneName);
+        this.refreshSelectedTrackRotationOverlay();
+        this.refreshViewportBottomBar();
+        this.updateSectionKeyframeButtons();
+        return true;
+    }
+
+    private applyCameraTransformSnapshotFromCommand(snapshot: CameraTransformCommandSnapshot): boolean {
+        if (!Number.isFinite(snapshot.distance) || !Number.isFinite(snapshot.fov)) return false;
+
+        this.mmdManager.applyCameraTrackPose(
+            snapshot.target,
+            snapshot.rotation,
+            Math.max(0.1, snapshot.distance),
+            Math.max(10, Math.min(120, snapshot.fov)),
+        );
+        this.rememberEditedBonePoseSnapshot("Camera", this.captureCurrentBonePoseSnapshot("Camera"));
+        this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+        this.syncBottomPanelBoneFromEditedPose("Camera");
+        this.handleCameraControlEdited();
+        this.refreshCameraUiFromRuntime(true);
+        this.refreshViewportBottomBar();
+        this.updateSectionKeyframeButtons();
+        return true;
+    }
+
     private handleCameraControlEdited(): void {
         this.bottomPanel.syncSelectedBoneSlidersFromRuntime();
         this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
         this.updateSectionKeyframeButtons();
         this.dofPanelController?.refreshAutoFocusReadout();
+        this.refreshViewportBottomBar();
+    }
+
+    private handleCameraTransformChanged(source: ActionSource): void {
+        if (source === "panel") {
+            this.handleCameraControlEdited();
+            return;
+        }
+
+        const cameraSelected = this.bottomPanel.getSelectedBone() === "Camera"
+            || this.mmdManager.getTimelineTarget() === "camera";
+        if (cameraSelected) {
+            this.rememberEditedBonePoseSnapshot("Camera", this.captureCurrentBonePoseSnapshot("Camera"));
+            this.markSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+            this.syncBottomPanelBoneFromEditedPose("Camera");
+        }
+        this.refreshCameraUiFromRuntime();
+        this.refreshViewportBottomBar();
+        this.updateSectionKeyframeButtons();
     }
 
     private refreshCameraUiFromRuntime(force = false): void {
@@ -2599,6 +6011,96 @@ export class UIController {
         const track = this.timeline.getSelectedTrack();
         if (!track) return null;
         return track;
+    }
+
+    private hasMultiTrackKeySelection(selectedKeys: readonly TimelineKeySelectionRef[]): boolean {
+        if (selectedKeys.length <= 1) return false;
+        const first = selectedKeys[0];
+        return selectedKeys.some((key) =>
+            key.trackCategory !== first.trackCategory || key.trackName !== first.trackName
+        );
+    }
+
+    private selectionRefToCommandTrack(ref: TimelineKeySelectionRef): CommandTrackRef {
+        return { category: ref.trackCategory, name: ref.trackName };
+    }
+
+    private boneTrackSelectionRefToCommandTrack(ref: TimelineBoneTrackSelectionRef): CommandTrackRef {
+        return { category: ref.trackCategory, name: ref.trackName };
+    }
+
+    private collectKeyframeCommandSnapshot(): KeyframeCommandSnapshot {
+        const selectedTrack = this.getSelectedTimelineTrack();
+        const framesByTrackKey: Record<string, number[]> = {};
+        if (selectedTrack) {
+            framesByTrackKey[createCommandTrackKey(selectedTrack)] = Array.from(selectedTrack.frames);
+        }
+
+        return {
+            selectedTrack: selectedTrack
+                ? { category: selectedTrack.category, name: selectedTrack.name }
+                : null,
+            selectedFrame: this.timeline.getSelectedFrame(),
+            currentFrame: this.mmdManager.currentFrame,
+            framesByTrackKey,
+        };
+    }
+
+    private createCommandExecutionContext(options: { seekToFrame?: boolean } = {}): CommandExecutionContext {
+        const seekToFrame = options.seekToFrame ?? true;
+        let timelineEditBatchDepth = 0;
+        let pendingRuntimeRefresh = false;
+        const refreshAfterPayloadEdit = (): void => {
+            if (timelineEditBatchDepth > 0) {
+                pendingRuntimeRefresh = true;
+                return;
+            }
+            this.refreshRuntimeAnimationForTrack();
+        };
+        return {
+            beginTimelineEditBatch: () => {
+                timelineEditBatchDepth += 1;
+                this.mmdManager.beginTimelineEditBatch();
+            },
+            endTimelineEditBatch: () => {
+                timelineEditBatchDepth = Math.max(0, timelineEditBatchDepth - 1);
+                this.mmdManager.endTimelineEditBatch();
+                if (timelineEditBatchDepth === 0 && pendingRuntimeRefresh) {
+                    pendingRuntimeRefresh = false;
+                    this.refreshRuntimeAnimationForTrack();
+                }
+            },
+            addTimelineKeyframe: (track, frame) => this.mmdManager.addTimelineKeyframe(track, frame),
+            removeTimelineKeyframe: (track, frame) => this.mmdManager.removeTimelineKeyframe(track, frame),
+            removeTimelineKeyframePayloads: (track, frames) =>
+                this.mmdManager.removeTimelineKeyframePayloads(track, frames),
+            moveTimelineKeyframe: (track, fromFrame, toFrame) => this.mmdManager.moveTimelineKeyframe(
+                track,
+                fromFrame,
+                toFrame,
+            ),
+            applyTimelineKeyframePayload: (track, frame, payload) => {
+                const applied = this.mmdManager.applyTimelineKeyframePayload(track, frame, payload);
+                if (applied) {
+                    refreshAfterPayloadEdit();
+                }
+                return applied;
+            },
+            applyBoneTransform: (boneName, snapshot) => this.applyBoneTransformSnapshotFromCommand(boneName, snapshot),
+            applyCameraTransform: (snapshot) => this.applyCameraTransformSnapshotFromCommand(snapshot),
+            setSelectedFrame: (frame) => this.timeline.setSelectedFrame(frame),
+            setSelectedKeys: (keys) => {
+                this.timeline.setSelectedKeys(keys.map((key) => ({
+                    trackCategory: key.track.category,
+                    trackName: key.track.name,
+                    frame: key.frame,
+                })));
+            },
+            seekToBoundary: (frame) => {
+                if (seekToFrame) this.mmdManager.seekToBoundary(frame);
+            },
+            refreshAfterKeyframeEdit: () => this.updateTimelineEditState(),
+        };
     }
 
     private getTrackTypeLabel(track: Pick<KeyframeTrack, "category">): string {
@@ -2627,7 +6129,11 @@ export class UIController {
 
         this.syncingBoneSelection = true;
         try {
-            if (this.isBoneTrackForEditor(track)) {
+            const selectedBoneTracks = this.timeline.getSelectedBoneTracks();
+            if (selectedBoneTracks.length > 1) {
+                this.selectedBoneTrackCategory = null;
+                this.bottomPanel.setMultipleSelectedBones(selectedBoneTracks.map((selectedTrack) => selectedTrack.trackName));
+            } else if (this.isBoneTrackForEditor(track)) {
                 this.selectedBoneTrackCategory = track.category;
                 this.bottomPanel.setSelectedBone(track.name);
             } else {
@@ -2637,6 +6143,7 @@ export class UIController {
         } finally {
             this.syncingBoneSelection = false;
         }
+        this.refreshViewportBottomBar();
     }
 
     private syncTimelineBoneSelectionFromBottomPanel(boneName: string | null): void {
@@ -2669,6 +6176,14 @@ export class UIController {
         if (this.mmdManager.getTimelineTarget() !== "model") {
             this.selectedBoneTrackCategory = null;
             this.mmdManager.setBoneVisualizerSelectedBone(null);
+            return;
+        }
+
+        if (this.timeline.hasMultipleSelectedBoneTracks()) {
+            this.selectedBoneTrackCategory = null;
+            this.mmdManager.setBoneVisualizerSelectedBones(
+                this.timeline.getSelectedBoneTracks().map((selectedTrack) => selectedTrack.trackName),
+            );
             return;
         }
 
@@ -2792,6 +6307,8 @@ export class UIController {
     private updateTimelineEditState(): void {
         const track = this.getSelectedTimelineTrack();
         const selectedFrame = this.timeline.getSelectedFrame();
+        const selectedKeys = this.timeline.getSelectedKeys();
+        const selectedBoneTracks = this.timeline.getSelectedBoneTracks();
         const currentFrame = this.mmdManager.currentFrame;
 
         if (!track) {
@@ -2806,6 +6323,9 @@ export class UIController {
             this.renderInterpolationCurves(null);
             this.updateInterpolationActionButtons();
             this.btnKeyframeAdd.disabled = true;
+            this.btnKeyframeCopy.disabled = true;
+            this.btnKeyframePaste.disabled = true;
+            this.btnKeyframeMirrorPaste.disabled = !this.canMirrorPasteKeyframeClipboard();
             this.btnKeyframeDelete.disabled = true;
             this.btnKeyframeNudgeLeft.disabled = false;
             this.btnKeyframeNudgeRight.disabled = false;
@@ -2813,32 +6333,89 @@ export class UIController {
             return;
         }
 
-        const frameLabel = selectedFrame !== null ? ` @${selectedFrame}` : "";
+        const frameLabel = selectedKeys.length > 1
+            ? ` (${selectedKeys.length} keys)`
+            : selectedFrame !== null ? ` @${selectedFrame}` : "";
         const trackTypeLabel = this.getTrackTypeLabel(track);
         if (this.timelineSelectionLabel) {
-            this.timelineSelectionLabel.textContent = `[${trackTypeLabel}] ${track.name}${frameLabel}`;
+            this.timelineSelectionLabel.textContent = selectedBoneTracks.length > 1
+                ? `[Bone] ${selectedBoneTracks.length} bones selected`
+                : `[${trackTypeLabel}] ${track.name}${frameLabel}`;
         }
-        const interpolationFrame = selectedFrame ?? currentFrame;
-        this.interpolationTrackNameLabel.textContent = `${trackTypeLabel}: ${track.name}`;
+        const interpolationFrame = selectedKeys.length > 1 ? currentFrame : selectedFrame ?? currentFrame;
+        this.interpolationTrackNameLabel.textContent = selectedBoneTracks.length > 1
+            ? `Bone: ${selectedBoneTracks.length} selected`
+            : `${trackTypeLabel}: ${track.name}`;
         this.interpolationFrameLabel.textContent = String(interpolationFrame);
-        this.updateInterpolationPreview(track, interpolationFrame);
+        if (selectedBoneTracks.length > 1) {
+            this.resetInterpolationTypeSelect();
+            this.interpolationStatusLabel.textContent = "Multiple bones selected";
+            this.currentInterpolationPreview = null;
+            this.renderInterpolationCurves(null);
+            this.updateInterpolationActionButtons();
+        } else if (this.hasMultiTrackKeySelection(selectedKeys)) {
+            this.resetInterpolationTypeSelect();
+            this.interpolationStatusLabel.textContent = "Multiple tracks selected";
+            this.currentInterpolationPreview = null;
+            this.renderInterpolationCurves(null);
+            this.updateInterpolationActionButtons();
+        } else {
+            this.updateInterpolationPreview(track, interpolationFrame);
+        }
         this.btnKeyframeAdd.disabled = false;
 
         const hasCurrentFrameKey = this.mmdManager.hasTimelineKeyframe(track, currentFrame);
         const canDelete = selectedFrame !== null || hasCurrentFrameKey;
-        this.btnKeyframeDelete.disabled = !canDelete;
+        const copyFrame = selectedFrame ?? currentFrame;
+        const canCopy = this.mmdManager.hasTimelineKeyframe(track, copyFrame);
+        this.btnKeyframeDelete.disabled = selectedKeys.length > 0 ? false : !canDelete;
+        this.btnKeyframeCopy.disabled = selectedKeys.length > 0 ? false : !canCopy;
+        this.btnKeyframePaste.disabled = !this.canPasteKeyframeClipboardToCurrentSelection();
+        this.btnKeyframeMirrorPaste.disabled = !this.canMirrorPasteKeyframeClipboard();
 
         this.btnKeyframeNudgeLeft.disabled = false;
         this.btnKeyframeNudgeRight.disabled = false;
         this.updateSectionKeyframeButtons();
     }
 
+    private canPasteKeyframeClipboardToCurrentSelection(): boolean {
+        const clipboard = this.keyframeClipboard;
+        if (!clipboard) return false;
+        if (clipboard.mode === "batch") {
+            return this.mmdManager.getTimelineTarget() === clipboard.sourceTarget && clipboard.items.length > 0;
+        }
+        return this.resolveKeyframePasteTarget(clipboard) !== null;
+    }
+
+    private canMirrorPasteKeyframeClipboard(): boolean {
+        if (this.mmdManager.getTimelineTarget() !== "model") return false;
+        const clipboardItems = this.getMirrorPasteClipboardItems();
+        return clipboardItems.some((item) => item.payload.kind === "bone" || item.payload.kind === "movableBone");
+    }
+
     private updateSectionKeyframeButtons(): void {
         this.setSectionKeyframeButtonState(this.btnInfoKeyframe, this.getInfoKeyframeButtonState());
         this.setSectionKeyframeButtonState(this.btnInterpolationKeyframe, this.getInterpolationKeyframeButtonState());
         this.setSectionKeyframeButtonState(this.btnBoneKeyframe, this.getBoneKeyframeButtonState());
+        this.updatePhysicsKeyframeButtonState();
         this.setSectionKeyframeButtonState(this.btnMorphKeyframe, this.getMorphKeyframeButtonState());
         this.setSectionKeyframeButtonState(this.btnAccessoryKeyframe, this.getAccessoryKeyframeButtonState());
+    }
+
+    private updatePhysicsKeyframeButtonState(): void {
+        if (!this.btnPhysicsKeyframe) return;
+        this.btnPhysicsKeyframe.hidden = this.mmdManager.isPlaying;
+        this.btnPhysicsKeyframe.setAttribute("aria-pressed", this.physicsKeyframeInputMode === 1 ? "true" : "false");
+        if (this.mmdManager.isPlaying) {
+            this.btnPhysicsKeyframe.disabled = true;
+            return;
+        }
+        this.btnPhysicsKeyframe.disabled = this.mmdManager.getTimelineTarget() !== "model";
+    }
+
+    private clearRegisteredKeySelection(): void {
+        this.timeline.clearSelectedKeys({ keepActiveTrack: true, clearActiveFrame: true });
+        this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
     }
 
     private setSectionKeyframeButtonState(button: HTMLButtonElement | null, state: SectionKeyframeButtonState): void {
@@ -2959,16 +6536,16 @@ export class UIController {
         return entry.snapshot;
     }
 
-    private syncBottomPanelBoneFromEditedPose(boneName: string | null): void {
+    private syncBottomPanelBoneFromEditedPose(boneName: string | null, force = true): void {
         if (!boneName) return;
         const snapshot = this.getPendingBonePoseSnapshot(boneName);
         if (snapshot) {
             this.debugKeyframeFlow("sync bottom panel from edited pose", { boneName, snapshot });
-            this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(snapshot, true);
+            this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(snapshot, force);
             return;
         }
         this.debugKeyframeFlow("sync bottom panel from runtime pose", { boneName });
-        this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
+        this.bottomPanel.syncSelectedBoneSlidersFromRuntime(force);
     }
 
     private formatBonePoseSnapshotForLog(snapshot: SelectedBonePoseSnapshot): {
@@ -3096,7 +6673,7 @@ export class UIController {
         return `${this.getSectionKeyframeContextPrefix("info")}:${modelKey}:frame:${this.mmdManager.currentFrame}`;
     }
 
-    private getInterpolationKeyframeContextKey(track: KeyframeTrack | null = null): string | null {
+    private getInterpolationKeyframeContextKey(track: Pick<KeyframeTrack, "name" | "category"> | null = null): string | null {
         const selectedTrack = track ?? this.getSelectedTimelineTrack();
         if (!selectedTrack) return null;
         if (selectedTrack.category === "morph") return null;
@@ -3750,10 +7327,11 @@ export class UIController {
             window.removeEventListener("pointerup", onUp);
             const changed = this.interpolationDragState?.changed ?? false;
             this.interpolationDragState = null;
-            if (changed) {
-                this.refreshRuntimeAnimationFromInterpolationEdit();
-                this.updateTimelineEditState();
-            }
+            this.actionDispatcher.dispatch({
+                type: "interpolation.finishHandleDrag",
+                source: "panel",
+                changed,
+            });
         };
 
         window.addEventListener("pointermove", onMove);
@@ -3777,14 +7355,33 @@ export class UIController {
         const x = this.clampInterpolationValue(((viewX - left) / innerWidth) * 127, 0);
         const y = this.clampInterpolationValue(((bottom - viewY) / innerHeight) * 127, 0);
 
-        const binding = this.interpolationChannelBindings.get(dragState.channelId);
+        const updated = this.actionDispatcher.dispatch({
+            type: "interpolation.updateHandle",
+            source: "panel",
+            channelId: dragState.channelId,
+            pointIndex: dragState.pointIndex,
+            x,
+            y,
+        });
+        if (!updated) return;
+
+        this.updateInterpolationCurveDragVisuals(svg, dragState.channelId);
+    }
+
+    private updateInterpolationCurveHandle(
+        channelId: string,
+        pointIndex: 1 | 2,
+        x: number,
+        y: number,
+    ): void {
+        const binding = this.interpolationChannelBindings.get(channelId);
         if (!binding) return;
 
-        const oldX = dragState.pointIndex === 1 ? binding.values[binding.offset + 0] : binding.values[binding.offset + 1];
-        const oldY = dragState.pointIndex === 1 ? binding.values[binding.offset + 2] : binding.values[binding.offset + 3];
+        const oldX = pointIndex === 1 ? binding.values[binding.offset + 0] : binding.values[binding.offset + 1];
+        const oldY = pointIndex === 1 ? binding.values[binding.offset + 2] : binding.values[binding.offset + 3];
         if (oldX === x && oldY === y) return;
 
-        if (dragState.pointIndex === 1) {
+        if (pointIndex === 1) {
             binding.values[binding.offset + 0] = x;
             binding.values[binding.offset + 2] = y;
         } else {
@@ -3792,13 +7389,19 @@ export class UIController {
             binding.values[binding.offset + 3] = y;
         }
 
-        dragState.changed = true;
-        if (!dragState.dirtyMarked) {
-            dragState.dirtyMarked = true;
-            this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
-            this.updateSectionKeyframeButtons();
+        const dragState = this.interpolationDragState;
+        if (dragState?.channelId === channelId && dragState.pointIndex === pointIndex) {
+            dragState.changed = true;
+            if (!dragState.dirtyMarked) {
+                dragState.dirtyMarked = true;
+                this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
+                this.updateSectionKeyframeButtons();
+            }
+            return;
         }
-        this.updateInterpolationCurveDragVisuals(svg, dragState.channelId);
+
+        this.markSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey());
+        this.updateSectionKeyframeButtons();
     }
 
     private updateInterpolationCurveDragVisuals(svg: SVGSVGElement, channelId: string): void {
@@ -3856,28 +7459,11 @@ export class UIController {
     private refreshRuntimeAnimationFromInterpolationEdit(): void {
         const track = this.getSelectedTimelineTrack();
         if (!track || track.category === "morph") return;
+        this.refreshRuntimeAnimationForTrack();
+    }
 
-        const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
-        if (track.category === "camera") {
-            const animation = managerInternal.cameraSourceAnimation;
-            const mmdCamera = managerInternal.mmdCamera;
-            if (!animation || !mmdCamera) return;
-
-            if (managerInternal.cameraAnimationHandle !== null && managerInternal.cameraAnimationHandle !== undefined) {
-                mmdCamera.destroyRuntimeAnimation(managerInternal.cameraAnimationHandle);
-            }
-            const handle = mmdCamera.createRuntimeAnimation(animation as unknown);
-            mmdCamera.setRuntimeAnimation(handle);
-            managerInternal.cameraAnimationHandle = handle;
-            this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
-            return;
-        }
-
-        const currentModel = managerInternal.currentModel;
-        const animation = currentModel ? managerInternal.modelSourceAnimationsByModel?.get(currentModel) : null;
-        if (!currentModel || !animation) return;
-        const handle = currentModel.createRuntimeAnimation(animation);
-        currentModel.setRuntimeAnimation(handle);
+    private refreshRuntimeAnimationForTrack(): void {
+        this.mmdManager.refreshActiveRuntimeAnimationHandles();
         this.mmdManager.seekToBoundary(this.mmdManager.currentFrame);
     }
 
@@ -4368,10 +7954,31 @@ export class UIController {
         };
     }
 
-    private addKeyframeAtCurrentFrame(poseSnapshotOverride: SelectedBonePoseSnapshot | null = null): void {
+    private addKeyframeAtCurrentFrame(
+        poseSnapshotOverride: SelectedBonePoseSnapshot | null = null,
+        source: ActionSource = "system",
+    ): void {
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
+            return;
+        }
+
+        const frame = this.mmdManager.currentFrame;
+        const poseSnapshot = poseSnapshotOverride
+            ?? (track.category === "camera" || this.isBoneTrackForEditor(track)
+                ? this.captureCurrentBonePoseSnapshot(track.name)
+                : null);
+        this.debugKeyframeFlow("add keyframe request", {
+            frame,
+            track,
+            poseSnapshotOverride,
+            poseSnapshot,
+        });
+        if (this.tryRegisterEditorCameraKeyframe(track, poseSnapshot)) {
+            return;
+        }
+        if (this.tryRegisterEditorBoneKeyframe(track, poseSnapshot)) {
             return;
         }
 
@@ -4384,31 +7991,20 @@ export class UIController {
             return;
         }
 
-        const frame = this.mmdManager.currentFrame;
-        const poseSnapshot = poseSnapshotOverride
-            ?? (track.category === "camera" || this.isBoneTrackForEditor(track)
-                ? this.captureCurrentBonePoseSnapshot(track.name)
-                : null);
-        const shouldRefreshRuntimePreview =
-            this.mmdManager.isPlaying
-            || !this.isBoneTrackForEditor(track)
-            || poseSnapshot === null;
-        this.debugKeyframeFlow("add keyframe request", {
-            frame,
-            track,
-            poseSnapshotOverride,
-            poseSnapshot,
-            shouldRefreshRuntimePreview,
-        });
         const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
-        const created = this.mmdManager.addTimelineKeyframe(track, frame);
+        const command = buildKeyframeCommand(
+            { type: "keyframe.addCurrent", source },
+            this.collectKeyframeCommandSnapshot(),
+        );
+        const created = command
+            ? executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }))
+            : false;
         if (!created) {
             const overwritten = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
             if (overwritten) {
-                if (shouldRefreshRuntimePreview) {
-                    this.refreshRuntimeAnimationFromInterpolationEdit();
-                }
-                this.timeline.setSelectedFrame(null);
+                this.refreshRuntimeAnimationForTrack();
+                this.applyRegisteredKeyframePoseToViewport(track, poseSnapshot);
+                this.clearRegisteredKeySelection();
                 this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
                 if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
                     this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
@@ -4424,11 +8020,12 @@ export class UIController {
         }
 
         const persistedInterpolation = this.persistInterpolationForNewKeyframe(track, frame, interpolationSnapshot, poseSnapshot);
-        if (persistedInterpolation && shouldRefreshRuntimePreview) {
-            this.refreshRuntimeAnimationFromInterpolationEdit();
+        if (persistedInterpolation) {
+            this.refreshRuntimeAnimationForTrack();
+            this.applyRegisteredKeyframePoseToViewport(track, poseSnapshot);
         }
 
-        this.timeline.setSelectedFrame(null);
+        this.clearRegisteredKeySelection();
         this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
         if (this.isBoneTrackForEditor(track) && this.bottomPanel.getSelectedBone() === track.name) {
             this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
@@ -4436,6 +8033,7 @@ export class UIController {
         this.refreshSelectedTrackRotationOverlay();
         this.updateTimelineEditState();
         this.updateSectionKeyframeButtons();
+        this.commandHistory.push(command);
         this.showToast(`Frame ${frame}: keyframe added`, "success");
     }
 
@@ -4453,12 +8051,45 @@ export class UIController {
     }
 
     private registerBoneKeyframeAtCurrentFrame(): void {
+        const selectedBoneTracks = this.timeline.getSelectedBoneTracks();
+        if (selectedBoneTracks.length > 1) {
+            this.registerSelectedBoneTracksKeyframesAtCurrentFrame(selectedBoneTracks);
+            return;
+        }
+
         const boneName = this.bottomPanel.getSelectedBone();
         if (!boneName) {
             this.showToast("Please select a bone", "error");
             return;
         }
 
+        this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "button");
+    }
+
+    private resolveBottomPanelBoneCommandTrack(): { category: TrackCategory; name: string } | null {
+        const boneName = this.bottomPanel.getSelectedBone();
+        if (!boneName || boneName === "Camera") return null;
+        const preferredCategories: TrackCategory[] = this.selectedBoneTrackCategory
+            ? [
+                this.selectedBoneTrackCategory,
+                ...(["bone", "semi-standard", "root"] as TrackCategory[]).filter(
+                    (category) => category !== this.selectedBoneTrackCategory,
+                ),
+            ]
+            : ["bone", "semi-standard", "root"];
+        if (this.timeline.selectTrackByNameAndCategory(boneName, preferredCategories)) {
+            const track = this.timeline.getSelectedTrack();
+            if (track && this.isBoneTrackForEditor(track) && track.name !== "Camera") {
+                return { category: track.category, name: track.name };
+            }
+        }
+        return {
+            category: this.selectedBoneTrackCategory ?? "bone",
+            name: boneName,
+        };
+    }
+
+    private registerBoneKeyframeForBoneAtCurrentFrame(boneName: string, source: ActionSource): void {
         const poseSnapshot = this.captureCurrentBonePoseSnapshot(boneName);
 
         const preferredCategories: TrackCategory[] = boneName === "Camera"
@@ -4478,7 +8109,220 @@ export class UIController {
         }
 
         this.syncBoneVisualizerSelection(this.timeline.getSelectedTrack());
-        this.addKeyframeAtCurrentFrame(poseSnapshot);
+        const selectedTrack = this.timeline.getSelectedTrack();
+        if (selectedTrack) {
+            if (this.tryRegisterEditorCameraKeyframe(selectedTrack, poseSnapshot)) {
+                return;
+            }
+            if (this.tryRegisterEditorBoneKeyframe(selectedTrack, poseSnapshot)) {
+                return;
+            }
+        }
+        this.addKeyframeAtCurrentFrame(poseSnapshot, source);
+    }
+
+    private registerSelectedBoneTracksKeyframesAtCurrentFrame(
+        selectedBoneTracks: readonly TimelineBoneTrackSelectionRef[],
+    ): void {
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const physicsToggle = this.physicsKeyframeInputMode;
+        const items = selectedBoneTracks
+            .map((selectedTrack) => {
+                const track = this.boneTrackSelectionRefToCommandTrack(selectedTrack);
+                const poseSnapshot = this.captureCurrentBonePoseSnapshot(track.name);
+                if (!poseSnapshot) return null;
+                const interpolationSnapshot = this.captureInterpolationCurveSnapshot({
+                    name: track.name,
+                    category: track.category,
+                    frames: new Uint32Array(),
+                }, frame);
+                const after = this.createBoneKeyframePayload(track, poseSnapshot, interpolationSnapshot, physicsToggle);
+                return {
+                    track,
+                    sourceFrame: frame,
+                    targetFrame: frame,
+                    before: this.mmdManager.readTimelineKeyframePayload(track, frame),
+                    after,
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (items.length === 0) {
+            this.showToast("No compatible bones selected", "error");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.boneBatch:${items.length}:${frame}:${nowMs}`,
+            label: `Register ${items.length} bone keyframes at frame ${frame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchPaste",
+                pasteBaseFrame: frame,
+                items,
+            },
+        };
+
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) {
+            this.showToast(`Frame ${frame}: bone keyframe registration failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        for (const item of items) {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(item.track.name));
+            this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(item.track));
+        }
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`Frame ${frame}: ${items.length} bone keyframes registered`, "success");
+    }
+
+    private tryRegisterEditorCameraKeyframe(
+        track: KeyframeTrack,
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+    ): boolean {
+        if (track.category !== "camera") {
+            return false;
+        }
+
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
+        const before = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        const after = this.createCameraKeyframePayload(poseSnapshot, interpolationSnapshot);
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.camera:${createCommandTrackKey(track)}:${frame}:${nowMs}`,
+            label: `Register camera keyframe at frame ${frame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.paste",
+                track: { category: track.category, name: track.name },
+                frame,
+                before,
+                after,
+            },
+        };
+
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) {
+            this.showToast(`Frame ${frame}: camera keyframe failed`, "error");
+            return true;
+        }
+
+        this.commandHistory.push(command);
+        this.clearRegisteredKeySelection();
+        this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
+        if (this.bottomPanel.getSelectedBone() === "Camera") {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey("Camera"));
+        }
+        this.refreshCameraUiFromRuntime(true);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(
+            before
+                ? `Frame ${frame} camera keyframe updated`
+                : `Frame ${frame}: camera keyframe added`,
+            "success",
+        );
+        return true;
+    }
+
+    private createCameraKeyframePayload(
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+        curves: ReadonlyMap<string, InterpolationCurve>,
+    ): CameraKeyframePayload {
+        const target = poseSnapshot?.target ?? this.mmdManager.getCameraTarget();
+        const rotationDeg = poseSnapshot?.rotation ?? this.mmdManager.getCameraRotation();
+        const distance = Math.max(0.0001, poseSnapshot?.distance ?? this.mmdManager.getCameraDistance());
+        const fov = poseSnapshot?.fov ?? this.mmdManager.getCameraFov();
+        const degToRad = Math.PI / 180;
+        return {
+            kind: "camera",
+            positions: [target.x, target.y, target.z],
+            positionInterpolations: this.composePositionInterpolationBlock(curves, "cam-x", "cam-y", "cam-z"),
+            rotations: [
+                rotationDeg.x * degToRad,
+                rotationDeg.y * degToRad,
+                rotationDeg.z * degToRad,
+            ],
+            rotationInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-rot")),
+            distances: [-distance],
+            distanceInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-dist")),
+            fovs: [fov],
+            fovInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-fov")),
+        };
+    }
+
+    private createBoneKeyframePayload(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        poseSnapshot: SelectedBonePoseSnapshot,
+        curves: ReadonlyMap<string, InterpolationCurve>,
+        physicsToggle: 0 | 1,
+    ): BoneKeyframePayload | MovableBoneKeyframePayload {
+        const rotations = this.rotationDegreesToQuaternionBlock(
+            poseSnapshot.rotation.x,
+            poseSnapshot.rotation.y,
+            poseSnapshot.rotation.z,
+        );
+        const rotationInterpolations = this.curveToBlock(this.getCurveFromSnapshot(curves, "bone-rot"));
+        if (this.shouldUseMovableBoneTrack(track)) {
+            return {
+                kind: "movableBone",
+                positions: [poseSnapshot.position.x, poseSnapshot.position.y, poseSnapshot.position.z],
+                positionInterpolations: this.composePositionInterpolationBlock(curves, "bone-x", "bone-y", "bone-z"),
+                rotations,
+                rotationInterpolations,
+                physicsToggles: [physicsToggle],
+            };
+        }
+        return {
+            kind: "bone",
+            rotations,
+            rotationInterpolations,
+            physicsToggles: [physicsToggle],
+        };
+    }
+
+    private tryRegisterEditorBoneKeyframe(
+        track: KeyframeTrack,
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+    ): boolean {
+        if (!poseSnapshot || !this.isBoneTrackForEditor(track) || track.name === "Camera") {
+            return false;
+        }
+
+        const result = this.mmdManager.registerEditorBoneKeyframe(
+            track,
+            this.mmdManager.currentFrame,
+            poseSnapshot,
+            this.physicsKeyframeInputMode,
+        );
+        if (!result) {
+            return false;
+        }
+
+        this.clearRegisteredKeySelection();
+        this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
+        if (this.bottomPanel.getSelectedBone() === track.name) {
+            this.clearSectionKeyframeDirty("bone", this.getBoneKeyframeContextKey(track.name));
+        }
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(
+            result.created
+                ? `Frame ${this.mmdManager.currentFrame}: keyframe added`
+                : `Frame ${this.mmdManager.currentFrame} keyframe updated`,
+            "success",
+        );
+        return true;
     }
 
     private registerMorphKeyframesAtCurrentFrame(): void {
@@ -4491,13 +8335,19 @@ export class UIController {
         const frame = this.mmdManager.currentFrame;
         let touched = false;
         for (const morph of snapshot.morphs) {
-            touched = this.mmdManager.addTimelineKeyframe({ name: morph.name, category: "morph" }, frame) || touched;
+            touched = this.mmdManager.applyTimelineKeyframePayload(
+                { name: morph.name, category: "morph" },
+                frame,
+                { kind: "morph", weights: [morph.value] },
+            ) || touched;
         }
 
         if (snapshot.morphs.length > 0) {
+            this.refreshRuntimeAnimationForTrack();
             this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(snapshot.frameIndex));
             this.updateSectionKeyframeButtons();
-            this.timeline.setSelectedFrame(null);
+            this.bottomPanel.updateMorphKeyframeButtonStates(frame);
+            this.clearRegisteredKeySelection();
             this.updateTimelineEditState();
             this.showToast(
                 touched ? `Frame ${frame}: morph keyframes added` : `Frame ${frame}: morph keyframes already registered`,
@@ -4507,6 +8357,33 @@ export class UIController {
         }
 
         this.showToast("No morphs in the selected frame", "error");
+    }
+
+    private registerSingleMorphKeyframeAtCurrentFrame(morph: { frameIndex: number; name: string; value: number }, options: { toast: boolean } = { toast: true }): void {
+        const frame = this.mmdManager.currentFrame;
+        const touched = this.mmdManager.applyTimelineKeyframePayload(
+            { name: morph.name, category: "morph" },
+            frame,
+            { kind: "morph", weights: [morph.value] },
+        );
+        this.refreshRuntimeAnimationForTrack();
+        const frameSnapshot = this.bottomPanel.getSelectedMorphFrameSnapshot();
+        const allFrameMorphsRegistered = frameSnapshot?.morphs.every((frameMorph) =>
+            this.mmdManager.hasTimelineKeyframe({ category: "morph", name: frameMorph.name }, frame),
+        ) ?? false;
+        if (allFrameMorphsRegistered) {
+            this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(morph.frameIndex));
+        }
+        this.updateSectionKeyframeButtons();
+        this.bottomPanel.updateMorphKeyframeButtonStates(frame);
+        this.clearRegisteredKeySelection();
+        this.updateTimelineEditState();
+        if (options.toast) {
+            this.showToast(
+                touched ? `Frame ${frame}: ${morph.name} morph keyframe added` : `Frame ${frame}: ${morph.name} morph keyframe already registered`,
+                "success",
+            );
+        }
     }
 
     private registerAccessoryTransformKeyframe(): void {
@@ -4541,7 +8418,9 @@ export class UIController {
         curves: ReadonlyMap<string, InterpolationCurve>,
         poseSnapshot: SelectedBonePoseSnapshot | null = null,
     ): boolean {
-        if (track.category === "morph") return false;
+        if (track.category === "morph") {
+            return this.persistMorphKeyframeValue(track, frame);
+        }
 
         const normalizedFrame = Math.max(0, Math.floor(frame));
         const managerInternal = this.mmdManager as unknown as Partial<MmdManagerInternalView>;
@@ -4562,8 +8441,10 @@ export class UIController {
         const modelAnimation = managerInternal.modelSourceAnimationsByModel?.get(currentModel);
         if (!modelAnimation) return false;
 
+        const preferMovableTrack = this.shouldUseMovableBoneTrack(track);
         const movableTrackLike = modelAnimation.movableBoneTracks.find((candidate) => candidate.name === track.name);
-        if (movableTrackLike) {
+        const boneTrackLike = modelAnimation.boneTracks.find((candidate) => candidate.name === track.name);
+        if (preferMovableTrack && movableTrackLike) {
             return this.persistMovableBoneKeyframeInterpolation(
                 track.name,
                 movableTrackLike as RuntimeMovableBoneTrackLike & RuntimeMovableBoneTrackMutable,
@@ -4573,7 +8454,6 @@ export class UIController {
             );
         }
 
-        const boneTrackLike = modelAnimation.boneTracks.find((candidate) => candidate.name === track.name);
         if (boneTrackLike) {
             return this.persistBoneKeyframeInterpolation(
                 track.name,
@@ -4584,7 +8464,68 @@ export class UIController {
             );
         }
 
+        if (movableTrackLike) {
+            return this.persistMovableBoneKeyframeInterpolation(
+                track.name,
+                movableTrackLike as RuntimeMovableBoneTrackLike & RuntimeMovableBoneTrackMutable,
+                normalizedFrame,
+                curves,
+                poseSnapshot,
+            );
+        }
+
         return false;
+    }
+
+    private shouldUseMovableBoneTrack(track: Pick<KeyframeTrack, "name" | "category">): boolean {
+        if (track.category === "camera" || track.category === "morph") return false;
+        const modelInfo = this.mmdManager.activeModelInfo;
+        const boneControl = modelInfo?.boneControlInfos?.find((candidate) => candidate.name === track.name);
+        if (boneControl) return boneControl.movable;
+        return track.category === "root";
+    }
+
+    private persistMorphKeyframeValue(track: Pick<KeyframeTrack, "name" | "category">, frame: number): boolean {
+        if (track.category !== "morph") return false;
+        const weight = this.mmdManager.getMorphWeight(track.name);
+        return this.mmdManager.applyTimelineKeyframePayload(track, frame, {
+            kind: "morph",
+            weights: [Number.isFinite(weight) ? weight : 0],
+        });
+    }
+
+    private applyRegisteredKeyframePoseToViewport(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        poseSnapshot: SelectedBonePoseSnapshot | null,
+    ): void {
+        if (!poseSnapshot || track.category === "morph") return;
+
+        if (track.category === "camera") {
+            const target = poseSnapshot.target ?? this.mmdManager.getCameraTarget();
+            this.mmdManager.applyCameraTrackPose(
+                target,
+                poseSnapshot.rotation,
+                poseSnapshot.distance ?? this.mmdManager.getCameraDistance(),
+                poseSnapshot.fov,
+            );
+            return;
+        }
+
+        if (track.category !== "root" && track.category !== "semi-standard" && track.category !== "bone") return;
+        this.mmdManager.setBoneTranslation(
+            track.name,
+            poseSnapshot.position.x,
+            poseSnapshot.position.y,
+            poseSnapshot.position.z,
+            false,
+        );
+        this.mmdManager.setBoneRotation(
+            track.name,
+            poseSnapshot.rotation.x,
+            poseSnapshot.rotation.y,
+            poseSnapshot.rotation.z,
+            false,
+        );
     }
 
     private persistCameraKeyframeInterpolation(
@@ -4950,7 +8891,13 @@ export class UIController {
         return block;
     }
 
-    private deleteSelectedKeyframe(): void {
+    private copySelectedKeyframe(): void {
+        const selectedKeys = this.timeline.getSelectedKeys();
+        if (selectedKeys.length > 1) {
+            this.copySelectedKeyframes(selectedKeys);
+            return;
+        }
+
         const track = this.getSelectedTimelineTrack();
         if (!track) {
             this.showToast("Please select a track", "error");
@@ -4958,17 +8905,410 @@ export class UIController {
         }
 
         const frame = this.timeline.getSelectedFrame() ?? this.mmdManager.currentFrame;
-        const removed = this.mmdManager.removeTimelineKeyframe(track, frame);
+        const payload = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        if (!payload) {
+            this.showToast(`Frame ${frame}: no keyframe to copy`, "info");
+            return;
+        }
+
+        this.keyframeClipboard = {
+            version: 1,
+            mode: "single",
+            sourceTarget: this.mmdManager.getTimelineTarget(),
+            sourceFrame: Math.max(0, Math.floor(frame)),
+            track: { category: track.category, name: track.name },
+            payload: this.cloneKeyframePayload(payload),
+        };
+        this.updateTimelineEditState();
+        this.showToast(`Frame ${frame}: keyframe copied`, "success");
+    }
+
+    private copySelectedKeyframes(selectedKeys: readonly TimelineKeySelectionRef[]): void {
+        const items: BatchKeyframeClipboard["items"] = [];
+        let sourceBaseFrame = Number.MAX_SAFE_INTEGER;
+        for (const selectedKey of selectedKeys) {
+            const track = this.selectionRefToCommandTrack(selectedKey);
+            const payload = this.mmdManager.readTimelineKeyframePayload(track, selectedKey.frame);
+            if (!payload) continue;
+            sourceBaseFrame = Math.min(sourceBaseFrame, selectedKey.frame);
+            items.push({
+                track,
+                sourceFrame: selectedKey.frame,
+                frameOffset: 0,
+                payload: this.cloneKeyframePayload(payload),
+            });
+        }
+
+        if (items.length === 0 || sourceBaseFrame === Number.MAX_SAFE_INTEGER) {
+            this.showToast("No selected keyframes to copy", "info");
+            return;
+        }
+
+        this.keyframeClipboard = {
+            version: 2,
+            mode: "batch",
+            sourceTarget: this.mmdManager.getTimelineTarget(),
+            sourceBaseFrame,
+            items: items.map((item) => ({
+                ...item,
+                frameOffset: item.sourceFrame - sourceBaseFrame,
+            })),
+        };
+        this.updateTimelineEditState();
+        this.showToast(`${items.length} keyframes copied`, "success");
+    }
+
+    private pasteKeyframeClipboard(): void {
+        const clipboard = this.keyframeClipboard;
+        if (!clipboard) {
+            this.showToast("No keyframe to paste", "info");
+            return;
+        }
+        if (clipboard.mode === "batch") {
+            this.pasteKeyframeBatchClipboard(clipboard);
+            return;
+        }
+
+        const target = this.resolveKeyframePasteTarget(clipboard);
+        if (!target) {
+            this.showToast("No compatible paste target", "error");
+            return;
+        }
+
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const before = this.mmdManager.readTimelineKeyframePayload(target.track, frame);
+        const after = this.cloneKeyframePayload(clipboard.payload);
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.paste:${createCommandTrackKey(target.track)}:${frame}:${nowMs}`,
+            label: `Paste keyframe at frame ${frame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.paste",
+                track: target.track,
+                frame,
+                before,
+                after,
+            },
+        };
+
+        const pasted = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!pasted) {
+            this.showToast(`Frame ${frame}: keyframe paste failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        this.timeline.setSelectedFrame(frame);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`Frame ${frame}: keyframe pasted`, "success");
+    }
+
+    private pasteKeyframeBatchClipboard(clipboard: BatchKeyframeClipboard): void {
+        if (this.mmdManager.getTimelineTarget() !== clipboard.sourceTarget) {
+            this.showToast("No compatible paste target", "error");
+            return;
+        }
+
+        const pasteBaseFrame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const items = clipboard.items
+            .map((item) => {
+                const targetFrame = pasteBaseFrame + item.frameOffset;
+                if (targetFrame < 0) return null;
+                return {
+                    track: item.track,
+                    sourceFrame: item.sourceFrame,
+                    targetFrame,
+                    before: this.mmdManager.readTimelineKeyframePayload(item.track, targetFrame),
+                    after: this.cloneKeyframePayload(item.payload),
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (items.length === 0) {
+            this.showToast("No keyframes to paste", "info");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.batchPaste:${items.length}:${pasteBaseFrame}:${nowMs}`,
+            label: `Paste ${items.length} keyframes at frame ${pasteBaseFrame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchPaste",
+                pasteBaseFrame,
+                items,
+            },
+        };
+
+        const pasted = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!pasted) {
+            this.showToast(`Frame ${pasteBaseFrame}: keyframe paste failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`${items.length} keyframes pasted`, "success");
+    }
+
+    private pasteMirroredKeyframeClipboard(): void {
+        if (this.mmdManager.getTimelineTarget() !== "model") {
+            this.showToast("Mirror paste is available for model bone keyframes only", "info");
+            return;
+        }
+
+        const clipboardItems = this.getMirrorPasteClipboardItems();
+        if (clipboardItems.length === 0) {
+            this.showToast("No bone keyframes to mirror paste", "info");
+            return;
+        }
+
+        const activeModelInfo = this.mmdManager.getActiveModelInfo();
+        const availableBoneNames = new Set(activeModelInfo?.boneNames ?? []);
+        const pasteBaseFrame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const mirroredItems = buildMirrorPasteItems(clipboardItems, pasteBaseFrame, availableBoneNames)
+            .map((item) => ({
+                ...item,
+                before: this.mmdManager.readTimelineKeyframePayload(item.track, item.targetFrame),
+            }));
+
+        if (mirroredItems.length === 0) {
+            this.showToast("No bone keyframes to mirror paste", "info");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.mirrorPaste:${mirroredItems.length}:${pasteBaseFrame}:${nowMs}`,
+            label: `Mirror paste ${mirroredItems.length} keyframes at frame ${pasteBaseFrame}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchPaste",
+                pasteBaseFrame,
+                items: mirroredItems,
+            },
+        };
+
+        const pasted = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!pasted) {
+            this.showToast(`Frame ${pasteBaseFrame}: mirror paste failed`, "error");
+            return;
+        }
+
+        this.commandHistory.push(command);
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        this.showToast(`${mirroredItems.length} bone keyframes mirror pasted`, "success");
+    }
+
+    private getMirrorPasteClipboardItems(): MirrorPasteClipboardItem[] {
+        const clipboard = this.keyframeClipboard;
+        if (!clipboard || clipboard.sourceTarget !== "model") return [];
+
+        if (clipboard.mode === "batch") {
+            return clipboard.items
+                .filter((item) => item.payload.kind === "bone" || item.payload.kind === "movableBone")
+                .map((item) => ({
+                    track: item.track,
+                    sourceFrame: item.sourceFrame,
+                    frameOffset: item.frameOffset,
+                    payload: this.cloneKeyframePayload(item.payload),
+                }));
+        }
+
+        if (clipboard.payload.kind !== "bone" && clipboard.payload.kind !== "movableBone") {
+            return [];
+        }
+
+        return [{
+            track: clipboard.track,
+            sourceFrame: clipboard.sourceFrame,
+            frameOffset: 0,
+            payload: this.cloneKeyframePayload(clipboard.payload),
+        }];
+    }
+
+    private resolveKeyframePasteTarget(clipboard: SingleKeyframeClipboard): { track: CommandTrackRef } | null {
+        const currentTarget = this.mmdManager.getTimelineTarget();
+        if (currentTarget !== clipboard.sourceTarget) return null;
+
+        const selectedTrack = this.getSelectedTimelineTrack();
+        if (selectedTrack && this.isCompatibleKeyframePayloadTarget(selectedTrack, clipboard.payload)) {
+            return { track: { category: selectedTrack.category, name: selectedTrack.name } };
+        }
+        return { track: clipboard.track };
+    }
+
+    private isCompatibleKeyframePayloadTarget(
+        track: Pick<KeyframeTrack, "category">,
+        payload: TimelineKeyframePayload,
+    ): boolean {
+        switch (payload.kind) {
+            case "camera":
+                return track.category === "camera";
+            case "morph":
+                return track.category === "morph";
+            case "bone":
+            case "movableBone":
+                return track.category === "root" || track.category === "semi-standard" || track.category === "bone";
+        }
+    }
+
+    private cloneKeyframePayload(payload: TimelineKeyframePayload): TimelineKeyframePayload {
+        switch (payload.kind) {
+            case "camera":
+                return {
+                    kind: "camera",
+                    positions: [...payload.positions],
+                    positionInterpolations: [...payload.positionInterpolations],
+                    rotations: [...payload.rotations],
+                    rotationInterpolations: [...payload.rotationInterpolations],
+                    distances: [...payload.distances],
+                    distanceInterpolations: [...payload.distanceInterpolations],
+                    fovs: [...payload.fovs],
+                    fovInterpolations: [...payload.fovInterpolations],
+                };
+            case "movableBone":
+                return {
+                    kind: "movableBone",
+                    positions: [...payload.positions],
+                    positionInterpolations: [...payload.positionInterpolations],
+                    rotations: [...payload.rotations],
+                    rotationInterpolations: [...payload.rotationInterpolations],
+                    physicsToggles: [...payload.physicsToggles],
+                };
+            case "bone":
+                return {
+                    kind: "bone",
+                    rotations: [...payload.rotations],
+                    rotationInterpolations: [...payload.rotationInterpolations],
+                    physicsToggles: [...payload.physicsToggles],
+                };
+            case "morph":
+                return {
+                    kind: "morph",
+                    weights: [...payload.weights],
+                };
+        }
+    }
+
+    private deleteSelectedKeyframe(source: ActionSource = "system"): void {
+        const selectedKeys = this.timeline.getSelectedKeys();
+        if (selectedKeys.length > 1) {
+            this.deleteSelectedKeyframes(selectedKeys);
+            return;
+        }
+
+        const track = this.getSelectedTimelineTrack();
+        if (!track) {
+            this.showToast("Please select a track", "error");
+            return;
+        }
+
+        const frame = this.timeline.getSelectedFrame() ?? this.mmdManager.currentFrame;
+        const command = buildKeyframeCommand(
+            { type: "keyframe.deleteSelected", source },
+            this.collectKeyframeCommandSnapshot(),
+        );
+        const removed = command
+            ? executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }))
+            : false;
         if (!removed) {
             this.showToast(`Frame ${frame}: no keyframe`, "info");
             return;
         }
 
-        if (this.timeline.getSelectedFrame() === frame) {
-            this.timeline.setSelectedFrame(null);
-        }
         this.updateTimelineEditState();
+        this.commandHistory.push(command);
         this.showToast(`Frame ${frame}: keyframe deleted`, "success");
+    }
+
+    private deleteSelectedKeyframes(selectedKeys: readonly TimelineKeySelectionRef[]): void {
+        const items = selectedKeys
+            .map((selectedKey) => {
+                const track = this.selectionRefToCommandTrack(selectedKey);
+                const before = this.mmdManager.readTimelineKeyframePayload(track, selectedKey.frame);
+                return before ? { track, frame: selectedKey.frame, before: this.cloneKeyframePayload(before) } : null;
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+        if (items.length === 0) {
+            this.showToast("No selected keyframes to delete", "info");
+            return;
+        }
+
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.batchDelete:${items.length}:${nowMs}`,
+            label: `Delete ${items.length} keyframes`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.batchDelete",
+                items,
+            },
+        };
+        const removed = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!removed) {
+            this.showToast("Selected keyframes delete failed", "error");
+            return;
+        }
+
+        this.updateTimelineEditState();
+        this.commandHistory.push(command);
+        this.showToast(`${items.length} keyframes deleted`, "success");
+    }
+
+    private undoLastCommand(): void {
+        const command = this.commandHistory.undo();
+        if (!command) {
+            this.showToast("Nothing to undo", "info");
+            return;
+        }
+
+        const reverted = executeCommand(
+            command,
+            "revert",
+            this.createCommandExecutionContext({ seekToFrame: false }),
+        );
+        if (!reverted) {
+            this.commandHistory.redo();
+            this.showToast(`Undo failed: ${command.label}`, "error");
+            return;
+        }
+
+        this.showToast(`Undo: ${command.label}`, "success");
+    }
+
+    private redoLastCommand(): void {
+        const command = this.commandHistory.redo();
+        if (!command) {
+            this.showToast("Nothing to redo", "info");
+            return;
+        }
+
+        const applied = executeCommand(
+            command,
+            "apply",
+            this.createCommandExecutionContext({ seekToFrame: false }),
+        );
+        if (!applied) {
+            this.commandHistory.undo();
+            this.showToast(`Redo failed: ${command.label}`, "error");
+            return;
+        }
+
+        this.showToast(`Redo: ${command.label}`, "success");
     }
 
     private nudgeSelectedKeyframe(deltaFrame: number): void {
@@ -4978,6 +9318,17 @@ export class UIController {
             this.updateTimelineEditState();
         };
 
+        const selectedKeys = this.timeline.getSelectedKeys();
+        if (selectedKeys.length > 1) {
+            if (deltaFrame !== -1 && deltaFrame !== 1) {
+                seekByDelta();
+                return;
+            }
+            if (this.nudgeSelectedKeyframes(selectedKeys, deltaFrame)) return;
+            seekByDelta();
+            return;
+        }
+
         const track = this.getSelectedTimelineTrack();
         const fromFrame = this.timeline.getSelectedFrame();
         if (!track || fromFrame === null) {
@@ -4985,17 +9336,104 @@ export class UIController {
             return;
         }
 
-        const toFrame = Math.max(0, fromFrame + deltaFrame);
-        const moved = this.mmdManager.moveTimelineKeyframe(track, fromFrame, toFrame);
+        if (deltaFrame !== -1 && deltaFrame !== 1) {
+            seekByDelta();
+            return;
+        }
+
+        const command = buildKeyframeCommand(
+            { type: "keyframe.nudgeSelected", source: "shortcut", deltaFrames: deltaFrame },
+            this.collectKeyframeCommandSnapshot(),
+        );
+        if (!command || command.diff.type !== "keyframe.move") {
+            seekByDelta();
+            return;
+        }
+
+        const moved = executeCommand(command, "apply", this.createCommandExecutionContext());
         if (!moved) {
             seekByDelta();
             return;
         }
 
-        this.timeline.setSelectedFrame(toFrame);
-        this.mmdManager.seekToBoundary(toFrame);
-        this.updateTimelineEditState();
-        this.showToast(`Key moved: ${fromFrame} -> ${toFrame}`, "success");
+        this.commandHistory.push(command);
+        this.showToast(`Key moved: ${command.diff.fromFrame} -> ${command.diff.toFrame}`, "success");
+    }
+
+    private nudgeSelectedKeyframes(selectedKeys: readonly TimelineKeySelectionRef[], deltaFrame: -1 | 1): boolean {
+        const selectedKeySet = new Set(selectedKeys.map((key) =>
+            `${key.trackCategory}\u001f${key.trackName}\u001f${key.frame}`
+        ));
+        const items = selectedKeys.map((selectedKey) => {
+            const toFrame = selectedKey.frame + deltaFrame;
+            if (toFrame < 0) return null;
+            const track = this.selectionRefToCommandTrack(selectedKey);
+            const before = this.mmdManager.readTimelineKeyframePayload(track, selectedKey.frame);
+            if (!before) return null;
+            const targetKey = `${selectedKey.trackCategory}\u001f${selectedKey.trackName}\u001f${toFrame}`;
+            const overwritten = selectedKeySet.has(targetKey)
+                ? null
+                : this.mmdManager.readTimelineKeyframePayload(track, toFrame);
+            return {
+                track,
+                fromFrame: selectedKey.frame,
+                toFrame,
+                before: this.cloneKeyframePayload(before),
+                overwritten: overwritten ? this.cloneKeyframePayload(overwritten) : null,
+            };
+        });
+
+        if (items.some((item) => item === null)) {
+            this.showToast("Selected keyframes move failed", "error");
+            return false;
+        }
+        const moveItems = items.filter((item): item is NonNullable<typeof item> => item !== null);
+        if (this.hasDuplicateBatchMoveTarget(moveItems)) {
+            this.showToast("Selected keyframes move would collide", "error");
+            return false;
+        }
+
+        const orderedItems = [...moveItems].sort((a, b) => {
+            if (a.track.category !== b.track.category) return a.track.category.localeCompare(b.track.category);
+            if (a.track.name !== b.track.name) return a.track.name.localeCompare(b.track.name);
+            return deltaFrame > 0 ? b.fromFrame - a.fromFrame : a.fromFrame - b.fromFrame;
+        });
+        const nowMs = Date.now();
+        const command: BuiltCommand = {
+            id: `keyframe.batchMove:${orderedItems.length}:${deltaFrame}:${nowMs}`,
+            label: `Move ${orderedItems.length} keyframes ${deltaFrame > 0 ? "right" : "left"}`,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            mergeKey: "keyframe.batchMove",
+            diff: {
+                type: "keyframe.batchMove",
+                deltaFrames: deltaFrame,
+                items: orderedItems,
+            },
+        };
+
+        const moved = executeCommand(command, "apply", this.createCommandExecutionContext());
+        if (!moved) {
+            this.showToast("Selected keyframes move failed", "error");
+            return false;
+        }
+
+        this.commandHistory.push(command);
+        this.showToast(`${orderedItems.length} keyframes moved`, "success");
+        return true;
+    }
+
+    private hasDuplicateBatchMoveTarget(items: readonly {
+        track: CommandTrackRef;
+        toFrame: number;
+    }[]): boolean {
+        const targets = new Set<string>();
+        for (const item of items) {
+            const key = `${createCommandTrackKey(item.track)}\u001f${item.toFrame}`;
+            if (targets.has(key)) return true;
+            targets.add(key);
+        }
+        return false;
     }
 
     private getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
@@ -5023,6 +9461,7 @@ export class UIController {
         this.btnPlay.style.display = "none";
         this.btnPause.style.display = "flex";
         if (updateStatus) this.setStatus("Playing", false);
+        this.refreshViewportBottomBar();
     }
 
     private pause(updateStatus = true): void {
@@ -5030,6 +9469,7 @@ export class UIController {
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         if (updateStatus) this.setStatus("Paused", false);
+        this.refreshViewportBottomBar();
     }
 
     private stop(): void {
@@ -5040,6 +9480,7 @@ export class UIController {
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
+        this.refreshViewportBottomBar();
     }
 
     private stopAtPlaybackEnd(endFrame: number): void {
@@ -5048,6 +9489,7 @@ export class UIController {
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
+        this.refreshViewportBottomBar();
     }
 
     private setStatus(text: string, loading: boolean): void {

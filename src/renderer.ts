@@ -11,11 +11,13 @@ import "./mmd-manager-x-extension";
 import { Timeline } from "./timeline";
 import { BottomPanel } from "./bottom-panel";
 import { UIController } from "./ui-controller";
+import { enhanceBottomPanelControls } from "./ui/panel-control-helpers";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
-import { logError, logInfo, toLogErrorData } from "./app-logger";
+import { isDebugLogEnabled, logDebug, logError, logInfo, toLogErrorData } from "./app-logger";
 import type { AppLogData, SmokeRendererReadyPayload } from "./types";
+import { POST_EFFECT_BACKEND_STORAGE_KEY } from "./render/post-effect-backend";
 
 let shaderRequestTraceInstalled = false;
 
@@ -35,6 +37,58 @@ function reportSmokeRendererFailure(message: string, details?: AppLogData): void
   }
 }
 
+function waitAnimationFrames(frameCount: number): Promise<void> {
+  return new Promise((resolve) => {
+    let remaining = Math.max(0, Math.floor(frameCount));
+    const step = (): void => {
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      remaining -= 1;
+      window.requestAnimationFrame(step);
+    };
+    step();
+  });
+}
+
+async function runSmokeLuminousScenario(mmdManager: MmdManager, modelPath: string): Promise<AppLogData> {
+  const beforeBackend = mmdManager.getPostEffectBackend();
+  const modelInfo = await mmdManager.loadPMX(modelPath);
+  if (!modelInfo) {
+    throw new Error("Smoke model load returned no model info");
+  }
+
+  const shaderStates = mmdManager.getWgslModelShaderStates();
+  const modelState = shaderStates.find((model) => model.modelPath === modelPath) ?? shaderStates.at(-1);
+  if (!modelState) {
+    throw new Error("Smoke model shader state was not found");
+  }
+
+  mmdManager.setWgslMaterialShaderPreset(modelState.modelIndex, null, "wgsl-autoluminous");
+  mmdManager.postEffectGlowEnabled = true;
+  mmdManager.postEffectGlowIntensity = 1.5;
+  mmdManager.postEffectGlowThreshold = 0;
+  mmdManager.postEffectGlowKernel = 64;
+  mmdManager.setFrameGraphPostEffectStackIds(["luminous"]);
+
+  await waitAnimationFrames(12);
+
+  return {
+    kind: "frameGraphLuminous",
+    modelName: modelInfo.name,
+    materialCount: modelState.materials.length,
+    beforeBackend,
+    afterBackend: mmdManager.getPostEffectBackend(),
+    frameGraphExecutedFrames: mmdManager.getFrameGraphPostEffectsExecutedFrameCount(),
+    luminousMaskSubMeshes: mmdManager.getFrameGraphPostEffectsLuminousMaskRenderedSubMeshCount(),
+    glowEnabled: mmdManager.postEffectGlowEnabled,
+    glowIntensity: mmdManager.postEffectGlowIntensity,
+    glowThreshold: mmdManager.postEffectGlowThreshold,
+    glowKernel: mmdManager.postEffectGlowKernel,
+  };
+}
+
 function isLikelyShaderRequestUrl(url: string): boolean {
   return /\.((vertex|fragment)\.fx|fx)(\?|$)/i.test(url)
     || /\/Shaders(WGSL)?\//i.test(url)
@@ -50,7 +104,7 @@ function installShaderRequestTrace(): void {
 
   WebRequest.prototype.open = function(method: string, url: string): void {
     if (isLikelyShaderRequestUrl(url)) {
-      console.log("[ShaderTrace] request", { method, url });
+      logDebug("shader", "shader request started", { method, url });
     }
     originalOpen.call(this, method, url);
   };
@@ -65,7 +119,7 @@ function installShaderRequestTrace(): void {
         const preview = responseText.slice(0, 120);
         const looksLikeHtml = preview.startsWith("<!doctype html") || preview.startsWith("<html");
         if (this.status >= 400 || looksLikeHtml || /text\/html/i.test(contentType)) {
-          console.error("[ShaderTrace] suspicious response", {
+          logError("shader", "suspicious shader response", {
             url: this.requestURL,
             status: this.status,
             statusText: this.statusText,
@@ -73,7 +127,7 @@ function installShaderRequestTrace(): void {
             preview,
           });
         } else {
-          console.log("[ShaderTrace] response", {
+          logDebug("shader", "shader response received", {
             url: this.requestURL,
             status: this.status,
             contentType,
@@ -81,7 +135,7 @@ function installShaderRequestTrace(): void {
         }
       });
       this.addEventListener("error", () => {
-        console.error("[ShaderTrace] network error", {
+        logError("shader", "shader request network error", {
           url: this.requestURL,
           status: this.status,
           statusText: this.statusText,
@@ -93,7 +147,9 @@ function installShaderRequestTrace(): void {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  installShaderRequestTrace();
+  if (isDebugLogEnabled("shaderTrace")) {
+    installShaderRequestTrace();
+  }
   initializeI18n(document);
   window.addEventListener("error", (event) => {
     logError("renderer", "uncaught renderer error", {
@@ -122,6 +178,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initializeApp(): Promise<void> {
   const searchParams = new URLSearchParams(window.location.search);
   const mode = searchParams.get("mode");
+  const smokeModelPath = searchParams.get("smokeModelPath");
   logInfo("renderer", "initialize app", { mode: mode ?? "editor" });
   if (mode === "exporter") {
     await initializePngSequenceExporter(searchParams);
@@ -131,16 +188,32 @@ async function initializeApp(): Promise<void> {
     await initializeWebmExporter(searchParams);
     return;
   }
+  enhanceBottomPanelControls(document);
+  if (smokeModelPath) {
+    try {
+      localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, "frameGraph");
+    } catch {
+      // Smoke should still report the actual backend if storage is unavailable.
+    }
+  }
 
   const canvas = document.getElementById("render-canvas") as HTMLCanvasElement;
   if (!canvas) {
-    console.error("Canvas not found");
+    logError("renderer", "render canvas is missing");
     reportSmokeRendererFailure("Canvas not found");
     return;
   }
 
   try {
     const mmdManager = await MmdManager.create(canvas);
+    await mmdManager.waitForPhysicsInitialization();
+    window.mmdModokiDiagnostics = {
+      dumpPerformanceSnapshot: () => mmdManager.dumpPerformanceSnapshot(),
+    };
+    window.mmdModokiDebug = {
+      enableAlphaTextureView: () => mmdManager.enableAlphaTextureDebugView(),
+      disableAlphaTextureView: () => mmdManager.disableAlphaTextureDebugView(),
+    };
     const engine = mmdManager.getEngineType();
     const physicsBackend = mmdManager.getPhysicsBackendLabel();
     logInfo("renderer", "MmdManager initialized", {
@@ -157,15 +230,20 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
+    const scenario = smokeModelPath
+      ? await runSmokeLuminousScenario(mmdManager, smokeModelPath)
+      : undefined;
     reportSmokeRendererReady({
       engine,
       physicsBackend,
+      crossOriginIsolated: globalThis.crossOriginIsolated,
+      sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
+      scenario,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logError("renderer", "failed to initialize MMD_modoki", toLogErrorData(err));
     reportSmokeRendererFailure(message, toLogErrorData(err));
-    console.error("Failed to initialize MMD modoki:", message);
 
     const statusText = document.getElementById("status-text");
     if (statusText) {
@@ -205,7 +283,7 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
   };
 
   if (!canvas) {
-    console.error("Canvas not found");
+    logError("render", "PNG sequence exporter canvas is missing");
     setStatus("Canvas not found");
     closeExporterWindowSoon();
     return;
@@ -261,7 +339,10 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
     closeExporterWindowSoon();
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("PNG sequence export failed:", message);
+    logError("render", "PNG sequence export failed", {
+      jobId,
+      ...toLogErrorData(err),
+    });
     setStatus(`Export failed: ${message}`);
     closeExporterWindowSoon();
   }
@@ -289,7 +370,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
   };
 
   if (!canvas) {
-    console.error("Canvas not found");
+    logError("webm", "exporter canvas is missing");
     setStatus("Canvas not found");
     closeExporterWindowSoon();
     return;
@@ -403,7 +484,6 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       jobId,
       ...toLogErrorData(err),
     });
-    console.error("WebM export failed:", message);
     setStatus(`Export failed: ${message}`);
     window.electronAPI.reportWebmExportProgress({
       jobId,

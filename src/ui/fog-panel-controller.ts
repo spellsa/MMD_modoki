@@ -1,5 +1,6 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 type FogPanelElements = {
     enabledInput: HTMLInputElement | null;
@@ -27,6 +28,7 @@ export type FogPanelControllerDeps = {
     syncRangeNumberInput: (slider: HTMLInputElement) => void;
     normalizeRangeInputValue: (slider: HTMLInputElement, value: number) => number;
     formatRangeInputValue: (slider: HTMLInputElement, value: number) => string;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveFogPanelElements(): FogPanelElements {
@@ -68,6 +70,7 @@ export class FogPanelController {
     private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
     private readonly normalizeRangeInputValue: (slider: HTMLInputElement, value: number) => number;
     private readonly formatRangeInputValue: (slider: HTMLInputElement, value: number) => string;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: FogPanelControllerDeps) {
         this.elements = resolveFogPanelElements();
@@ -75,6 +78,7 @@ export class FogPanelController {
         this.syncRangeNumberInput = deps.syncRangeNumberInput;
         this.normalizeRangeInputValue = deps.normalizeRangeInputValue;
         this.formatRangeInputValue = deps.formatRangeInputValue;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupControls();
     }
@@ -104,6 +108,53 @@ export class FogPanelController {
         this.syncModeAvailability();
     }
 
+    public setFogEnabled(enabled: boolean): void {
+        this.mmdManager.postEffectFogEnabled = enabled;
+        this.refreshEnabled();
+    }
+
+    public setFogStart(value: number): void {
+        this.mmdManager.postEffectFogStart = value;
+        this.refreshSlider(this.elements.startInput, this.elements.startValue, this.mmdManager.postEffectFogStart);
+        if (this.elements.endInput && Number(this.elements.endInput.value) < this.mmdManager.postEffectFogStart) {
+            this.elements.endInput.value = String(Math.round(this.mmdManager.postEffectFogStart));
+            this.setFogEnd(Number(this.elements.endInput.value));
+        }
+    }
+
+    public setFogEnd(value: number): void {
+        this.mmdManager.postEffectFogEnd = value;
+        this.refreshSlider(this.elements.endInput, this.elements.endValue, this.mmdManager.postEffectFogEnd);
+    }
+
+    public setFogDensity(value: number): void {
+        this.mmdManager.postEffectFogDensity = value;
+        this.refreshSlider(
+            this.elements.densityInput,
+            this.elements.densityValue,
+            this.mmdManager.postEffectFogDensity,
+            (rawValue) => `${Math.round(rawValue * 10000)}`,
+        );
+    }
+
+    public setFogOpacity(value: number): void {
+        this.mmdManager.postEffectFogOpacity = value;
+        this.refreshSlider(
+            this.elements.opacityInput,
+            this.elements.opacityValue,
+            this.mmdManager.postEffectFogOpacity,
+            (rawValue) => `${Math.round(rawValue * 100)}`,
+        );
+    }
+
+    public setFogColor(r: number, g: number, b: number): void {
+        this.mmdManager.setPostEffectFogColor(r, g, b);
+        const fogColor = this.mmdManager.getPostEffectFogColor();
+        this.refreshSlider(this.elements.colorRInput, this.elements.colorRValue, fogColor.r * 255);
+        this.refreshSlider(this.elements.colorGInput, this.elements.colorGValue, fogColor.g * 255);
+        this.refreshSlider(this.elements.colorBInput, this.elements.colorBValue, fogColor.b * 255);
+    }
+
     private setupControls(): void {
         const elements = this.elements;
         if (
@@ -128,59 +179,46 @@ export class FogPanelController {
         }
 
         const applyFogEnabled = (): void => {
-            this.mmdManager.postEffectFogEnabled = elements.enabledInput?.checked ?? false;
-            this.refreshEnabled();
+            const enabled = elements.enabledInput?.checked ?? false;
+            if (this.dispatchAction?.({ type: "effect.setFogEnabled", source: "panel", enabled })) return;
+            this.setFogEnabled(enabled);
         };
 
         const applyFogStart = (): void => {
             if (!elements.startInput) return;
-            this.mmdManager.postEffectFogStart = Number(elements.startInput.value);
-            this.refreshSlider(elements.startInput, elements.startValue, this.mmdManager.postEffectFogStart);
-            if (elements.endInput && Number(elements.endInput.value) < this.mmdManager.postEffectFogStart) {
-                elements.endInput.value = String(Math.round(this.mmdManager.postEffectFogStart));
-                applyFogEnd();
-            }
+            const value = Number(elements.startInput.value);
+            if (this.dispatchAction?.({ type: "effect.setFogStart", source: "panel", value })) return;
+            this.setFogStart(value);
         };
 
         const applyFogEnd = (): void => {
             if (!elements.endInput) return;
-            this.mmdManager.postEffectFogEnd = Number(elements.endInput.value);
-            this.refreshSlider(elements.endInput, elements.endValue, this.mmdManager.postEffectFogEnd);
+            const value = Number(elements.endInput.value);
+            if (this.dispatchAction?.({ type: "effect.setFogEnd", source: "panel", value })) return;
+            this.setFogEnd(value);
         };
 
         const applyFogDensity = (): void => {
             if (!elements.densityInput) return;
-            this.mmdManager.postEffectFogDensity = Number(elements.densityInput.value);
-            this.refreshSlider(
-                elements.densityInput,
-                elements.densityValue,
-                this.mmdManager.postEffectFogDensity,
-                (value) => `${Math.round(value * 10000)}`,
-            );
+            const value = Number(elements.densityInput.value);
+            if (this.dispatchAction?.({ type: "effect.setFogDensity", source: "panel", value })) return;
+            this.setFogDensity(value);
         };
 
         const applyFogOpacity = (): void => {
             if (!elements.opacityInput) return;
-            this.mmdManager.postEffectFogOpacity = Number(elements.opacityInput.value);
-            this.refreshSlider(
-                elements.opacityInput,
-                elements.opacityValue,
-                this.mmdManager.postEffectFogOpacity,
-                (value) => `${Math.round(value * 100)}`,
-            );
+            const value = Number(elements.opacityInput.value);
+            if (this.dispatchAction?.({ type: "effect.setFogOpacity", source: "panel", value })) return;
+            this.setFogOpacity(value);
         };
 
         const applyFogColor = (): void => {
             if (!elements.colorRInput || !elements.colorGInput || !elements.colorBInput) return;
-            this.mmdManager.setPostEffectFogColor(
-                Number(elements.colorRInput.value) / 255,
-                Number(elements.colorGInput.value) / 255,
-                Number(elements.colorBInput.value) / 255,
-            );
-            const fogColor = this.mmdManager.getPostEffectFogColor();
-            this.refreshSlider(elements.colorRInput, elements.colorRValue, fogColor.r * 255);
-            this.refreshSlider(elements.colorGInput, elements.colorGValue, fogColor.g * 255);
-            this.refreshSlider(elements.colorBInput, elements.colorBValue, fogColor.b * 255);
+            const r = Number(elements.colorRInput.value) / 255;
+            const g = Number(elements.colorGInput.value) / 255;
+            const b = Number(elements.colorBInput.value) / 255;
+            if (this.dispatchAction?.({ type: "effect.setFogColor", source: "panel", r, g, b })) return;
+            this.setFogColor(r, g, b);
         };
 
         this.mmdManager.postEffectFogMode = 2;

@@ -75,6 +75,9 @@ const printSmokeResult = () => {
     const physicsBackend = result?.data?.physicsBackend ?? "unknown";
     const status = result?.success ? "pass" : "fail";
     console.log(`[smoke] ${status}: ${result?.reason ?? "unknown result"} (engine=${engine}, physics=${physicsBackend})`);
+    if (result?.data?.scenario) {
+      console.log(`[smoke] scenario: ${JSON.stringify(result.data.scenario)}`);
+    }
     return result;
   } catch {
     console.warn("[smoke] result file was not written");

@@ -1,4 +1,5 @@
 import type { MmdManager } from "../mmd-manager";
+import type { EditorAction } from "../actions/types";
 
 export type CameraViewPreset = "left" | "front" | "right" | "top" | "back" | "bottom";
 
@@ -9,17 +10,12 @@ type CameraPanelElements = {
     topButton: HTMLButtonElement | null;
     backButton: HTMLButtonElement | null;
     bottomButton: HTMLButtonElement | null;
-    distanceSlider: HTMLInputElement | null;
-    distanceValue: HTMLElement | null;
 };
 
 export type CameraPanelControllerDeps = {
     mmdManager: MmdManager;
-    syncRangeNumberInput: (slider: HTMLInputElement) => void;
-    normalizeRangeInputValue: (slider: HTMLInputElement, value: number) => number;
-    formatRangeInputValue: (slider: HTMLInputElement, value: number) => string;
-    isRangeInputEditing: (slider: HTMLInputElement) => boolean;
     onCameraEdited: () => void;
+    dispatchAction?: (action: EditorAction) => boolean;
 };
 
 function resolveCameraPanelElements(): CameraPanelElements {
@@ -30,50 +26,40 @@ function resolveCameraPanelElements(): CameraPanelElements {
         topButton: document.getElementById("btn-cam-top") as HTMLButtonElement | null,
         backButton: document.getElementById("btn-cam-back") as HTMLButtonElement | null,
         bottomButton: document.getElementById("btn-cam-bottom") as HTMLButtonElement | null,
-        distanceSlider: document.getElementById("cam-distance") as HTMLInputElement | null,
-        distanceValue: document.getElementById("cam-distance-value"),
     };
 }
 
 export class CameraPanelController {
     private readonly elements: CameraPanelElements;
     private readonly mmdManager: MmdManager;
-    private readonly syncRangeNumberInput: (slider: HTMLInputElement) => void;
-    private readonly normalizeRangeInputValue: (slider: HTMLInputElement, value: number) => number;
-    private readonly formatRangeInputValue: (slider: HTMLInputElement, value: number) => string;
-    private readonly isRangeInputEditing: (slider: HTMLInputElement) => boolean;
     private readonly onCameraEdited: () => void;
+    private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
 
     constructor(deps: CameraPanelControllerDeps) {
         this.elements = resolveCameraPanelElements();
         this.mmdManager = deps.mmdManager;
-        this.syncRangeNumberInput = deps.syncRangeNumberInput;
-        this.normalizeRangeInputValue = deps.normalizeRangeInputValue;
-        this.formatRangeInputValue = deps.formatRangeInputValue;
-        this.isRangeInputEditing = deps.isRangeInputEditing;
         this.onCameraEdited = deps.onCameraEdited;
+        this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupControls();
     }
 
     public refresh(force = false, displayDistance?: number): void {
-        const slider = this.elements.distanceSlider;
-        const valueEl = this.elements.distanceValue;
-        if (!slider || !valueEl) return;
-        if (!force && this.isRangeInputEditing(slider)) return;
+        void force;
+        void displayDistance;
+        // Camera transform controls still live in the pseudo Camera bone section for this slice.
+    }
 
-        const distance = displayDistance ?? this.mmdManager.getCameraDistance();
-        const clamped = this.normalizeRangeInputValue(slider, distance);
-        slider.value = this.formatRangeInputValue(slider, clamped);
-        valueEl.textContent = `${distance.toFixed(1)}m`;
-        this.syncRangeNumberInput(slider);
+    public setCameraViewPreset(view: CameraViewPreset): void {
+        this.mmdManager.setCameraView(view);
+        this.updateViewButtons(view);
+        this.onCameraEdited();
     }
 
     private setupControls(): void {
         const switchCameraView = (view: CameraViewPreset): void => {
-            this.mmdManager.setCameraView(view);
-            this.updateViewButtons(view);
-            this.onCameraEdited();
+            if (this.dispatchAction?.({ type: "camera.setViewPreset", source: "button", view })) return;
+            this.setCameraViewPreset(view);
         };
 
         this.elements.leftButton?.addEventListener("click", () => switchCameraView("left"));
@@ -83,18 +69,7 @@ export class CameraPanelController {
         this.elements.backButton?.addEventListener("click", () => switchCameraView("back"));
         this.elements.bottomButton?.addEventListener("click", () => switchCameraView("bottom"));
 
-        this.elements.distanceSlider?.addEventListener("input", () => {
-            const slider = this.elements.distanceSlider;
-            const valueEl = this.elements.distanceValue;
-            if (!slider || !valueEl) return;
-
-            this.mmdManager.setCameraDistance(Number(slider.value));
-            valueEl.textContent = `${this.mmdManager.getCameraDistance().toFixed(1)}m`;
-            this.onCameraEdited();
-        });
-
         this.updateViewButtons("front");
-        this.refresh(true);
     }
 
     private updateViewButtons(active: CameraViewPreset): void {

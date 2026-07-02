@@ -42,9 +42,9 @@
 
 ローカル実装を見ると、内部では `ThinGlowLayer` が本体で、`GlowLayer` はそれを包む形になっている。
 
-- [glowLayer.d.ts](/d:/DevTools/Projects/MMD_modoki/node_modules/@babylonjs/core/Layers/glowLayer.d.ts)
-- [glowLayer.js](/d:/DevTools/Projects/MMD_modoki/node_modules/@babylonjs/core/Layers/glowLayer.js)
-- [thinGlowLayer.js](/d:/DevTools/Projects/MMD_modoki/node_modules/@babylonjs/core/Layers/thinGlowLayer.js)
+- [glowLayer.d.ts](../node_modules/@babylonjs/core/Layers/glowLayer.d.ts)
+- [glowLayer.js](../node_modules/@babylonjs/core/Layers/glowLayer.js)
+- [thinGlowLayer.js](../node_modules/@babylonjs/core/Layers/thinGlowLayer.js)
 
 ## 3. 重要 API
 
@@ -352,15 +352,15 @@ community 記事を総合すると、材質発光では少なくとも次を見�
 
 Babylon 側の確認開始点:
 
-- [glowLayer.d.ts](/d:/DevTools/Projects/MMD_modoki/node_modules/@babylonjs/core/Layers/glowLayer.d.ts)
-- [glowLayer.js](/d:/DevTools/Projects/MMD_modoki/node_modules/@babylonjs/core/Layers/glowLayer.js)
-- [thinGlowLayer.js](/d:/DevTools/Projects/MMD_modoki/node_modules/@babylonjs/core/Layers/thinGlowLayer.js)
+- [glowLayer.d.ts](../node_modules/@babylonjs/core/Layers/glowLayer.d.ts)
+- [glowLayer.js](../node_modules/@babylonjs/core/Layers/glowLayer.js)
+- [thinGlowLayer.js](../node_modules/@babylonjs/core/Layers/thinGlowLayer.js)
 
 本プロジェクト側の関連:
 
 - [camera-postfx-current-spec.md](./camera-postfx-current-spec.md)
-- [post-process-controller.ts](/d:/DevTools/Projects/MMD_modoki/src/render/post-process-controller.ts)
-- [mmd-manager.ts](/d:/DevTools/Projects/MMD_modoki/src/mmd-manager.ts)
+- [post-process-controller.ts](../src/render/post-process-controller.ts)
+- [mmd-manager.ts](../src/mmd-manager.ts)
 
 ## 10. 参考にした外部情報
 

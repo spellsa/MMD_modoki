@@ -17,6 +17,25 @@
  */
 import type { KeyframeTrack, TimelineRotationOverlay, TrackCategory } from "./types";
 
+export type TimelineSeekPhase = "jump" | "dragStart" | "dragMove" | "dragEnd";
+export type TimelineKeySelectionRef = {
+    trackCategory: TrackCategory;
+    trackName: string;
+    frame: number;
+};
+
+export type TimelineBoneTrackSelectionRef = {
+    trackCategory: TrackCategory;
+    trackName: string;
+};
+
+export type TimelineSelectionChange = {
+    activeTrack: KeyframeTrack | null;
+    activeFrame: number | null;
+    selectedKeys: TimelineKeySelectionRef[];
+    selectedBoneTracks: TimelineBoneTrackSelectionRef[];
+};
+
 // ── Layout ─────────────────────────────────────────────────────────
 const RULER_H = 20;
 const ROW_H = 18;
@@ -33,6 +52,11 @@ const TRACK_ROW_BG_SELECTED = "rgba(255,255,255,0.07)";
 const CURRENT_FRAME_COLOR = "#ff4fa3";
 const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
+const SELECTION_KEY_SEPARATOR = "\u001f";
+const RECT_SELECTION_THRESHOLD_PX = 4;
+const MULTI_BONE_TRACK_ROW_BG = "rgba(57,197,187,0.12)";
+const MULTI_BONE_LABEL_BG = "rgba(57,197,187,0.16)";
+const EMPTY_FRAMES = new Uint32Array(0);
 
 // ── Category palette ───────────────────────────────────────────────
 const CAT = {
@@ -58,6 +82,18 @@ function upperBound(a: Uint32Array, v: number): number {
 function hasFrame(a: Uint32Array, v: number): boolean {
     const i = lowerBound(a, v);
     return i < a.length && a[i] === v;
+}
+
+function createSelectionKey(ref: TimelineKeySelectionRef): string {
+    return `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}${SELECTION_KEY_SEPARATOR}${ref.frame}`;
+}
+
+function createBoneTrackSelectionKey(ref: TimelineBoneTrackSelectionRef): string {
+    return `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}`;
+}
+
+function isMultiSelectableBoneCategory(category: TrackCategory): boolean {
+    return category === "root" || category === "semi-standard" || category === "bone";
 }
 
 function drawDiamondMarker(
@@ -93,10 +129,40 @@ function drawDiamondMarker(
     ctx.restore();
 }
 
+function drawXMarker(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    strokeStyle: string,
+    lineWidth = 2,
+): void {
+    const half = size / 2;
+    ctx.save();
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - half, y - half);
+    ctx.lineTo(x + half, y + half);
+    ctx.moveTo(x + half, y - half);
+    ctx.lineTo(x - half, y + half);
+    ctx.stroke();
+    ctx.restore();
+}
+
 function resolveCssVarColor(name: string, fallback: string): string {
     const rootStyle = getComputedStyle(document.documentElement);
     const resolved = rootStyle.getPropertyValue(name).trim();
     return resolved || fallback;
+}
+
+function getCanvasRenderingContext2D(canvas: HTMLCanvasElement, label: string): CanvasRenderingContext2D {
+    const context = canvas.getContext("2d");
+    if (!context) {
+        throw new Error(`Canvas 2D context is not available: ${label}`);
+    }
+    return context;
 }
 
 export class Timeline {
@@ -119,13 +185,25 @@ export class Timeline {
     private viewOffset = 0;   // currentFrame * PX_PER_F
     private selectedTrackIndex = -1;
     private selectedFrame: number | null = null;
+    private selectedKeySet = new Set<string>();
+    private selectedBoneTrackSet = new Set<string>();
+    private selectionAnchor: TimelineKeySelectionRef | null = null;
+    private pendingPointerSelection: {
+        startX: number;
+        startY: number;
+        additive: boolean;
+        event: MouseEvent;
+    } | null = null;
+    private rectangleSelection: {
+        startX: number;
+        startY: number;
+        currentX: number;
+        currentY: number;
+        baseSelection: Set<string>;
+        additive: boolean;
+    } | null = null;
     private waveformPeaks: Float32Array | null = null;
     private rotationOverlay: TimelineRotationOverlay | null = null;
-
-    // Drag-seek
-    private isDragging = false;
-    private dragBaseFrame = 0;
-    private dragBaseX = 0;
 
     // RAF
     private staticRaf: number | null = null;
@@ -136,8 +214,8 @@ export class Timeline {
     // Scroll sync guard
     private syncingScroll = false;
 
-    public onSeek: ((frame: number) => void) | null = null;
     public onSelectionChanged: ((track: KeyframeTrack | null, frame: number | null) => void) | null = null;
+    public onKeySelectionChanged: ((change: TimelineSelectionChange) => void) | null = null;
 
     // ── Constructor ─────────────────────────────────────────────────
 
@@ -154,9 +232,9 @@ export class Timeline {
         this.waveformCanvas = document.getElementById("timeline-waveform-canvas") as HTMLCanvasElement | null;
         this.labelsEl = document.getElementById(labelsElId) as HTMLElement;
 
-        this.staticCtx = this.staticCanvas.getContext("2d")!;
-        this.overlayCtx = this.overlayCanvas.getContext("2d")!;
-        this.labelCtx = this.labelCanvas.getContext("2d")!;
+        this.staticCtx = getCanvasRenderingContext2D(this.staticCanvas, staticCanvasId);
+        this.overlayCtx = getCanvasRenderingContext2D(this.overlayCanvas, "timeline-overlay-canvas");
+        this.labelCtx = getCanvasRenderingContext2D(this.labelCanvas, labelCanvasId);
         this.waveformCtx = this.waveformCanvas?.getContext("2d") ?? null;
 
         this.setupEvents();
@@ -173,20 +251,15 @@ export class Timeline {
         // Seek and select: static layer
         this.staticCanvas.style.pointerEvents = "auto";
         this.staticCanvas.addEventListener("mousedown", (e) => {
-            this.selectTrackFromStaticEvent(e);
-            this.isDragging = true;
-            this.dragBaseFrame = this.currentFrame;
-            this.dragBaseX = e.clientX;
-            this.seekFromEvent(e, this.staticCanvas);
+            this.beginStaticPointerSelection(e);
         });
+        window.addEventListener("mousemove", (e) => this.updateStaticPointerSelection(e));
+        window.addEventListener("mouseup", (e) => this.endStaticPointerSelection(e));
 
         // Seek only: overlay layer
         this.overlayCanvas.style.pointerEvents = "auto";
-        this.overlayCanvas.addEventListener("mousedown", (e) => {
-            this.isDragging = true;
-            this.dragBaseFrame = this.currentFrame;
-            this.dragBaseX = e.clientX;
-            this.seekFromEvent(e, this.overlayCanvas);
+        this.overlayCanvas.addEventListener("dblclick", (e) => {
+            this.selectAllKeysAtFrameFromRulerEvent(e);
         });
 
         // Select from labels
@@ -194,21 +267,9 @@ export class Timeline {
         this.labelCanvas.addEventListener("mousedown", (e) => {
             this.selectTrackFromLabelEvent(e);
         });
-        window.addEventListener("mousemove", (e) => {
-            if (!this.isDragging) return;
-            const dx = e.clientX - this.dragBaseX;
-            const delta = Math.round(-dx / PX_PER_F);
-            const frame = Math.max(0, this.dragBaseFrame + delta);
-            if (frame !== this.currentFrame) {
-                this.currentFrame = frame;
-                this.viewOffset = frame * PX_PER_F;
-                this.onSeek?.(frame);
-                this.scheduleOverlay();
-                this.scheduleStatic();
-                this.scheduleWaveform();
-            }
+        this.labelCanvas.addEventListener("dblclick", (e) => {
+            this.selectAllKeysFromLabelEvent(e);
         });
-        window.addEventListener("mouseup", () => { this.isDragging = false; });
 
         // ── Bidirectional scroll sync ──────────────────────────────
         this.trackScrollEl.addEventListener("scroll", () => {
@@ -233,21 +294,6 @@ export class Timeline {
         const trackWidth = this.trackScrollEl.clientWidth;
         if (labelWidth <= 0 || trackWidth <= 0) return PLAYHEAD_X_FALLBACK;
         return Math.max(12, Math.round((trackWidth - labelWidth) / 2));
-    }
-
-    private seekFromEvent(e: MouseEvent, canvas: HTMLCanvasElement): void {
-        const rect = canvas.getBoundingClientRect();
-        const playheadX = this.getPlayheadX();
-        const frame = Math.max(
-            0,
-            Math.round(this.currentFrame + (e.clientX - rect.left - playheadX) / PX_PER_F)
-        );
-        this.currentFrame = frame;
-        this.viewOffset = frame * PX_PER_F;
-        this.onSeek?.(frame);
-        this.scheduleOverlay();
-        this.scheduleStatic();
-        this.scheduleWaveform();
     }
 
     // ── Public API ───────────────────────────────────────────────────
@@ -298,10 +344,53 @@ export class Timeline {
         return this.selectedFrame;
     }
 
+    getSelectedKeys(): TimelineKeySelectionRef[] {
+        return this.getSelectedKeyRefsFromSet(this.selectedKeySet);
+    }
+
+    getSelectedBoneTracks(): TimelineBoneTrackSelectionRef[] {
+        return this.getSelectedBoneTrackRefsFromSet(this.selectedBoneTrackSet);
+    }
+
+    hasMultipleSelectedKeys(): boolean {
+        return this.selectedKeySet.size > 1;
+    }
+
+    hasMultipleSelectedBoneTracks(): boolean {
+        return this.selectedBoneTrackSet.size > 1;
+    }
+
+    setSelectedKeys(keys: readonly TimelineKeySelectionRef[], activeKey: TimelineKeySelectionRef | null = null): void {
+        this.selectedKeySet = this.createNormalizedSelectionSet(keys);
+        this.selectedBoneTrackSet.clear();
+        const active = activeKey && this.hasSelectionRef(activeKey)
+            ? activeKey
+            : this.getSelectedKeys()[0] ?? null;
+        this.applyActiveSelection(active);
+        this.selectionAnchor = active;
+        this.scheduleStatic();
+        this.scheduleLabel();
+        this.emitSelectionChanged();
+    }
+
+    clearSelectedKeys(options: { keepActiveTrack?: boolean; clearActiveFrame?: boolean } = {}): void {
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
+        if (options.clearActiveFrame || !options.keepActiveTrack) {
+            this.selectedFrame = null;
+        }
+        this.scheduleStatic();
+        this.scheduleLabel();
+        this.emitSelectionChanged();
+    }
+
     setSelectedFrame(frame: number | null): void {
         const track = this.getSelectedTrack();
         if (!track) {
             this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectedBoneTrackSet.clear();
+            this.selectionAnchor = null;
             this.emitSelectionChanged();
             return;
         }
@@ -309,8 +398,15 @@ export class Timeline {
         const normalizedFrame = frame === null ? null : Math.max(0, Math.floor(frame));
         if (normalizedFrame === null || !hasFrame(track.frames, normalizedFrame)) {
             this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectedBoneTrackSet.clear();
+            this.selectionAnchor = null;
         } else {
             this.selectedFrame = normalizedFrame;
+            const ref = this.createSelectionRef(track, normalizedFrame);
+            this.selectedKeySet = new Set([createSelectionKey(ref)]);
+            this.selectedBoneTrackSet.clear();
+            this.selectionAnchor = ref;
         }
         this.scheduleStatic();
         this.emitSelectionChanged();
@@ -329,10 +425,42 @@ export class Timeline {
         const changed = this.selectedTrackIndex !== targetIndex || this.selectedFrame !== null;
         this.selectedTrackIndex = targetIndex;
         this.selectedFrame = null;
+        this.selectedKeySet.clear();
+        this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(this.tracks[targetIndex]);
+        this.selectionAnchor = null;
         this.resize();
         if (changed) {
             this.emitSelectionChanged();
         }
+        return true;
+    }
+
+    selectBoneTrackByName(name: string, options: { additive?: boolean } = {}): boolean {
+        const targetIndex = this.findBoneTrackIndexByName(name);
+        if (targetIndex < 0) return false;
+
+        const previousSelectedTrackIndex = this.selectedTrackIndex;
+        const track = this.tracks[targetIndex];
+        this.selectedFrame = null;
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
+
+        if (options.additive === true) {
+            const activeRef = this.toggleBoneTrackSelection(track);
+            this.selectedTrackIndex = activeRef
+                ? this.findTrackIndexByBoneTrackRef(activeRef)
+                : targetIndex;
+        } else {
+            this.selectedTrackIndex = targetIndex;
+            this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(track);
+        }
+
+        if (this.selectedTrackIndex !== previousSelectedTrackIndex) this.resize();
+        else {
+            this.scheduleStatic();
+            this.scheduleLabel();
+        }
+        this.emitSelectionChanged();
         return true;
     }
 
@@ -434,6 +562,7 @@ export class Timeline {
 
         const visStart = Math.max(0, Math.floor((this.viewOffset - playheadX) / PX_PER_F));
         const visEnd = Math.min(this.totalFrames, visStart + Math.ceil(w / PX_PER_F) + 2);
+        const selectedFramesByTrack = this.getSelectedFramesByTrackKey();
 
         // Vertical culling: only draw rows visible in the scroll viewport
         const scrollTop = this.trackScrollEl.scrollTop;
@@ -447,9 +576,15 @@ export class Timeline {
             const rowH = this.getRowHeight(i);
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
+            const isSelectedBoneTrack = this.selectedBoneTrackSet.has(this.createTrackSelectionKey(track));
 
             ctx.fillStyle = TRACK_ROW_BG;
             ctx.fillRect(0, ry, w, rowH);
+
+            if (isSelectedBoneTrack) {
+                ctx.fillStyle = MULTI_BONE_TRACK_ROW_BG;
+                ctx.fillRect(0, ry, w, rowH);
+            }
 
             if (isSelectedRow) {
                 ctx.fillStyle = TRACK_ROW_BG_SELECTED;
@@ -470,16 +605,42 @@ export class Timeline {
             const hi = upperBound(frames, visEnd);
             const markerSize = track.category === "root" ? 9 : track.category === "camera" ? 8 : 6;
             const midY = ry + rowH / 2;
+            const selectedFrames = selectedFramesByTrack.get(this.createTrackSelectionKey(track));
+            const physicsOnFrames = track.physicsOnFrames ?? EMPTY_FRAMES;
+            const virtualPhysicsOnFrames = track.virtualPhysicsOnFrames ?? EMPTY_FRAMES;
 
             for (let k = lo; k <= hi && k < frames.length; k++) {
                 const sx = frames[k] * PX_PER_F - this.viewOffset + playheadX;
                 if (sx < -markerSize || sx > w + markerSize) continue;
-                drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
-
-                if (isSelectedRow && this.selectedFrame !== null && frames[k] === this.selectedFrame) {
-                    drawDiamondMarker(ctx, sx, midY, markerSize + 4, "rgba(255,255,255,0.12)", "#ffffff", 1.5);
+                const isPhysicsOnKey = hasFrame(physicsOnFrames, frames[k]);
+                if (isPhysicsOnKey) {
+                    drawXMarker(ctx, sx, midY, markerSize + 2, col.kf);
+                } else {
                     drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
                 }
+
+                const isSelectedKey = selectedFrames?.has(frames[k]) ?? false;
+                const isActiveKey = isSelectedRow && this.selectedFrame !== null && frames[k] === this.selectedFrame;
+                if (isSelectedKey || isActiveKey) {
+                    const fill = isActiveKey ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.09)";
+                    const stroke = isActiveKey ? "#ffffff" : "rgba(255,255,255,0.72)";
+                    drawDiamondMarker(ctx, sx, midY, markerSize + 4, fill, stroke, isActiveKey ? 1.5 : 1);
+                    if (isPhysicsOnKey) {
+                        drawXMarker(ctx, sx, midY, markerSize + 2, col.kf);
+                    } else {
+                        drawDiamondMarker(ctx, sx, midY, markerSize, col.kf);
+                    }
+                }
+            }
+
+            const virtualLo = lowerBound(virtualPhysicsOnFrames, visStart);
+            const virtualHi = upperBound(virtualPhysicsOnFrames, visEnd);
+            for (let k = virtualLo; k <= virtualHi && k < virtualPhysicsOnFrames.length; k++) {
+                const frame = virtualPhysicsOnFrames[k];
+                if (hasFrame(frames, frame)) continue;
+                const sx = frame * PX_PER_F - this.viewOffset + playheadX;
+                if (sx < -markerSize || sx > w + markerSize) continue;
+                drawXMarker(ctx, sx, midY, markerSize + 2, col.kf);
             }
         }
 
@@ -619,6 +780,8 @@ export class Timeline {
         ctx.lineTo(playheadX, h);
         ctx.stroke();
         ctx.restore();
+
+        this.drawRectangleSelection(ctx);
     }
 
     // ── Label column ─────────────────────────────────────────────────
@@ -652,9 +815,15 @@ export class Timeline {
             const y = RULER_H + this.getRowTop(i);
             const col = CAT[track.category];
             const isSelectedRow = i === this.selectedTrackIndex;
+            const isSelectedBoneTrack = this.selectedBoneTrackSet.has(this.createTrackSelectionKey(track));
 
             ctx.fillStyle = col.bg;
             ctx.fillRect(0, y, w, rowH);
+
+            if (isSelectedBoneTrack) {
+                ctx.fillStyle = MULTI_BONE_LABEL_BG;
+                ctx.fillRect(0, y, w, rowH);
+            }
 
             if (isSelectedRow) {
                 ctx.fillStyle = "rgba(99,102,241,0.18)";
@@ -684,6 +853,73 @@ export class Timeline {
         }
     }
 
+    private beginStaticPointerSelection(e: MouseEvent): void {
+        if (e.button !== 0) return;
+
+        const rect = this.staticCanvas.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        const row = this.getRowIndexAtOffset(localY);
+        if (row < 0 || row >= this.tracks.length) return;
+
+        e.preventDefault();
+        this.pendingPointerSelection = {
+            startX: localX,
+            startY: localY,
+            additive: e.ctrlKey || e.metaKey,
+            event: e,
+        };
+    }
+
+    private updateStaticPointerSelection(e: MouseEvent): void {
+        const pending = this.pendingPointerSelection;
+        if (!pending) return;
+
+        const point = this.getStaticCanvasPoint(e);
+        const dragDistance = Math.max(
+            Math.abs(point.x - pending.startX),
+            Math.abs(point.y - pending.startY),
+        );
+
+        if (!this.rectangleSelection && dragDistance < RECT_SELECTION_THRESHOLD_PX) return;
+        if (!this.rectangleSelection) {
+            this.rectangleSelection = {
+                startX: pending.startX,
+                startY: pending.startY,
+                currentX: point.x,
+                currentY: point.y,
+                baseSelection: pending.additive ? new Set(this.selectedKeySet) : new Set<string>(),
+                additive: pending.additive,
+            };
+        } else {
+            this.rectangleSelection.currentX = point.x;
+            this.rectangleSelection.currentY = point.y;
+        }
+
+        this.applyRectangleSelection();
+        this.scheduleStatic();
+    }
+
+    private endStaticPointerSelection(e: MouseEvent): void {
+        const pending = this.pendingPointerSelection;
+        if (!pending) return;
+
+        if (this.rectangleSelection) {
+            this.rectangleSelection.currentX = this.getStaticCanvasPoint(e).x;
+            this.rectangleSelection.currentY = this.getStaticCanvasPoint(e).y;
+            this.applyRectangleSelection();
+            this.rectangleSelection = null;
+            this.pendingPointerSelection = null;
+            this.scheduleStatic();
+            this.scheduleLabel();
+            this.emitSelectionChanged();
+            return;
+        }
+
+        this.pendingPointerSelection = null;
+        this.selectTrackFromStaticEvent(pending.event);
+    }
+
     private selectTrackFromStaticEvent(e: MouseEvent): void {
         const rect = this.staticCanvas.getBoundingClientRect();
         const localX = e.clientX - rect.left;
@@ -694,7 +930,10 @@ export class Timeline {
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
         const pickedFrame = this.pickFrameOnTrackFromX(this.tracks[row], localX);
-        this.selectedFrame = pickedFrame;
+        if (pickedFrame === null) {
+            this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(this.tracks[row]);
+        }
+        this.applyKeySelectionFromPointer(this.tracks[row], pickedFrame, e);
         if (selectionChanged) this.resize();
         else {
             this.scheduleStatic();
@@ -703,20 +942,238 @@ export class Timeline {
         this.emitSelectionChanged();
     }
 
-    private selectTrackFromLabelEvent(e: MouseEvent): void {
+    private selectAllKeysFromLabelEvent(e: MouseEvent): void {
         const rect = this.labelCanvas.getBoundingClientRect();
         const localY = e.clientY - rect.top;
+        if (localY >= 0 && localY < RULER_H) {
+            this.selectAllKeysFromAllTracks();
+            return;
+        }
+
         const row = this.getRowIndexAtOffset(localY - RULER_H);
         if (row < 0 || row >= this.tracks.length) return;
 
+        const track = this.tracks[row];
         const selectionChanged = this.selectedTrackIndex !== row;
         this.selectedTrackIndex = row;
-        this.selectedFrame = null;
+        this.selectedBoneTrackSet.clear();
+        this.selectAllKeysOnTrack(track, e.ctrlKey || e.metaKey);
         if (selectionChanged) this.resize();
         else {
             this.scheduleStatic();
             this.scheduleLabel();
         }
+        this.emitSelectionChanged();
+    }
+
+    private selectAllKeysAtFrameFromRulerEvent(e: MouseEvent): void {
+        if (e.button !== 0) return;
+
+        const rect = this.overlayCanvas.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) return;
+
+        const frame = Math.max(0, Math.round(this.frameFromCanvasX(localX)));
+        this.selectAllKeysAtFrame(frame);
+    }
+
+    private selectTrackFromLabelEvent(e: MouseEvent): void {
+        if (e.detail > 1) return;
+
+        const rect = this.labelCanvas.getBoundingClientRect();
+        const localY = e.clientY - rect.top;
+        const row = this.getRowIndexAtOffset(localY - RULER_H);
+        if (row < 0 || row >= this.tracks.length) return;
+
+        const previousSelectedTrackIndex = this.selectedTrackIndex;
+        this.selectedFrame = null;
+        this.selectedKeySet.clear();
+        this.selectionAnchor = null;
+        const track = this.tracks[row];
+        if (e.shiftKey && this.isMultiSelectableBoneTrack(track)) {
+            const activeRef = this.toggleBoneTrackSelection(track);
+            this.selectedTrackIndex = activeRef
+                ? this.findTrackIndexByBoneTrackRef(activeRef)
+                : row;
+        } else {
+            this.selectedTrackIndex = row;
+            this.selectedBoneTrackSet = this.createSingleBoneTrackSelectionSet(track);
+        }
+        const selectionChanged = this.selectedTrackIndex !== previousSelectedTrackIndex;
+        if (selectionChanged) this.resize();
+        else {
+            this.scheduleStatic();
+            this.scheduleLabel();
+        }
+        this.emitSelectionChanged();
+    }
+
+    private getStaticCanvasPoint(e: MouseEvent): { x: number; y: number } {
+        const rect = this.staticCanvas.getBoundingClientRect();
+        return {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top,
+        };
+    }
+
+    private drawRectangleSelection(ctx: CanvasRenderingContext2D): void {
+        const selection = this.rectangleSelection;
+        if (!selection) return;
+
+        const bounds = this.getRectangleSelectionBounds(selection);
+        const width = Math.max(1, bounds.right - bounds.left);
+        const height = Math.max(1, bounds.bottom - bounds.top);
+        ctx.save();
+        ctx.fillStyle = "rgba(96,165,250,0.14)";
+        ctx.strokeStyle = "rgba(147,197,253,0.82)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.fillRect(bounds.left, bounds.top, width, height);
+        ctx.strokeRect(bounds.left + 0.5, bounds.top + 0.5, width, height);
+        ctx.restore();
+    }
+
+    private applyRectangleSelection(): void {
+        const selection = this.rectangleSelection;
+        if (!selection) return;
+
+        const refs = this.getKeyRefsInRectangle(selection);
+        const nextSelection = new Set(selection.baseSelection);
+        for (const ref of refs) {
+            nextSelection.add(createSelectionKey(ref));
+        }
+
+        this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeyRefsFromSet(nextSelection));
+        if (this.selectedKeySet.size > 0 || !selection.additive) {
+            this.selectedBoneTrackSet.clear();
+        }
+        const active = refs[refs.length - 1] ?? this.getSelectedKeys()[0] ?? null;
+        if (active) {
+            this.applyActiveSelection(active);
+            this.selectionAnchor = active;
+        } else if (!selection.additive) {
+            this.selectedTrackIndex = this.getRowIndexAtOffset(selection.startY, true);
+            this.selectedFrame = null;
+            this.selectionAnchor = null;
+        }
+    }
+
+    private getKeyRefsInRectangle(selection: {
+        startX: number;
+        startY: number;
+        currentX: number;
+        currentY: number;
+    }): TimelineKeySelectionRef[] {
+        const bounds = this.getRectangleSelectionBounds(selection);
+        const firstRow = this.getRowIndexAtOffset(bounds.top, true);
+        const lastRow = this.getRowIndexAtOffset(bounds.bottom, true);
+        if (firstRow < 0 || lastRow < 0) return [];
+
+        const playheadX = this.getPlayheadX();
+        const leftFrame = this.frameFromCanvasX(bounds.left);
+        const rightFrame = this.frameFromCanvasX(bounds.right);
+        const minFrame = Math.max(0, Math.floor(Math.min(leftFrame, rightFrame)) - 1);
+        const maxFrame = Math.max(0, Math.ceil(Math.max(leftFrame, rightFrame)) + 1);
+        const refs: TimelineKeySelectionRef[] = [];
+
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            const track = this.tracks[row];
+            const midY = this.getRowTop(row) + this.getRowHeight(row) / 2;
+            if (midY < bounds.top || midY > bounds.bottom) continue;
+
+            const lo = lowerBound(track.frames, minFrame);
+            const hi = upperBound(track.frames, maxFrame);
+            for (let i = lo; i <= hi && i < track.frames.length; i += 1) {
+                const frame = track.frames[i];
+                const sx = frame * PX_PER_F - this.viewOffset + playheadX;
+                if (sx < bounds.left || sx > bounds.right) continue;
+                refs.push(this.createSelectionRef(track, frame));
+            }
+        }
+
+        return refs;
+    }
+
+    private getRectangleSelectionBounds(selection: {
+        startX: number;
+        startY: number;
+        currentX: number;
+        currentY: number;
+    }): { left: number; right: number; top: number; bottom: number } {
+        return {
+            left: Math.min(selection.startX, selection.currentX),
+            right: Math.max(selection.startX, selection.currentX),
+            top: Math.min(selection.startY, selection.currentY),
+            bottom: Math.max(selection.startY, selection.currentY),
+        };
+    }
+
+    private frameFromCanvasX(x: number): number {
+        return this.currentFrame + (x - this.getPlayheadX()) / PX_PER_F;
+    }
+
+    private selectAllKeysOnTrack(track: KeyframeTrack, additive: boolean): void {
+        const refs = Array.from(track.frames, (frame) => this.createSelectionRef(track, frame));
+        if (refs.length === 0) {
+            if (!additive) {
+                this.selectedFrame = null;
+                this.selectedKeySet.clear();
+                this.selectionAnchor = null;
+            }
+            return;
+        }
+
+        if (!additive) {
+            this.selectedKeySet = this.createNormalizedSelectionSet(refs);
+            const active = refs[0] ?? null;
+            this.applyActiveSelection(active);
+            this.selectionAnchor = active;
+            return;
+        }
+
+        const nextSelection = new Set(this.selectedKeySet);
+        const allSelected = refs.every((ref) => nextSelection.has(createSelectionKey(ref)));
+        for (const ref of refs) {
+            const key = createSelectionKey(ref);
+            if (allSelected) nextSelection.delete(key);
+            else nextSelection.add(key);
+        }
+        this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeyRefsFromSet(nextSelection));
+        const active = allSelected ? this.getSelectedKeys()[0] ?? null : refs[0] ?? null;
+        this.applyActiveSelection(active);
+        this.selectionAnchor = active;
+    }
+
+    private selectAllKeysAtFrame(frame: number): void {
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const track of this.tracks) {
+            if (!hasFrame(track.frames, frame)) continue;
+            refs.push(this.createSelectionRef(track, frame));
+        }
+        this.applyKeySelectionRefs(refs);
+    }
+
+    private selectAllKeysFromAllTracks(): void {
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const track of this.tracks) {
+            for (const frame of track.frames) {
+                refs.push(this.createSelectionRef(track, frame));
+            }
+        }
+        this.applyKeySelectionRefs(refs);
+    }
+
+    private applyKeySelectionRefs(refs: readonly TimelineKeySelectionRef[]): void {
+        this.selectedBoneTrackSet.clear();
+        this.selectedKeySet = this.createNormalizedSelectionSet(refs);
+        const active = refs[0] && this.hasSelectionRef(refs[0])
+            ? refs[0]
+            : this.getSelectedKeys()[0] ?? null;
+        this.applyActiveSelection(active);
+        this.selectionAnchor = active;
+        this.scheduleStatic();
+        this.scheduleLabel();
         this.emitSelectionChanged();
     }
 
@@ -750,6 +1207,9 @@ export class Timeline {
         if (this.tracks.length === 0) {
             this.selectedTrackIndex = -1;
             this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectedBoneTrackSet.clear();
+            this.selectionAnchor = null;
             this.emitSelectionChanged();
             return;
         }
@@ -763,6 +1223,9 @@ export class Timeline {
             } else {
                 this.selectedTrackIndex = -1;
                 this.selectedFrame = null;
+                this.selectedKeySet.clear();
+                this.selectedBoneTrackSet.clear();
+                this.selectionAnchor = null;
                 this.emitSelectionChanged();
                 return;
             }
@@ -773,6 +1236,11 @@ export class Timeline {
         const track = this.getSelectedTrack();
         if (!track || this.selectedFrame === null || !hasFrame(track.frames, this.selectedFrame)) {
             this.selectedFrame = null;
+        }
+        this.selectedKeySet = this.createNormalizedSelectionSet(this.getSelectedKeys());
+        this.selectedBoneTrackSet = this.createNormalizedBoneTrackSelectionSet(this.getSelectedBoneTracks());
+        if (this.selectionAnchor && !this.hasSelectionRef(this.selectionAnchor)) {
+            this.selectionAnchor = null;
         }
 
         this.emitSelectionChanged();
@@ -975,8 +1443,221 @@ export class Timeline {
         return clampToRange ? this.tracks.length - 1 : -1;
     }
 
+    private applyKeySelectionFromPointer(track: KeyframeTrack, pickedFrame: number | null, event: MouseEvent): void {
+        if (pickedFrame === null) {
+            this.selectedFrame = null;
+            this.selectedKeySet.clear();
+            this.selectionAnchor = null;
+            return;
+        }
+
+        this.selectedBoneTrackSet.clear();
+        const ref = this.createSelectionRef(track, pickedFrame);
+        if (event.shiftKey) {
+            this.applyRangeSelection(track, ref);
+            return;
+        }
+
+        if (event.ctrlKey || event.metaKey) {
+            const key = createSelectionKey(ref);
+            if (this.selectedKeySet.has(key)) {
+                this.selectedKeySet.delete(key);
+                const fallback = this.getSelectedKeys()[this.selectedKeySet.size - 1] ?? null;
+                this.applyActiveSelection(fallback);
+                this.selectionAnchor = fallback;
+            } else {
+                this.selectedKeySet.add(key);
+                this.applyActiveSelection(ref);
+                this.selectionAnchor = ref;
+            }
+            return;
+        }
+
+        this.selectedKeySet = new Set([createSelectionKey(ref)]);
+        this.applyActiveSelection(ref);
+        this.selectionAnchor = ref;
+    }
+
+    private applyRangeSelection(track: KeyframeTrack, clickedRef: TimelineKeySelectionRef): void {
+        const anchor = this.selectionAnchor;
+        if (!anchor || anchor.trackCategory !== clickedRef.trackCategory || anchor.trackName !== clickedRef.trackName) {
+            this.selectedKeySet = new Set([createSelectionKey(clickedRef)]);
+            this.applyActiveSelection(clickedRef);
+            this.selectionAnchor = clickedRef;
+            return;
+        }
+
+        const start = Math.min(anchor.frame, clickedRef.frame);
+        const end = Math.max(anchor.frame, clickedRef.frame);
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const frame of track.frames) {
+            if (frame < start || frame > end) continue;
+            refs.push(this.createSelectionRef(track, frame));
+        }
+        this.selectedKeySet = this.createNormalizedSelectionSet(refs);
+        this.applyActiveSelection(clickedRef);
+    }
+
+    private applyActiveSelection(ref: TimelineKeySelectionRef | null): void {
+        if (!ref) {
+            this.selectedFrame = null;
+            return;
+        }
+        const index = this.tracks.findIndex((track) =>
+            track.category === ref.trackCategory && track.name === ref.trackName
+        );
+        if (index < 0) {
+            this.selectedFrame = null;
+            return;
+        }
+        this.selectedTrackIndex = index;
+        this.selectedFrame = ref.frame;
+    }
+
+    private createSelectionRef(track: KeyframeTrack, frame: number): TimelineKeySelectionRef {
+        return {
+            trackCategory: track.category,
+            trackName: track.name,
+            frame: Math.max(0, Math.floor(frame)),
+        };
+    }
+
+    private hasSelectionRef(ref: TimelineKeySelectionRef): boolean {
+        const track = this.tracks.find((candidate) =>
+            candidate.category === ref.trackCategory && candidate.name === ref.trackName
+        );
+        return !!track && hasFrame(track.frames, ref.frame);
+    }
+
+    private createNormalizedSelectionSet(keys: readonly TimelineKeySelectionRef[]): Set<string> {
+        const normalized = new Set<string>();
+        for (const key of keys) {
+            const ref = {
+                trackCategory: key.trackCategory,
+                trackName: key.trackName,
+                frame: Math.max(0, Math.floor(key.frame)),
+            };
+            if (!this.hasSelectionRef(ref)) continue;
+            normalized.add(createSelectionKey(ref));
+        }
+        return normalized;
+    }
+
+    private getSelectedKeyRefsFromSet(source: ReadonlySet<string>): TimelineKeySelectionRef[] {
+        const refs: TimelineKeySelectionRef[] = [];
+        for (const track of this.tracks) {
+            for (const frame of track.frames) {
+                const ref = this.createSelectionRef(track, frame);
+                if (source.has(createSelectionKey(ref))) refs.push(ref);
+            }
+        }
+        return refs;
+    }
+
+    private createTrackSelectionKey(track: Pick<KeyframeTrack, "category" | "name">): string {
+        return `${track.category}${SELECTION_KEY_SEPARATOR}${track.name}`;
+    }
+
+    private findBoneTrackIndexByName(name: string): number {
+        const categories: TrackCategory[] = ["bone", "semi-standard", "root"];
+        for (const category of categories) {
+            const index = this.tracks.findIndex((track) =>
+                track.name === name && track.category === category && this.isMultiSelectableBoneTrack(track)
+            );
+            if (index >= 0) return index;
+        }
+        return -1;
+    }
+
+    private isMultiSelectableBoneTrack(track: Pick<KeyframeTrack, "category" | "name">): boolean {
+        return track.name !== "Camera" && isMultiSelectableBoneCategory(track.category);
+    }
+
+    private createBoneTrackSelectionRef(track: Pick<KeyframeTrack, "category" | "name">): TimelineBoneTrackSelectionRef {
+        return {
+            trackCategory: track.category,
+            trackName: track.name,
+        };
+    }
+
+    private hasBoneTrackSelectionRef(ref: TimelineBoneTrackSelectionRef): boolean {
+        return this.tracks.some((track) =>
+            track.category === ref.trackCategory
+            && track.name === ref.trackName
+            && this.isMultiSelectableBoneTrack(track)
+        );
+    }
+
+    private createNormalizedBoneTrackSelectionSet(
+        refs: readonly TimelineBoneTrackSelectionRef[],
+    ): Set<string> {
+        const normalized = new Set<string>();
+        for (const ref of refs) {
+            if (!this.hasBoneTrackSelectionRef(ref)) continue;
+            normalized.add(createBoneTrackSelectionKey(ref));
+        }
+        return normalized;
+    }
+
+    private createSingleBoneTrackSelectionSet(track: Pick<KeyframeTrack, "category" | "name">): Set<string> {
+        if (!this.isMultiSelectableBoneTrack(track)) return new Set<string>();
+        return new Set([createBoneTrackSelectionKey(this.createBoneTrackSelectionRef(track))]);
+    }
+
+    private getSelectedBoneTrackRefsFromSet(source: ReadonlySet<string>): TimelineBoneTrackSelectionRef[] {
+        const refs: TimelineBoneTrackSelectionRef[] = [];
+        for (const track of this.tracks) {
+            if (!this.isMultiSelectableBoneTrack(track)) continue;
+            const ref = this.createBoneTrackSelectionRef(track);
+            if (source.has(createBoneTrackSelectionKey(ref))) refs.push(ref);
+        }
+        return refs;
+    }
+
+    private findTrackIndexByBoneTrackRef(ref: TimelineBoneTrackSelectionRef): number {
+        return this.tracks.findIndex((track) => track.category === ref.trackCategory && track.name === ref.trackName);
+    }
+
+    private toggleBoneTrackSelection(track: KeyframeTrack): TimelineBoneTrackSelectionRef | null {
+        const ref = this.createBoneTrackSelectionRef(track);
+        const key = createBoneTrackSelectionKey(ref);
+        const nextSelection = new Set(this.selectedBoneTrackSet);
+        const wasSelected = nextSelection.has(key);
+        if (nextSelection.has(key)) {
+            nextSelection.delete(key);
+        } else {
+            nextSelection.add(key);
+        }
+        this.selectedBoneTrackSet = this.createNormalizedBoneTrackSelectionSet(
+            this.getSelectedBoneTrackRefsFromSet(nextSelection),
+        );
+        if (!wasSelected) return ref;
+        return this.getSelectedBoneTracks()[0] ?? null;
+    }
+
+    private getSelectedFramesByTrackKey(): Map<string, Set<number>> {
+        const result = new Map<string, Set<number>>();
+        for (const ref of this.getSelectedKeys()) {
+            const trackKey = `${ref.trackCategory}${SELECTION_KEY_SEPARATOR}${ref.trackName}`;
+            let frames = result.get(trackKey);
+            if (!frames) {
+                frames = new Set<number>();
+                result.set(trackKey, frames);
+            }
+            frames.add(ref.frame);
+        }
+        return result;
+    }
+
     private emitSelectionChanged(): void {
-        this.onSelectionChanged?.(this.getSelectedTrack(), this.selectedFrame);
+        const activeTrack = this.getSelectedTrack();
+        this.onSelectionChanged?.(activeTrack, this.selectedFrame);
+        this.onKeySelectionChanged?.({
+            activeTrack,
+            activeFrame: this.selectedFrame,
+            selectedKeys: this.getSelectedKeys(),
+            selectedBoneTracks: this.getSelectedBoneTracks(),
+        });
     }
 }
 

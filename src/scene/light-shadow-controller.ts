@@ -5,6 +5,72 @@ import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import { CascadedShadowGenerator } from "@babylonjs/core/Lights/Shadows/cascadedShadowGenerator";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { Scene } from "@babylonjs/core/scene";
+import type { Camera } from "@babylonjs/core/Cameras/camera";
+
+type LightShadowMaterialColor = {
+    set?: (r: number, g: number, b: number, a: number) => void;
+    r?: number;
+    g?: number;
+    b?: number;
+    a?: number;
+};
+
+type LightShadowMaterial = object & {
+    subMaterials?: Array<LightShadowMaterial | null | undefined>;
+    toonTextureMultiplicativeColor?: LightShadowMaterialColor | null;
+    toonTextureAdditiveColor?: LightShadowMaterialColor | null;
+    useToonTextureColor?: boolean;
+};
+
+type LightShadowHostStatics = {
+    toonFlatLightColorInfluence: number;
+    toonSelfShadowBoundarySoftness: number;
+    toonOcclusionShadowBoundarySoftness: number;
+};
+
+type LightShadowHost = {
+    engine: {
+        getCaps(): { maxTextureSize?: number };
+        releaseEffects?: () => void;
+    };
+    scene: Scene;
+    camera?: Camera | null;
+    hemiLight: HemisphericLight | null;
+    dirLight: DirectionalLight | null;
+    shadowGenerator: ShadowGenerator | CascadedShadowGenerator | null;
+    shadowBiasValue: number;
+    shadowNormalBiasValue: number;
+    shadowFilteringQualityValue: number;
+    shadowBlurKernelValue: number;
+    shadowPenumbraEnabledValue: boolean;
+    shadowPenumbraSizeValue: number;
+    transparentShadowEnabledValue: boolean;
+    softTransparentShadowEnabledValue: boolean;
+    shadowDarknessValue: number;
+    selfShadowEdgeSoftnessValue: number;
+    occlusionShadowEdgeSoftnessValue: number;
+    shadowGroundColorValue: Color3;
+    shadowEnabled: boolean;
+    lightColorTemperatureKelvin: number;
+    lightColorScaleValue: Color3;
+    lightFlatStrengthValue: number;
+    lightFlatColorInfluenceValue: number;
+    toonShadowInfluenceValue: number;
+    shadowFrustumSizeValue: number;
+    shadowMaxZValue: number;
+    lightDirectionInputValue: Vector3 | null;
+    sceneModels: Array<{ mesh: Mesh }>;
+    getAccessoryMeshes?: () => Mesh[];
+    markMaterialShaderDirty(material: LightShadowMaterial): void;
+    applyVolumetricLightSettings?: () => void;
+    refreshGlobalIlluminationLightParameters?: () => void;
+    constructor: unknown;
+};
+
+function getLightShadowHostStatics(host: LightShadowHost): LightShadowHostStatics {
+    return host.constructor as LightShadowHostStatics;
+}
 
 function clamp01(v: number): number {
     if (!Number.isFinite(v)) return 0;
@@ -21,12 +87,12 @@ function clampShadowEdgeSoftness(v: number): number {
 }
 
 function clampShadowFrustumSize(v: number): number {
-    return Math.max(120, Math.min(6000, v));
+    return Math.max(120, Math.min(30000, v));
 }
 
 function clampShadowMaxZ(v: number): number {
     if (!Number.isFinite(v)) return DEFAULT_CSM_SHADOW_MAX_Z;
-    return Math.max(500, Math.min(12000, v));
+    return Math.max(500, Math.min(100000, v));
 }
 
 function clampShadowBias(v: number): number {
@@ -39,18 +105,64 @@ function clampShadowNormalBias(v: number): number {
     return Math.max(0, Math.min(0.02, v));
 }
 
+function clampShadowFilteringQuality(v: number): number {
+    const fallback = ShadowGenerator.QUALITY_MEDIUM;
+    const rounded = Math.round(Number.isFinite(v) ? v : fallback);
+    return Math.max(ShadowGenerator.QUALITY_HIGH, Math.min(ShadowGenerator.QUALITY_LOW, rounded));
+}
+
+function clampShadowBlurKernel(v: number): number {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(64, Math.round(v)));
+}
+
+function clampShadowPenumbraSize(v: number): number {
+    if (!Number.isFinite(v)) return 0.035;
+    return Math.max(0.001, Math.min(0.2, v));
+}
+
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
-const DEFAULT_CSM_SHADOW_MAX_Z = 4800;
+const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const DEFAULT_CSM_LIGHT_DISTANCE = 220;
 
-function applyShadowBiasSettings(host: any): void {
+function applyShadowBiasSettings(host: LightShadowHost): void {
     if (!host.shadowGenerator) return;
     host.shadowGenerator.bias = clampShadowBias(host.shadowBiasValue);
     host.shadowGenerator.normalBias = clampShadowNormalBias(host.shadowNormalBiasValue);
 }
 
-function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGenerator {
+function applyTransparentShadowSettings(host: LightShadowHost): void {
+    if (!host.shadowGenerator) return;
+    const enabled = host.transparentShadowEnabledValue !== false;
+    host.shadowGenerator.transparencyShadow = enabled;
+    host.shadowGenerator.enableSoftTransparentShadow = enabled && host.softTransparentShadowEnabledValue !== false;
+    host.shadowGenerator.useOpacityTextureForTransparentShadow = enabled;
+}
+
+function applyShadowFilterSettings(host: LightShadowHost): void {
+    if (!host.shadowGenerator) return;
+
+    const blurKernel = clampShadowBlurKernel(host.shadowBlurKernelValue);
+    const penumbraEnabled = Boolean(host.shadowPenumbraEnabledValue);
+    if (penumbraEnabled) {
+        host.shadowGenerator.filter = ShadowGenerator.FILTER_PCSS;
+    } else if (blurKernel > 0) {
+        host.shadowGenerator.filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP;
+        host.shadowGenerator.useKernelBlur = true;
+        host.shadowGenerator.blurScale = 2;
+        host.shadowGenerator.blurKernel = blurKernel;
+    } else {
+        host.shadowGenerator.filter = ShadowGenerator.FILTER_PCF;
+    }
+
+    host.shadowGenerator.filteringQuality = clampShadowFilteringQuality(host.shadowFilteringQualityValue);
+    host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
+        ? Math.max(0.001, Math.min(0.04, clampShadowPenumbraSize(host.shadowPenumbraSizeValue) * 0.25))
+        : clampShadowPenumbraSize(host.shadowPenumbraSizeValue);
+}
+
+function createShadowGenerator(host: LightShadowHost, dirLight: DirectionalLight): ShadowGenerator {
     const maxTextureSize = host.engine.getCaps().maxTextureSize ?? 4096;
     const shadowMapSize = Math.min(8192, maxTextureSize);
     const camera = host.camera ?? host.scene?.activeCamera ?? null;
@@ -65,20 +177,16 @@ function createShadowGenerator(host: any, dirLight: DirectionalLight): ShadowGen
         shadowGenerator.autoCalcDepthBounds = true;
         shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
     }
-    shadowGenerator.usePercentageCloserFiltering = true;
-    shadowGenerator.filteringQuality = ShadowGenerator.QUALITY_MEDIUM;
-    shadowGenerator.useContactHardeningShadow = false;
-    shadowGenerator.frustumEdgeFalloff = 0.26;
-    shadowGenerator.transparencyShadow = true;
-    shadowGenerator.enableSoftTransparentShadow = true;
-    shadowGenerator.useOpacityTextureForTransparentShadow = true;
-    shadowGenerator.darkness = host.shadowDarknessValue;
     host.shadowGenerator = shadowGenerator;
+    applyShadowFilterSettings(host);
+    shadowGenerator.frustumEdgeFalloff = 0.26;
+    applyTransparentShadowSettings(host);
+    shadowGenerator.darkness = host.shadowDarknessValue;
     applyShadowBiasSettings(host);
     return shadowGenerator;
 }
 
-function getEffectiveShadowEdgeSoftness(host: any): number {
+function getEffectiveShadowEdgeSoftness(host: LightShadowHost): number {
     return (host.selfShadowEdgeSoftnessValue + host.occlusionShadowEdgeSoftnessValue) * 0.5;
 }
 
@@ -105,11 +213,11 @@ function kelvinToColor(kelvin: number): Color3 {
     );
 }
 
-function collectMaterials(meshes: Mesh[]): Set<any> {
-    const materials = new Set<any>();
+function collectMaterials(meshes: Mesh[]): Set<LightShadowMaterial> {
+    const materials = new Set<LightShadowMaterial>();
 
     for (const mesh of meshes) {
-        const material = mesh.material as any;
+        const material = mesh.material as LightShadowMaterial | null;
         if (!material) continue;
         if (Array.isArray(material.subMaterials)) {
             for (const sub of material.subMaterials) {
@@ -123,7 +231,7 @@ function collectMaterials(meshes: Mesh[]): Set<any> {
     return materials;
 }
 
-export function initializeLightShadowSystem(host: any): void {
+export function initializeLightShadowSystem(host: LightShadowHost): void {
     if (host.hemiLight && host.dirLight && host.shadowGenerator) {
         return;
     }
@@ -158,34 +266,34 @@ export function initializeLightShadowSystem(host: any): void {
     applyShadowEdgeSoftness(host);
 }
 
-export function getLightColorTemperature(host: any): number {
+export function getLightColorTemperature(host: LightShadowHost): number {
     return host.lightColorTemperatureKelvin;
 }
 
-export function setLightColorTemperature(host: any, kelvin: number): void {
+export function setLightColorTemperature(host: LightShadowHost, kelvin: number): void {
     host.lightColorTemperatureKelvin = Math.max(1000, Math.min(20000, Math.round(kelvin)));
     applyLightColorTemperature(host);
 }
 
-export function getLightIntensity(host: any): number {
+export function getLightIntensity(host: LightShadowHost): number {
     return host.dirLight?.intensity ?? 0;
 }
 
-export function setLightIntensity(host: any, v: number): void {
+export function setLightIntensity(host: LightShadowHost, v: number): void {
     if (!host.dirLight) return;
     host.dirLight.intensity = Math.max(0, Math.min(2, v));
 }
 
-export function getAmbientIntensity(host: any): number {
+export function getAmbientIntensity(host: LightShadowHost): number {
     return host.hemiLight?.intensity ?? 0;
 }
 
-export function setAmbientIntensity(host: any, v: number): void {
+export function setAmbientIntensity(host: LightShadowHost, v: number): void {
     if (!host.hemiLight) return;
     host.hemiLight.intensity = Math.max(0, Math.min(2, v));
 }
 
-export function getLightColor(host: any): { r: number; g: number; b: number } {
+export function getLightColor(host: LightShadowHost): { r: number; g: number; b: number } {
     return {
         r: host.lightColorScaleValue.r,
         g: host.lightColorScaleValue.g,
@@ -193,7 +301,7 @@ export function getLightColor(host: any): { r: number; g: number; b: number } {
     };
 }
 
-export function setLightColor(host: any, r: number, g: number, b: number): void {
+export function setLightColor(host: LightShadowHost, r: number, g: number, b: number): void {
     host.lightColorScaleValue = new Color3(
         clampLightColorScale(r),
         clampLightColorScale(g),
@@ -202,26 +310,26 @@ export function setLightColor(host: any, r: number, g: number, b: number): void 
     applyLightColorTemperature(host);
 }
 
-export function getLightFlatStrength(host: any): number {
+export function getLightFlatStrength(host: LightShadowHost): number {
     return host.lightFlatStrengthValue;
 }
 
-export function setLightFlatStrength(host: any, v: number): void {
+export function setLightFlatStrength(host: LightShadowHost, v: number): void {
     host.lightFlatStrengthValue = Math.max(0, Math.min(0.1, v));
     applyToonShadowInfluenceToAllModels(host);
 }
 
-export function getLightFlatColorInfluence(host: any): number {
+export function getLightFlatColorInfluence(host: LightShadowHost): number {
     return host.lightFlatColorInfluenceValue;
 }
 
-export function setLightFlatColorInfluence(host: any, v: number): void {
+export function setLightFlatColorInfluence(host: LightShadowHost, v: number): void {
     host.lightFlatColorInfluenceValue = clamp01(v);
-    host.constructor.toonFlatLightColorInfluence = host.lightFlatColorInfluenceValue;
+    getLightShadowHostStatics(host).toonFlatLightColorInfluence = host.lightFlatColorInfluenceValue;
     applyToonShadowInfluenceToAllModels(host);
 }
 
-export function getShadowColor(host: any): { r: number; g: number; b: number } {
+export function getShadowColor(host: LightShadowHost): { r: number; g: number; b: number } {
     return {
         r: host.shadowGroundColorValue.r,
         g: host.shadowGroundColorValue.g,
@@ -229,7 +337,7 @@ export function getShadowColor(host: any): { r: number; g: number; b: number } {
     };
 }
 
-export function setShadowColor(host: any, r: number, g: number, b: number): void {
+export function setShadowColor(host: LightShadowHost, r: number, g: number, b: number): void {
     host.shadowGroundColorValue = new Color3(
         clamp01(r),
         clamp01(g),
@@ -241,31 +349,31 @@ export function setShadowColor(host: any, r: number, g: number, b: number): void
     applyToonShadowInfluenceToAllModels(host);
 }
 
-export function getToonShadowInfluence(host: any): number {
+export function getToonShadowInfluence(host: LightShadowHost): number {
     return host.toonShadowInfluenceValue;
 }
 
-export function setToonShadowInfluence(host: any, v: number): void {
+export function setToonShadowInfluence(host: LightShadowHost, v: number): void {
     host.toonShadowInfluenceValue = clamp01(v);
     applyToonShadowInfluenceToAllModels(host);
 }
 
-export function getShadowDarkness(host: any): number {
+export function getShadowDarkness(host: LightShadowHost): number {
     return host.shadowDarknessValue;
 }
 
-export function setShadowDarkness(host: any, v: number): void {
+export function setShadowDarkness(host: LightShadowHost, v: number): void {
     host.shadowDarknessValue = Math.max(0, Math.min(1, v));
     if (host.shadowEnabled && host.shadowGenerator) {
         host.shadowGenerator.darkness = host.shadowDarknessValue;
     }
 }
 
-export function getShadowFrustumSize(host: any): number {
+export function getShadowFrustumSize(host: LightShadowHost): number {
     return host.shadowFrustumSizeValue;
 }
 
-export function setShadowFrustumSize(host: any, v: number): void {
+export function setShadowFrustumSize(host: LightShadowHost, v: number): void {
     host.shadowFrustumSizeValue = clampShadowFrustumSize(v);
     applyShadowFrustumSize(host);
     if (host.dirLight) {
@@ -274,11 +382,11 @@ export function setShadowFrustumSize(host: any, v: number): void {
     }
 }
 
-export function getShadowMaxZ(host: any): number {
+export function getShadowMaxZ(host: LightShadowHost): number {
     return clampShadowMaxZ(host.shadowMaxZValue);
 }
 
-export function setShadowMaxZ(host: any, v: number): void {
+export function setShadowMaxZ(host: LightShadowHost, v: number): void {
     host.shadowMaxZValue = clampShadowMaxZ(v);
     applyShadowFrustumSize(host);
     if (host.dirLight) {
@@ -287,29 +395,91 @@ export function setShadowMaxZ(host: any, v: number): void {
     }
 }
 
-export function getShadowBias(host: any): number {
+export function getShadowBias(host: LightShadowHost): number {
     return clampShadowBias(host.shadowBiasValue);
 }
 
-export function setShadowBias(host: any, v: number): void {
+export function setShadowBias(host: LightShadowHost, v: number): void {
     host.shadowBiasValue = clampShadowBias(v);
     applyShadowBiasSettings(host);
 }
 
-export function getShadowNormalBias(host: any): number {
+export function getShadowNormalBias(host: LightShadowHost): number {
     return clampShadowNormalBias(host.shadowNormalBiasValue);
 }
 
-export function setShadowNormalBias(host: any, v: number): void {
+export function setShadowNormalBias(host: LightShadowHost, v: number): void {
     host.shadowNormalBiasValue = clampShadowNormalBias(v);
     applyShadowBiasSettings(host);
 }
 
-export function getShadowEnabled(host: any): boolean {
+export function getShadowFilteringQuality(host: LightShadowHost): number {
+    return clampShadowFilteringQuality(host.shadowFilteringQualityValue);
+}
+
+export function setShadowFilteringQuality(host: LightShadowHost, v: number): void {
+    host.shadowFilteringQualityValue = clampShadowFilteringQuality(v);
+    if (host.shadowGenerator) {
+        applyShadowFilterSettings(host);
+        host.engine?.releaseEffects?.();
+    }
+}
+
+export function getShadowBlurKernel(host: LightShadowHost): number {
+    return clampShadowBlurKernel(host.shadowBlurKernelValue);
+}
+
+export function setShadowBlurKernel(host: LightShadowHost, v: number): void {
+    host.shadowBlurKernelValue = clampShadowBlurKernel(v);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getShadowPenumbraEnabled(host: LightShadowHost): boolean {
+    return Boolean(host.shadowPenumbraEnabledValue);
+}
+
+export function setShadowPenumbraEnabled(host: LightShadowHost, enabled: boolean): void {
+    host.shadowPenumbraEnabledValue = Boolean(enabled);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getShadowPenumbraSize(host: LightShadowHost): number {
+    return clampShadowPenumbraSize(host.shadowPenumbraSizeValue);
+}
+
+export function setShadowPenumbraSize(host: LightShadowHost, v: number): void {
+    host.shadowPenumbraSizeValue = clampShadowPenumbraSize(v);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getTransparentShadowEnabled(host: LightShadowHost): boolean {
+    return host.transparentShadowEnabledValue !== false;
+}
+
+export function setTransparentShadowEnabled(host: LightShadowHost, enabled: boolean): void {
+    host.transparentShadowEnabledValue = Boolean(enabled);
+    applyTransparentShadowSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getSoftTransparentShadowEnabled(host: LightShadowHost): boolean {
+    return host.softTransparentShadowEnabledValue !== false;
+}
+
+export function setSoftTransparentShadowEnabled(host: LightShadowHost, enabled: boolean): void {
+    host.softTransparentShadowEnabledValue = Boolean(enabled);
+    applyTransparentShadowSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getShadowEnabled(host: LightShadowHost): boolean {
     return Boolean(host.shadowEnabled);
 }
 
-export function setShadowEnabled(host: any, enabled: boolean): void {
+export function setShadowEnabled(host: LightShadowHost, enabled: boolean): void {
     host.shadowEnabled = Boolean(enabled);
     if (host.dirLight) {
         host.dirLight.shadowEnabled = host.shadowEnabled;
@@ -319,36 +489,36 @@ export function setShadowEnabled(host: any, enabled: boolean): void {
     }
 }
 
-export function getShadowEdgeSoftness(host: any): number {
+export function getShadowEdgeSoftness(host: LightShadowHost): number {
     return getEffectiveShadowEdgeSoftness(host);
 }
 
-export function setShadowEdgeSoftness(host: any, v: number): void {
+export function setShadowEdgeSoftness(host: LightShadowHost, v: number): void {
     const clamped = clampShadowEdgeSoftness(v);
     host.selfShadowEdgeSoftnessValue = clamped;
     host.occlusionShadowEdgeSoftnessValue = clamped;
     applyShadowEdgeSoftness(host);
 }
 
-export function getSelfShadowEdgeSoftness(host: any): number {
+export function getSelfShadowEdgeSoftness(host: LightShadowHost): number {
     return host.selfShadowEdgeSoftnessValue;
 }
 
-export function setSelfShadowEdgeSoftness(host: any, v: number): void {
+export function setSelfShadowEdgeSoftness(host: LightShadowHost, v: number): void {
     host.selfShadowEdgeSoftnessValue = clampShadowEdgeSoftness(v);
     applyShadowEdgeSoftness(host);
 }
 
-export function getOcclusionShadowEdgeSoftness(host: any): number {
+export function getOcclusionShadowEdgeSoftness(host: LightShadowHost): number {
     return host.occlusionShadowEdgeSoftnessValue;
 }
 
-export function setOcclusionShadowEdgeSoftness(host: any, v: number): void {
+export function setOcclusionShadowEdgeSoftness(host: LightShadowHost, v: number): void {
     host.occlusionShadowEdgeSoftnessValue = clampShadowEdgeSoftness(v);
     applyShadowEdgeSoftness(host);
 }
 
-export function applyToonShadowInfluenceToAllModels(host: any): void {
+export function applyToonShadowInfluenceToAllModels(host: LightShadowHost): void {
     for (const sceneModel of host.sceneModels) {
         const meshes = [sceneModel.mesh, ...sceneModel.mesh.getChildMeshes()];
         applyToonShadowInfluenceToMeshes(host, meshes as Mesh[]);
@@ -362,7 +532,7 @@ export function applyToonShadowInfluenceToAllModels(host: any): void {
     }
 }
 
-export function applyToonShadowInfluenceToMeshes(host: any, meshes: Mesh[]): void {
+export function applyToonShadowInfluenceToMeshes(host: LightShadowHost, meshes: Mesh[]): void {
     const materials = collectMaterials(meshes);
 
     const lightTintR = clampLightColorScale(host.lightColorScaleValue.r);
@@ -411,31 +581,29 @@ export function applyToonShadowInfluenceToMeshes(host: any, meshes: Mesh[]): voi
     }
 }
 
-export function applyShadowFrustumSize(host: any): void {
+export function applyShadowFrustumSize(host: LightShadowHost): void {
     if (!host.dirLight) return;
     const csmEnabled = host.shadowGenerator instanceof CascadedShadowGenerator;
-    host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : host.shadowFrustumSizeValue;
+    const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
+    host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : shadowMaxZ;
     host.dirLight.shadowMinZ = 1;
-    host.dirLight.shadowMaxZ = csmEnabled
-        ? clampShadowMaxZ(host.shadowMaxZValue)
-        : Math.max(500, host.shadowFrustumSizeValue * 6);
+    host.dirLight.shadowMaxZ = shadowMaxZ;
     if (csmEnabled) {
-        host.shadowGenerator.shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
+        host.shadowGenerator.shadowMaxZ = shadowMaxZ;
     }
 }
 
-export function applyShadowEdgeSoftness(host: any): void {
+export function applyShadowEdgeSoftness(host: LightShadowHost): void {
     if (!host.shadowGenerator) return;
-    host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
-        ? Math.max(0.003, Math.min(0.010, getEffectiveShadowEdgeSoftness(host) * 0.18))
-        : getEffectiveShadowEdgeSoftness(host);
-    host.constructor.toonSelfShadowBoundarySoftness = host.selfShadowEdgeSoftnessValue;
-    host.constructor.toonOcclusionShadowBoundarySoftness = host.occlusionShadowEdgeSoftnessValue;
+    applyShadowFilterSettings(host);
+    const hostStatics = getLightShadowHostStatics(host);
+    hostStatics.toonSelfShadowBoundarySoftness = host.selfShadowEdgeSoftnessValue;
+    hostStatics.toonOcclusionShadowBoundarySoftness = host.occlusionShadowEdgeSoftnessValue;
     applyToonShadowInfluenceToAllModels(host);
     host.engine?.releaseEffects?.();
 }
 
-export function setLightDirection(host: any, x: number, y: number, z: number): void {
+export function setLightDirection(host: LightShadowHost, x: number, y: number, z: number): void {
     if (!host.dirLight) return;
 
     const rawDirection = new Vector3(
@@ -451,9 +619,10 @@ export function setLightDirection(host: any, x: number, y: number, z: number): v
     const direction = rawDirection.clone();
     direction.normalize();
     host.dirLight.direction = direction;
+    const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
     const dist = host.shadowGenerator instanceof CascadedShadowGenerator
         ? DEFAULT_CSM_LIGHT_DISTANCE
-        : Math.max(90, host.shadowFrustumSizeValue * 0.35);
+        : Math.max(90, shadowMaxZ * 0.35);
     host.dirLight.position = new Vector3(
         -direction.x * dist,
         Math.abs(direction.y) * dist + 5,
@@ -467,7 +636,7 @@ export function setLightDirection(host: any, x: number, y: number, z: number): v
     }
 }
 
-export function getLightDirection(host: any): Vector3 {
+export function getLightDirection(host: LightShadowHost): Vector3 {
     if (!host.dirLight || !host.dirLight.direction) {
         return DEFAULT_LIGHT_DIRECTION.clone();
     }
@@ -478,7 +647,7 @@ export function getLightDirection(host: any): Vector3 {
     return direction.clone().normalize();
 }
 
-export function getSerializedLightDirection(host: any): Vector3 {
+export function getSerializedLightDirection(host: LightShadowHost): Vector3 {
     const rawDirection = host.lightDirectionInputValue;
     if (
         rawDirection
@@ -496,7 +665,7 @@ export function getSerializedLightDirection(host: any): Vector3 {
     return getLightDirection(host);
 }
 
-export function applyLightColorTemperature(host: any): void {
+export function applyLightColorTemperature(host: LightShadowHost): void {
     if (!host.dirLight || !host.hemiLight) return;
 
     const color = kelvinToColor(host.lightColorTemperatureKelvin);
