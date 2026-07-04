@@ -19,8 +19,8 @@
 |---:|---|---|---|---|
 | 1 | Done | B6 | 履歴クリア漏れ | Project load 成功後に `commandHistory.clear("project-load")` を呼ぶ。検品バッチ1で別プロジェクト読込後の undo を確認する。 |
 | 2 | Code Done | B3 | WebM 失敗時の UI 永久ロック | `consumeQueue()` の例外を `fatalError` に格納する形で対応。検品バッチ2で失敗復帰を確認する。 |
-| 3 | Todo | B7 | Auto キーの履歴化 | Auto キー登録を Command 発行に載せ替える。 |
-| 4 | Todo | B5 | 単一キー編集を batch 経路へ一本化 | B7 と同じ Command 経路への合流。B7/B5 は同一セッション推奨。 |
+| 3 | Code Done | B7 | Auto キーの履歴化 | 単一ボーン/モーフ登録を `keyframe.paste` / `keyframe.batchPaste` Command 経路へ載せ替え。検品バッチ1で Auto キーの undo/redo を確認する。 |
+| 4 | Code Done | B5 | 単一キー編集を batch 経路へ一本化 | 単一選択の Delete / nudge を batch payload 経路へ合流。morph の addCurrent fallback も `keyframe.paste` に寄せた。検品バッチ1で保存・再読込と undo/redo を確認する。 |
 | 5 | Human QA | 検品バッチ1 | キー編集系 | 1回の起動で、キー打つ -> Auto キー発動 -> undo/redo 数回 -> 保存 -> 再読込 -> 別プロジェクトを開いて undo(B6確認) -> もう一度保存・再読込。 |
 | 6 | Todo | B1/B2 | 出力への post stack 適用 | 本丸、半日級。検品バッチ1 が通ってから着手する。 |
 | 7 | Todo | B4 | 注記系の小修正 | B1/B2 と同じ出力系セッションで対応する。 |

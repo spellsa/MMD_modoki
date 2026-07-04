@@ -7993,10 +7993,22 @@ export class UIController {
         }
 
         const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
-        const command = buildKeyframeCommand(
-            { type: "keyframe.addCurrent", source },
-            this.collectKeyframeCommandSnapshot(),
-        );
+        const morphWeight = track.category === "morph" ? this.mmdManager.getMorphWeight(track.name) : 0;
+        const command = track.category === "morph"
+            ? this.createKeyframePasteCommand(
+                track,
+                frame,
+                this.mmdManager.readTimelineKeyframePayload(track, frame),
+                {
+                    kind: "morph",
+                    weights: [Number.isFinite(morphWeight) ? morphWeight : 0],
+                },
+                `Register ${track.name} morph keyframe at frame ${frame}`,
+            )
+            : buildKeyframeCommand(
+                { type: "keyframe.addCurrent", source },
+                this.collectKeyframeCommandSnapshot(),
+            );
         const created = command
             ? executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }))
             : false;
@@ -8299,16 +8311,24 @@ export class UIController {
             return false;
         }
 
-        const result = this.mmdManager.registerEditorBoneKeyframe(
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const interpolationSnapshot = this.captureInterpolationCurveSnapshot(track, frame);
+        const before = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        const after = this.createBoneKeyframePayload(track, poseSnapshot, interpolationSnapshot, this.physicsKeyframeInputMode);
+        const command = this.createKeyframePasteCommand(
             track,
-            this.mmdManager.currentFrame,
-            poseSnapshot,
-            this.physicsKeyframeInputMode,
+            frame,
+            before,
+            after,
+            `Register ${track.name} keyframe at frame ${frame}`,
         );
-        if (!result) {
-            return false;
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) {
+            this.showToast(`Frame ${frame}: ${track.name} keyframe failed`, "error");
+            return true;
         }
 
+        this.commandHistory.push(command);
         this.clearRegisteredKeySelection();
         this.clearSectionKeyframeDirty("interpolation", this.getInterpolationKeyframeContextKey(track));
         if (this.bottomPanel.getSelectedBone() === track.name) {
@@ -8318,12 +8338,42 @@ export class UIController {
         this.updateTimelineEditState();
         this.updateSectionKeyframeButtons();
         this.showToast(
-            result.created
-                ? `Frame ${this.mmdManager.currentFrame}: keyframe added`
-                : `Frame ${this.mmdManager.currentFrame} keyframe updated`,
+            before
+                ? `Frame ${frame} keyframe updated`
+                : `Frame ${frame}: keyframe added`,
             "success",
         );
         return true;
+    }
+
+    private createMorphKeyframePayload(morph: { value: number }): TimelineKeyframePayload {
+        return {
+            kind: "morph",
+            weights: [Number.isFinite(morph.value) ? morph.value : 0],
+        };
+    }
+
+    private createKeyframePasteCommand(
+        track: Pick<KeyframeTrack, "name" | "category">,
+        frame: number,
+        before: TimelineKeyframePayload | null,
+        after: TimelineKeyframePayload,
+        label: string,
+    ): BuiltCommand {
+        const nowMs = Date.now();
+        return {
+            id: `keyframe.paste:${createCommandTrackKey(track)}:${frame}:${nowMs}`,
+            label,
+            scope: "keyframe",
+            createdAtMs: nowMs,
+            diff: {
+                type: "keyframe.paste",
+                track: { category: track.category, name: track.name },
+                frame,
+                before,
+                after,
+            },
+        };
     }
 
     private registerMorphKeyframesAtCurrentFrame(): void {
@@ -8333,25 +8383,47 @@ export class UIController {
             return;
         }
 
-        const frame = this.mmdManager.currentFrame;
-        let touched = false;
-        for (const morph of snapshot.morphs) {
-            touched = this.mmdManager.applyTimelineKeyframePayload(
-                { name: morph.name, category: "morph" },
-                frame,
-                { kind: "morph", weights: [morph.value] },
-            ) || touched;
-        }
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const items = snapshot.morphs.map((morph) => {
+            const track = { name: morph.name, category: "morph" as const };
+            return {
+                track,
+                sourceFrame: frame,
+                targetFrame: frame,
+                before: this.mmdManager.readTimelineKeyframePayload(track, frame),
+                after: this.createMorphKeyframePayload(morph),
+            };
+        });
 
-        if (snapshot.morphs.length > 0) {
-            this.refreshRuntimeAnimationForTrack();
+        if (items.length > 0) {
+            const nowMs = Date.now();
+            const command: BuiltCommand = {
+                id: `keyframe.morphBatch:${items.length}:${frame}:${nowMs}`,
+                label: `Register ${items.length} morph keyframes at frame ${frame}`,
+                scope: "keyframe",
+                createdAtMs: nowMs,
+                diff: {
+                    type: "keyframe.batchPaste",
+                    pasteBaseFrame: frame,
+                    items,
+                },
+            };
+            const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+            if (!registered) {
+                this.showToast(`Frame ${frame}: morph keyframes registration failed`, "error");
+                return;
+            }
+
+            this.commandHistory.push(command);
             this.clearSectionKeyframeDirty("morph", this.getMorphKeyframeContextKey(snapshot.frameIndex));
             this.updateSectionKeyframeButtons();
             this.bottomPanel.updateMorphKeyframeButtonStates(frame);
             this.clearRegisteredKeySelection();
             this.updateTimelineEditState();
             this.showToast(
-                touched ? `Frame ${frame}: morph keyframes added` : `Frame ${frame}: morph keyframes already registered`,
+                items.some((item) => item.before)
+                    ? `Frame ${frame}: morph keyframes updated`
+                    : `Frame ${frame}: morph keyframes added`,
                 "success",
             );
             return;
@@ -8361,13 +8433,25 @@ export class UIController {
     }
 
     private registerSingleMorphKeyframeAtCurrentFrame(morph: { frameIndex: number; name: string; value: number }, options: { toast: boolean } = { toast: true }): void {
-        const frame = this.mmdManager.currentFrame;
-        const touched = this.mmdManager.applyTimelineKeyframePayload(
-            { name: morph.name, category: "morph" },
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const track = { name: morph.name, category: "morph" as const };
+        const before = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        const command = this.createKeyframePasteCommand(
+            track,
             frame,
-            { kind: "morph", weights: [morph.value] },
+            before,
+            this.createMorphKeyframePayload(morph),
+            `Register ${morph.name} morph keyframe at frame ${frame}`,
         );
-        this.refreshRuntimeAnimationForTrack();
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) {
+            if (options.toast) {
+                this.showToast(`Frame ${frame}: ${morph.name} morph keyframe failed`, "error");
+            }
+            return;
+        }
+
+        this.commandHistory.push(command);
         const frameSnapshot = this.bottomPanel.getSelectedMorphFrameSnapshot();
         const allFrameMorphsRegistered = frameSnapshot?.morphs.every((frameMorph) =>
             this.mmdManager.hasTimelineKeyframe({ category: "morph", name: frameMorph.name }, frame),
@@ -8381,7 +8465,9 @@ export class UIController {
         this.updateTimelineEditState();
         if (options.toast) {
             this.showToast(
-                touched ? `Frame ${frame}: ${morph.name} morph keyframe added` : `Frame ${frame}: ${morph.name} morph keyframe already registered`,
+                before
+                    ? `Frame ${frame}: ${morph.name} morph keyframe updated`
+                    : `Frame ${frame}: ${morph.name} morph keyframe added`,
                 "success",
             );
         }
@@ -9205,7 +9291,7 @@ export class UIController {
 
     private deleteSelectedKeyframe(source: ActionSource = "system"): void {
         const selectedKeys = this.timeline.getSelectedKeys();
-        if (selectedKeys.length > 1) {
+        if (selectedKeys.length >= 1) {
             this.deleteSelectedKeyframes(selectedKeys);
             return;
         }
@@ -9320,7 +9406,7 @@ export class UIController {
         };
 
         const selectedKeys = this.timeline.getSelectedKeys();
-        if (selectedKeys.length > 1) {
+        if (selectedKeys.length >= 1) {
             if (deltaFrame !== -1 && deltaFrame !== 1) {
                 seekByDelta();
                 return;
