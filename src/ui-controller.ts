@@ -8479,7 +8479,7 @@ export class UIController {
 
     private shouldUseMovableBoneTrack(track: Pick<KeyframeTrack, "name" | "category">): boolean {
         if (track.category === "camera" || track.category === "morph") return false;
-        const modelInfo = this.mmdManager.activeModelInfo;
+        const modelInfo = this.mmdManager.getActiveModelInfo();
         const boneControl = modelInfo?.boneControlInfos?.find((candidate) => candidate.name === track.name);
         if (boneControl) return boneControl.movable;
         return track.category === "root";

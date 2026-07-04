@@ -14,7 +14,6 @@ jobs:
   typecheck:
     name: tsc --noEmit
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Check out repository
@@ -29,5 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
+      - name: Critical typecheck gate
+        run: npm run typecheck:critical
+
+      - name: Typecheck baseline
+        continue-on-error: true
         run: npm run typecheck

@@ -16,7 +16,7 @@ import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import type { FrameGraphTextureHandle } from "@babylonjs/core/FrameGraph/frameGraphTypes";
-import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/frameGraphRenderPass";
+import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/Passes/renderPass";
 import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGraphRenderContext";
 import { EffectWrapper } from "@babylonjs/core/Materials/effectRenderer";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";

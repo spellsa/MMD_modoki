@@ -151,10 +151,7 @@ export class BottomPanel {
         return this.currentMorphFrameIndex;
     }
 
-    getSelectedBoneTransformSnapshot(): {
-        position: { x: number; y: number; z: number };
-        rotation: { x: number; y: number; z: number };
-    } | null {
+    getSelectedBoneTransformSnapshot(): BonePoseSnapshot | null {
         if (!this.currentBoneName || this.boneSliders.size === 0) return null;
 
         const isCameraControl = this.currentBoneName === BottomPanel.CAMERA_CONTROL_NAME;

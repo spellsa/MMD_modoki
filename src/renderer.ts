@@ -16,7 +16,7 @@ import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 import { isDebugLogEnabled, logDebug, logError, logInfo, toLogErrorData } from "./app-logger";
-import type { AppLogData, SmokeRendererReadyPayload } from "./types";
+import type { AppLogData, SmokeRendererReadyPayload, WebmExportPhase, WebmExportRequest } from "./types";
 import { POST_EFFECT_BACKEND_STORAGE_KEY } from "./render/post-effect-backend";
 
 let shaderRequestTraceInstalled = false;
@@ -392,8 +392,10 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
     return;
   }
 
+  let request: WebmExportRequest | null = null;
+
   try {
-    const request = await window.electronAPI.takeWebmExportJob(jobId);
+    request = await window.electronAPI.takeWebmExportJob(jobId);
     if (!request) {
       logError("webm", "export job is unavailable", { jobId });
       setStatus("Export job is unavailable");
@@ -430,7 +432,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       lastProgressReportAt = now;
       window.electronAPI.reportWebmExportProgress({
         jobId,
-        phase: phase as import("./types").WebmExportPhase,
+        phase: phase as WebmExportPhase,
         encoded: encodedFrames,
         total: totalOutputFrames,
         frame: currentFrame,
@@ -491,8 +493,8 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       encoded: 0,
       total: 0,
       frame: 0,
-      startFrame: request.startFrame,
-      endFrame: request.endFrame,
+      startFrame: request?.startFrame ?? 0,
+      endFrame: request?.endFrame ?? 0,
       captured: 0,
       message,
       timestampMs: Date.now(),

@@ -89,7 +89,7 @@ export function classifyLargeThinMesh(
 
 export function refreshMeshBoundingInfoForRenderStability(mesh: AbstractMesh): void {
     mesh.computeWorldMatrix(true);
-    mesh.refreshBoundingInfo();
+    mesh.refreshBoundingInfo({});
 }
 
 export function stabilizeAppGeneratedPlanarMesh(
