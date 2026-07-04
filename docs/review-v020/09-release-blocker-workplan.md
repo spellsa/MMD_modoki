@@ -17,8 +17,8 @@
 
 | 順 | Status | 対象 | 内容 | メモ |
 |---:|---|---|---|---|
-| 1 | Todo | B6 | 履歴クリア漏れ | `clear()` 1行。ウォームアップ兼、即戦果。 |
-| 2 | Todo | B3 | WebM 失敗時の UI 永久ロック | `try/catch` + 状態復帰 1箇所。B1/B2 実装中に失敗しても UI が固まらないよう先に直す。 |
+| 1 | Done | B6 | 履歴クリア漏れ | Project load 成功後に `commandHistory.clear("project-load")` を呼ぶ。検品バッチ1で別プロジェクト読込後の undo を確認する。 |
+| 2 | Code Done | B3 | WebM 失敗時の UI 永久ロック | `consumeQueue()` の例外を `fatalError` に格納する形で対応。検品バッチ2で失敗復帰を確認する。 |
 | 3 | Todo | B7 | Auto キーの履歴化 | Auto キー登録を Command 発行に載せ替える。 |
 | 4 | Todo | B5 | 単一キー編集を batch 経路へ一本化 | B7 と同じ Command 経路への合流。B7/B5 は同一セッション推奨。 |
 | 5 | Human QA | 検品バッチ1 | キー編集系 | 1回の起動で、キー打つ -> Auto キー発動 -> undo/redo 数回 -> 保存 -> 再読込 -> 別プロジェクトを開いて undo(B6確認) -> もう一度保存・再読込。 |

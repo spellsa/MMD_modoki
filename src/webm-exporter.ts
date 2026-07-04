@@ -723,23 +723,29 @@ export async function runWebmExportJob(
         };
 
         const consumeQueue = async (): Promise<void> => {
-            while (!producerDone || queue.length > 0) {
-                if (fatalError) break;
-                const item = queue.shift();
-                if (!item) {
-                    await sleepMs(1);
-                    continue;
-                }
+            try {
+                while (!producerDone || queue.length > 0) {
+                    if (fatalError) break;
+                    const item = queue.shift();
+                    if (!item) {
+                        await sleepMs(1);
+                        continue;
+                    }
 
-                try {
-                    await videoSource.add(item.videoSample);
-                } finally {
-                    item.videoSample.close();
-                    item.release?.();
-                }
+                    try {
+                        await videoSource.add(item.videoSample);
+                    } finally {
+                        item.videoSample.close();
+                        item.release?.();
+                    }
 
-                encodedFrames += 1;
-                reportProgress(item.frame);
+                    encodedFrames += 1;
+                    reportProgress(item.frame);
+                }
+            } catch (error: unknown) {
+                fatalError = error instanceof Error
+                    ? error
+                    : new Error(`Failed to encode WebM frame: ${String(error)}`);
             }
         };
 
