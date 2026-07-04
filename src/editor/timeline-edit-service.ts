@@ -56,6 +56,22 @@ type BoneTrackBatchMutable = {
     physicsToggles: Uint8Array;
 };
 
+function asMutableCameraTrack(track: MmdCameraAnimationTrack): CameraTrackBatchMutable {
+    return track as unknown as CameraTrackBatchMutable;
+}
+
+function asMutableMorphTrack(track: MmdMorphAnimationTrack): MorphTrackBatchMutable {
+    return track as unknown as MorphTrackBatchMutable;
+}
+
+function asMutableMovableBoneTrack(track: MmdMovableBoneAnimationTrack): MovableBoneTrackBatchMutable {
+    return track as unknown as MovableBoneTrackBatchMutable;
+}
+
+function asMutableBoneTrack(track: MmdBoneAnimationTrack): BoneTrackBatchMutable {
+    return track as unknown as BoneTrackBatchMutable;
+}
+
 type TimelineEditRuntimeModel = {
     name?: string;
 };
@@ -1119,7 +1135,7 @@ function applyCameraKeyframePayload(
     payload: CameraKeyframePayload,
 ): boolean {
     if (!ensureCameraAnimationForEditing(host)) return false;
-    const cameraTrack = host.cameraSourceAnimation?.cameraTrack as MmdCameraAnimationTrack;
+    const cameraTrack = asMutableCameraTrack(host.cameraSourceAnimation.cameraTrack);
     const frameEdit = upsertFrameNumberForPayload(cameraTrack.frameNumbers, frame);
     cameraTrack.frameNumbers = frameEdit.frames;
     cameraTrack.positions = upsertFloatValuesForPayload(cameraTrack.positions, 3, frameEdit.index, frameEdit.exists, payload.positions);
@@ -1144,8 +1160,9 @@ function applyMorphKeyframePayload(
 ): boolean {
     if (!host.currentModel || !ensureModelAnimationForEditing(host, track)) return false;
     const animation = getCurrentModelAnimation(host);
-    const morphTrack = animation?.morphTracks.find((candidate) => candidate.name === track.name);
-    if (!morphTrack) return false;
+    const sourceMorphTrack = animation?.morphTracks.find((candidate) => candidate.name === track.name);
+    if (!sourceMorphTrack) return false;
+    const morphTrack = asMutableMorphTrack(sourceMorphTrack);
     const frameEdit = upsertFrameNumberForPayload(morphTrack.frameNumbers, frame);
     morphTrack.frameNumbers = frameEdit.frames;
     morphTrack.weights = upsertFloatValuesForPayload(morphTrack.weights, 1, frameEdit.index, frameEdit.exists, payload.weights);
@@ -1172,8 +1189,9 @@ function applyMovableBoneKeyframePayload(
 
     if (!host.currentModel || !ensureModelAnimationForEditing(host, track)) return false;
     const animation = getCurrentModelAnimation(host);
-    const movableTrack = animation?.movableBoneTracks.find((candidate) => candidate.name === track.name);
-    if (!movableTrack) return false;
+    const sourceMovableTrack = animation?.movableBoneTracks.find((candidate) => candidate.name === track.name);
+    if (!sourceMovableTrack) return false;
+    const movableTrack = asMutableMovableBoneTrack(sourceMovableTrack);
     const frameEdit = upsertFrameNumberForPayload(movableTrack.frameNumbers, frame);
     movableTrack.frameNumbers = frameEdit.frames;
     movableTrack.positions = upsertFloatValuesForPayload(movableTrack.positions, 3, frameEdit.index, frameEdit.exists, payload.positions);
@@ -1201,12 +1219,13 @@ function applyBoneKeyframePayload(
     }
     if (!animation) return false;
 
-    let boneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
-    if (!boneTrack) {
+    let sourceBoneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
+    if (!sourceBoneTrack) {
         const animationMutable = animation as unknown as { boneTracks: MmdBoneAnimationTrack[] };
-        boneTrack = new MmdBoneAnimationTrack(track.name, 0);
-        animationMutable.boneTracks.push(boneTrack);
+        sourceBoneTrack = new MmdBoneAnimationTrack(track.name, 0);
+        animationMutable.boneTracks.push(sourceBoneTrack);
     }
+    const boneTrack = asMutableBoneTrack(sourceBoneTrack);
     const frameEdit = upsertFrameNumberForPayload(boneTrack.frameNumbers, frame);
     boneTrack.frameNumbers = frameEdit.frames;
     boneTrack.rotations = upsertFloatValuesForPayload(boneTrack.rotations, 4, frameEdit.index, frameEdit.exists, payload.rotations);
@@ -1226,8 +1245,9 @@ function removeTimelineKeyframePayload(
     const normalized = Math.max(0, Math.floor(frame));
 
     if (track.category === "camera") {
-        const cameraTrack = host.cameraSourceAnimation?.cameraTrack;
-        if (!cameraTrack) return false;
+        const sourceCameraTrack = host.cameraSourceAnimation?.cameraTrack;
+        if (!sourceCameraTrack) return false;
+        const cameraTrack = asMutableCameraTrack(sourceCameraTrack);
         const frameIndex = findFrameIndex(cameraTrack.frameNumbers, normalized);
         if (frameIndex < 0) return false;
         cameraTrack.frameNumbers = removeFrameNumber(cameraTrack.frameNumbers, normalized);
@@ -1249,8 +1269,9 @@ function removeTimelineKeyframePayload(
     if (!animation || !host.currentModel) return false;
 
     if (track.category === "morph") {
-        const morphTrack = animation.morphTracks.find((candidate) => candidate.name === track.name);
-        if (!morphTrack) return false;
+        const sourceMorphTrack = animation.morphTracks.find((candidate) => candidate.name === track.name);
+        if (!sourceMorphTrack) return false;
+        const morphTrack = asMutableMorphTrack(sourceMorphTrack);
         const frameIndex = findFrameIndex(morphTrack.frameNumbers, normalized);
         if (frameIndex < 0) return false;
         morphTrack.frameNumbers = removeFrameNumber(morphTrack.frameNumbers, normalized);
@@ -1261,8 +1282,9 @@ function removeTimelineKeyframePayload(
         return true;
     }
 
-    const movableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === track.name);
-    if (movableTrack) {
+    const sourceMovableTrack = animation.movableBoneTracks.find((candidate) => candidate.name === track.name);
+    if (sourceMovableTrack) {
+        const movableTrack = asMutableMovableBoneTrack(sourceMovableTrack);
         const frameIndex = findFrameIndex(movableTrack.frameNumbers, normalized);
         if (frameIndex < 0) return false;
         movableTrack.frameNumbers = removeFrameNumber(movableTrack.frameNumbers, normalized);
@@ -1277,8 +1299,9 @@ function removeTimelineKeyframePayload(
         return true;
     }
 
-    const boneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
-    if (!boneTrack) return false;
+    const sourceBoneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
+    if (!sourceBoneTrack) return false;
+    const boneTrack = asMutableBoneTrack(sourceBoneTrack);
     const frameIndex = findFrameIndex(boneTrack.frameNumbers, normalized);
     if (frameIndex < 0) return false;
     boneTrack.frameNumbers = removeFrameNumber(boneTrack.frameNumbers, normalized);

@@ -18,6 +18,8 @@
 追加メモ:
 
 - [07: TypeScript 型検査初回ベースライン](./07-typecheck-baseline.md)
+- [08: TS2540 readonly mutation 対応](./08-typecheck-ts2540-followup.md)
+- [09: release blocker 対応順管理](./09-release-blocker-workplan.md)
 
 ---
 
