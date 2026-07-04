@@ -295,12 +295,6 @@ export class AppMenuController {
             case "file.exportPng":
                 this.dispatchAction({ type: "project.exportPng", source: "menu" });
                 return;
-            case "file.exportPngSequence":
-                this.dispatchAction({ type: "project.exportPngSequence", source: "menu" });
-                return;
-            case "file.exportWebm":
-                this.dispatchAction({ type: "project.exportWebm", source: "menu" });
-                return;
             case "file.webmExportSettings":
                 this.openWebmExportDialog(invoker ?? null);
                 return;

@@ -579,6 +579,13 @@ export async function runWebmExportJob(
         mmdManager.setAutoRenderEnabled(false);
         mmdManager.seekTo(startFrame);
         mmdManager.setExternalPlaybackSimulationEnabled(true);
+        if (captureMode !== "readpixels") {
+            updateStatus(callbacks, "Preparing post effects for WebM capture...", "initializing");
+            const postEffectReady = await mmdManager.waitForPostEffectBackendReadyForCapture();
+            if (!postEffectReady) {
+                throw new Error("FrameGraph post effects were not ready for WebM capture");
+            }
+        }
 
         const videoBitrate = estimateVideoBitrate(outputWidth, outputHeight, fps);
 
@@ -790,12 +797,20 @@ export async function runWebmExportJob(
                         startFrame + Math.round((outputFrameIndex * TIMELINE_FPS) / fps),
                     );
                     if (!playbackStarted) {
-                        mmdManager.renderOnce(0);
+                        if (captureMode === "readpixels") {
+                            mmdManager.renderOnce(0);
+                        } else {
+                            mmdManager.renderOnceForCapture(0);
+                        }
                         playbackStarted = true;
                     } else {
                         await exportRuntimeInternals.mmdRuntime.playAnimation();
 
-                        mmdManager.renderOnce(1000 / fps);
+                        if (captureMode === "readpixels") {
+                            mmdManager.renderOnce(1000 / fps);
+                        } else {
+                            mmdManager.renderOnceForCapture(1000 / fps);
+                        }
                         exportRuntimeInternals.mmdRuntime.pauseAnimation();
                     }
 

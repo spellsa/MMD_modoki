@@ -1,11 +1,9 @@
 import { t } from "../i18n";
 import type { EditorAction } from "../actions/types";
-import type { WebmCaptureMode } from "../types";
 import {
     OUTPUT_ASPECT_OPTIONS,
     OUTPUT_FPS_OPTIONS,
     OUTPUT_SIZE_PRESET_OPTIONS,
-    WEBM_CAPTURE_MODE_OPTIONS,
     type WebmExportSettingsAdapter,
 } from "./export-ui-controller";
 import { installEnterCommitNumberInput } from "./panel-control-helpers";
@@ -32,7 +30,6 @@ export class WebmExportDialogController implements PopupContentController {
     private usePlaybackRangeInput: HTMLInputElement | null = null;
     private startFrameInput: HTMLInputElement | null = null;
     private endFrameInput: HTMLInputElement | null = null;
-    private captureModeSelect: HTMLSelectElement | null = null;
 
     constructor(deps: WebmExportDialogDeps) {
         this.dispatchAction = deps.dispatchAction;
@@ -65,11 +62,6 @@ export class WebmExportDialogController implements PopupContentController {
         this.usePlaybackRangeInput = this.createCheckbox("webm-output-use-playback-range", state.usePlaybackRange);
         this.startFrameInput = this.createNumberInput("webm-output-start-frame", state.startFrame, 0, 999999);
         this.endFrameInput = this.createNumberInput("webm-output-end-frame", state.endFrame, 0, 999999);
-        this.captureModeSelect = this.createSelect(
-            "webm-output-capture-mode",
-            WEBM_CAPTURE_MODE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) })),
-            state.captureMode,
-        );
 
         form.appendChild(createPopupFormField(t("dialog.webmExport.aspect"), this.aspectSelect));
         form.appendChild(createPopupFormField(t("dialog.webmExport.longSide"), this.sizePresetSelect));
@@ -78,7 +70,6 @@ export class WebmExportDialogController implements PopupContentController {
         form.appendChild(createPopupFormField(t("dialog.webmExport.includeAudio"), this.includeAudioInput));
         form.appendChild(createPopupFormField(t("dialog.webmExport.usePlaybackRange"), this.usePlaybackRangeInput));
         form.appendChild(this.createFrameRangeField());
-        form.appendChild(createPopupFormField(t("dialog.webmExport.captureMode"), this.captureModeSelect));
 
         const actions = document.createElement("div");
         actions.className = "popup-form-actions";
@@ -156,9 +147,6 @@ export class WebmExportDialogController implements PopupContentController {
                 revert: () => this.syncFrameRangeFromOutputState(),
             });
         }
-        this.captureModeSelect?.addEventListener("change", () => {
-            this.output.setCaptureMode(this.normalizeCaptureMode(this.captureModeSelect?.value));
-        });
     }
 
     private createSizeField(): HTMLElement {
@@ -245,7 +233,7 @@ export class WebmExportDialogController implements PopupContentController {
         if (this.usePlaybackRangeInput) this.output.setUsePlaybackRange(this.usePlaybackRangeInput.checked);
         if (this.startFrameInput) this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
         if (this.endFrameInput) this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
-        if (this.captureModeSelect) this.output.setCaptureMode(this.normalizeCaptureMode(this.captureModeSelect.value));
+        this.output.setCaptureMode("webgpu-copy");
         this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" });
     }
 
@@ -277,9 +265,4 @@ export class WebmExportDialogController implements PopupContentController {
         return Number.isFinite(value) ? value : fallback;
     }
 
-    private normalizeCaptureMode(value: string | null | undefined): WebmCaptureMode {
-        return value === "readpixels" || value === "webgpu-copy" || value === "canvas"
-            ? value
-            : "webgpu-copy";
-    }
 }

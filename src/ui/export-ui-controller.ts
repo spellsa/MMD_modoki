@@ -78,10 +78,7 @@ export const OUTPUT_FPS_OPTIONS: ReadonlyArray<{ value: string; label: string }>
     { value: "60", label: "60" },
 ];
 
-export const WEBM_CAPTURE_MODE_OPTIONS: ReadonlyArray<{ value: WebmCaptureMode; labelKey: string }> = [
-    { value: "readpixels", labelKey: "dialog.webmExport.captureModeStable" },
-    { value: "webgpu-copy", labelKey: "dialog.webmExport.captureModeSpeed" },
-];
+const FIXED_WEBM_CAPTURE_MODE: WebmCaptureMode = "webgpu-copy";
 
 type ToastType = "success" | "error" | "info";
 
@@ -256,7 +253,7 @@ export class ExportUiController {
             fps: outputSettings.fps,
             includeAudio: this.outputState.includeAudio,
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
-            webmCaptureMode: this.getWebmOutputOptions().captureMode,
+            webmCaptureMode: FIXED_WEBM_CAPTURE_MODE,
             usePlaybackRange: this.outputState.usePlaybackRange,
             startFrame: playbackFrameRange.startFrame,
             endFrame: playbackFrameRange.endFrame,
@@ -292,9 +289,7 @@ export class ExportUiController {
         if (state.webmCodec === "auto" || state.webmCodec === "vp8" || state.webmCodec === "vp9") {
             this.outputState.preferredVideoCodec = state.webmCodec;
         }
-        if (this.isWebmCaptureMode(state.webmCaptureMode)) {
-            this.outputState.captureMode = state.webmCaptureMode;
-        }
+        this.outputState.captureMode = FIXED_WEBM_CAPTURE_MODE;
         if (Number.isFinite(state.startFrame) && Number.isFinite(state.endFrame)) {
             this.isFrameRangeCustomized = true;
             this.setOutputFrameRangeValues(state.startFrame ?? 0, state.endFrame ?? 0);
@@ -377,7 +372,7 @@ export class ExportUiController {
         return {
             includeAudio: this.outputState.includeAudio,
             preferredVideoCodec: this.outputState.preferredVideoCodec,
-            captureMode: this.outputState.captureMode,
+            captureMode: FIXED_WEBM_CAPTURE_MODE,
         };
     }
 
@@ -737,8 +732,8 @@ export class ExportUiController {
                 this.outputState.endFrame = this.parseOutputFrameDraft(value, this.getMaxOutputFrame());
                 if (this.elements.outputEndFrameInput) this.elements.outputEndFrameInput.value = String(this.outputState.endFrame);
             },
-            setCaptureMode: (value) => {
-                if (this.isWebmCaptureMode(value)) this.outputState.captureMode = value;
+            setCaptureMode: () => {
+                this.outputState.captureMode = FIXED_WEBM_CAPTURE_MODE;
             },
         };
     }
@@ -883,10 +878,6 @@ export class ExportUiController {
 
     private isOutputSizePreset(value: string): boolean {
         return OUTPUT_SIZE_PRESET_OPTIONS.some((option) => option.value === value);
-    }
-
-    private isWebmCaptureMode(value: unknown): value is WebmCaptureMode {
-        return value === "canvas" || value === "webgpu-copy" || value === "readpixels";
     }
 
     private setupPngSequenceExportStateBridge(): void {

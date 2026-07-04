@@ -10761,6 +10761,31 @@ ${beforeFogAppendBlock}
         this.nextRenderDueTimestampMs = now;
     }
 
+    public isPostEffectBackendReadyForCapture(): boolean {
+        if (this.postEffectBackend !== "frameGraph" || !this.shouldExecuteFrameGraphPostEffects()) {
+            return true;
+        }
+        return this.frameGraphPostEffectsController?.isReady() === true;
+    }
+
+    public async waitForPostEffectBackendReadyForCapture(timeoutMs = 8_000): Promise<boolean> {
+        if (this.isPostEffectBackendReadyForCapture()) {
+            return true;
+        }
+
+        const startedAt = performance.now();
+        const timeout = Math.max(1, timeoutMs);
+        while (performance.now() - startedAt < timeout) {
+            await new Promise<void>((resolve) => {
+                requestAnimationFrame(() => resolve());
+            });
+            if (this.isPostEffectBackendReadyForCapture()) {
+                return true;
+            }
+        }
+        return this.isPostEffectBackendReadyForCapture();
+    }
+
     public renderOnce(deltaMs = 1000 / 30): void {
         const clampedDeltaMs = Math.max(0, Math.min(100, deltaMs));
         const now = performance.now();
@@ -10773,6 +10798,39 @@ ${beforeFogAppendBlock}
         this.updateSimpleMotionBlurState(clampedDeltaMs);
         this.syncBackgroundVideoFrame();
         this.scene.render();
+        if (!this._isPlaying) return;
+
+        if (advancedManualPlayback) {
+            this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+            return;
+        }
+
+        const runtimeFrame = Math.floor(this.mmdRuntime.currentFrameTime);
+        this._currentFrame = Math.min(runtimeFrame, this._totalFrames);
+        this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
+    }
+
+    public renderOnceForCapture(deltaMs = 1000 / 30): void {
+        const clampedDeltaMs = Math.max(0, Math.min(100, deltaMs));
+        const now = performance.now();
+        this.lastRenderTimestampMs = now;
+        this.nextRenderDueTimestampMs = now;
+        const engineWithDelta = this.engine as typeof this.engine & { _deltaTime?: number };
+        engineWithDelta._deltaTime = clampedDeltaMs;
+        const advancedManualPlayback = this.advanceManualPlaybackWithoutAudio(clampedDeltaMs);
+
+        this.syncFrameGraphRenderTargetState();
+        this.updateSimpleMotionBlurState(clampedDeltaMs);
+        this.syncBackgroundVideoFrame();
+        try {
+            this.scene.render();
+        } catch (err: unknown) {
+            if (this.tryRecoverFrameGraphRenderTargetFailure(err)) {
+                return;
+            }
+            throw err;
+        }
+        this.executePostEffectBackend();
         if (!this._isPlaying) return;
 
         if (advancedManualPlayback) {

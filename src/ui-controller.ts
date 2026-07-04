@@ -2737,7 +2737,7 @@ export class UIController {
             fps: 30,
             includeAudio: false,
             webmCodec: "vp8",
-            webmCaptureMode: "readpixels",
+            webmCaptureMode: "webgpu-copy",
             startFrame: 0,
             endFrame: 0,
             frameStartEnabled: false,
