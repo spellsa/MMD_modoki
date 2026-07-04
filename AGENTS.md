@@ -90,6 +90,20 @@ npm.cmd run lint
 
 確認できなかった場合は、その旨を明確に伝えてください。
 
+型検査:
+
+```powershell
+npm.cmd run typecheck
+```
+
+現時点では `typecheck` は既知の既存エラーがあるため失敗する。初回ベースラインは
+[docs/review-v020/07-typecheck-baseline.md](./docs/review-v020/07-typecheck-baseline.md)
+を参照する。
+
+ただし、`TS2304` / `TS2552` のような未定義名参照は実バグ候補として優先確認する。
+特に WebM exporter の `request` スコープ問題のような catch 経路の破損は、lint では拾えず
+`typecheck` で初めて見えるため、関係するファイルを触った場合は可能な範囲で確認する。
+
 追加の確認ルール:
 
 - 純ロジック変更では、可能なら `npm.cmd run test:unit` も実行する
@@ -145,11 +159,33 @@ button / shortcut / timeline
 - lint warning は 20 件程度を超えたら小掃除回を入れ、数百件まで溜めない。
 - warning 対応後は `npm.cmd run lint` を必ず実行し、pure helper / project state / action まわりに触った場合は `npm.cmd run test:unit` も実行する。
 
+## TypeScript 型検査 再発防止メモ
+
+`tsc --noEmit` の初回ベースラインでは 479 件の既存エラーが出ているため、現時点で
+全体の型検査を blocking CI にするのは現実的ではない。
+
+当面の方針:
+
+- `npm.cmd run typecheck` は非ブロッキングのベースライン確認として扱う。
+- `TS2304` / `TS2552` の未定義名参照は、既存の Babylon / host 型ズレとは別枠の実バグ候補として優先して直す。
+- 新規コードや修正コードで `TS2304` / `TS2552` を増やさない。
+- 型検査エラー総数は段階的に減らし、十分減ったら CI の `continue-on-error` を外す。
+- `@ts-ignore` は原則使わず、必要なら理由付きの `@ts-expect-error` にする。
+
+型エラーを減らすときの優先順:
+
+1. 未定義名参照など、実行時クラッシュに直結しやすいもの。
+2. 少数ファイルに出ている実装ミス候補。
+3. `tsconfig` / module resolution 由来の設定問題。
+4. `timeline-edit-service.ts` の readonly mutation など、データ整合に近いもの。
+5. host 型 / Babylon private 型 / test mock 型の大きな整理。
+
 特に守る短いルール:
 
 ```text
 新規/切り出し service では any host 禁止。
 最低限の XxxHost 型を同じファイル先頭に置く。
+未定義名参照(TS2304/TS2552)は新規に増やさない。
 ```
 
 ## ログ / エラーハンドリング運用

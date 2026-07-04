@@ -15,6 +15,10 @@
 - [05: 起動シーケンス・環境差・packaged build](./05-launch-env.md)
 - [06: 横断掃除(機械スイープ)](./06-sweep.md)
 
+追加メモ:
+
+- [07: TypeScript 型検査初回ベースライン](./07-typecheck-baseline.md)
+
 ---
 
 ## リリース判定サマリ
