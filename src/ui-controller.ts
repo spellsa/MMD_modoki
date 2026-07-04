@@ -2940,6 +2940,7 @@ export class UIController {
             }
 
             const result = await this.mmdManager.importProjectState(parsed);
+            this.commandHistory.clear("project-load");
             this.currentProjectFilePath = filePath;
 
             this.postFxWgslToonPath = resolvedWgslToonPath;
