@@ -1715,8 +1715,8 @@ ${beforeFogAppendBlock}
     private dofEnabledValue = false;
     private dofBlurLevelValue = DepthOfFieldEffectBlurLevel.Medium;
     private dofFocusDistanceMmValue = 55000;
-    private dofFStopValue = 2.8;
-    private dofEffectiveFStopValue = 2.8;
+    private dofFStopValue = 2.0;
+    private dofEffectiveFStopValue = 2.0;
     private dofLensBlurStrengthValue = 0;
     private dofLensBlurEnabledValue = true;
     private dofLensEdgeBlurValue = 0;
@@ -1730,7 +1730,7 @@ ${beforeFogAppendBlock}
     private readonly dofLensHighlightsGainRange = 8.0;
     private readonly dofLensHighlightsBaseThreshold = 0.62;
     private readonly dofLensHighlightsThresholdRange = 0.72;
-    private dofLensSizeValue = 30;
+    private dofLensSizeValue = 1000;
     private dofFocalLengthValue = 50;
     private readonly dofFocalLengthFollowsCameraFov = true;
     private readonly dofFovLinkSensorWidthMm = 36;
@@ -7315,6 +7315,7 @@ ${beforeFogAppendBlock}
     }
 
     private getFrameGraphPostEffectsSettings(): FrameGraphPostEffectsSettings {
+        this.updateEditorDofFocusAndFStop();
         return {
             contrast: this.postEffectContrastValue,
             gammaPower: this.postEffectGammaValue,

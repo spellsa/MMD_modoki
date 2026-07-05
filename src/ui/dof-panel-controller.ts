@@ -2,6 +2,8 @@ import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
 import type { EditorAction } from "../actions/types";
 
+const FIXED_DOF_FSTOP = 2.0;
+
 type DofPanelElements = {
     cameraControls: HTMLElement | null;
     cameraDofControls: HTMLElement | null;
@@ -255,6 +257,11 @@ export class DofPanelController {
         const lensBlurValue = elements.lensBlurValue;
         const lensSizeSlider = elements.lensSizeSlider;
         const focalLengthSlider = elements.focalLengthSlider;
+        focusSlider.closest<HTMLElement>(".effect-row")?.setAttribute("hidden", "");
+        fStopSlider.closest<HTMLElement>(".effect-row")?.setAttribute("hidden", "");
+        focalLengthSlider.closest<HTMLElement>(".effect-row")?.setAttribute("hidden", "");
+        lensSizeSlider.min = "1";
+        lensSizeSlider.max = "4096";
 
         const applyDofEnabled = (): void => {
             const enabled = enabledInput.checked;
@@ -281,9 +288,9 @@ export class DofPanelController {
             }
         };
         const applyDofFStop = (): void => {
-            const fStop = Number(fStopSlider.value) / 100;
+            const fStop = FIXED_DOF_FSTOP;
             if (!this.dispatchAction?.({ type: "effect.setDofFStop", source: "panel", value: fStop })) {
-                this.setDofFStop(fStop);
+                this.setDofFStop();
             }
         };
         const applyDofNearSuppression = (): void => {
@@ -341,7 +348,8 @@ export class DofPanelController {
         qualitySelect.value = String(this.mmdManager.dofBlurLevel);
         focusSlider.value = String(Math.round(this.mmdManager.dofFocusDistanceMm));
         focusOffsetSlider.value = String(Math.round(this.mmdManager.dofAutoFocusNearOffsetMm));
-        fStopSlider.value = String(Math.round(this.mmdManager.dofFStop * 100));
+        this.mmdManager.dofFStop = FIXED_DOF_FSTOP;
+        fStopSlider.value = String(Math.round(FIXED_DOF_FSTOP * 100));
         nearSuppressionSlider.value = String(Math.round(this.mmdManager.dofNearSuppressionScale * 100));
         focalInvertInput.checked = this.mmdManager.dofFocalLengthDistanceInverted;
         if (lensBlurSlider && lensBlurValue) {
@@ -434,11 +442,11 @@ export class DofPanelController {
         }
     }
 
-    public setDofFStop(value: number): void {
+    public setDofFStop(): void {
         const elements = this.elements;
         if (!elements.fStopSlider || !elements.fStopValue) return;
-        this.mmdManager.dofFStop = value;
-        elements.fStopSlider.value = String(Math.round(value * 100));
+        this.mmdManager.dofFStop = FIXED_DOF_FSTOP;
+        elements.fStopSlider.value = String(Math.round(FIXED_DOF_FSTOP * 100));
         if (this.mmdManager.dofAutoFocusEnabled) {
             this.refreshAutoFocusReadout();
             return;

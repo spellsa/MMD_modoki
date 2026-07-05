@@ -71,6 +71,7 @@ import {
 type SectionKeyframeButtonState = "none" | "dirty" | "registered";
 type SectionKeyframeSection = "info" | "interpolation" | "bone" | "morph" | "accessory";
 type NumericArrayLike = ArrayLike<number> | null | undefined;
+const FIXED_DOF_FSTOP = 2.0;
 type SelectedBonePoseSnapshot = {
     position: { x: number; y: number; z: number };
     rotation: { x: number; y: number; z: number };
@@ -2334,8 +2335,8 @@ export class UIController {
         this.actionDispatcher.register("effect.setDofFocusOffset", (action) => {
             this.dofPanelController?.setDofFocusOffsetMm(action.millimeters);
         });
-        this.actionDispatcher.register("effect.setDofFStop", (action) => {
-            this.dofPanelController?.setDofFStop(action.value);
+        this.actionDispatcher.register("effect.setDofFStop", () => {
+            this.dofPanelController?.setDofFStop();
         });
         this.actionDispatcher.register("effect.setDofNearSuppression", (action) => {
             this.dofPanelController?.setDofNearSuppressionPercent(action.percent);
@@ -2388,8 +2389,8 @@ export class UIController {
         this.actionDispatcher.register("effect.setFrameGraphDofFocusOffset", (action) => {
             this.mmdManager.dofAutoFocusNearOffsetMm = action.millimeters;
         });
-        this.actionDispatcher.register("effect.setFrameGraphDofFStop", (action) => {
-            this.mmdManager.dofFStop = action.value;
+        this.actionDispatcher.register("effect.setFrameGraphDofFStop", () => {
+            this.applySimplifiedDofDefaults();
         });
         this.actionDispatcher.register("effect.setFrameGraphDofLensSize", (action) => {
             this.mmdManager.dofLensSize = action.value;
@@ -4143,8 +4144,8 @@ export class UIController {
                 this.mmdManager.postEffectBloomKernel = Math.max(this.mmdManager.postEffectBloomKernel, 128);
                 break;
             case "dof":
-                this.mmdManager.dofFStop = Math.min(this.mmdManager.dofFStop, 2.8);
-                this.mmdManager.dofLensSize = Math.max(this.mmdManager.dofLensSize, 30);
+                this.applySimplifiedDofDefaults();
+                this.mmdManager.dofLensSize = Math.max(this.mmdManager.dofLensSize, 1000);
                 this.mmdManager.dofFocalLength = Math.max(this.mmdManager.dofFocalLength, 50);
                 break;
             case "luminous":
@@ -4480,6 +4481,14 @@ export class UIController {
         this.refreshFrameGraphPostAddUi();
     }
 
+    private applySimplifiedDofDefaults(): void {
+        this.mmdManager.dofFStop = FIXED_DOF_FSTOP;
+    }
+
+    private getDofLensSizeSliderValue(): number {
+        return Math.round(this.mmdManager.dofLensSize);
+    }
+
     private renderFrameGraphPostEffectDetails(effect: FrameGraphPostAddEffect): string {
         const rows: string[] = [];
         const controlsDisabled = !effect.isActive(this.mmdManager);
@@ -4557,6 +4566,7 @@ export class UIController {
                 );
                 break;
             case "dof":
+                this.applySimplifiedDofDefaults();
                 rows.push(
                     select(
                         "dofTargetModel",
@@ -4570,11 +4580,15 @@ export class UIController {
                         this.buildFrameGraphPostStackDofTargetBoneOptionsHtml(),
                         this.getFrameGraphPostStackDofTargetBoneLabel(),
                     ),
-                    range("dofFocus", "Focus", 100, 300000, Math.round(this.mmdManager.dofFocusDistanceMm), `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`, 100),
                     range("dofFocusOffset", "Offset", -20000, 20000, Math.round(this.mmdManager.dofAutoFocusNearOffsetMm), `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`, 100),
-                    range("dofFStop", "F-Stop", 0, 400, Math.round(this.mmdManager.dofFStop * 100), this.mmdManager.dofFStop.toFixed(2)),
-                    range("dofLensSize", "Lens", 1, 4096, Math.round(this.mmdManager.dofLensSize), String(Math.round(this.mmdManager.dofLensSize))),
-                    range("dofFocalLength", "Focal", 1, 300, Math.round(this.mmdManager.dofFocalLength), String(Math.round(this.mmdManager.dofFocalLength))),
+                    range(
+                        "dofLensSize",
+                        "Lens",
+                        1,
+                        4096,
+                        this.getDofLensSizeSliderValue(),
+                        String(this.getDofLensSizeSliderValue()),
+                    ),
                 );
                 break;
             case "lut":
@@ -4751,7 +4765,7 @@ export class UIController {
                 this.mmdManager.dofAutoFocusNearOffsetMm = Number(rawValue);
                 break;
             case "dofFStop":
-                this.mmdManager.dofFStop = Number(rawValue) / 100;
+                this.applySimplifiedDofDefaults();
                 break;
             case "dofLensSize":
                 this.mmdManager.dofLensSize = Number(rawValue);
@@ -5014,7 +5028,7 @@ export class UIController {
                 valueElement.textContent = this.mmdManager.dofFStop.toFixed(2);
                 break;
             case "dofLensSize":
-                valueElement.textContent = String(Math.round(this.mmdManager.dofLensSize));
+                valueElement.textContent = String(this.getDofLensSizeSliderValue());
                 break;
             case "dofFocalLength":
                 valueElement.textContent = String(Math.round(this.mmdManager.dofFocalLength));
@@ -5389,6 +5403,12 @@ export class UIController {
             return;
         }
 
+        focusSlider.closest<HTMLElement>(".effect-row")?.setAttribute("hidden", "");
+        fStopSlider.closest<HTMLElement>(".effect-row")?.setAttribute("hidden", "");
+        focalLengthSlider.closest<HTMLElement>(".effect-row")?.setAttribute("hidden", "");
+        lensSizeSlider.min = "1";
+        lensSizeSlider.max = "4096";
+
         const refreshTargetControls = (): void => {
             const loadedModels = this.mmdManager.getLoadedModels();
             const targetModelPath = this.mmdManager.getDofFocusTargetModelPath();
@@ -5439,16 +5459,17 @@ export class UIController {
         };
 
         const refreshValues = (): void => {
+            this.applySimplifiedDofDefaults();
             enabledInput.checked = this.mmdManager.dofEnabled;
             enabledValue.textContent = this.mmdManager.dofEnabled ? t("status.on") : t("status.off");
             focusSlider.value = String(Math.round(this.mmdManager.dofFocusDistanceMm));
             focusValue.textContent = `${(this.mmdManager.dofFocusDistanceMm / 1000).toFixed(1)}m`;
             focusOffsetSlider.value = String(Math.round(this.mmdManager.dofAutoFocusNearOffsetMm));
             focusOffsetValue.textContent = `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`;
-            fStopSlider.value = String(Math.round(this.mmdManager.dofFStop * 100));
+            fStopSlider.value = String(Math.round(FIXED_DOF_FSTOP * 100));
             fStopValue.textContent = this.mmdManager.dofFStop.toFixed(2);
-            lensSizeSlider.value = String(Math.round(this.mmdManager.dofLensSize));
-            lensSizeValue.textContent = `${Math.round(this.mmdManager.dofLensSize)}`;
+            lensSizeSlider.value = String(this.getDofLensSizeSliderValue());
+            lensSizeValue.textContent = `${this.getDofLensSizeSliderValue()}`;
             focalLengthSlider.value = String(Math.round(this.mmdManager.dofFocalLength));
             focalLengthValue.textContent = `${Math.round(this.mmdManager.dofFocalLength)}`;
             focusSlider.disabled = this.mmdManager.dofAutoFocusEnabled;
@@ -5527,19 +5548,20 @@ export class UIController {
             if (!this.actionDispatcher.dispatch({
                 type: "effect.setFrameGraphDofFStop",
                 source: "panel",
-                value: Number(fStopSlider.value) / 100,
+                value: FIXED_DOF_FSTOP,
             })) {
-                this.mmdManager.dofFStop = Number(fStopSlider.value) / 100;
+                this.applySimplifiedDofDefaults();
             }
             refreshValues();
         });
         lensSizeSlider.addEventListener("input", () => {
+            const lensSize = Number(lensSizeSlider.value);
             if (!this.actionDispatcher.dispatch({
                 type: "effect.setFrameGraphDofLensSize",
                 source: "panel",
-                value: Number(lensSizeSlider.value),
+                value: lensSize,
             })) {
-                this.mmdManager.dofLensSize = Number(lensSizeSlider.value);
+                this.mmdManager.dofLensSize = lensSize;
             }
             refreshValues();
         });
@@ -5605,13 +5627,10 @@ export class UIController {
         }
         const frameGraphDofVisibleControls = new Set([
             "effect-dof-enabled",
-            "effect-dof-focus",
             "effect-dof-target-model",
             "effect-dof-target-bone",
             "effect-dof-focus-offset",
-            "effect-dof-fstop",
             "effect-dof-lens-size",
-            "effect-dof-focal-length",
         ]);
         const frameGraphDofControlledRows = [
             "effect-dof-enabled",

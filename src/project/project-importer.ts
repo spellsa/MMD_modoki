@@ -736,9 +736,9 @@ export async function importProjectState(
             ? data.effects.dofTargetBoneName
             : null,
     );
-    host.dofFStop = readFiniteNumber(data.effects.dofFStop, 5.6);
+    host.dofFStop = 2.0;
     host.dofNearSuppressionScale = readFiniteNumber(data.effects.dofNearSuppressionScale, 4);
-    host.dofLensSize = readFiniteNumber(data.effects.dofLensSize, 50);
+    host.dofLensSize = readFiniteNumber(data.effects.dofLensSize, 1000);
     host.dofFocalLengthDistanceInverted = typeof data.effects.dofFocalLengthDistanceInverted === "boolean"
         ? data.effects.dofFocalLengthDistanceInverted
         : false;
