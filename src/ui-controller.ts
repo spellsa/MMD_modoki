@@ -4663,15 +4663,13 @@ export class UIController {
             }
             case "offsetHighlight": {
                 const offsetHighlightColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetHighlightColor());
+                const offsetHighlightStrength = Math.max(0, Math.min(1, this.mmdManager.postEffectOffsetHighlightStrength));
                 rows.push(
                     color("offsetHighlightColor", label("color"), offsetHighlightColor, offsetHighlightColor),
-                    range("offsetHighlightStrength", label("strength"), 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightStrength * 100), this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2)),
+                    range("offsetHighlightStrength", label("strength"), 0, 100, Math.round(offsetHighlightStrength * 100), offsetHighlightStrength.toFixed(2)),
                     range("offsetHighlightOffsetX", label("offsetX"), -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`),
                     range("offsetHighlightOffsetY", label("offsetY"), -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`),
-                    range("offsetHighlightDepthThreshold", label("depthEdge"), 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightDepthThreshold * 1000), this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3)),
                     range("offsetHighlightDepthScale", label("depthScale"), 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightDepthScale * 100), this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2)),
-                    range("offsetHighlightThickness", label("thickness"), 1, 300, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
-                    range("offsetHighlightSoftness", label("softness"), 0, 120, Math.round(this.mmdManager.postEffectOffsetHighlightSoftness * 10), `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`),
                 );
                 break;
             }

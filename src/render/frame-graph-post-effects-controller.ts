@@ -814,9 +814,6 @@ function ensureOffsetHighlightShaders(): void {
             uniform vec2 texelSize;
             uniform vec2 offsetPixels;
             uniform float strength;
-            uniform float depthThreshold;
-            uniform float thickness;
-            uniform float softness;
             uniform float depthScale;
             uniform vec3 highlightColor;
             uniform float debugView;
@@ -835,32 +832,28 @@ function ensureOffsetHighlightShaders(): void {
                 return farMask;
             }
 
-            float sampleHighlightMask(vec2 uv, vec2 direction, float sampleRadius) {
-                float currentDepth = sampleDepth(uv);
-                vec2 offsetUv = uv - direction * texelSize * sampleRadius;
-                float offsetDepth = sampleDepth(offsetUv);
-                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+            float foregroundMaskAt(vec2 uv) {
+                float depth = sampleDepth(uv);
+                if (depth <= 0.000001) {
                     return 0.0;
                 }
-                float thresholdRange = max(0.0001, thickness);
-                float depthDelta = offsetDepth - currentDepth;
-                return smoothstep(depthThreshold, depthThreshold + thresholdRange, depthDelta);
+                return resolveForegroundMask(depth);
+            }
+
+            float sampleOffsetFillMask(vec2 uv, vec2 direction, float sampleRadius) {
+                float originalMask = foregroundMaskAt(uv);
+                float offsetMask = foregroundMaskAt(uv - direction * texelSize * sampleRadius);
+                return max(0.0, originalMask - offsetMask);
             }
 
             void main(void) {
                 vec4 source = texture2D(textureSampler, vUV);
                 float currentDepth = sampleDepth(vUV);
-                float offsetScale = resolveOffsetScale(currentDepth);
                 float offsetLength = length(offsetPixels);
                 vec2 direction = offsetLength > 0.001 ? offsetPixels / offsetLength : vec2(0.0, -1.0);
+                float offsetScale = currentDepth > 0.000001 ? resolveOffsetScale(currentDepth) : 1.0;
                 float sampleRadius = max(1.0, min(24.0, offsetLength * 0.125)) * offsetScale;
-                float spreadRadius = max(0.0, min(18.0, softness + thickness * 5.0)) * offsetScale;
-                float mask = sampleHighlightMask(vUV, direction, sampleRadius) * 0.34;
-                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius * 0.25, direction, sampleRadius) * 0.23;
-                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius * 0.50, direction, sampleRadius) * 0.18;
-                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius * 0.75, direction, sampleRadius) * 0.14;
-                mask += sampleHighlightMask(vUV + direction * texelSize * spreadRadius, direction, sampleRadius) * 0.11;
-                mask *= resolveForegroundMask(currentDepth);
+                float mask = sampleOffsetFillMask(vUV, direction, sampleRadius);
                 mask = clamp(mask * strength, 0.0, 1.0);
                 if (debugView > 0.5) {
                     gl_FragColor = vec4(vec3(mask), source.a);
@@ -881,9 +874,6 @@ function ensureOffsetHighlightShaders(): void {
             uniform texelSize: vec2f;
             uniform offsetPixels: vec2f;
             uniform strength: f32;
-            uniform depthThreshold: f32;
-            uniform thickness: f32;
-            uniform softness: f32;
             uniform depthScale: f32;
             uniform highlightColor: vec3f;
             uniform debugView: f32;
@@ -902,16 +892,18 @@ function ensureOffsetHighlightShaders(): void {
                 return farMask;
             }
 
-            fn sampleHighlightMask(uv: vec2f, direction: vec2f, sampleRadius: f32) -> f32 {
-                let currentDepth = sampleDepth(uv);
-                let offsetUv = uv - direction * uniforms.texelSize * sampleRadius;
-                let offsetDepth = sampleDepth(offsetUv);
-                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+            fn foregroundMaskAt(uv: vec2f) -> f32 {
+                let depth = sampleDepth(uv);
+                if (depth <= 0.000001) {
                     return 0.0;
                 }
-                let thresholdRange = max(0.0001, uniforms.thickness);
-                let depthDelta = offsetDepth - currentDepth;
-                return smoothstep(uniforms.depthThreshold, uniforms.depthThreshold + thresholdRange, depthDelta);
+                return resolveForegroundMask(depth);
+            }
+
+            fn sampleOffsetFillMask(uv: vec2f, direction: vec2f, sampleRadius: f32) -> f32 {
+                let originalMask = foregroundMaskAt(uv);
+                let offsetMask = foregroundMaskAt(uv - direction * uniforms.texelSize * sampleRadius);
+                return max(0.0, originalMask - offsetMask);
             }
 
             #define CUSTOM_FRAGMENT_DEFINITIONS
@@ -919,20 +911,17 @@ function ensureOffsetHighlightShaders(): void {
             fn main(input: FragmentInputs)->FragmentOutputs {
                 let source = textureSampleLevel(textureSampler, textureSamplerSampler, input.vUV, 0.0);
                 let currentDepth = sampleDepth(input.vUV);
-                let offsetScale = resolveOffsetScale(currentDepth);
                 let offsetLength = length(uniforms.offsetPixels);
                 var direction = vec2f(0.0, -1.0);
                 if (offsetLength > 0.001) {
                     direction = uniforms.offsetPixels / offsetLength;
                 }
+                var offsetScale = 1.0;
+                if (currentDepth > 0.000001) {
+                    offsetScale = resolveOffsetScale(currentDepth);
+                }
                 let sampleRadius = max(1.0, min(24.0, offsetLength * 0.125)) * offsetScale;
-                let spreadRadius = max(0.0, min(18.0, uniforms.softness + uniforms.thickness * 5.0)) * offsetScale;
-                var mask = sampleHighlightMask(input.vUV, direction, sampleRadius) * 0.34;
-                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius * 0.25, direction, sampleRadius) * 0.23;
-                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius * 0.50, direction, sampleRadius) * 0.18;
-                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius * 0.75, direction, sampleRadius) * 0.14;
-                mask += sampleHighlightMask(input.vUV + direction * uniforms.texelSize * spreadRadius, direction, sampleRadius) * 0.11;
-                mask *= resolveForegroundMask(currentDepth);
+                var mask = sampleOffsetFillMask(input.vUV, direction, sampleRadius);
                 mask = clamp(mask * uniforms.strength, 0.0, 1.0);
                 if (uniforms.debugView > 0.5) {
                     fragmentOutputs.color = vec4f(vec3f(mask), source.a);
@@ -1770,10 +1759,7 @@ class FrameGraphPostEffectsOffsetHighlightTask extends FrameGraphPostProcessTask
                     1 / Math.max(1, engine.getRenderHeight()),
                 );
                 effect.setFloat2("offsetPixels", settings.offsetHighlightOffsetX, settings.offsetHighlightOffsetY);
-                effect.setFloat("strength", Math.max(0, Math.min(2, settings.offsetHighlightStrength)));
-                effect.setFloat("depthThreshold", Math.max(0, Math.min(1, settings.offsetHighlightDepthThreshold)));
-                effect.setFloat("thickness", Math.max(0.0001, Math.min(3, settings.offsetHighlightThickness)));
-                effect.setFloat("softness", Math.max(0, Math.min(12, settings.offsetHighlightSoftness)));
+                effect.setFloat("strength", Math.max(0, Math.min(1, settings.offsetHighlightStrength)));
                 effect.setFloat("depthScale", Math.max(0, Math.min(1, settings.offsetHighlightDepthScale)));
                 effect.setFloat3(
                     "highlightColor",
@@ -2326,9 +2312,6 @@ export class FrameGraphPostEffectsController {
                         "texelSize",
                         "offsetPixels",
                         "strength",
-                        "depthThreshold",
-                        "thickness",
-                        "softness",
                         "depthScale",
                         "highlightColor",
                         "debugView",
