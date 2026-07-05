@@ -1370,9 +1370,10 @@ export function setupEditorDofPipeline(host: PostProcessHost): void {
 
 export function isImageProcessingEffectsEnabled(host: PostProcessHost): boolean {
     const epsilon = 1e-4;
+    const useSceneVignette = host.postEffectBackend !== "frameGraph" && host.postEffectVignetteEnabledValue;
     return host.postEffectToneMappingEnabledValue
         || host.postEffectDitheringEnabledValue
-        || host.postEffectVignetteEnabledValue
+        || useSceneVignette
         || host.postEffectColorCurvesEnabledValue
         || (host.postEffectBackend !== "frameGraph" && host.postEffectLutEnabledValue && isLutSourceReady(host))
         || Math.abs(host.postEffectExposureValue - 1) > epsilon;
@@ -1385,8 +1386,9 @@ export function applyImageProcessingSettings(host: PostProcessHost): void {
     imageProcessing.toneMappingType = host.postEffectToneMappingTypeValue;
     imageProcessing.ditheringEnabled = host.postEffectDitheringEnabledValue;
     imageProcessing.ditheringIntensity = host.postEffectDitheringIntensityValue;
-    imageProcessing.vignetteEnabled = host.postEffectVignetteEnabledValue;
-    imageProcessing.vignetteWeight = host.postEffectVignetteWeightValue;
+    const useSceneVignette = host.postEffectBackend !== "frameGraph" && host.postEffectVignetteEnabledValue;
+    imageProcessing.vignetteEnabled = useSceneVignette;
+    imageProcessing.vignetteWeight = useSceneVignette ? host.postEffectVignetteWeightValue : 0;
     imageProcessing.vignetteColor.set(0, 0, 0, 1);
 
     if (host.postEffectColorCurvesEnabledValue) {

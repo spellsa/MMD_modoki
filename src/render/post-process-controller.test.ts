@@ -1,5 +1,63 @@
 import { describe, expect, it, vi } from "vitest";
-import { enforceFinalPostProcessOrder } from "./post-process-controller";
+import {
+    applyImageProcessingSettings,
+    enforceFinalPostProcessOrder,
+    isImageProcessingEffectsEnabled,
+} from "./post-process-controller";
+
+function createImageProcessingHost(postEffectBackend: "classic" | "frameGraph") {
+    return {
+        constructor: {
+            POST_EFFECT_LUT_PRESETS: [],
+            POST_EFFECT_LUT_TEXT_BY_ID: {},
+        },
+        postEffectBackend,
+        scene: {
+            imageProcessingConfiguration: {
+                exposure: 1,
+                toneMappingEnabled: false,
+                toneMappingType: 0,
+                ditheringEnabled: false,
+                ditheringIntensity: 0,
+                vignetteEnabled: false,
+                vignetteWeight: 0,
+                vignetteColor: { set: vi.fn() },
+                colorCurves: null,
+                colorCurvesEnabled: false,
+                colorGradingEnabled: false,
+                colorGradingTexture: null,
+                isEnabled: false,
+                applyByPostProcess: false,
+            },
+        },
+        defaultRenderingPipeline: {
+            imageProcessingEnabled: false,
+        },
+        postEffectToneMappingEnabledValue: false,
+        postEffectDitheringEnabledValue: false,
+        postEffectVignetteEnabledValue: true,
+        postEffectColorCurvesEnabledValue: false,
+        postEffectLutEnabledValue: false,
+        postEffectExposureValue: 1,
+        postEffectToneMappingTypeValue: 0,
+        postEffectDitheringIntensityValue: 0,
+        postEffectVignetteWeightValue: 2,
+        postEffectColorCurvesHueValue: 0,
+        postEffectColorCurvesDensityValue: 0,
+        postEffectColorCurvesSaturationValue: 0,
+        postEffectColorCurvesExposureValue: 0,
+        postEffectLutSourceModeValue: "builtin",
+        postEffectLutPresetValue: "",
+        postEffectLutExternalTextValue: null,
+        postEffectLutExternalPathValue: null,
+        postEffectLutExternalSourceFormatValue: null,
+        postEffectLutExternalRevision: 0,
+        postEffectLutTexture: null,
+        postEffectLutTextureKey: null,
+        postEffectLutPresetBlobUrlById: new Map(),
+        postEffectLutExternalBlobUrl: null,
+    };
+}
 
 describe("enforceFinalPostProcessOrder", () => {
     it("keeps fog and bloom before volumetric light and final cleanup passes", () => {
@@ -60,5 +118,33 @@ describe("enforceFinalPostProcessOrder", () => {
             lens,
             aa,
         ]);
+    });
+});
+
+describe("applyImageProcessingSettings", () => {
+    it("does not enable scene vignette while FrameGraph owns vignette rendering", () => {
+        const host = createImageProcessingHost("frameGraph");
+
+        expect(isImageProcessingEffectsEnabled(host as never)).toBe(false);
+
+        applyImageProcessingSettings(host as never);
+
+        expect(host.scene.imageProcessingConfiguration.vignetteEnabled).toBe(false);
+        expect(host.scene.imageProcessingConfiguration.vignetteWeight).toBe(0);
+        expect(host.scene.imageProcessingConfiguration.isEnabled).toBe(false);
+        expect(host.scene.imageProcessingConfiguration.applyByPostProcess).toBe(false);
+        expect(host.defaultRenderingPipeline.imageProcessingEnabled).toBe(false);
+    });
+
+    it("keeps using scene vignette for the classic post-process backend", () => {
+        const host = createImageProcessingHost("classic");
+
+        expect(isImageProcessingEffectsEnabled(host as never)).toBe(true);
+
+        applyImageProcessingSettings(host as never);
+
+        expect(host.scene.imageProcessingConfiguration.vignetteEnabled).toBe(true);
+        expect(host.scene.imageProcessingConfiguration.vignetteWeight).toBe(2);
+        expect(host.defaultRenderingPipeline.imageProcessingEnabled).toBe(true);
     });
 });

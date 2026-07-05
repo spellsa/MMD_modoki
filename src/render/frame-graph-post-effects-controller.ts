@@ -2739,12 +2739,14 @@ export class FrameGraphPostEffectsController {
         if (this.imageProcessingTask) {
             this.imageProcessingTask.disabled = !settings.imageProcessingEnabled;
         }
-        if (this.imageProcessingEffect && this.lastImageProcessingEnabled !== settings.imageProcessingEnabled) {
-            this.imageProcessingEffect._updateParameters();
-            this.lastImageProcessingEnabled = settings.imageProcessingEnabled;
-        }
-        if (this.imageProcessingEffect?.vignetteEnabled) {
+        if (this.imageProcessingEffect) {
+            const hadImageProcessingVignette = this.imageProcessingEffect.vignetteEnabled;
             this.imageProcessingEffect.vignetteEnabled = false;
+            this.imageProcessingEffect.vignetteWeight = 0;
+            if (hadImageProcessingVignette || this.lastImageProcessingEnabled !== settings.imageProcessingEnabled) {
+                this.imageProcessingEffect._updateParameters();
+                this.lastImageProcessingEnabled = settings.imageProcessingEnabled;
+            }
         }
         if (this.depthOfFieldTask) {
             this.depthOfFieldTask.disabled = !settings.dofEnabled;
