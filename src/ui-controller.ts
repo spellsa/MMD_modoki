@@ -212,7 +212,7 @@ type FrameGraphPostAddEffectId = FrameGraphPostEffectId;
 
 type FrameGraphPostAddEffect = {
     id: FrameGraphPostAddEffectId;
-    label: string;
+    labelKey: string;
     isActive: (manager: MmdManager) => boolean;
     setActive: (manager: MmdManager, active: boolean) => void;
 };
@@ -220,85 +220,85 @@ type FrameGraphPostAddEffect = {
 const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
     {
         id: "ssr",
-        label: "SSR",
+        labelKey: "effect.frameGraphPost.effects.ssr",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("ssr"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssr", active); },
     },
     {
         id: "ssao",
-        label: "SSAO",
+        labelKey: "effect.frameGraphPost.effects.ssao",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("ssao"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssao", active); },
     },
     {
         id: "offsetShadow",
-        label: "Offset Shadow",
+        labelKey: "effect.frameGraphPost.effects.offsetShadow",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("offsetShadow"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("offsetShadow", active); },
     },
     {
         id: "offsetHighlight",
-        label: "Offset Rim",
+        labelKey: "effect.frameGraphPost.effects.offsetHighlight",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("offsetHighlight"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("offsetHighlight", active); },
     },
     {
         id: "dof",
-        label: "DoF",
+        labelKey: "effect.frameGraphPost.effects.dof",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("dof"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("dof", active); },
     },
     {
         id: "luminous",
-        label: "Luminous",
+        labelKey: "effect.frameGraphPost.effects.luminous",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("luminous"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("luminous", active); },
     },
     {
         id: "bloom",
-        label: "Bloom",
+        labelKey: "effect.frameGraphPost.effects.bloom",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("bloom"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("bloom", active); },
     },
     {
         id: "lut",
-        label: "LUT",
+        labelKey: "effect.frameGraphPost.effects.lut",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("lut"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("lut", active); },
     },
     {
         id: "sharpen",
-        label: "Sharpen",
+        labelKey: "effect.frameGraphPost.effects.sharpen",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("sharpen"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("sharpen", active); },
     },
     {
         id: "grain",
-        label: "Grain",
+        labelKey: "effect.frameGraphPost.effects.grain",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("grain"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("grain", active); },
     },
     {
         id: "chromatic",
-        label: "Chroma",
+        labelKey: "effect.frameGraphPost.effects.chromatic",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("chromatic"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("chromatic", active); },
     },
     {
         id: "vignette",
-        label: "Vignette",
+        labelKey: "effect.frameGraphPost.effects.vignette",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("vignette"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("vignette", active); },
     },
     {
         id: "edgeBlur",
-        label: "EdgeBlur",
+        labelKey: "effect.frameGraphPost.effects.edgeBlur",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("edgeBlur"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("edgeBlur", active); },
     },
     {
         id: "distortion",
-        label: "Distort",
+        labelKey: "effect.frameGraphPost.effects.distortion",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("distortion"),
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("distortion", active); },
     },
@@ -463,6 +463,7 @@ export class UIController {
         this.viewportAxisHandleController?.refreshLocale();
         this.viewportTopBarController?.refreshLocale();
         this.dofPanelController?.refreshFocusTargetControls();
+        this.refreshFrameGraphPostAddUi();
         this.refreshShaderPanel();
     };
 
@@ -4000,9 +4001,7 @@ export class UIController {
 
     private setupPostEffectAddControls(): void {
         this.postEffectAddButton?.addEventListener("click", () => {
-            if (!this.postEffectAddPanel) return;
-            this.postEffectAddPanel.hidden = !this.postEffectAddPanel.hidden;
-            this.refreshFrameGraphPostAddUi();
+            this.setPostEffectAddPanelOpen(this.postEffectAddPanel?.hidden ?? true);
         });
 
         this.postEffectEnableFrameGraphButton?.addEventListener("click", () => {
@@ -4014,7 +4013,24 @@ export class UIController {
                 const effectId = button.dataset.effectAddPost ?? "";
                 if (!this.isFrameGraphPostAddEffectId(effectId)) return;
                 this.addFrameGraphPostEffect(effectId);
+                this.setPostEffectAddPanelOpen(false);
             });
+        });
+
+        document.addEventListener("click", (event) => {
+            if (this.postEffectAddPanel?.hidden ?? true) return;
+            const target = event.target instanceof Node ? event.target : null;
+            if (!target) return;
+            if (this.postEffectAddPanel?.contains(target) || this.postEffectAddButton?.contains(target)) {
+                return;
+            }
+            this.setPostEffectAddPanelOpen(false);
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape" || (this.postEffectAddPanel?.hidden ?? true)) return;
+            this.setPostEffectAddPanelOpen(false);
+            this.postEffectAddButton?.focus();
         });
 
         this.postEffectStackList?.addEventListener("change", (event) => {
@@ -4126,7 +4142,7 @@ export class UIController {
         try {
             localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, "frameGraph");
         } catch {
-            this.showToast("FrameGraph backend setting could not be saved", "error");
+            this.showToast(t("effect.frameGraphPost.backendSaveFailed"), "error");
             return;
         }
 
@@ -4212,7 +4228,7 @@ export class UIController {
 
     private addFrameGraphPostEffect(effectId: FrameGraphPostAddEffectId): void {
         if (this.getConfiguredPostEffectBackend() !== "frameGraph") {
-            this.showToast("FrameGraph backend is required", "info");
+            this.showToast(t("effect.frameGraphPost.backendRequired"), "info");
             this.refreshFrameGraphPostAddUi();
             return;
         }
@@ -4268,7 +4284,7 @@ export class UIController {
 
         this.expandedFrameGraphPostEffectId = effectId;
         this.refreshFrameGraphPostAddUi();
-        this.showToast(`FrameGraph effect added: ${this.getFrameGraphPostEffectLabel(effectId)}`, "success");
+        this.showToast(t("effect.frameGraphPost.effectAdded", { name: this.getFrameGraphPostEffectLabel(effectId) }), "success");
     }
 
     private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
@@ -4279,7 +4295,8 @@ export class UIController {
     }
 
     private getFrameGraphPostEffectLabel(effectId: FrameGraphPostAddEffectId): string {
-        return FRAME_GRAPH_POST_ADD_EFFECTS.find((effect) => effect.id === effectId)?.label ?? effectId;
+        const effect = FRAME_GRAPH_POST_ADD_EFFECTS.find((candidate) => candidate.id === effectId);
+        return effect ? t(effect.labelKey) : effectId;
     }
 
     private areFrameGraphPostEffectIdsEqual(
@@ -4493,6 +4510,7 @@ export class UIController {
         const rows: string[] = [];
         const controlsDisabled = !effect.isActive(this.mmdManager);
         const disabledAttr = controlsDisabled ? " disabled" : "";
+        const label = (key: string): string => this.escapeEffectStackHtml(t(`effect.frameGraphPost.controls.${key}`));
         const range = (
             field: string,
             label: string,
@@ -4503,7 +4521,7 @@ export class UIController {
             step = 1,
         ): string => `
             <div class="effect-layer-control-row">
-                <span class="effect-layer-control-label">${label}</span>
+                <span class="effect-layer-control-label">${this.escapeEffectStackHtml(label)}</span>
                 <input class="effect-layer-control-slider" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-effect-stack-control="${field}"${disabledAttr}>
                 <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
             </div>
@@ -4515,7 +4533,7 @@ export class UIController {
             displayValue: string,
         ): string => `
             <div class="effect-layer-control-row">
-                <span class="effect-layer-control-label">${label}</span>
+                <span class="effect-layer-control-label">${this.escapeEffectStackHtml(label)}</span>
                 <select class="effect-layer-control-select" data-effect-stack-control="${field}"${disabledAttr}>
                     ${optionsHtml}
                 </select>
@@ -4529,7 +4547,7 @@ export class UIController {
             displayValue: string,
         ): string => `
             <div class="effect-layer-control-row">
-                <span class="effect-layer-control-label">${label}</span>
+                <span class="effect-layer-control-label">${this.escapeEffectStackHtml(label)}</span>
                 <button class="effect-layer-control-button" type="button" data-effect-stack-action="${action}"${disabledAttr}>${buttonLabel}</button>
                 <span class="effect-layer-control-value" data-effect-stack-value="${action}">${displayValue}</span>
             </div>
@@ -4541,7 +4559,7 @@ export class UIController {
             displayValue: string,
         ): string => `
             <div class="effect-layer-control-row">
-                <span class="effect-layer-control-label">${label}</span>
+                <span class="effect-layer-control-label">${this.escapeEffectStackHtml(label)}</span>
                 <input class="effect-layer-control-color" type="color" value="${value}" data-effect-stack-control="${field}"${disabledAttr}>
                 <span class="effect-layer-control-value" data-effect-stack-value="${field}">${displayValue}</span>
             </div>
@@ -4551,18 +4569,18 @@ export class UIController {
             case "bloom": {
                 const bloomColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectBloomColor());
                 rows.push(
-                    color("bloomColor", "Color", bloomColor, bloomColor),
-                    range("bloomWeight", "Weight", 0, 200, Math.round(this.mmdManager.postEffectBloomWeight * 100), this.mmdManager.postEffectBloomWeight.toFixed(2)),
-                    range("bloomThreshold", "Threshold", 0, 200, Math.round(this.mmdManager.postEffectBloomThreshold * 100), this.mmdManager.postEffectBloomThreshold.toFixed(2)),
-                    range("bloomKernel", "Kernel", 1, 256, Math.round(this.mmdManager.postEffectBloomKernel), String(Math.round(this.mmdManager.postEffectBloomKernel))),
+                    color("bloomColor", label("color"), bloomColor, bloomColor),
+                    range("bloomWeight", label("weight"), 0, 200, Math.round(this.mmdManager.postEffectBloomWeight * 100), this.mmdManager.postEffectBloomWeight.toFixed(2)),
+                    range("bloomThreshold", label("threshold"), 0, 200, Math.round(this.mmdManager.postEffectBloomThreshold * 100), this.mmdManager.postEffectBloomThreshold.toFixed(2)),
+                    range("bloomKernel", label("kernel"), 1, 256, Math.round(this.mmdManager.postEffectBloomKernel), String(Math.round(this.mmdManager.postEffectBloomKernel))),
                 );
                 break;
             }
             case "luminous":
                 rows.push(
-                    range("luminousIntensity", "Intensity", 0, 200, Math.round(this.mmdManager.postEffectGlowIntensity * 100), this.mmdManager.postEffectGlowIntensity.toFixed(2)),
-                    range("luminousThreshold", "Threshold", 0, 150, Math.round(this.mmdManager.postEffectGlowThreshold * 100), this.mmdManager.postEffectGlowThreshold.toFixed(2)),
-                    range("luminousRadius", "Radius", 1, 128, Math.round(this.mmdManager.postEffectGlowKernel), `${Math.round(this.mmdManager.postEffectGlowKernel)}px`),
+                    range("luminousIntensity", label("intensity"), 0, 200, Math.round(this.mmdManager.postEffectGlowIntensity * 100), this.mmdManager.postEffectGlowIntensity.toFixed(2)),
+                    range("luminousThreshold", label("threshold"), 0, 150, Math.round(this.mmdManager.postEffectGlowThreshold * 100), this.mmdManager.postEffectGlowThreshold.toFixed(2)),
+                    range("luminousRadius", label("radius"), 1, 128, Math.round(this.mmdManager.postEffectGlowKernel), `${Math.round(this.mmdManager.postEffectGlowKernel)}px`),
                 );
                 break;
             case "dof":
@@ -4570,20 +4588,20 @@ export class UIController {
                 rows.push(
                     select(
                         "dofTargetModel",
-                        "Target",
+                        label("target"),
                         this.buildFrameGraphPostStackDofTargetModelOptionsHtml(),
                         this.getFrameGraphPostStackDofTargetModelLabel(),
                     ),
                     select(
                         "dofTargetBone",
-                        "Bone",
+                        label("bone"),
                         this.buildFrameGraphPostStackDofTargetBoneOptionsHtml(),
                         this.getFrameGraphPostStackDofTargetBoneLabel(),
                     ),
-                    range("dofFocusOffset", "Offset", -20000, 20000, Math.round(this.mmdManager.dofAutoFocusNearOffsetMm), `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`, 100),
+                    range("dofFocusOffset", label("offset"), -20000, 20000, Math.round(this.mmdManager.dofAutoFocusNearOffsetMm), `${(this.mmdManager.dofAutoFocusNearOffsetMm / 1000).toFixed(1)}m`, 100),
                     range(
                         "dofLensSize",
-                        "Lens",
+                        label("lens"),
                         1,
                         4096,
                         this.getDofLensSizeSliderValue(),
@@ -4594,92 +4612,92 @@ export class UIController {
             case "lut":
                 rows.push(select(
                     "lutSource",
-                    "Source",
+                    label("source"),
                     `
-                        <option value="builtin"${this.mmdManager.postEffectLutSourceMode === "builtin" ? " selected" : ""}>Builtin</option>
-                        <option value="external-absolute"${this.mmdManager.postEffectLutSourceMode === "external-absolute" ? " selected" : ""}>External</option>
-                        <option value="project-relative"${this.mmdManager.postEffectLutSourceMode === "project-relative" ? " selected" : ""}>Project</option>
+                        <option value="builtin"${this.mmdManager.postEffectLutSourceMode === "builtin" ? " selected" : ""}>${this.escapeEffectStackHtml(t("shader.option.builtin"))}</option>
+                        <option value="external-absolute"${this.mmdManager.postEffectLutSourceMode === "external-absolute" ? " selected" : ""}>${this.escapeEffectStackHtml(t("shader.option.externalAbsolute"))}</option>
+                        <option value="project-relative"${this.mmdManager.postEffectLutSourceMode === "project-relative" ? " selected" : ""}>${this.escapeEffectStackHtml(t("shader.option.projectLut"))}</option>
                     `,
                     this.getFrameGraphPostStackLutSourceLabel(),
                 ));
                 rows.push(button(
                     "lutFile",
-                    "File",
-                    "Load",
+                    label("file"),
+                    t("action.load"),
                     this.mmdManager.postEffectLutExternalPath
                         ? this.getBaseNameForRenderer(this.mmdManager.postEffectLutExternalPath)
                         : t("option.none"),
                 ));
                 rows.push(`
                     <div class="effect-layer-control-row">
-                        <span class="effect-layer-control-label">Preset</span>
+                        <span class="effect-layer-control-label">${label("preset")}</span>
                         <select class="effect-layer-control-select" data-effect-stack-control="lutPreset"${disabledAttr}>
                             ${this.buildFrameGraphPostStackLutPresetOptionsHtml()}
                         </select>
                         <span class="effect-layer-control-value" data-effect-stack-value="lutPreset">${this.getFrameGraphPostStackLutPresetLabel()}</span>
                     </div>
                 `);
-                rows.push(range("lutIntensity", "Intensity", 0, 100, Math.round(this.mmdManager.postEffectLutIntensity * 100), this.mmdManager.postEffectLutIntensity.toFixed(2)));
+                rows.push(range("lutIntensity", label("intensity"), 0, 100, Math.round(this.mmdManager.postEffectLutIntensity * 100), this.mmdManager.postEffectLutIntensity.toFixed(2)));
                 break;
             case "ssao":
                 rows.push(
-                    range("ssaoStrength", "Strength", 0, 100, Math.round(this.mmdManager.postEffectSsaoStrength * 100), this.mmdManager.postEffectSsaoStrength.toFixed(2)),
-                    range("ssaoRadius", "Radius", 1, 100, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
-                    range("ssaoFadeEnd", "FadeEnd", 4, 200, Math.round(this.mmdManager.postEffectSsaoFadeEnd), `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`),
+                    range("ssaoStrength", label("strength"), 0, 100, Math.round(this.mmdManager.postEffectSsaoStrength * 100), this.mmdManager.postEffectSsaoStrength.toFixed(2)),
+                    range("ssaoRadius", label("radius"), 1, 100, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
+                    range("ssaoFadeEnd", label("fadeEnd"), 4, 200, Math.round(this.mmdManager.postEffectSsaoFadeEnd), `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`),
                 );
                 break;
             case "offsetShadow": {
                 const offsetShadowColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
                 rows.push(
-                    color("offsetShadowColor", "Color", offsetShadowColor, offsetShadowColor),
-                    range("offsetShadowStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowStrength * 100), this.mmdManager.postEffectOffsetShadowStrength.toFixed(2)),
-                    range("offsetShadowOffsetX", "Offset X", -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetX), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`),
-                    range("offsetShadowOffsetY", "Offset Y", -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetY), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`),
-                    range("offsetShadowDepthBias", "Min Depth", 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowDepthBias * 1000), this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3)),
-                    range("offsetShadowMaxDepth", "Max Depth", 1, 4000, Math.round(this.mmdManager.postEffectOffsetShadowMaxDepth * 1000), this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3)),
-                    range("offsetShadowDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetShadowDepthScale * 100), this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2)),
-                    range("offsetShadowThickness", "Thickness", 1, 100, Math.round(this.mmdManager.postEffectOffsetShadowThickness * 100), this.mmdManager.postEffectOffsetShadowThickness.toFixed(2)),
-                    range("offsetShadowSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetShadowSoftness * 10), `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`),
+                    color("offsetShadowColor", label("color"), offsetShadowColor, offsetShadowColor),
+                    range("offsetShadowStrength", label("strength"), 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowStrength * 100), this.mmdManager.postEffectOffsetShadowStrength.toFixed(2)),
+                    range("offsetShadowOffsetX", label("offsetX"), -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetX), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`),
+                    range("offsetShadowOffsetY", label("offsetY"), -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetY), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`),
+                    range("offsetShadowDepthBias", label("minDepth"), 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowDepthBias * 1000), this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3)),
+                    range("offsetShadowMaxDepth", label("maxDepth"), 1, 4000, Math.round(this.mmdManager.postEffectOffsetShadowMaxDepth * 1000), this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3)),
+                    range("offsetShadowDepthScale", label("depthScale"), 0, 100, Math.round(this.mmdManager.postEffectOffsetShadowDepthScale * 100), this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2)),
+                    range("offsetShadowThickness", label("thickness"), 1, 100, Math.round(this.mmdManager.postEffectOffsetShadowThickness * 100), this.mmdManager.postEffectOffsetShadowThickness.toFixed(2)),
+                    range("offsetShadowSoftness", label("softness"), 0, 120, Math.round(this.mmdManager.postEffectOffsetShadowSoftness * 10), `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`),
                 );
                 break;
             }
             case "offsetHighlight": {
                 const offsetHighlightColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetHighlightColor());
                 rows.push(
-                    color("offsetHighlightColor", "Color", offsetHighlightColor, offsetHighlightColor),
-                    range("offsetHighlightStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightStrength * 100), this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2)),
-                    range("offsetHighlightOffsetX", "Offset X", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`),
-                    range("offsetHighlightOffsetY", "Offset Y", -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`),
-                    range("offsetHighlightDepthThreshold", "Depth Edge", 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightDepthThreshold * 1000), this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3)),
-                    range("offsetHighlightDepthScale", "Depth Scale", 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightDepthScale * 100), this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2)),
-                    range("offsetHighlightThickness", "Thickness", 1, 300, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
-                    range("offsetHighlightSoftness", "Softness", 0, 120, Math.round(this.mmdManager.postEffectOffsetHighlightSoftness * 10), `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`),
+                    color("offsetHighlightColor", label("color"), offsetHighlightColor, offsetHighlightColor),
+                    range("offsetHighlightStrength", label("strength"), 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightStrength * 100), this.mmdManager.postEffectOffsetHighlightStrength.toFixed(2)),
+                    range("offsetHighlightOffsetX", label("offsetX"), -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetX)}px`),
+                    range("offsetHighlightOffsetY", label("offsetY"), -256, 256, Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY), `${Math.round(this.mmdManager.postEffectOffsetHighlightOffsetY)}px`),
+                    range("offsetHighlightDepthThreshold", label("depthEdge"), 0, 200, Math.round(this.mmdManager.postEffectOffsetHighlightDepthThreshold * 1000), this.mmdManager.postEffectOffsetHighlightDepthThreshold.toFixed(3)),
+                    range("offsetHighlightDepthScale", label("depthScale"), 0, 100, Math.round(this.mmdManager.postEffectOffsetHighlightDepthScale * 100), this.mmdManager.postEffectOffsetHighlightDepthScale.toFixed(2)),
+                    range("offsetHighlightThickness", label("thickness"), 1, 300, Math.round(this.mmdManager.postEffectOffsetHighlightThickness * 100), this.mmdManager.postEffectOffsetHighlightThickness.toFixed(2)),
+                    range("offsetHighlightSoftness", label("softness"), 0, 120, Math.round(this.mmdManager.postEffectOffsetHighlightSoftness * 10), `${this.mmdManager.postEffectOffsetHighlightSoftness.toFixed(1)}px`),
                 );
                 break;
             }
             case "ssr":
                 rows.push(
-                    range("ssrStrength", "Strength", 0, 200, Math.round(this.mmdManager.postEffectSsrStrength * 100), this.mmdManager.postEffectSsrStrength.toFixed(2)),
-                    range("ssrStep", "Step", 1, 8, Math.round(this.mmdManager.postEffectSsrStep), String(Math.round(this.mmdManager.postEffectSsrStep))),
+                    range("ssrStrength", label("strength"), 0, 200, Math.round(this.mmdManager.postEffectSsrStrength * 100), this.mmdManager.postEffectSsrStrength.toFixed(2)),
+                    range("ssrStep", label("step"), 1, 8, Math.round(this.mmdManager.postEffectSsrStep), String(Math.round(this.mmdManager.postEffectSsrStep))),
                 );
                 break;
             case "vignette":
-                rows.push(range("vignetteWeight", "Weight", 0, 400, Math.round(this.mmdManager.postEffectVignetteWeight * 100), this.mmdManager.postEffectVignetteWeight.toFixed(2)));
+                rows.push(range("vignetteWeight", label("weight"), 0, 400, Math.round(this.mmdManager.postEffectVignetteWeight * 100), this.mmdManager.postEffectVignetteWeight.toFixed(2)));
                 break;
             case "grain":
-                rows.push(range("grainIntensity", "Intensity", 0, 100, Math.round(this.mmdManager.postEffectGrainIntensity), `${Math.round(this.mmdManager.postEffectGrainIntensity)}%`));
+                rows.push(range("grainIntensity", label("intensity"), 0, 100, Math.round(this.mmdManager.postEffectGrainIntensity), `${Math.round(this.mmdManager.postEffectGrainIntensity)}%`));
                 break;
             case "sharpen":
-                rows.push(range("sharpenEdge", "Edge", 0, 400, Math.round(this.mmdManager.postEffectSharpenEdge * 100), this.mmdManager.postEffectSharpenEdge.toFixed(2)));
+                rows.push(range("sharpenEdge", label("edge"), 0, 400, Math.round(this.mmdManager.postEffectSharpenEdge * 100), this.mmdManager.postEffectSharpenEdge.toFixed(2)));
                 break;
             case "chromatic":
-                rows.push(range("chromaticAberration", "Offset", 0, 200, Math.round(this.mmdManager.postEffectChromaticAberration), `${Math.round(this.mmdManager.postEffectChromaticAberration)}px`));
+                rows.push(range("chromaticAberration", label("offset"), 0, 200, Math.round(this.mmdManager.postEffectChromaticAberration), `${Math.round(this.mmdManager.postEffectChromaticAberration)}px`));
                 break;
             case "edgeBlur":
-                rows.push(range("edgeBlur", "Strength", 0, 100, Math.round(this.mmdManager.dofLensEdgeBlur * 100), `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`));
+                rows.push(range("edgeBlur", label("strength"), 0, 100, Math.round(this.mmdManager.dofLensEdgeBlur * 100), `${Math.round(this.mmdManager.dofLensEdgeBlur * 100)}%`));
                 break;
             case "distortion":
-                rows.push(range("distortion", "Influence", 0, 100, Math.round(this.mmdManager.dofLensDistortionInfluence * 100), `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`));
+                rows.push(range("distortion", label("influence"), 0, 100, Math.round(this.mmdManager.dofLensDistortionInfluence * 100), `${Math.round(this.mmdManager.dofLensDistortionInfluence * 100)}%`));
                 break;
         }
 
@@ -5148,7 +5166,7 @@ export class UIController {
             this.expandedFrameGraphPostEffectId = null;
             this.postEffectStackList.innerHTML = `
                 <div class="effect-layer-placeholder">
-                    <span class="effect-layer-name">FrameGraph backend</span>
+                    <span class="effect-layer-name">${this.escapeEffectStackHtml(t("effect.frameGraphPost.backendRequired"))}</span>
                     <span class="effect-status-badge effect-status-badge--experimental">classic</span>
                 </div>
             `;
@@ -5157,7 +5175,7 @@ export class UIController {
 
         if (stackEffects.length === 0) {
             this.expandedFrameGraphPostEffectId = null;
-            this.postEffectStackList.innerHTML = `<div class="panel-empty-state">No post stack</div>`;
+            this.postEffectStackList.innerHTML = `<div class="panel-empty-state">${this.escapeEffectStackHtml(t("effect.frameGraphPost.empty"))}</div>`;
             return;
         }
 
@@ -5168,16 +5186,19 @@ export class UIController {
         this.postEffectStackList.innerHTML = stackEffects.map((effect) => {
             const expanded = effect.id === this.expandedFrameGraphPostEffectId;
             const enabled = effect.isActive(this.mmdManager);
+            const effectLabel = this.escapeEffectStackHtml(t(effect.labelKey));
+            const toggleTitle = this.escapeEffectStackHtml(t("effect.frameGraphPost.toggleVisibility"));
+            const dragTitle = this.escapeEffectStackHtml(t("effect.frameGraphPost.dragToReorder"));
             return `
                 <div class="effect-layer-placeholder effect-layer-placeholder--active effect-layer-placeholder--check${enabled ? "" : " effect-layer-placeholder--off"}" data-effect-stack-row="${effect.id}">
                     <div class="effect-layer-header">
-                        <label class="effect-layer-check-wrap" title="表示 / 非表示">
+                        <label class="effect-layer-check-wrap" title="${toggleTitle}">
                             <input class="effect-layer-check" type="checkbox" data-effect-stack-toggle="${effect.id}"${enabled ? " checked" : ""}>
                         </label>
                         <button class="effect-layer-main" type="button" data-effect-stack-item="${effect.id}" aria-expanded="${expanded ? "true" : "false"}">
-                            <span class="effect-layer-name">${effect.label}</span>
+                            <span class="effect-layer-name">${effectLabel}</span>
                         </button>
-                        <button class="effect-layer-drag-handle" type="button" draggable="true" data-effect-stack-drag="${effect.id}" title="ドラッグして並べ替え" aria-label="ドラッグして並べ替え">
+                        <button class="effect-layer-drag-handle" type="button" draggable="true" data-effect-stack-drag="${effect.id}" title="${dragTitle}" aria-label="${dragTitle}">
                             <span class="effect-layer-drag-grip" aria-hidden="true"></span>
                         </button>
                     </div>
@@ -5219,6 +5240,15 @@ export class UIController {
                 window.location.reload();
             }, 120);
         });
+    }
+
+    private setPostEffectAddPanelOpen(open: boolean): void {
+        if (!this.postEffectAddPanel) return;
+        this.postEffectAddPanel.hidden = !open;
+        this.postEffectAddButton?.setAttribute("aria-expanded", open ? "true" : "false");
+        if (open) {
+            this.refreshFrameGraphPostAddUi();
+        }
     }
 
     private installFrameGraphLensEffectControls(root: HTMLElement): void {

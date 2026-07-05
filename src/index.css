@@ -2500,6 +2500,7 @@ body.file-drag-active #viewport-container {
 }
 
 .effect-panel-view {
+  position: relative;
   min-height: 0;
   flex: 1 1 auto;
   display: flex;
@@ -2513,7 +2514,7 @@ body.file-drag-active #viewport-container {
 
 .effect-panel-section-head {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-columns: 32px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   padding: 2px 0;
@@ -2554,11 +2555,20 @@ body.file-drag-active #viewport-container {
 }
 
 .effect-add-panel {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 36px;
+  left: 0;
+  z-index: 18;
+  width: min(260px, calc(100% - 2px));
+  max-height: min(430px, calc(100% - 44px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 6px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border: 1px solid rgba(148, 163, 184, 0.32);
   border-radius: var(--radius-sm);
-  background: rgba(148, 163, 184, 0.055);
+  background: #15171b;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48);
 }
 
 .effect-add-panel[hidden] {
@@ -2576,35 +2586,41 @@ body.file-drag-active #viewport-container {
   font-family: var(--font-mono);
 }
 
-.effect-add-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
+.effect-add-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
-.effect-add-grid button {
+.effect-add-list button {
   min-width: 0;
-  height: 26px;
-  padding: 0 4px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.035);
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
   font-family: var(--font-mono);
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.effect-add-grid button:hover:not(:disabled) {
+.effect-add-list button:hover:not(:disabled),
+.effect-add-list button:focus-visible {
   color: var(--text-primary);
   border-color: rgba(148, 163, 184, 0.36);
   background: rgba(148, 163, 184, 0.12);
+  outline: none;
 }
 
-.effect-add-grid button:disabled {
+.effect-add-list button:disabled {
   opacity: 0.45;
   cursor: default;
 }

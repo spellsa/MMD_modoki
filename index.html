@@ -561,35 +561,35 @@
 
           <section class="effect-panel-view" data-effect-tab-view="post">
             <div class="effect-panel-section-head">
+              <button id="btn-effect-add-post" class="effect-panel-add-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="effect-post-add-panel">+</button>
               <div>
-                <div class="effect-panel-section-title">FrameGraph / Post</div>
+                <div class="effect-panel-section-title" data-i18n="effect.frameGraphPost.title">FrameGraph / Post</div>
               </div>
-              <button id="btn-effect-add-post" class="effect-panel-add-button" type="button">+</button>
             </div>
-            <div id="effect-post-add-panel" class="effect-add-panel" hidden>
+            <div id="effect-post-add-panel" class="effect-add-panel" role="menu" aria-label="Add FrameGraph post effect" data-i18n-aria-label="effect.frameGraphPost.addMenuLabel" hidden>
               <div class="effect-add-panel-head">
-                <span>FrameGraph</span>
-                <button id="btn-effect-enable-framegraph" class="effect-button" type="button">Enable</button>
+                <span data-i18n="effect.frameGraphPost.group">FrameGraph</span>
+                <button id="btn-effect-enable-framegraph" class="effect-button" type="button" data-i18n="effect.frameGraphPost.enable">Enable</button>
               </div>
-              <div class="effect-add-grid">
-                <button type="button" data-effect-add-post="bloom">Bloom</button>
-                <button type="button" data-effect-add-post="dof">DoF</button>
-                <button type="button" data-effect-add-post="luminous">Luminous</button>
-                <button type="button" data-effect-add-post="lut">LUT</button>
-                <button type="button" data-effect-add-post="ssao">SSAO</button>
-                <button type="button" data-effect-add-post="offsetShadow">Offset Shadow</button>
-                <button type="button" data-effect-add-post="offsetHighlight">Offset Rim</button>
-                <button type="button" data-effect-add-post="ssr">SSR</button>
-                <button type="button" data-effect-add-post="vignette">Vignette</button>
-                <button type="button" data-effect-add-post="grain">Grain</button>
-                <button type="button" data-effect-add-post="sharpen">Sharpen</button>
-                <button type="button" data-effect-add-post="chromatic">Chroma</button>
-                <button type="button" data-effect-add-post="edgeBlur">EdgeBlur</button>
-                <button type="button" data-effect-add-post="distortion">Distort</button>
+              <div class="effect-add-list">
+                <button type="button" role="menuitem" data-effect-add-post="bloom" data-i18n="effect.frameGraphPost.effects.bloom">Bloom</button>
+                <button type="button" role="menuitem" data-effect-add-post="dof" data-i18n="effect.frameGraphPost.effects.dof">DoF</button>
+                <button type="button" role="menuitem" data-effect-add-post="luminous" data-i18n="effect.frameGraphPost.effects.luminous">Luminous</button>
+                <button type="button" role="menuitem" data-effect-add-post="lut" data-i18n="effect.frameGraphPost.effects.lut">LUT</button>
+                <button type="button" role="menuitem" data-effect-add-post="ssao" data-i18n="effect.frameGraphPost.effects.ssao">SSAO</button>
+                <button type="button" role="menuitem" data-effect-add-post="offsetShadow" data-i18n="effect.frameGraphPost.effects.offsetShadow">Offset Shadow</button>
+                <button type="button" role="menuitem" data-effect-add-post="offsetHighlight" data-i18n="effect.frameGraphPost.effects.offsetHighlight">Offset Rim</button>
+                <button type="button" role="menuitem" data-effect-add-post="ssr" data-i18n="effect.frameGraphPost.effects.ssr">SSR</button>
+                <button type="button" role="menuitem" data-effect-add-post="vignette" data-i18n="effect.frameGraphPost.effects.vignette">Vignette</button>
+                <button type="button" role="menuitem" data-effect-add-post="grain" data-i18n="effect.frameGraphPost.effects.grain">Grain</button>
+                <button type="button" role="menuitem" data-effect-add-post="sharpen" data-i18n="effect.frameGraphPost.effects.sharpen">Sharpen</button>
+                <button type="button" role="menuitem" data-effect-add-post="chromatic" data-i18n="effect.frameGraphPost.effects.chromatic">Chroma</button>
+                <button type="button" role="menuitem" data-effect-add-post="edgeBlur" data-i18n="effect.frameGraphPost.effects.edgeBlur">EdgeBlur</button>
+                <button type="button" role="menuitem" data-effect-add-post="distortion" data-i18n="effect.frameGraphPost.effects.distortion">Distort</button>
               </div>
             </div>
             <div id="effect-post-stack-list" class="effect-layer-list effect-layer-list--compact">
-              <div class="panel-empty-state">No post stack</div>
+              <div class="panel-empty-state" data-i18n="effect.frameGraphPost.empty">No post stack</div>
             </div>
             <div id="effect-post-host" class="effect-panel-host effect-panel-host--legacy" hidden></div>
           </section>
