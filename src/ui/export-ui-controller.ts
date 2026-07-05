@@ -391,10 +391,17 @@ export class ExportUiController {
             document.body.classList.add("png-capture-mode");
             this.mmdManager.setCaptureEditorOverlaysSuppressed(true);
             await this.waitForNextPaint();
-            savedPath = await window.electronAPI.saveCanvasSnapshotPngFile(
-                this.mmdManager.getRenderingCanvasClientRect(),
-                captureWidth,
-                captureHeight,
+            const capturedFrame = await this.mmdManager.capturePngRgbaData({
+                width: captureWidth,
+                height: captureHeight,
+            });
+            if (!capturedFrame) {
+                throw new Error("PNG framebuffer capture returned no data");
+            }
+            savedPath = await window.electronAPI.savePngRgbaFile(
+                capturedFrame.rgbaData,
+                capturedFrame.width,
+                capturedFrame.height,
                 fileName,
             );
         } catch (error: unknown) {
