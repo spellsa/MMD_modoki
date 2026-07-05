@@ -1,6 +1,5 @@
 import type { MmdManager } from "../mmd-manager";
 import { t } from "../i18n";
-import type { EditorAction } from "../actions/types";
 import type { PopupContentController } from "./popup-dialog-controller";
 import {
     createPopupFormField,
@@ -10,17 +9,8 @@ import {
 
 export type GravitySettingsDialogControllerDeps = {
     mmdManager: MmdManager;
-    dispatchAction: (action: EditorAction) => boolean;
     refreshUi: () => void;
 };
-
-function createCheckbox(checked: boolean): HTMLInputElement {
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.className = "popup-form-checkbox";
-    input.checked = checked;
-    return input;
-}
 
 function createRange(min: number, max: number, step: number, value: number): HTMLInputElement {
     const input = document.createElement("input");
@@ -35,12 +25,10 @@ function createRange(min: number, max: number, step: number, value: number): HTM
 
 export class GravitySettingsDialogController implements PopupContentController {
     private readonly mmdManager: MmdManager;
-    private readonly dispatchAction: (action: EditorAction) => boolean;
     private readonly refreshUi: () => void;
 
     constructor(deps: GravitySettingsDialogControllerDeps) {
         this.mmdManager = deps.mmdManager;
-        this.dispatchAction = deps.dispatchAction;
         this.refreshUi = deps.refreshUi;
     }
 
@@ -50,41 +38,6 @@ export class GravitySettingsDialogController implements PopupContentController {
         const grid = document.createElement("div");
         grid.className = "popup-form-grid";
         form.appendChild(grid);
-
-        const physicsEnabled = createCheckbox(this.mmdManager.getPhysicsEnabled());
-        physicsEnabled.disabled = !this.mmdManager.isPhysicsAvailable();
-        physicsEnabled.addEventListener("change", () => {
-            this.dispatchAction({ type: "runtime.togglePhysics", source: "menu" });
-            physicsEnabled.checked = this.mmdManager.getPhysicsEnabled();
-            this.refreshUi();
-        });
-        grid.appendChild(createPopupFormField(t("dialog.gravity.physicsEnabled"), physicsEnabled));
-
-        const rigidBodiesEnabled = createCheckbox(this.mmdManager.isRigidBodyVisualizerEnabled());
-        rigidBodiesEnabled.disabled = !this.mmdManager.isRigidBodyVisualizerAvailable();
-        rigidBodiesEnabled.addEventListener("change", () => {
-            this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });
-            rigidBodiesEnabled.checked = this.mmdManager.isRigidBodyVisualizerEnabled();
-            this.refreshUi();
-        });
-        grid.appendChild(createPopupFormField(t("dialog.gravity.rigidBodies"), rigidBodiesEnabled));
-
-        const rate = document.createElement("select");
-        rate.className = "popup-form-control";
-        [30, 60, 120].forEach((value) => {
-            const option = document.createElement("option");
-            option.value = String(value);
-            option.textContent = `${value}Hz`;
-            rate.appendChild(option);
-        });
-        rate.value = String(this.mmdManager.getPhysicsSimulationRateHz());
-        rate.disabled = !this.mmdManager.isPhysicsAvailable();
-        rate.addEventListener("change", () => {
-            const next = this.mmdManager.setPhysicsSimulationRateHz(Number(rate.value));
-            rate.value = String(next);
-            this.refreshUi();
-        });
-        grid.appendChild(createPopupFormField(t("dialog.gravity.simulationRate"), rate));
 
         this.appendRange(grid, t("label.gravity"), 0, 200, 1, this.mmdManager.getPhysicsGravityAcceleration(), (value) => String(Math.round(value)), (value) => {
             this.mmdManager.setPhysicsGravityAcceleration(value);

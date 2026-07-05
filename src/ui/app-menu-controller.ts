@@ -8,6 +8,7 @@ import { GravitySettingsDialogController } from "./gravity-settings-dialog-contr
 import { IblShadowSettingsDialogController } from "./ibl-shadow-settings-dialog-controller";
 import { LightingShadowSettingsDialogController } from "./lighting-shadow-settings-dialog-controller";
 import { MirrorFloorSettingsDialogController } from "./mirror-floor-settings-dialog-controller";
+import { PhysicsSettingsDialogController } from "./physics-settings-dialog-controller";
 import { PopupDialogController } from "./popup-dialog-controller";
 import type { WebmExportSettingsAdapter } from "./export-ui-controller";
 import { WebmExportDialogController } from "./webm-export-dialog-controller";
@@ -428,6 +429,9 @@ export class AppMenuController {
             case "physics.toggleRigidBodies":
                 this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });
                 return;
+            case "physics.settings":
+                this.openPhysicsSettingsDialog(invoker ?? null);
+                return;
             case "dialog.preferences":
                 this.openDialog("preferences", invoker ?? null);
                 return;
@@ -587,7 +591,22 @@ export class AppMenuController {
             restoreFocusTo: invoker,
             content: new GravitySettingsDialogController({
                 mmdManager: this.mmdManager,
-                dispatchAction: (action) => this.dispatchAction(action),
+                refreshUi: () => this.refreshRuntimeUi(),
+            }),
+        });
+    }
+
+    private openPhysicsSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "physics-settings",
+            surface: "modal",
+            title: t("dialog.physics.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new PhysicsSettingsDialogController({
+                mmdManager: this.mmdManager,
+                getRuntimeMode: () => this.getRuntimeMode(),
+                setRuntimeMode: (mode) => this.setRuntimeMode(mode),
                 refreshUi: () => this.refreshRuntimeUi(),
             }),
         });
@@ -684,6 +703,11 @@ export class AppMenuController {
         }
         select.value = mode;
         select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    private getRuntimeMode(): "classic" | "wasm" {
+        const select = document.getElementById("toolbar-runtime-mode-select") as HTMLSelectElement | null;
+        return select?.value === "wasm" ? "wasm" : "classic";
     }
 
     private isMirroringFloorEnabled(): boolean {
