@@ -4182,7 +4182,7 @@ export class UIController {
                 this.mmdManager.postEffectOffsetShadowStrength = 0.35;
                 this.mmdManager.postEffectOffsetShadowOffsetX = 0;
                 this.mmdManager.postEffectOffsetShadowOffsetY = -30;
-                this.mmdManager.postEffectOffsetShadowDepthBias = 0.1;
+                this.mmdManager.postEffectOffsetShadowDepthBias = 0.2;
                 this.mmdManager.postEffectOffsetShadowMaxDepth = 2;
                 this.mmdManager.postEffectOffsetShadowDepthScale = 1;
                 this.mmdManager.postEffectOffsetShadowThickness = 1;
@@ -4653,11 +4653,9 @@ export class UIController {
                     range("offsetShadowStrength", label("strength"), 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowStrength * 100), this.mmdManager.postEffectOffsetShadowStrength.toFixed(2)),
                     range("offsetShadowOffsetX", label("offsetX"), -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetX), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetX)}px`),
                     range("offsetShadowOffsetY", label("offsetY"), -64, 64, Math.round(this.mmdManager.postEffectOffsetShadowOffsetY), `${Math.round(this.mmdManager.postEffectOffsetShadowOffsetY)}px`),
-                    range("offsetShadowDepthBias", label("minDepth"), 0, 200, Math.round(this.mmdManager.postEffectOffsetShadowDepthBias * 1000), this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3)),
+                    range("offsetShadowDepthBias", label("minDepth"), 0, 400, Math.round(this.mmdManager.postEffectOffsetShadowDepthBias * 1000), this.mmdManager.postEffectOffsetShadowDepthBias.toFixed(3)),
                     range("offsetShadowMaxDepth", label("maxDepth"), 1, 4000, Math.round(this.mmdManager.postEffectOffsetShadowMaxDepth * 1000), this.mmdManager.postEffectOffsetShadowMaxDepth.toFixed(3)),
                     range("offsetShadowDepthScale", label("depthScale"), 0, 100, Math.round(this.mmdManager.postEffectOffsetShadowDepthScale * 100), this.mmdManager.postEffectOffsetShadowDepthScale.toFixed(2)),
-                    range("offsetShadowThickness", label("thickness"), 1, 100, Math.round(this.mmdManager.postEffectOffsetShadowThickness * 100), this.mmdManager.postEffectOffsetShadowThickness.toFixed(2)),
-                    range("offsetShadowSoftness", label("softness"), 0, 120, Math.round(this.mmdManager.postEffectOffsetShadowSoftness * 10), `${this.mmdManager.postEffectOffsetShadowSoftness.toFixed(1)}px`),
                 );
                 break;
             }

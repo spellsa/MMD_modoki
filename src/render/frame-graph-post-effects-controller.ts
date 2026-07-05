@@ -695,34 +695,76 @@ function ensureOffsetShadowShaders(): void {
                 return mix(1.0, distanceScale, clamp(depthScale, 0.0, 1.0));
             }
 
-            float sampleShadowMask(vec2 uv, vec2 offsetUv) {
+            float closerMaskAt(vec2 uv, float receiverDepth) {
+                float depth = sampleDepth(uv);
+                if (receiverDepth <= 0.000001 || depth <= 0.000001) {
+                    return 0.0;
+                }
+                float depthDelta = receiverDepth - depth;
+                float minMask = step(depthBias, depthDelta);
+                float resolvedMaxDepth = max(depthBias + 0.0001, maxDepth);
+                float maxMask = 1.0 - step(resolvedMaxDepth, depthDelta);
+                return minMask * maxMask;
+            }
+
+            float depthEdgeMaskAt(vec2 uv, float receiverDepth) {
+                float centerDepth = sampleDepth(uv);
+                if (closerMaskAt(uv, receiverDepth) <= 0.0) {
+                    return 0.0;
+                }
+                float rightDepth = sampleDepth(uv + vec2(texelSize.x, 0.0));
+                float leftDepth = sampleDepth(uv - vec2(texelSize.x, 0.0));
+                float upDepth = sampleDepth(uv + vec2(0.0, texelSize.y));
+                float downDepth = sampleDepth(uv - vec2(0.0, texelSize.y));
+                float edgeThreshold = max(0.0001, depthBias);
+                float edge = 0.0;
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - rightDepth)));
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - leftDepth)));
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - upDepth)));
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - downDepth)));
+                return edge;
+            }
+
+            float sampleShadowMask(vec2 uv, vec2 offsetVector) {
                 float currentDepth = sampleDepth(uv);
-                float offsetDepth = sampleDepth(offsetUv);
-                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+                if (currentDepth <= 0.000001) {
                     return 0.0;
                 }
                 float maxReceiverDepth = max(10.0, maxDepth * 20.0);
                 if (currentDepth > maxReceiverDepth) {
                     return 0.0;
                 }
-                float depthDelta = currentDepth - offsetDepth;
-                float minMask = smoothstep(depthBias, depthBias + max(0.0001, thickness), depthDelta);
-                float resolvedMaxDepth = max(depthBias + 0.0001, maxDepth);
-                float maxMask = 1.0 - smoothstep(resolvedMaxDepth, resolvedMaxDepth + max(0.0001, thickness * 0.1), depthDelta);
-                return minMask * maxMask;
+                if (closerMaskAt(uv - offsetVector, currentDepth) <= 0.0) {
+                    return 0.0;
+                }
+                vec2 pixelOffset = offsetVector / max(texelSize, vec2(0.000001));
+                float pixelLength = length(pixelOffset);
+                vec2 perpendicular = pixelLength > 0.0001
+                    ? vec2(-pixelOffset.y, pixelOffset.x) / pixelLength * texelSize
+                    : vec2(0.0);
+                float mask = 0.0;
+                for (int i = 0; i < 64; i++) {
+                    float t = (float(i) + 0.5) / 64.0;
+                    vec2 sampleUv = uv - offsetVector * t;
+                    float edge = depthEdgeMaskAt(sampleUv, currentDepth);
+                    edge = max(edge, depthEdgeMaskAt(sampleUv + perpendicular, currentDepth));
+                    edge = max(edge, depthEdgeMaskAt(sampleUv - perpendicular, currentDepth));
+                    mask = max(mask, edge);
+                }
+                return mask;
             }
 
             void main(void) {
                 vec4 source = texture2D(textureSampler, vUV);
                 float currentDepth = sampleDepth(vUV);
                 float offsetScale = resolveOffsetScale(currentDepth);
-                vec2 offsetUv = vUV - offsetPixels * texelSize * offsetScale;
+                vec2 offsetVector = offsetPixels * texelSize * offsetScale;
                 float radius = max(0.0, softness) * offsetScale;
-                float mask = sampleShadowMask(vUV, offsetUv) * 0.42;
-                mask += sampleShadowMask(vUV, offsetUv + vec2(texelSize.x * radius, 0.0)) * 0.145;
-                mask += sampleShadowMask(vUV, offsetUv - vec2(texelSize.x * radius, 0.0)) * 0.145;
-                mask += sampleShadowMask(vUV, offsetUv + vec2(0.0, texelSize.y * radius)) * 0.135;
-                mask += sampleShadowMask(vUV, offsetUv - vec2(0.0, texelSize.y * radius)) * 0.135;
+                float mask = sampleShadowMask(vUV, offsetVector) * 0.42;
+                mask += sampleShadowMask(vUV, offsetVector - vec2(texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(vUV, offsetVector + vec2(texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(vUV, offsetVector - vec2(0.0, texelSize.y * radius)) * 0.135;
+                mask += sampleShadowMask(vUV, offsetVector + vec2(0.0, texelSize.y * radius)) * 0.135;
                 mask = clamp(mask * strength, 0.0, 1.0);
                 if (debugView > 0.5) {
                     gl_FragColor = vec4(vec3(mask), source.a);
@@ -760,21 +802,65 @@ function ensureOffsetShadowShaders(): void {
                 return mix(1.0, distanceScale, clamp(uniforms.depthScale, 0.0, 1.0));
             }
 
-            fn sampleShadowMask(uv: vec2f, offsetUv: vec2f) -> f32 {
+            fn closerMaskAt(uv: vec2f, receiverDepth: f32) -> f32 {
+                let depth = sampleDepth(uv);
+                if (receiverDepth <= 0.000001 || depth <= 0.000001) {
+                    return 0.0;
+                }
+                let depthDelta = receiverDepth - depth;
+                let minMask = step(uniforms.depthBias, depthDelta);
+                let resolvedMaxDepth = max(uniforms.depthBias + 0.0001, uniforms.maxDepth);
+                let maxMask = 1.0 - step(resolvedMaxDepth, depthDelta);
+                return minMask * maxMask;
+            }
+
+            fn depthEdgeMaskAt(uv: vec2f, receiverDepth: f32) -> f32 {
+                let centerDepth = sampleDepth(uv);
+                if (closerMaskAt(uv, receiverDepth) <= 0.0) {
+                    return 0.0;
+                }
+                let rightDepth = sampleDepth(uv + vec2f(uniforms.texelSize.x, 0.0));
+                let leftDepth = sampleDepth(uv - vec2f(uniforms.texelSize.x, 0.0));
+                let upDepth = sampleDepth(uv + vec2f(0.0, uniforms.texelSize.y));
+                let downDepth = sampleDepth(uv - vec2f(0.0, uniforms.texelSize.y));
+                let edgeThreshold = max(0.0001, uniforms.depthBias);
+                var edge = 0.0;
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - rightDepth)));
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - leftDepth)));
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - upDepth)));
+                edge = max(edge, step(edgeThreshold, abs(centerDepth - downDepth)));
+                return edge;
+            }
+
+            fn sampleShadowMask(uv: vec2f, offsetVector: vec2f) -> f32 {
                 let currentDepth = sampleDepth(uv);
-                let offsetDepth = sampleDepth(offsetUv);
-                if (currentDepth <= 0.000001 || offsetDepth <= 0.000001) {
+                if (currentDepth <= 0.000001) {
                     return 0.0;
                 }
                 let maxReceiverDepth = max(10.0, uniforms.maxDepth * 20.0);
                 if (currentDepth > maxReceiverDepth) {
                     return 0.0;
                 }
-                let depthDelta = currentDepth - offsetDepth;
-                let minMask = smoothstep(uniforms.depthBias, uniforms.depthBias + max(0.0001, uniforms.thickness), depthDelta);
-                let resolvedMaxDepth = max(uniforms.depthBias + 0.0001, uniforms.maxDepth);
-                let maxMask = 1.0 - smoothstep(resolvedMaxDepth, resolvedMaxDepth + max(0.0001, uniforms.thickness * 0.1), depthDelta);
-                return minMask * maxMask;
+                if (closerMaskAt(uv - offsetVector, currentDepth) <= 0.0) {
+                    return 0.0;
+                }
+                let pixelOffset = offsetVector / max(uniforms.texelSize, vec2f(0.000001));
+                let pixelLength = length(pixelOffset);
+                let perpendicular = select(
+                    vec2f(0.0),
+                    vec2f(-pixelOffset.y, pixelOffset.x) / pixelLength * uniforms.texelSize,
+                    pixelLength > 0.0001,
+                );
+                var mask = 0.0;
+                for (var i = 0; i < 64; i = i + 1) {
+                    let t = (f32(i) + 0.5) / 64.0;
+                    let sampleUv = uv - offsetVector * t;
+                    var edge = depthEdgeMaskAt(sampleUv, currentDepth);
+                    edge = max(edge, depthEdgeMaskAt(sampleUv + perpendicular, currentDepth));
+                    edge = max(edge, depthEdgeMaskAt(sampleUv - perpendicular, currentDepth));
+                    mask = max(mask, edge);
+                }
+                return mask;
             }
 
             #define CUSTOM_FRAGMENT_DEFINITIONS
@@ -783,13 +869,13 @@ function ensureOffsetShadowShaders(): void {
                 let source = textureSampleLevel(textureSampler, textureSamplerSampler, input.vUV, 0.0);
                 let currentDepth = sampleDepth(input.vUV);
                 let offsetScale = resolveOffsetScale(currentDepth);
-                let offsetUv = input.vUV - uniforms.offsetPixels * uniforms.texelSize * offsetScale;
+                let offsetVector = uniforms.offsetPixels * uniforms.texelSize * offsetScale;
                 let radius = max(0.0, uniforms.softness) * offsetScale;
-                var mask = sampleShadowMask(input.vUV, offsetUv) * 0.42;
-                mask += sampleShadowMask(input.vUV, offsetUv + vec2f(uniforms.texelSize.x * radius, 0.0)) * 0.145;
-                mask += sampleShadowMask(input.vUV, offsetUv - vec2f(uniforms.texelSize.x * radius, 0.0)) * 0.145;
-                mask += sampleShadowMask(input.vUV, offsetUv + vec2f(0.0, uniforms.texelSize.y * radius)) * 0.135;
-                mask += sampleShadowMask(input.vUV, offsetUv - vec2f(0.0, uniforms.texelSize.y * radius)) * 0.135;
+                var mask = sampleShadowMask(input.vUV, offsetVector) * 0.42;
+                mask += sampleShadowMask(input.vUV, offsetVector - vec2f(uniforms.texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(input.vUV, offsetVector + vec2f(uniforms.texelSize.x * radius, 0.0)) * 0.145;
+                mask += sampleShadowMask(input.vUV, offsetVector - vec2f(0.0, uniforms.texelSize.y * radius)) * 0.135;
+                mask += sampleShadowMask(input.vUV, offsetVector + vec2f(0.0, uniforms.texelSize.y * radius)) * 0.135;
                 mask = clamp(mask * uniforms.strength, 0.0, 1.0);
                 if (uniforms.debugView > 0.5) {
                     fragmentOutputs.color = vec4f(vec3f(mask), source.a);
@@ -1948,7 +2034,7 @@ export class FrameGraphPostEffectsController {
             offsetShadowStrength: 0.35,
             offsetShadowOffsetX: 0,
             offsetShadowOffsetY: -30,
-            offsetShadowDepthBias: 0.1,
+            offsetShadowDepthBias: 0.2,
             offsetShadowMaxDepth: 2,
             offsetShadowDepthScale: 1,
             offsetShadowThickness: 1,

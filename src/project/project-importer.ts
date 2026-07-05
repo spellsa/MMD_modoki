@@ -835,7 +835,7 @@ export async function importProjectState(
     host.postEffectOffsetShadowStrength = readFiniteNumber(data.effects.offsetShadowStrength, 0.35);
     host.postEffectOffsetShadowOffsetX = readFiniteNumber(data.effects.offsetShadowOffsetX, 0);
     host.postEffectOffsetShadowOffsetY = readFiniteNumber(data.effects.offsetShadowOffsetY, -30);
-    host.postEffectOffsetShadowDepthBias = readFiniteNumber(data.effects.offsetShadowDepthBias, 0.1);
+    host.postEffectOffsetShadowDepthBias = readFiniteNumber(data.effects.offsetShadowDepthBias, 0.2);
     host.postEffectOffsetShadowMaxDepth = readFiniteNumber(data.effects.offsetShadowMaxDepth, 2);
     host.postEffectOffsetShadowDepthScale = readFiniteNumber(data.effects.offsetShadowDepthScale, 1);
     host.postEffectOffsetShadowThickness = readFiniteNumber(data.effects.offsetShadowThickness, 1);

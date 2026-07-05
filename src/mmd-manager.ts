@@ -1609,7 +1609,7 @@ ${beforeFogAppendBlock}
     private postEffectOffsetShadowStrengthValue = 0.35;
     private postEffectOffsetShadowOffsetXValue = 0;
     private postEffectOffsetShadowOffsetYValue = -30;
-    private postEffectOffsetShadowDepthBiasValue = 0.1;
+    private postEffectOffsetShadowDepthBiasValue = 0.2;
     private postEffectOffsetShadowMaxDepthValue = 2;
     private postEffectOffsetShadowDepthScaleValue = 1;
     private postEffectOffsetShadowThicknessValue = 1;

@@ -121,7 +121,7 @@ function createHost() {
         postEffectOffsetShadowStrength: 0.35,
         postEffectOffsetShadowOffsetX: 0,
         postEffectOffsetShadowOffsetY: -30,
-        postEffectOffsetShadowDepthBias: 0.1,
+        postEffectOffsetShadowDepthBias: 0.2,
         postEffectOffsetShadowMaxDepth: 2,
         postEffectOffsetShadowDepthScale: 1,
         postEffectOffsetShadowThickness: 1,
