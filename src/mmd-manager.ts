@@ -15,6 +15,7 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import { CascadedShadowGenerator } from "@babylonjs/core/Lights/Shadows/cascadedShadowGenerator";
+import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -60,6 +61,7 @@ import type {
     ProjectPackedArray,
     ProjectModelMaterialShaderState,
     KeyframeTrack,
+    MirroringFloorShape,
 } from "./types";
 import type { IMmdBindableCameraAnimation } from "babylon-mmd/esm/Runtime/Animation/IMmdBindableAnimation";
 import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
@@ -1442,11 +1444,12 @@ ${beforeFogAppendBlock}
     private mirroringFloor: Mesh | null = null;
     private mirroringFloorMaterial: StandardMaterial | null = null;
     private mirroringFloorTexture: MirrorTexture | null = null;
-    private mirroringFloorEnabledValue = false;
-    private mirroringFloorReflectanceValue = 0.35;
-    private mirroringFloorSizeValue = 40;
+    private mirroringFloorEnabledValue = true;
+    private mirroringFloorShapeValue: MirroringFloorShape = "square";
+    private mirroringFloorReflectanceValue = 0.3;
+    private mirroringFloorSizeValue = 100;
     private mirroringFloorHeightValue = 0;
-    private mirroringFloorResolutionValue = 512;
+    private mirroringFloorResolutionValue = 1024;
     private skydome: Mesh | null = null;
     private backgroundImageLayer: Layer | null = null;
     private backgroundImagePath: string | null = null;
@@ -1478,8 +1481,8 @@ ${beforeFogAppendBlock}
     private contactShadowMaterial: StandardMaterial | null = null;
     private contactShadowMeshesByModel = new WeakMap<SceneModelEntry, ContactShadowBlobMeshes>();
     private characterContactShadowEnabledValue = false;
-    private characterContactShadowOpacityValue = 0.35;
-    private characterContactShadowScaleValue = 1.0;
+    private characterContactShadowOpacityValue = 0.5;
+    private characterContactShadowScaleValue = 2.0;
     private cameraRotationEulerDeg = new Vector3(0, 0, 0);
     private cameraAnimationHandle: MmdRuntimeAnimationHandle | null = null;
     private hasCameraMotion = false;
@@ -2897,7 +2900,7 @@ ${beforeFogAppendBlock}
     }
 
     public set characterContactShadowOpacity(value: number) {
-        this.characterContactShadowOpacityValue = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.35));
+        this.characterContactShadowOpacityValue = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.5));
         this.updateCharacterContactShadows();
     }
 
@@ -2906,7 +2909,7 @@ ${beforeFogAppendBlock}
     }
 
     public set characterContactShadowScale(value: number) {
-        this.characterContactShadowScaleValue = Math.max(0.5, Math.min(3, Number.isFinite(value) ? value : 1));
+        this.characterContactShadowScaleValue = Math.max(0.5, Math.min(3, Number.isFinite(value) ? value : 2));
         this.updateCharacterContactShadows();
     }
 
@@ -3018,8 +3021,10 @@ ${beforeFogAppendBlock}
         const targets: ContactShadowTarget[] = [];
         const leftFoot = this.getContactShadowBoneWorldPosition(entry, ["左足首", "左足", "左つま先", "左足ＩＫ", "左足IK", "左つま先ＩＫ", "左つま先IK"]);
         const rightFoot = this.getContactShadowBoneWorldPosition(entry, ["右足首", "右足", "右つま先", "右足ＩＫ", "右足IK", "右つま先ＩＫ", "右つま先IK"]);
-        const footWidth = Math.max(1.1, Math.min(3.6, modelWidth * 0.72 * this.characterContactShadowScaleValue));
-        const footDepth = Math.max(0.9, Math.min(3.0, modelDepth * 0.62 * this.characterContactShadowScaleValue));
+        const baseFootWidth = Math.max(1.1, Math.min(3.6, modelWidth * 0.72));
+        const baseFootDepth = Math.max(0.9, Math.min(3.0, modelDepth * 0.62));
+        const footWidth = baseFootWidth * this.characterContactShadowScaleValue;
+        const footDepth = baseFootDepth * this.characterContactShadowScaleValue;
 
         if (leftFoot) {
             targets.push({ kind: "leftFoot", position: leftFoot, width: footWidth, depth: footDepth, opacityScale: 1 });
@@ -3125,11 +3130,7 @@ ${beforeFogAppendBlock}
         material.zOffset = -2;
         material.zOffsetUnits = -8;
 
-        const floor = CreateGround(
-            "mirroringFloor",
-            { width: 1, height: 1, subdivisions: 1, updatable: false },
-            this.scene,
-        );
+        const floor = this.createMirroringFloorMesh();
         floor.material = material;
         floor.isPickable = false;
         floor.receiveShadows = false;
@@ -3146,11 +3147,33 @@ ${beforeFogAppendBlock}
         return floor;
     }
 
+    private createMirroringFloorMesh(): Mesh {
+        if (this.mirroringFloorShapeValue === "circle") {
+            const floor = CreateDisc(
+                "mirroringFloor",
+                { radius: 1, tessellation: 96, updatable: false },
+                this.scene,
+            );
+            floor.rotation.x = Math.PI / 2;
+            return floor;
+        }
+
+        return CreateGround(
+            "mirroringFloor",
+            { width: 1, height: 1, subdivisions: 1, updatable: false },
+            this.scene,
+        );
+    }
+
     private applyMirroringFloorTransform(): void {
         if (!this.mirroringFloor) return;
         const size = this.mirroringFloorSizeValue;
         this.mirroringFloor.position.set(0, this.mirroringFloorHeightValue + 0.006, 0);
-        this.mirroringFloor.scaling.set(size, 1, size);
+        if (this.mirroringFloorShapeValue === "circle") {
+            this.mirroringFloor.scaling.set(size, size, 1);
+        } else {
+            this.mirroringFloor.scaling.set(size, 1, size);
+        }
         refreshMeshBoundingInfoForRenderStability(this.mirroringFloor);
     }
 
@@ -3623,12 +3646,26 @@ ${beforeFogAppendBlock}
         this.syncMirroringFloorState();
     }
 
+    public get mirroringFloorShape(): MirroringFloorShape {
+        return this.mirroringFloorShapeValue;
+    }
+
+    public set mirroringFloorShape(shape: MirroringFloorShape) {
+        const next = shape === "circle" ? "circle" : "square";
+        if (this.mirroringFloorShapeValue === next) return;
+        this.mirroringFloorShapeValue = next;
+        if (this.mirroringFloor) {
+            this.disposeMirroringFloorResources();
+            this.syncMirroringFloorState();
+        }
+    }
+
     public get mirroringFloorReflectance(): number {
         return this.mirroringFloorReflectanceValue;
     }
 
     public set mirroringFloorReflectance(value: number) {
-        this.mirroringFloorReflectanceValue = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.35));
+        this.mirroringFloorReflectanceValue = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.3));
         this.applyMirroringFloorMaterialState();
     }
 
@@ -3637,7 +3674,7 @@ ${beforeFogAppendBlock}
     }
 
     public set mirroringFloorSize(value: number) {
-        this.mirroringFloorSizeValue = Math.max(1, Math.min(200, Number.isFinite(value) ? value : 40));
+        this.mirroringFloorSizeValue = Math.max(1, Math.min(500, Number.isFinite(value) ? value : 100));
         this.applyMirroringFloorTransform();
     }
 

@@ -320,6 +320,7 @@ export interface ProjectViewportState {
     skydomeVisible: boolean;
     antialiasEnabled: boolean;
     mirroringFloorEnabled?: boolean;
+    mirroringFloorShape?: MirroringFloorShape;
     mirroringFloorReflectance?: number;
     mirroringFloorSize?: number;
     mirroringFloorHeight?: number;
@@ -327,6 +328,8 @@ export interface ProjectViewportState {
     backgroundImagePath?: string | null;
     backgroundVideoPath?: string | null;
 }
+
+export type MirroringFloorShape = "square" | "circle";
 
 export interface ProjectPhysicsState {
     enabled: boolean;

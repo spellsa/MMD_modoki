@@ -70,6 +70,7 @@ type ProjectImportHost = {
     setSkydomeVisible(visible: boolean): void;
     antialiasEnabled: boolean;
     mirroringFloorReflectance: number;
+    mirroringFloorShape: "square" | "circle";
     mirroringFloorSize: number;
     mirroringFloorHeight: number;
     mirroringFloorResolution: number;
@@ -586,19 +587,22 @@ export async function importProjectState(
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
     host.mirroringFloorReflectance = typeof data.viewport.mirroringFloorReflectance === "number" && Number.isFinite(data.viewport.mirroringFloorReflectance)
         ? data.viewport.mirroringFloorReflectance
-        : 0.35;
+        : 0.3;
+    host.mirroringFloorShape = data.viewport.mirroringFloorShape === "circle"
+        ? "circle"
+        : "square";
     host.mirroringFloorSize = typeof data.viewport.mirroringFloorSize === "number" && Number.isFinite(data.viewport.mirroringFloorSize)
         ? data.viewport.mirroringFloorSize
-        : 40;
+        : 100;
     host.mirroringFloorHeight = typeof data.viewport.mirroringFloorHeight === "number" && Number.isFinite(data.viewport.mirroringFloorHeight)
         ? data.viewport.mirroringFloorHeight
         : 0;
     host.mirroringFloorResolution = typeof data.viewport.mirroringFloorResolution === "number" && Number.isFinite(data.viewport.mirroringFloorResolution)
         ? data.viewport.mirroringFloorResolution
-        : 512;
+        : 1024;
     host.mirroringFloorEnabled = typeof data.viewport.mirroringFloorEnabled === "boolean"
         ? data.viewport.mirroringFloorEnabled
-        : false;
+        : true;
     if (typeof data.viewport.backgroundVideoPath === "string" && data.viewport.backgroundVideoPath.trim().length > 0) {
         try {
             await host.setBackgroundVideoFromPath(data.viewport.backgroundVideoPath);
@@ -691,10 +695,10 @@ export async function importProjectState(
         : false;
     host.characterContactShadowOpacity = typeof data.lighting.characterContactShadowOpacity === "number" && Number.isFinite(data.lighting.characterContactShadowOpacity)
         ? data.lighting.characterContactShadowOpacity
-        : 0.35;
+        : 0.5;
     host.characterContactShadowScale = typeof data.lighting.characterContactShadowScale === "number" && Number.isFinite(data.lighting.characterContactShadowScale)
         ? data.lighting.characterContactShadowScale
-        : 1;
+        : 2;
     host.characterContactShadowEnabled = typeof data.lighting.characterContactShadowEnabled === "boolean"
         ? data.lighting.characterContactShadowEnabled
         : false;

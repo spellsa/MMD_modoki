@@ -49,7 +49,10 @@ export class ContactShadowSettingsDialogController implements PopupContentContro
             return `${Math.round(this.mmdManager.characterContactShadowOpacity * 100)}%`;
         });
         this.appendRange(grid, t("label.characterContactShadowScale"), 50, 300, 5, this.mmdManager.characterContactShadowScale * 100, (value) => (value / 100).toFixed(2), (value) => {
-            this.dispatchAction({ type: "effect.setCharacterContactShadowScale", source: "menu", value: value / 100 });
+            const scale = value / 100;
+            if (!this.dispatchAction({ type: "effect.setCharacterContactShadowScale", source: "menu", value: scale })) {
+                this.mmdManager.characterContactShadowScale = scale;
+            }
             this.refreshUi();
             return this.mmdManager.characterContactShadowScale.toFixed(2);
         });

@@ -324,6 +324,7 @@ describe("importProjectState", () => {
             viewport: {
                 ...createProject().viewport,
                 mirroringFloorEnabled: true,
+                mirroringFloorShape: "circle",
                 mirroringFloorReflectance: 0.48,
                 mirroringFloorSize: 64,
                 mirroringFloorHeight: 0.03,
@@ -334,6 +335,7 @@ describe("importProjectState", () => {
         await importProjectState(host, project);
 
         expect(host.mirroringFloorEnabled).toBe(true);
+        expect(host.mirroringFloorShape).toBe("circle");
         expect(host.mirroringFloorReflectance).toBe(0.48);
         expect(host.mirroringFloorSize).toBe(64);
         expect(host.mirroringFloorHeight).toBe(0.03);
@@ -346,11 +348,12 @@ describe("importProjectState", () => {
 
         await importProjectState(host, project);
 
-        expect(host.mirroringFloorEnabled).toBe(false);
-        expect(host.mirroringFloorReflectance).toBe(0.35);
-        expect(host.mirroringFloorSize).toBe(40);
+        expect(host.mirroringFloorEnabled).toBe(true);
+        expect(host.mirroringFloorShape).toBe("square");
+        expect(host.mirroringFloorReflectance).toBe(0.3);
+        expect(host.mirroringFloorSize).toBe(100);
         expect(host.mirroringFloorHeight).toBe(0);
-        expect(host.mirroringFloorResolution).toBe(512);
+        expect(host.mirroringFloorResolution).toBe(1024);
     });
 
     it("restores embedded camera animation through the runtime camera path", async () => {

@@ -93,12 +93,12 @@ export class LightingShadowSettingsDialogController implements PopupContentContr
             return this.mmdManager.shadowDarkness.toFixed(2);
         });
 
-        this.appendRange(grid, t("label.selfShadowEdge"), 5, 120, 1, this.mmdManager.selfShadowEdgeSoftness * 1000, (value) => (value / 1000).toFixed(3), (value) => {
+        this.appendRange(grid, t("label.selfShadowEdge"), 5, 100, 1, this.mmdManager.selfShadowEdgeSoftness * 1000, (value) => (value / 1000).toFixed(3), (value) => {
             this.dispatchAction({ type: "effect.setSelfShadowSoftness", source: "menu", value: value / 1000 });
             this.refreshUi();
             return this.mmdManager.selfShadowEdgeSoftness.toFixed(3);
         });
-        this.appendRange(grid, t("label.occlusionShadowEdge"), 5, 120, 1, this.mmdManager.occlusionShadowEdgeSoftness * 1000, (value) => (value / 1000).toFixed(3), (value) => {
+        this.appendRange(grid, t("label.occlusionShadowEdge"), 5, 100, 1, this.mmdManager.occlusionShadowEdgeSoftness * 1000, (value) => (value / 1000).toFixed(3), (value) => {
             this.dispatchAction({ type: "effect.setOcclusionShadowSoftness", source: "menu", value: value / 1000 });
             this.refreshUi();
             return this.mmdManager.occlusionShadowEdgeSoftness.toFixed(3);

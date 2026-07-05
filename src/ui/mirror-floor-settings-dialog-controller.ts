@@ -14,14 +14,6 @@ export type MirrorFloorSettingsDialogControllerDeps = {
     refreshUi: () => void;
 };
 
-function createCheckbox(checked: boolean): HTMLInputElement {
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.className = "popup-form-checkbox";
-    input.checked = checked;
-    return input;
-}
-
 function createRange(min: number, max: number, step: number): HTMLInputElement {
     const input = document.createElement("input");
     input.type = "range";
@@ -51,23 +43,31 @@ export class MirrorFloorSettingsDialogController implements PopupContentControll
         grid.className = "popup-form-grid";
         form.appendChild(grid);
 
-        const enabled = createCheckbox(this.mmdManager.mirroringFloorEnabled);
-        enabled.addEventListener("change", () => {
-            this.dispatchAction({
-                type: "camera.setMirroringFloorEnabled",
-                source: "menu",
-                enabled: enabled.checked,
-            });
+        const shape = document.createElement("select");
+        shape.className = "popup-form-control";
+        [
+            { value: "square", label: t("dialog.mirrorFloor.shape.square") },
+            { value: "circle", label: t("dialog.mirrorFloor.shape.circle") },
+        ].forEach((item) => {
+            const option = document.createElement("option");
+            option.value = item.value;
+            option.textContent = item.label;
+            shape.appendChild(option);
+        });
+        shape.value = this.mmdManager.mirroringFloorShape;
+        shape.addEventListener("change", () => {
+            this.mmdManager.mirroringFloorShape = shape.value === "circle" ? "circle" : "square";
+            shape.value = this.mmdManager.mirroringFloorShape;
             this.refreshUi();
         });
-        grid.appendChild(createPopupFormField(t("dialog.mirrorFloor.enabled"), enabled));
+        grid.appendChild(createPopupFormField(t("dialog.mirrorFloor.shape"), shape));
 
         this.appendRange(grid, t("dialog.mirrorFloor.reflectance"), 0, 100, 1, () => this.mmdManager.mirroringFloorReflectance * 100, (value) => `${Math.round(value)}%`, (value) => {
             this.mmdManager.mirroringFloorReflectance = value / 100;
             this.refreshUi();
             return `${Math.round(this.mmdManager.mirroringFloorReflectance * 100)}%`;
         });
-        this.appendRange(grid, t("dialog.mirrorFloor.size"), 1, 200, 1, () => this.mmdManager.mirroringFloorSize, (value) => `${Math.round(value)}m`, (value) => {
+        this.appendRange(grid, t("dialog.mirrorFloor.size"), 1, 500, 1, () => this.mmdManager.mirroringFloorSize, (value) => `${Math.round(value)}m`, (value) => {
             this.mmdManager.mirroringFloorSize = value;
             this.refreshUi();
             return `${Math.round(this.mmdManager.mirroringFloorSize)}m`;

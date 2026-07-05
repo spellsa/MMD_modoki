@@ -67,6 +67,7 @@ type ProjectExportHost = {
     occlusionShadowEdgeSoftness: number;
     antialiasEnabled: boolean;
     mirroringFloorEnabled: boolean;
+    mirroringFloorShape: "square" | "circle";
     mirroringFloorReflectance: number;
     mirroringFloorSize: number;
     mirroringFloorHeight: number;
@@ -322,6 +323,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             skydomeVisible: host.isSkydomeVisible(),
             antialiasEnabled: host.antialiasEnabled,
             mirroringFloorEnabled: host.mirroringFloorEnabled,
+            mirroringFloorShape: host.mirroringFloorShape,
             mirroringFloorReflectance: host.mirroringFloorReflectance,
             mirroringFloorSize: host.mirroringFloorSize,
             mirroringFloorHeight: host.mirroringFloorHeight,

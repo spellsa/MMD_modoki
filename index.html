@@ -69,12 +69,12 @@
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleShadow"><span data-i18n="menu.view.toggleShadow">影表示</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.lightShadowSettings"><span data-i18n="menu.view.lightShadowSettings">照明/影品質設定...</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.iblShadowSettings" hidden><span data-i18n="menu.view.iblShadowSettings">IBL影詳細...</span></button>
-          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleCharacterContactShadow"><span data-i18n="menu.view.toggleCharacterContactShadow">キャラ接地影</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleCharacterContactShadow"><span data-i18n="menu.view.toggleCharacterContactShadow">足下影</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.contactShadowSettings"><span data-i18n="menu.view.contactShadowSettings">足下影詳細...</span></button>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleMirrorFloor"><span data-i18n="menu.view.toggleMirrorFloor">Mirror床</span></button>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.mirrorFloorSettings"><span data-i18n="menu.view.mirrorFloorSettings">Mirror床設定...</span></button>
-          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleGi"><span data-i18n="menu.view.toggleGi">グローバルイルミネーション</span></button>
-          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleFxPanel"><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleGi" hidden><span data-i18n="menu.view.toggleGi">グローバルイルミネーション</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleFxPanel" hidden><span data-i18n="menu.view.toggleFxPanel">エフェクト欄</span></button>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="view.toggleTimelinePhysicsBones"><span data-i18n="menu.view.toggleTimelinePhysicsBones">タイムラインに物理ボーンを表示</span></button>
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item" type="button" role="menuitem" data-menu-command="view.camera.front"><span data-i18n="menu.view.camera.front">正面</span></button>
@@ -956,19 +956,19 @@
               <span id="light-ibl-shadow-range-val" class="light-value">4.0</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label" data-i18n="label.characterContactShadow">キャラ接地影</span>
+              <span class="light-label" data-i18n="label.characterContactShadow">足下影</span>
               <input type="range" id="light-character-contact-shadow" class="light-slider" min="0" max="1" value="0" step="1">
               <span id="light-character-contact-shadow-val" class="light-value">Off</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.characterContactShadowOpacity">接地影濃度</span>
-              <input type="range" id="light-character-contact-shadow-opacity" class="light-slider" min="0" max="100" value="35" step="1">
-              <span id="light-character-contact-shadow-opacity-val" class="light-value">35%</span>
+              <input type="range" id="light-character-contact-shadow-opacity" class="light-slider" min="0" max="100" value="50" step="1">
+              <span id="light-character-contact-shadow-opacity-val" class="light-value">50%</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.characterContactShadowScale">接地影サイズ</span>
-              <input type="range" id="light-character-contact-shadow-scale" class="light-slider" min="50" max="300" value="100" step="5">
-              <span id="light-character-contact-shadow-scale-val" class="light-value">1.00</span>
+              <input type="range" id="light-character-contact-shadow-scale" class="light-slider" min="50" max="300" value="200" step="5">
+              <span id="light-character-contact-shadow-scale-val" class="light-value">2.00</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.shadowBias">Shadow Bias</span>

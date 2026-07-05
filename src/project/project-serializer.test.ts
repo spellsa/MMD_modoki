@@ -53,19 +53,20 @@ function createHost() {
         iblShadowOpacity: 0.25,
         iblShadowDistanceScale: 4,
         characterContactShadowEnabled: false,
-        characterContactShadowOpacity: 0.35,
-        characterContactShadowScale: 1,
+        characterContactShadowOpacity: 0.5,
+        characterContactShadowScale: 2,
         shadowEdgeSoftness: 0.03,
         selfShadowEdgeSoftness: 0.05,
         occlusionShadowEdgeSoftness: 0.01,
         isGroundVisible: (): boolean => true,
         isSkydomeVisible: (): boolean => true,
         antialiasEnabled: true,
-        mirroringFloorEnabled: false,
-        mirroringFloorReflectance: 0.35,
-        mirroringFloorSize: 40,
+        mirroringFloorEnabled: true,
+        mirroringFloorShape: "square" as const,
+        mirroringFloorReflectance: 0.3,
+        mirroringFloorSize: 100,
         mirroringFloorHeight: 0,
-        mirroringFloorResolution: 512,
+        mirroringFloorResolution: 1024,
         getBackgroundImagePath: (): null => null,
         getBackgroundVideoPath: (): null => null,
         physicsEnabled: true,
@@ -205,6 +206,7 @@ describe("exportProjectState", () => {
         const host = {
             ...createHost(),
             mirroringFloorEnabled: true,
+            mirroringFloorShape: "circle" as const,
             mirroringFloorReflectance: 0.5,
             mirroringFloorSize: 60,
             mirroringFloorHeight: 0.02,
@@ -214,6 +216,7 @@ describe("exportProjectState", () => {
         const project = exportProjectState(host);
 
         expect(project.viewport.mirroringFloorEnabled).toBe(true);
+        expect(project.viewport.mirroringFloorShape).toBe("circle");
         expect(project.viewport.mirroringFloorReflectance).toBe(0.5);
         expect(project.viewport.mirroringFloorSize).toBe(60);
         expect(project.viewport.mirroringFloorHeight).toBe(0.02);
