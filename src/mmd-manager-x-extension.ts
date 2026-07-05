@@ -108,8 +108,8 @@ const X_ACCESSORY_IMPORT_SCALE = 10;
 const GLB_ACCESSORY_IMPORT_SCALE = 25;
 const GLB_ACCESSORY_MIN_VISIBLE_SIZE = 60;
 const GLB_ACCESSORY_MAX_AUTO_SCALE = 400;
-const GLB_DEBUG_FORCE_NEON_MATERIAL = true;
-const GLB_DEBUG_SHOW_BOUNDING_BOX = true;
+const GLB_DEBUG_FORCE_NEON_MATERIAL = false;
+const GLB_DEBUG_SHOW_BOUNDING_BOX = false;
 const GLB_DEBUG_SHOW_EDGES = false;
 
 function getAccessoryEntries(host: object): AccessoryEntry[] {

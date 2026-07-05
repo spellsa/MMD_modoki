@@ -13,6 +13,7 @@ Last updated: 2026-06-13
 | `@babylonjs/gui` | `9.2.0` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
 | `@babylonjs/loaders` | `9.2.0` | Apache-2.0 | https://github.com/BabylonJS/Babylon.js |
 | `babylon-mmd` | `1.2.0` | MIT | https://github.com/noname0310/babylon-mmd |
+| `electron-log` | `5.4.3` | MIT | https://github.com/megahertz/electron-log |
 | `electron-squirrel-startup` | `1.0.1` | Apache-2.0 | https://github.com/mongodb-js/electron-squirrel-startup |
 | `i18next` | `25.8.18` | MIT | https://github.com/i18next/i18next |
 | `mediabunny` | `1.39.1` | MPL-2.0 | https://github.com/Vanilagy/mediabunny |

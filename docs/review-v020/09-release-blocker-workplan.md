@@ -26,7 +26,7 @@
 | 7 | Deferred | B2 | PNG 連番出力への post stack 適用 | PNG 連番は遅く、capture 経路の載せ替えも大きいため v0.2.0 では後回し。メニューバーの PNG 連番出力導線は閉じた。 |
 | 8 | Todo | B4 | 注記系の小修正 | B1 の残差として、PNG 連番の post effect 非対応/延期を UI またはリリースノートで明記する。`readpixels` は UI から外して速度優先固定にしたため注記対象外。 |
 | 9 | Human QA | 検品バッチ2 | 出力系 | 1回の起動で、エフェクト盛る -> WebM 出力(`canvas` / `webgpu-copy`) -> 画面と見比べ -> わざと失敗させて復帰確認(B3確認) -> 連続出力。PNG 連番は延期扱い。 |
-| 10 | Todo | B9/B10/B11 | 小修正組 | ネオン緑消灯、バージョン表記、notices。数行 x 3。忘れないよう検品バッチ2 後に固定。 |
+| 10 | Done | B9/B10/B11 | 小修正組 | GLB の強制ネオン材質/BoundingBox を OFF。package/package-lock version を 0.2.0 に更新。THIRD_PARTY_NOTICES.md に electron-log を追記。 |
 | 11 | Human QA | 最終 QA | クリーン環境で zip 展開 -> 起動 -> コア動線 | 削らない。リリース2日前までには終える。 |
 | 12 | Todo | Release notes | リリースノート作成 | review-v020 の対応済み欄を素材にし、既知の問題節に積み残しを明記する。 |
 
