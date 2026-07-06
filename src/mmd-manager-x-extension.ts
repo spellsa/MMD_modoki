@@ -713,12 +713,11 @@ function logGlbImportDebug(
         };
     });
 
-    console.groupCollapsed(`[GLB] Import debug: ${accessoryName}`);
-    console.table(meshRows);
-    if (transformRows.length > 0) console.table(transformRows);
-    console.log("[GLB] Import rows:", meshRows);
-    if (transformRows.length > 0) console.log("[GLB] Transform rows:", transformRows);
-    console.groupEnd();
+    logDebugIfEnabled("accessoryLoad", "asset", "GLB import debug rows", {
+        accessoryName,
+        meshRows,
+        transformRows,
+    });
 }
 
 function logGlbReplacementDebug(accessoryName: string, meshes: readonly AbstractMesh[]): void {
@@ -745,10 +744,10 @@ function logGlbReplacementDebug(accessoryName: string, meshes: readonly Abstract
         };
     });
 
-    console.groupCollapsed(`[GLB] Replacement debug: ${accessoryName}`);
-    console.table(replacementRows);
-    console.log("[GLB] Replacement rows:", replacementRows);
-    console.groupEnd();
+    logDebugIfEnabled("accessoryLoad", "asset", "GLB replacement debug rows", {
+        accessoryName,
+        replacementRows,
+    });
 }
 
 function createAccessoryEntryFromImport(

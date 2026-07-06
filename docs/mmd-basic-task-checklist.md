@@ -163,14 +163,19 @@
 
 ## 7. ビルド・配布
 
-- [ ] ターゲット整理（Windows / macOS / Linux）
-- [ ] `electron-forge make` 前提の build 構成整理
+- [x] ターゲット整理（Windows x64 / macOS arm64 / Linux x64）
+- [x] `electron-forge make` 前提の build 構成整理
 - [ ] アプリ情報整理
 - [ ] 配布時アセット / wasm / モデルローダー同梱確認
 - [ ] Windows 配布時の注意点整理
 - [ ] クリーン環境でのインストール / 起動確認
 - [x] WebGPU 必須のローカル起動スモークテスト追加（`npm.cmd run smoke:launch`）
 - [ ] 配布用ドキュメント整備
+
+補足:
+- v0.2.0 の release workflow は zip のみを標準配布物にする。
+- macOS は Apple Silicon 向けの `darwin arm64` を優先し、Intel Mac / universal build は後続検討に回す。
+- ビルド前確認は [v0.2.0 ビルド前確認メモ](./release-build-preflight-2026-07-06.md) を参照。
 
 ## 8. 拡張候補
 

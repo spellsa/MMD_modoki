@@ -20,17 +20,23 @@ jobs:
           - label: Windows Zip
             os: windows-latest
             forge_platform: win32
+            forge_arch: x64
             release_platform: windows
+            release_arch: x64
             artifact_name: mmd-modoki-windows-x64-zip
           - label: macOS Zip
             os: macos-latest
             forge_platform: darwin
+            forge_arch: arm64
             release_platform: mac
-            artifact_name: mmd-modoki-macos-x64-zip
+            release_arch: arm64
+            artifact_name: mmd-modoki-macos-arm64-zip
           - label: Linux Zip
             os: ubuntu-latest
             forge_platform: linux
+            forge_arch: x64
             release_platform: linux
+            release_arch: x64
             artifact_name: mmd-modoki-linux-x64-zip
 
     steps:
@@ -49,13 +55,19 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Critical typecheck
+        run: npm run typecheck:critical
+
       - name: Build zip package
-        run: npm run make:zip -- --platform=${{ matrix.forge_platform }} --arch=x64
+        run: npm run make:zip -- --platform=${{ matrix.forge_platform }} --arch=${{ matrix.forge_arch }}
 
       - name: Rename zip for release
         shell: bash
         run: |
-          ZIP_DIR="out/make/zip/${{ matrix.forge_platform }}/x64"
+          ZIP_DIR="out/make/zip/${{ matrix.forge_platform }}/${{ matrix.forge_arch }}"
           shopt -s nullglob
           zips=("$ZIP_DIR"/*.zip)
           if [ "${#zips[@]}" -ne 1 ]; then
@@ -65,13 +77,14 @@ jobs:
           fi
           VERSION=$(node -p "require('./package.json').version")
           SOURCE="${zips[0]}"
-          TARGET="$ZIP_DIR/MMD.modoki-${RELEASE_PLATFORM}-x64-${VERSION}.zip"
+          TARGET="$ZIP_DIR/MMD.modoki-${RELEASE_PLATFORM}-${RELEASE_ARCH}-${VERSION}.zip"
           if [ "$SOURCE" != "$TARGET" ]; then
             mv "$SOURCE" "$TARGET"
           fi
           echo "Renamed $(basename "$SOURCE") -> $(basename "$TARGET")"
         env:
           RELEASE_PLATFORM: ${{ matrix.release_platform }}
+          RELEASE_ARCH: ${{ matrix.release_arch }}
 
       - name: Upload zip artifact
         uses: actions/upload-artifact@v4

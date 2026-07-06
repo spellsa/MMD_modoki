@@ -1,6 +1,6 @@
 # リリース手順メモ
 
-更新日: 2026-03-24
+更新日: 2026-07-06
 
 ## 目的
 
@@ -26,13 +26,31 @@ git push origin v0.1.5
 
 ## 自動で作られるもの
 
-- Windows zip
-- macOS zip
-- Linux zip
+- Windows x64 zip
+- macOS Apple Silicon / arm64 zip
+- Linux x64 zip
 - prerelease 本文の初期版
 - zip assets の release への添付
 
 release 名は `MMD modoki vX.Y.Z` になる。
+
+## OS 別ビルド方針
+
+GitHub Actions の [`build-zips.yml`](../.github/workflows/build-zips.yml) では、現時点では zip 配布だけを標準配布物として作る。
+
+| OS | Forge platform / arch | release asset |
+| --- | --- | --- |
+| Windows | `win32 x64` | `MMD.modoki-windows-x64-<version>.zip` |
+| macOS | `darwin arm64` | `MMD.modoki-mac-arm64-<version>.zip` |
+| Linux | `linux x64` | `MMD.modoki-linux-x64-<version>.zip` |
+
+macOS は M1 / M2 / M3 / M4 などの Apple Silicon 向けを優先する。
+Intel Mac 向けの `darwin x64` や universal build は、v0.2.0 の標準配布対象には含めない。
+要望が増えた場合は matrix に `darwin x64` を追加するか、別途 universal 化を検討する。
+
+macOS zip は現時点では署名 / notarize 済み配布物ではないため、配布案内では初回起動時の Gatekeeper 注意を既知の制限として書く。
+
+Windows は当面 x64 zip のみを配布する。インストーラや Squirrel 配布は maker 設定には残っているが、release workflow では `make:zip` のみを使う。
 
 ## 確認ポイント
 
