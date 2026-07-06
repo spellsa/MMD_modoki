@@ -4064,7 +4064,7 @@ ${beforeFogAppendBlock}
     }
 
     private isPhysicsSimulationActive(): boolean {
-        return this._isPlaying || this.externalPlaybackSimulationEnabled;
+        return this.getPhysicsEnabled() || this.externalPlaybackSimulationEnabled;
     }
 
     private syncScenePhysicsSimulationState(): void {
@@ -4080,7 +4080,7 @@ ${beforeFogAppendBlock}
     }
 
     public setPhysicsEnabled(enabled: boolean): boolean {
-        const nextEnabled = this.physicsController.setEnabled(enabled, this.isPhysicsSimulationActive());
+        const nextEnabled = this.physicsController.setEnabled(enabled, enabled || this.externalPlaybackSimulationEnabled);
         this.applyPhysicsStateToAllModels();
         return nextEnabled;
     }
@@ -4410,6 +4410,7 @@ ${beforeFogAppendBlock}
         refreshMeshBoundingInfoForRenderStability(this.skydome);
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
+        this.mmdRuntime.autoPhysicsInitialization = false;
         this.installMmdRuntimePerformanceHooks(this.mmdRuntime);
         this.mmdRuntime.register(this.scene);
         this.physicsController = new PhysicsRuntimeController({
@@ -4630,6 +4631,7 @@ ${beforeFogAppendBlock}
 
         const wasmInstance = await loadBundledMprWasmInstance();
         const wasmRuntime = new MmdWasmRuntime(wasmInstance, this.scene, new MmdWasmPhysics(this.scene));
+        wasmRuntime.autoPhysicsInitialization = false;
         this.installMmdRuntimePerformanceHooks(wasmRuntime);
         wasmRuntime.register(this.scene);
 
@@ -6230,19 +6232,16 @@ ${beforeFogAppendBlock}
     play(): void {
         if (!this.currentModel) return;
         this._isPlaying = true;
-        this.manualPlaybackWithoutAudio = this.audioPlayer === null;
+        this.manualPlaybackWithoutAudio = false;
         this.refreshActiveRuntimeAnimationHandles();
         this.mmdRuntime.seekAnimation(this._currentFrame, true);
         this.syncBackgroundVideoFrame(true);
-        this.applyPhysicsStateToAllModels();
+        if (!this.getPhysicsEnabled()) {
+            this.applyPhysicsStateToAllModels();
+        }
         this.syncScenePhysicsSimulationState();
         this.physicsController.syncBulletEvaluationTypeForPlayback();
-        if (this.manualPlaybackWithoutAudio) {
-            this.manualPlaybackFrameCursor = this._currentFrame;
-            this.mmdRuntime.pauseAnimation();
-        } else {
-            this.mmdRuntime.playAnimation();
-        }
+        this.mmdRuntime.playAnimation();
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
     }
