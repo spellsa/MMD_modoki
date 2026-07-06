@@ -25,7 +25,7 @@ jobs:
             release_arch: x64
             artifact_name: mmd-modoki-windows-x64-zip
           - label: macOS Zip
-            os: macos-latest
+            os: macos-15
             forge_platform: darwin
             forge_arch: arm64
             release_platform: mac
