@@ -2,11 +2,16 @@ import { describe, expect, it } from "vitest";
 import { normalizePostEffectBackend } from "./post-effect-backend";
 
 describe("normalizePostEffectBackend", () => {
-    it("keeps classic as the default backend", () => {
-        expect(normalizePostEffectBackend(null)).toBe("classic");
-        expect(normalizePostEffectBackend("")).toBe("classic");
-        expect(normalizePostEffectBackend("unknown")).toBe("classic");
+    it("uses frame graph as the default backend", () => {
+        expect(normalizePostEffectBackend(null)).toBe("frameGraph");
+        expect(normalizePostEffectBackend("")).toBe("frameGraph");
+        expect(normalizePostEffectBackend("unknown")).toBe("frameGraph");
         expect(normalizePostEffectBackend("classic")).toBe("classic");
+    });
+
+    it("uses the provided fallback for unknown values", () => {
+        expect(normalizePostEffectBackend(null, "classic")).toBe("classic");
+        expect(normalizePostEffectBackend("unknown", "classic")).toBe("classic");
     });
 
     it("accepts frame graph aliases for dev flags", () => {

@@ -2,7 +2,7 @@ export type PostEffectBackend = "classic" | "frameGraph";
 
 export const POST_EFFECT_BACKEND_STORAGE_KEY = "mmd_modoki.postEffectBackend";
 
-export function normalizePostEffectBackend(value: unknown, fallback: PostEffectBackend = "classic"): PostEffectBackend {
+export function normalizePostEffectBackend(value: unknown, fallback: PostEffectBackend = "frameGraph"): PostEffectBackend {
     if (typeof value !== "string") {
         return fallback;
     }
@@ -17,7 +17,7 @@ export function normalizePostEffectBackend(value: unknown, fallback: PostEffectB
     return fallback;
 }
 
-export function readPostEffectBackendLocalStorage(fallback: PostEffectBackend = "classic"): PostEffectBackend {
+export function readPostEffectBackendLocalStorage(fallback: PostEffectBackend = "frameGraph"): PostEffectBackend {
     try {
         return normalizePostEffectBackend(globalThis.localStorage?.getItem(POST_EFFECT_BACKEND_STORAGE_KEY), fallback);
     } catch {

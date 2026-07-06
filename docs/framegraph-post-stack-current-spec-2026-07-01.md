@@ -11,10 +11,17 @@ FrameGraph / PostFX まわりは、DoF / Bloom / LUT / SSAO / SSR に加えて�
 ## 現行の基本方針
 
 - 既存の MMD scene render は維持し、FrameGraph は主に post effect stack の backend として扱う。
+- 2026-07-06 以降、新規環境や不正な保存値では PostFX backend の既定を `frameGraph` にする。明示的に保存済みの `classic` は互換用に尊重する。
 - UI の効果一覧は `frameGraphPostStack` を持ち、各 entry は `{ id, enabled }` で管理する。
 - 効果パラメーターと ON/OFF は分離する。チェックを外しても、色、強度、オフセット量などの値は保持する。
 - プロジェクト保存 / 読み込みでは、stack の順序と enabled 状態を `effects.frameGraphPostStack` として復元する。
 - 旧 project などで stack がない場合は、既存の各 post effect state から canonical order で復元する。
+
+背景:
+
+- v0.2.0 packaged build の初回起動では localStorage に `mmd_modoki.postEffectBackend` がなく、旧既定の `classic` に落ちていた。
+- Effect パネル側は FrameGraph stack を主導線にしているため、clean profile では「FrameGraph バックエンドが必要です」と表示され、実質的にエフェクト追加が使えない状態になった。
+- 対策として、未設定 / 不正値は `frameGraph` に正規化する。FrameGraph 初期化自体が失敗した場合は、従来通り runtime 側で `classic` fallback と diagnostic を残す。
 
 ## Stack 対象
 
