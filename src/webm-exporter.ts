@@ -579,6 +579,10 @@ export async function runWebmExportJob(
         mmdManager.setAutoRenderEnabled(false);
         mmdManager.seekTo(startFrame);
         mmdManager.setExternalPlaybackSimulationEnabled(true);
+        const restoredInitialPhysics = mmdManager.applyWebmInitialPhysicsState(request.initialPhysicsState);
+        if (request.initialPhysicsState && !restoredInitialPhysics) {
+            console.warn("[WebM] Initial physics snapshot was provided but could not be restored.");
+        }
         if (captureMode !== "readpixels") {
             updateStatus(callbacks, "Preparing post effects for WebM capture...", "initializing");
             const postEffectReady = await mmdManager.waitForPostEffectBackendReadyForCapture();

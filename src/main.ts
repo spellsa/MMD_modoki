@@ -374,6 +374,78 @@ const sanitizePngSequenceExportRequest = (request: PngSequenceExportRequest): Pn
   };
 };
 
+const sanitizeNumberArray = (value: unknown, expectedLength?: number): number[] | null => {
+  if (!Array.isArray(value)) return null;
+  if (expectedLength !== undefined && value.length !== expectedLength) return null;
+  const result: number[] = [];
+  for (const item of value) {
+    if (!Number.isFinite(item)) return null;
+    result.push(Number(item));
+  }
+  return result;
+};
+
+const sanitizeVectorTuple = (value: unknown): [number, number, number] | null => {
+  const array = sanitizeNumberArray(value, 3);
+  return array ? [array[0], array[1], array[2]] : null;
+};
+
+const sanitizeWebmInitialPhysicsState = (
+  value: WebmExportRequest['initialPhysicsState'],
+): WebmExportRequest['initialPhysicsState'] => {
+  if (!value || typeof value !== 'object' || value.physicsEnabled !== true || !Array.isArray(value.models)) {
+    return null;
+  }
+
+  const models: NonNullable<WebmExportRequest['initialPhysicsState']>['models'] = [];
+  for (const model of value.models) {
+    if (!model || typeof model !== 'object') continue;
+    const modelIndex = Number.isFinite(model.modelIndex) ? Math.max(0, Math.floor(model.modelIndex)) : -1;
+    if (modelIndex < 0) continue;
+    const rigidBodyStates = sanitizeNumberArray(model.rigidBodyStates);
+    if (!rigidBodyStates) continue;
+    const rigidBodiesInput = Array.isArray(model.rigidBodies) ? model.rigidBodies : [];
+    const rigidBodies: typeof model.rigidBodies = [];
+    for (const body of rigidBodiesInput) {
+      if (body === null) {
+        rigidBodies.push(null);
+        continue;
+      }
+      if (!body || typeof body !== 'object') {
+        rigidBodies.push(null);
+        continue;
+      }
+      const transformMatrix = sanitizeNumberArray(body.transformMatrix, 16);
+      const linearVelocity = sanitizeVectorTuple(body.linearVelocity);
+      const angularVelocity = sanitizeVectorTuple(body.angularVelocity);
+      if (!transformMatrix || !linearVelocity || !angularVelocity) {
+        rigidBodies.push(null);
+        continue;
+      }
+      rigidBodies.push({
+        transformMatrix,
+        linearVelocity,
+        angularVelocity,
+      });
+    }
+    models.push({
+      modelIndex,
+      modelName: typeof model.modelName === 'string' ? model.modelName : '',
+      rigidBodyStates: rigidBodyStates.map((state) => state ? 1 : 0),
+      rigidBodies,
+    });
+  }
+
+  if (models.length === 0) {
+    return null;
+  }
+  return {
+    capturedFrame: Number.isFinite(value.capturedFrame) ? Math.max(0, Math.floor(value.capturedFrame)) : 0,
+    physicsEnabled: true,
+    models,
+  };
+};
+
 const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportRequest | null => {
   if (!request || typeof request !== 'object') return null;
   if (!request.project || typeof request.project !== 'object') return null;
@@ -413,6 +485,7 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
     audioFilePath,
     preferredVideoCodec,
     captureMode,
+    initialPhysicsState: sanitizeWebmInitialPhysicsState(request.initialPhysicsState),
   };
 };
 

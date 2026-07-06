@@ -608,6 +608,25 @@ export interface PngSequenceExportProgress {
     endFrame?: number;
 }
 
+export interface WebmPhysicsRigidBodySnapshot {
+    transformMatrix: number[];
+    linearVelocity: [number, number, number];
+    angularVelocity: [number, number, number];
+}
+
+export interface WebmPhysicsModelSnapshot {
+    modelIndex: number;
+    modelName: string;
+    rigidBodyStates: number[];
+    rigidBodies: Array<WebmPhysicsRigidBodySnapshot | null>;
+}
+
+export interface WebmInitialPhysicsState {
+    capturedFrame: number;
+    physicsEnabled: boolean;
+    models: WebmPhysicsModelSnapshot[];
+}
+
 export interface WebmExportRequest {
     project: MmdModokiProjectFileV1;
     outputFilePath: string;
@@ -620,6 +639,7 @@ export interface WebmExportRequest {
     audioFilePath?: string | null;
     preferredVideoCodec?: "auto" | "vp8" | "vp9";
     captureMode?: WebmCaptureMode;
+    initialPhysicsState?: WebmInitialPhysicsState | null;
 }
 
 export type WebmCaptureMode = "readpixels" | "canvas" | "webgpu-copy";

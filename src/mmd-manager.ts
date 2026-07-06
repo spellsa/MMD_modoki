@@ -62,6 +62,7 @@ import type {
     ProjectModelMaterialShaderState,
     KeyframeTrack,
     MirroringFloorShape,
+    WebmInitialPhysicsState,
 } from "./types";
 import type { IMmdBindableCameraAnimation } from "babylon-mmd/esm/Runtime/Animation/IMmdBindableAnimation";
 import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
@@ -2004,6 +2005,58 @@ ${beforeFogAppendBlock}
 
     public getActiveModelInfo(): ModelInfo | null {
         return this.activeModelInfo;
+    }
+
+    public captureWebmInitialPhysicsState(): WebmInitialPhysicsState | null {
+        if (!this.getPhysicsEnabled()) {
+            return null;
+        }
+
+        const models = this.sceneModels
+            .map((entry, modelIndex) => PhysicsModelController.captureWebmPhysicsModelSnapshot(
+                entry.model,
+                modelIndex,
+                entry.info.name,
+            ))
+            .filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null);
+        if (models.length === 0) {
+            return null;
+        }
+
+        return {
+            capturedFrame: this._currentFrame,
+            physicsEnabled: this.getPhysicsEnabled(),
+            models,
+        };
+    }
+
+    public applyWebmInitialPhysicsState(snapshot: WebmInitialPhysicsState | null | undefined): boolean {
+        if (!snapshot?.physicsEnabled || snapshot.models.length === 0) {
+            return false;
+        }
+
+        const clearedPendingInitializations = PhysicsModelController.clearPendingPhysicsInitializations(this.mmdRuntime);
+        let restoredCount = 0;
+        for (const modelSnapshot of snapshot.models) {
+            const sceneModel = this.sceneModels[modelSnapshot.modelIndex];
+            if (!sceneModel) {
+                continue;
+            }
+            if (PhysicsModelController.applyWebmPhysicsModelSnapshot(sceneModel.model, modelSnapshot)) {
+                this.syncCpuSkinnedMorphSourceBuffers(sceneModel.model);
+                restoredCount += 1;
+            }
+        }
+        if (restoredCount > 0) {
+            this.syncScenePhysicsSimulationState();
+            logInfo("webm", "initial physics snapshot restored", {
+                capturedFrame: snapshot.capturedFrame,
+                restoredModels: restoredCount,
+                requestedModels: snapshot.models.length,
+                clearedPendingInitializations,
+            });
+        }
+        return restoredCount > 0;
     }
 
     public setModelMotionImports(model: RuntimeModel, imports: ProjectMotionImport[]): void {

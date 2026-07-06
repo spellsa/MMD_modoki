@@ -538,6 +538,7 @@ export class ExportUiController {
             this.showToast(t("toast.audioMissingForWebm"), "info");
         }
         project.assets.audioPath = null;
+        const initialPhysicsState = this.mmdManager.captureWebmInitialPhysicsState();
         logInfo("webm", "export launching", {
             outputFilePath,
             startFrame,
@@ -549,6 +550,8 @@ export class ExportUiController {
             audioFilePath: includeAudio ? audioFilePath : null,
             preferredVideoCodec,
             captureMode,
+            initialPhysicsModels: initialPhysicsState?.models.length ?? 0,
+            initialPhysicsFrame: initialPhysicsState?.capturedFrame ?? null,
         });
 
         this.setStatus(t("busy.webmExportLaunching"), true);
@@ -564,6 +567,7 @@ export class ExportUiController {
             audioFilePath: includeAudio ? audioFilePath : null,
             preferredVideoCodec,
             captureMode,
+            initialPhysicsState,
         });
 
         if (!result) {

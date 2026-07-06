@@ -1,11 +1,87 @@
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
 import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
 import type { MmdWasmModel } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmModel";
+import type { WebmPhysicsModelSnapshot, WebmPhysicsRigidBodySnapshot } from "../types";
 
 export type PhysicsRuntimeModel = MmdModel | MmdWasmModel;
 export type PhysicsMmdRuntime = MmdRuntime | MmdWasmRuntime;
+
+type PhysicsVectorLike = {
+    x: number;
+    y: number;
+    z: number;
+};
+
+type PhysicsBodyLike = {
+    transformNode?: {
+        computeWorldMatrix?: (force?: boolean) => Matrix;
+        scaling?: Vector3;
+        rotationQuaternion?: Quaternion | null;
+        position?: Vector3;
+    };
+    getLinearVelocityToRef?: (target: Vector3) => void;
+    getAngularVelocityToRef?: (target: Vector3) => void;
+    setTargetTransform?: (position: Vector3, rotation: Quaternion) => void;
+    setLinearVelocity?: (velocity: Vector3) => void;
+    setAngularVelocity?: (velocity: Vector3) => void;
+};
+
+type ClassicPhysicsNodeLike = {
+    scaling?: Vector3;
+    rotationQuaternion?: Quaternion | null;
+    position?: Vector3;
+    computeWorldMatrix?: (force?: boolean) => Matrix;
+    physicsBody?: PhysicsBodyLike | null;
+};
+
+type ClassicPhysicsModelLike = {
+    _nodes?: Array<ClassicPhysicsNodeLike | null>;
+    _bodies?: Array<PhysicsBodyLike | null>;
+    commitBodyStates?: (states: Uint8Array) => void;
+    syncBones?: () => void;
+};
+
+type BulletPhysicsBundleLike = {
+    count: number;
+    getTransformMatrixToRef?: (index: number, target: Matrix) => Matrix;
+    setDynamicTransformMatrix?: (index: number, matrix: Matrix, fallbackToSetTransformMatrix?: boolean) => void;
+    setTransformMatrix?: (index: number, matrix: Matrix) => void;
+    getLinearVelocityToRef?: (index: number, target: Vector3) => Vector3;
+    getAngularVelocityToRef?: (index: number, target: Vector3) => Vector3;
+    setLinearVelocity?: (index: number, velocity: Vector3, shouldSynced: boolean) => void;
+    setAngularVelocity?: (index: number, velocity: Vector3, shouldSynced: boolean) => void;
+    updateBufferedMotionStates?: (forceUseFrontBuffer: boolean) => void;
+    needToCommit?: boolean;
+    commitToWasm?: () => void;
+};
+
+type BulletPhysicsModelLike = {
+    _bundle?: BulletPhysicsBundleLike | null;
+    _rigidBodyIndexMap?: Int32Array | number[];
+    commitBodyStates?: (states: Uint8Array) => void;
+    syncBones?: () => void;
+};
+
+type PhysicsModelInternal = {
+    _physicsModel?: ClassicPhysicsModelLike | BulletPhysicsModelLike | null;
+};
+
+type PhysicsRuntimeInitializationSetLike = {
+    clear?: () => void;
+};
+
+type PhysicsRuntimeInitializerLike = {
+    initializer?: PhysicsRuntimeInitializationSetLike | null;
+};
+
+type PhysicsRuntimeWithInitializationQueues = {
+    _needToInitializePhysicsModels?: PhysicsRuntimeInitializationSetLike | null;
+    _needToInitializePhysicsModelsBuffer?: PhysicsRuntimeInitializationSetLike | null;
+    _physicsRuntime?: PhysicsRuntimeInitializerLike | null;
+};
 
 export type PhysicsModelControllerOptions = {
     getRuntime: () => PhysicsMmdRuntime;
@@ -261,6 +337,239 @@ export class PhysicsModelController {
     public static hasPhysicsModel(model: PhysicsRuntimeModel, rigidBodyCount: number): boolean {
         const modelInternal = model as unknown as { _physicsModel?: unknown } | null;
         return Boolean(modelInternal?._physicsModel && rigidBodyCount > 0);
+    }
+
+    public static captureWebmPhysicsModelSnapshot(
+        model: PhysicsRuntimeModel,
+        modelIndex: number,
+        modelName: string,
+    ): WebmPhysicsModelSnapshot | null {
+        const rigidBodyCount = model.rigidBodyStates.length;
+        if (rigidBodyCount === 0) return null;
+
+        const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
+        if (!physicsModel) return null;
+
+        const rigidBodies = PhysicsModelController.captureBulletRigidBodies(physicsModel, rigidBodyCount)
+            ?? PhysicsModelController.captureClassicRigidBodies(physicsModel, rigidBodyCount);
+        if (!rigidBodies) return null;
+
+        return {
+            modelIndex,
+            modelName,
+            rigidBodyStates: Array.from(model.rigidBodyStates),
+            rigidBodies,
+        };
+    }
+
+    public static applyWebmPhysicsModelSnapshot(
+        model: PhysicsRuntimeModel,
+        snapshot: WebmPhysicsModelSnapshot,
+    ): boolean {
+        if (model.rigidBodyStates.length === 0) return false;
+        if (snapshot.rigidBodyStates.length !== model.rigidBodyStates.length) return false;
+
+        const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
+        if (!physicsModel) return false;
+
+        model.rigidBodyStates.set(snapshot.rigidBodyStates.map((state) => state ? 1 : 0));
+        physicsModel.commitBodyStates?.(model.rigidBodyStates);
+
+        const restored = PhysicsModelController.applyBulletRigidBodies(physicsModel, snapshot)
+            || PhysicsModelController.applyClassicRigidBodies(physicsModel, snapshot);
+        if (!restored) return false;
+
+        physicsModel.syncBones?.();
+        return true;
+    }
+
+    public static clearPendingPhysicsInitializations(runtime: PhysicsMmdRuntime): boolean {
+        const runtimeInternal = runtime as unknown as PhysicsRuntimeWithInitializationQueues;
+        let cleared = false;
+
+        const clearSet = (setLike: PhysicsRuntimeInitializationSetLike | null | undefined): void => {
+            if (typeof setLike?.clear !== "function") return;
+            setLike.clear();
+            cleared = true;
+        };
+
+        clearSet(runtimeInternal._needToInitializePhysicsModels);
+        clearSet(runtimeInternal._needToInitializePhysicsModelsBuffer);
+        clearSet(runtimeInternal._physicsRuntime?.initializer);
+        return cleared;
+    }
+
+    private static captureBulletRigidBodies(
+        physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike,
+        rigidBodyCount: number,
+    ): Array<WebmPhysicsRigidBodySnapshot | null> | null {
+        const bulletModel = physicsModel as BulletPhysicsModelLike;
+        const bundle = bulletModel._bundle;
+        const indexMap = bulletModel._rigidBodyIndexMap;
+        if (!bundle || !indexMap || typeof bundle.getTransformMatrixToRef !== "function") {
+            return null;
+        }
+
+        const transform = Matrix.Identity();
+        const linearVelocity = Vector3.Zero();
+        const angularVelocity = Vector3.Zero();
+        const rigidBodies: Array<WebmPhysicsRigidBodySnapshot | null> = [];
+        for (let rigidBodyIndex = 0; rigidBodyIndex < rigidBodyCount; rigidBodyIndex += 1) {
+            const mappedIndex = indexMap[rigidBodyIndex];
+            if (!Number.isInteger(mappedIndex) || mappedIndex < 0 || mappedIndex >= bundle.count) {
+                rigidBodies.push(null);
+                continue;
+            }
+
+            bundle.getTransformMatrixToRef(mappedIndex, transform);
+            linearVelocity.set(0, 0, 0);
+            angularVelocity.set(0, 0, 0);
+            bundle.getLinearVelocityToRef?.(mappedIndex, linearVelocity);
+            bundle.getAngularVelocityToRef?.(mappedIndex, angularVelocity);
+            rigidBodies.push({
+                transformMatrix: Array.from(transform.m),
+                linearVelocity: PhysicsModelController.vectorToTuple(linearVelocity),
+                angularVelocity: PhysicsModelController.vectorToTuple(angularVelocity),
+            });
+        }
+        return rigidBodies;
+    }
+
+    private static captureClassicRigidBodies(
+        physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike,
+        rigidBodyCount: number,
+    ): Array<WebmPhysicsRigidBodySnapshot | null> | null {
+        const classicModel = physicsModel as ClassicPhysicsModelLike;
+        const nodes = classicModel._nodes;
+        const bodies = classicModel._bodies;
+        if (!Array.isArray(nodes) || !Array.isArray(bodies)) {
+            return null;
+        }
+
+        const transform = Matrix.Identity();
+        const linearVelocity = Vector3.Zero();
+        const angularVelocity = Vector3.Zero();
+        const rigidBodies: Array<WebmPhysicsRigidBodySnapshot | null> = [];
+        for (let rigidBodyIndex = 0; rigidBodyIndex < rigidBodyCount; rigidBodyIndex += 1) {
+            const node = nodes[rigidBodyIndex] ?? null;
+            const body = bodies[rigidBodyIndex] ?? node?.physicsBody ?? null;
+            if (!node || !body) {
+                rigidBodies.push(null);
+                continue;
+            }
+
+            const nodeTransform = node.computeWorldMatrix?.(true)
+                ?? body.transformNode?.computeWorldMatrix?.(true)
+                ?? null;
+            if (!nodeTransform) {
+                rigidBodies.push(null);
+                continue;
+            }
+
+            transform.copyFrom(nodeTransform);
+            linearVelocity.set(0, 0, 0);
+            angularVelocity.set(0, 0, 0);
+            body.getLinearVelocityToRef?.(linearVelocity);
+            body.getAngularVelocityToRef?.(angularVelocity);
+            rigidBodies.push({
+                transformMatrix: Array.from(transform.m),
+                linearVelocity: PhysicsModelController.vectorToTuple(linearVelocity),
+                angularVelocity: PhysicsModelController.vectorToTuple(angularVelocity),
+            });
+        }
+        return rigidBodies;
+    }
+
+    private static applyBulletRigidBodies(
+        physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike,
+        snapshot: WebmPhysicsModelSnapshot,
+    ): boolean {
+        const bulletModel = physicsModel as BulletPhysicsModelLike;
+        const bundle = bulletModel._bundle;
+        const indexMap = bulletModel._rigidBodyIndexMap;
+        if (!bundle || !indexMap) return false;
+
+        const transform = Matrix.Identity();
+        const linearVelocity = Vector3.Zero();
+        const angularVelocity = Vector3.Zero();
+        let restoredCount = 0;
+        for (let rigidBodyIndex = 0; rigidBodyIndex < snapshot.rigidBodies.length; rigidBodyIndex += 1) {
+            const bodySnapshot = snapshot.rigidBodies[rigidBodyIndex];
+            const mappedIndex = indexMap[rigidBodyIndex];
+            if (!bodySnapshot || !Number.isInteger(mappedIndex) || mappedIndex < 0 || mappedIndex >= bundle.count) {
+                continue;
+            }
+
+            Matrix.FromArrayToRef(bodySnapshot.transformMatrix, 0, transform);
+            if (typeof bundle.setDynamicTransformMatrix === "function") {
+                bundle.setDynamicTransformMatrix(mappedIndex, transform, true);
+            } else {
+                bundle.setTransformMatrix?.(mappedIndex, transform);
+            }
+            bundle.setTransformMatrix?.(mappedIndex, transform);
+            PhysicsModelController.tupleToVector(bodySnapshot.linearVelocity, linearVelocity);
+            PhysicsModelController.tupleToVector(bodySnapshot.angularVelocity, angularVelocity);
+            bundle.setLinearVelocity?.(mappedIndex, linearVelocity, true);
+            bundle.setAngularVelocity?.(mappedIndex, angularVelocity, true);
+            restoredCount += 1;
+        }
+        if (bundle.needToCommit === true) {
+            bundle.commitToWasm?.();
+        }
+        bundle.updateBufferedMotionStates?.(true);
+        return restoredCount > 0;
+    }
+
+    private static applyClassicRigidBodies(
+        physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike,
+        snapshot: WebmPhysicsModelSnapshot,
+    ): boolean {
+        const classicModel = physicsModel as ClassicPhysicsModelLike;
+        const nodes = classicModel._nodes;
+        const bodies = classicModel._bodies;
+        if (!Array.isArray(nodes) || !Array.isArray(bodies)) return false;
+
+        const transform = Matrix.Identity();
+        const scaling = Vector3.One();
+        const rotation = Quaternion.Identity();
+        const position = Vector3.Zero();
+        const linearVelocity = Vector3.Zero();
+        const angularVelocity = Vector3.Zero();
+        let restoredCount = 0;
+        for (let rigidBodyIndex = 0; rigidBodyIndex < snapshot.rigidBodies.length; rigidBodyIndex += 1) {
+            const bodySnapshot = snapshot.rigidBodies[rigidBodyIndex];
+            const node = nodes[rigidBodyIndex] ?? null;
+            const body = bodies[rigidBodyIndex] ?? node?.physicsBody ?? null;
+            if (!bodySnapshot || !node || !body) {
+                continue;
+            }
+
+            Matrix.FromArrayToRef(bodySnapshot.transformMatrix, 0, transform);
+            transform.decompose(scaling, rotation, position);
+            node.scaling?.copyFrom(scaling);
+            if (node.rotationQuaternion) {
+                node.rotationQuaternion.copyFrom(rotation);
+            } else {
+                node.rotationQuaternion = rotation.clone();
+            }
+            node.position?.copyFrom(position);
+            body.setTargetTransform?.(position, rotation);
+            PhysicsModelController.tupleToVector(bodySnapshot.linearVelocity, linearVelocity);
+            PhysicsModelController.tupleToVector(bodySnapshot.angularVelocity, angularVelocity);
+            body.setLinearVelocity?.(linearVelocity);
+            body.setAngularVelocity?.(angularVelocity);
+            restoredCount += 1;
+        }
+        return restoredCount > 0;
+    }
+
+    private static vectorToTuple(value: PhysicsVectorLike): [number, number, number] {
+        return [value.x, value.y, value.z];
+    }
+
+    private static tupleToVector(value: [number, number, number], target: Vector3): Vector3 {
+        target.set(value[0], value[1], value[2]);
+        return target;
     }
 
     public static beforeAndAfterPhysics(model: PhysicsRuntimeModel): void {
