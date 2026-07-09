@@ -168,6 +168,7 @@
 - [FrameGraph resource plan implementation note](./framegraph-resource-plan-implementation-note-2026-06-14.md)
 - [FrameGraph performance logging plan](./framegraph-performance-logging-plan-2026-06-14.md)
 - [FrameGraph blur quality guidelines](./framegraph-blur-quality-guidelines-2026-06-14.md)
+- [FrameGraphComputeShaderTask 調査メモ 2026-07-09](./framegraph-compute-shader-task-note-2026-07-09.md)
 - [FrameGraph ImageProcessing 初期化順 再発防止メモ](./framegraph-image-processing-init-regression-2026-06-17.md)
 - [LUT Frame Graph plan](./lut-frame-graph-plan-2026-05-13.md)
 - [Luminous Frame Graph redesign plan](./luminous-frame-graph-redesign-plan-2026-06-13.md)
