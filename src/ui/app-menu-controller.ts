@@ -607,7 +607,6 @@ export class AppMenuController {
                 mmdManager: this.mmdManager,
                 getRuntimeMode: () => this.getRuntimeMode(),
                 setRuntimeMode: (mode) => this.setRuntimeMode(mode),
-                refreshUi: () => this.refreshRuntimeUi(),
             }),
         });
     }

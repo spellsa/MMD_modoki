@@ -223,6 +223,7 @@ export class RuntimeFeatureUiController {
         const rateSelect = this.elements.physicsSimulationRateSelect;
         if (rateSelect) {
             rateSelect.value = String(this.mmdManager.getPhysicsSimulationRateHz());
+            rateSelect.disabled = true;
             this.refreshPhysicsSimulationRateUi();
             rateSelect.addEventListener("change", () => {
                 const next = this.mmdManager.setPhysicsSimulationRateHz(Number(rateSelect.value));
@@ -293,7 +294,7 @@ export class RuntimeFeatureUiController {
         if (this.elements.physicsGravityDirXSlider) this.elements.physicsGravityDirXSlider.disabled = !available;
         if (this.elements.physicsGravityDirYSlider) this.elements.physicsGravityDirYSlider.disabled = !available;
         if (this.elements.physicsGravityDirZSlider) this.elements.physicsGravityDirZSlider.disabled = !available;
-        if (this.elements.physicsSimulationRateSelect) this.elements.physicsSimulationRateSelect.disabled = !available;
+        if (this.elements.physicsSimulationRateSelect) this.elements.physicsSimulationRateSelect.disabled = true;
         this.refreshPhysicsSimulationRateUi();
     }
 

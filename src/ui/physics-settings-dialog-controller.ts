@@ -7,20 +7,17 @@ export type PhysicsSettingsDialogControllerDeps = {
     mmdManager: MmdManager;
     getRuntimeMode: () => "classic" | "wasm";
     setRuntimeMode: (mode: "classic" | "wasm") => void;
-    refreshUi: () => void;
 };
 
 export class PhysicsSettingsDialogController implements PopupContentController {
     private readonly mmdManager: MmdManager;
     private readonly getRuntimeMode: () => "classic" | "wasm";
     private readonly setRuntimeMode: (mode: "classic" | "wasm") => void;
-    private readonly refreshUi: () => void;
 
     constructor(deps: PhysicsSettingsDialogControllerDeps) {
         this.mmdManager = deps.mmdManager;
         this.getRuntimeMode = deps.getRuntimeMode;
         this.setRuntimeMode = deps.setRuntimeMode;
-        this.refreshUi = deps.refreshUi;
     }
 
     public mount(container: HTMLElement): void {
@@ -30,21 +27,12 @@ export class PhysicsSettingsDialogController implements PopupContentController {
         grid.className = "popup-form-grid";
         form.appendChild(grid);
 
-        const rate = document.createElement("select");
+        const rate = document.createElement("input");
         rate.className = "popup-form-control";
-        [30, 60, 120].forEach((value) => {
-            const option = document.createElement("option");
-            option.value = String(value);
-            option.textContent = `${value}Hz`;
-            rate.appendChild(option);
-        });
-        rate.value = String(this.mmdManager.getPhysicsSimulationRateHz());
+        rate.type = "text";
+        rate.value = `${this.mmdManager.getPhysicsSimulationRateHz()}Hz`;
+        rate.readOnly = true;
         rate.disabled = !this.mmdManager.isPhysicsAvailable();
-        rate.addEventListener("change", () => {
-            const next = this.mmdManager.setPhysicsSimulationRateHz(Number(rate.value));
-            rate.value = String(next);
-            this.refreshUi();
-        });
         grid.appendChild(createPopupFormField(t("dialog.physics.simulationRate"), rate));
 
         const runtime = document.createElement("select");

@@ -1,8 +1,5 @@
 import { Scene } from "@babylonjs/core/scene";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import Ammo from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm";
-import { MmdAmmoJSPlugin } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoJSPlugin";
-import { MmdAmmoPhysics } from "babylon-mmd/esm/Runtime/Physics/mmdAmmoPhysics";
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime";
 import { PhysicsRuntimeEvaluationType } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/physicsRuntimeEvaluationType";
@@ -11,13 +8,10 @@ import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime
 import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
 import { logError, logInfo, logWarn, toLogErrorData } from "../app-logger";
 
-// eslint-disable-next-line import/no-unresolved
-import ammoWasmBinaryUrl from "babylon-mmd/esm/Runtime/Physics/External/ammo.wasm.wasm?url";
-
-export type PhysicsSimulationRateHz = 30 | 60 | 120;
-export type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "ammo" | "wasm-mpr";
+export type PhysicsSimulationRateHz = 60;
+export type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "wasm-mpr";
 type BulletPhysicsBackend = Extract<PhysicsBackend, "bullet-mpr" | "bullet-spr">;
-export type PhysicsBackendLabel = "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Ammo" | "Off";
+export type PhysicsBackendLabel = "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Off";
 export type PhysicsEvaluationTypeLabel = "Immediate" | "Buffered" | "WasmImmediate";
 type RuntimeMmdRuntime = MmdRuntime | MmdWasmRuntime;
 
@@ -26,6 +20,14 @@ type PhysicsStepTimingStats = {
     totalMs: number;
     maxMs: number;
     lastMs: number | null;
+};
+
+type PhysicsDeltaTimingStats = {
+    samples: number;
+    rawMaxMs: number;
+    usedMaxMs: number;
+    lastRawMs: number | null;
+    lastUsedMs: number | null;
 };
 
 export type PhysicsPerformanceSampleContext = {
@@ -46,6 +48,12 @@ export type PhysicsRuntimeControllerOptions = {
     onError?: (message: string) => void;
 };
 
+const PHYSICS_SIMULATION_RATE_HZ: PhysicsSimulationRateHz = 60;
+const PHYSICS_FIXED_TIME_STEP_SECONDS = 1 / PHYSICS_SIMULATION_RATE_HZ;
+const PHYSICS_MAX_SUB_STEPS = 2;
+const DEFAULT_PHYSICS_DELTA_MS = 1000 / 60;
+const USE_BUFFERED_EVALUATION_DURING_PLAYBACK = true;
+
 export class PhysicsRuntimeController {
     private readonly scene: Scene;
     private runtime: RuntimeMmdRuntime;
@@ -54,13 +62,13 @@ export class PhysicsRuntimeController {
     private readonly loadSprWasmInstance: () => Promise<IMmdWasmInstance>;
     private readonly onStateChanged?: (enabled: boolean, available: boolean) => void;
     private readonly onError?: (message: string) => void;
-    private physicsPlugin: MmdAmmoJSPlugin | null = null;
+    private readonly wrappedWasmPhysicsClocks = new WeakSet<object>();
     private bulletPhysicsRuntime: MultiPhysicsRuntime | null = null;
-    private physicsRuntime: MmdAmmoPhysics | MmdBulletPhysics | null = null;
+    private physicsRuntime: MmdBulletPhysics | null = null;
     private available = false;
     private backend: PhysicsBackend = "none";
     private enabled = true;
-    private simulationRateHz: PhysicsSimulationRateHz = 60;
+    private simulationRateHz: PhysicsSimulationRateHz = PHYSICS_SIMULATION_RATE_HZ;
     private gravityAcceleration = 98;
     private gravityDirection = new Vector3(0, -100, 0);
     private bulletEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
@@ -70,6 +78,13 @@ export class PhysicsRuntimeController {
         totalMs: 0,
         maxMs: 0,
         lastMs: null,
+    };
+    private deltaTimingStats: PhysicsDeltaTimingStats = {
+        samples: 0,
+        rawMaxMs: 0,
+        usedMaxMs: 0,
+        lastRawMs: null,
+        lastUsedMs: null,
     };
 
     constructor(options: PhysicsRuntimeControllerOptions) {
@@ -92,37 +107,20 @@ export class PhysicsRuntimeController {
             this.available = true;
             logInfo("physics", "physics backend initialized", {
                 backend: this.getBackendLabel(),
-                fallback: false,
+                fallback: this.backend === "bullet-spr",
                 simulationRateHz: this.simulationRateHz,
             });
-        } catch (bulletErr: unknown) {
-            const bulletMessage = bulletErr instanceof Error ? bulletErr.message : String(bulletErr);
-            console.warn("Bullet physics initialization failed. Falling back to Ammo.js:", bulletMessage);
-            logWarn("physics", "Bullet physics initialization failed; falling back to Ammo.js", toLogErrorData(bulletErr));
-
-            try {
-                await this.initializeAmmoPhysicsBackend();
-                this.available = true;
-                logInfo("physics", "physics backend initialized", {
-                    backend: "Ammo",
-                    fallback: true,
-                    simulationRateHz: this.simulationRateHz,
-                });
-            } catch (ammoErr: unknown) {
-                const ammoMessage = ammoErr instanceof Error ? ammoErr.message : String(ammoErr);
-                console.warn("Physics initialization failed:", ammoMessage);
-                logError("physics", "physics initialization failed", {
-                    bullet: toLogErrorData(bulletErr).error,
-                    ammo: toLogErrorData(ammoErr).error,
-                });
-                this.available = false;
-                this.enabled = false;
-                this.backend = "none";
-                this.syncScenePhysicsSimulationState(false);
-                this.onStateChanged?.(false, false);
-                this.onError?.(`Physics init warning: Bullet=${bulletMessage}; Ammo=${ammoMessage}`);
-                return false;
-            }
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.warn("Bullet physics initialization failed:", message);
+            logError("physics", "Bullet physics initialization failed; physics disabled", toLogErrorData(err));
+            this.available = false;
+            this.enabled = false;
+            this.backend = "none";
+            this.syncScenePhysicsSimulationState(false);
+            this.onStateChanged?.(false, false);
+            this.onError?.(`Physics init warning: Bullet=${message}`);
+            return false;
         }
 
         this.available = true;
@@ -137,6 +135,7 @@ export class PhysicsRuntimeController {
         this.backend = "wasm-mpr";
         this.available = true;
         this.enabled = true;
+        this.installWasmPhysicsDeltaClamp(runtime);
         this.applySimulationRate();
         this.applyGravity();
         this.onStateChanged?.(this.enabled, true);
@@ -157,7 +156,7 @@ export class PhysicsRuntimeController {
         return this.available && this.enabled;
     }
 
-    public setEnabled(enabled: boolean, simulationActive: boolean): boolean {
+    public setEnabled(enabled: boolean, simulationActive: boolean, playbackActive = false): boolean {
         if (!this.available) {
             this.enabled = false;
             this.syncScenePhysicsSimulationState(simulationActive);
@@ -166,7 +165,7 @@ export class PhysicsRuntimeController {
         }
 
         this.enabled = enabled;
-        this.syncBulletEvaluationTypeForPlayback();
+        this.syncBulletEvaluationTypeForPlayback(playbackActive);
         this.syncScenePhysicsSimulationState(simulationActive);
         this.onStateChanged?.(this.enabled, true);
         return this.enabled;
@@ -211,8 +210,15 @@ export class PhysicsRuntimeController {
         this.scene.physicsEnabled = this.getEnabled() && simulationActive;
     }
 
-    public syncBulletEvaluationTypeForPlayback(): void {
-        this.setBulletEvaluationType(PhysicsRuntimeEvaluationType.Immediate, "playback state");
+    public syncBulletEvaluationTypeForPlayback(playbackActive = false): void {
+        const useBuffered = USE_BUFFERED_EVALUATION_DURING_PLAYBACK
+            && playbackActive
+            && this.getEnabled()
+            && this.backend === "bullet-mpr";
+        this.setBulletEvaluationType(
+            useBuffered ? PhysicsRuntimeEvaluationType.Buffered : PhysicsRuntimeEvaluationType.Immediate,
+            playbackActive ? "playback active" : "playback inactive",
+        );
     }
 
     public syncBulletEvaluationTypeForSeek(): void {
@@ -239,6 +245,7 @@ export class PhysicsRuntimeController {
         }
         this.nextPerformanceLogMs = nowMs + 10_000;
         const physicsStepTiming = this.consumeStepTimingStats();
+        const physicsDeltaTiming = this.consumeDeltaTimingStats();
         logInfo("physics", "physics performance sample", {
             backend: this.getBackendLabel(),
             runtimeMode: context.runtimeMode,
@@ -254,6 +261,13 @@ export class PhysicsRuntimeController {
             physicsStepAvgMs: this.formatStepTimingValue(physicsStepTiming.avgMs),
             physicsStepMaxMs: this.formatStepTimingValue(physicsStepTiming.maxMs),
             physicsStepLastMs: this.formatStepTimingValue(physicsStepTiming.lastMs),
+            physicsFixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
+            physicsMaxSubSteps: PHYSICS_MAX_SUB_STEPS,
+            physicsDeltaSamples: physicsDeltaTiming.samples,
+            physicsDeltaRawMaxMs: this.formatStepTimingValue(physicsDeltaTiming.rawMaxMs),
+            physicsDeltaUsedMaxMs: this.formatStepTimingValue(physicsDeltaTiming.usedMaxMs),
+            physicsDeltaLastRawMs: this.formatStepTimingValue(physicsDeltaTiming.lastRawMs),
+            physicsDeltaLastUsedMs: this.formatStepTimingValue(physicsDeltaTiming.lastUsedMs),
             crossOriginIsolated: globalThis.crossOriginIsolated,
             sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
         });
@@ -289,7 +303,6 @@ export class PhysicsRuntimeController {
 
         this.disposeClassicResources();
         this.bulletPhysicsRuntime = runtime;
-        this.physicsPlugin = null;
         this.physicsRuntime = new MmdBulletPhysics(runtime);
         (this.runtime as unknown as { _physics: MmdBulletPhysics | null })._physics = this.physicsRuntime;
         this.backend = backend;
@@ -306,55 +319,17 @@ export class PhysicsRuntimeController {
         this.initializeBulletPhysicsBackendWithWasmInstance("bullet-spr", await this.loadSprWasmInstance());
     }
 
-    private async initializeAmmoPhysicsBackend(): Promise<void> {
-        const wasmResponse = await fetch(ammoWasmBinaryUrl);
-        if (!wasmResponse.ok) {
-            throw new Error(`Failed to fetch ammo wasm binary: ${wasmResponse.status} ${wasmResponse.statusText}`);
-        }
-        const wasmBinary = new Uint8Array(await wasmResponse.arrayBuffer());
-        const ammoInstance = await Ammo({
-            wasmBinary,
-            printErr: (message: unknown) => {
-                const text = String(message);
-                if (
-                    text.includes("wasm streaming compile failed") ||
-                    text.includes("falling back to ArrayBuffer instantiation")
-                ) {
-                    return;
-                }
-                console.warn(text);
-            },
-        });
-        const plugin = new MmdAmmoJSPlugin(true, ammoInstance);
-        this.installAmmoStepTiming(plugin);
-        this.disposeClassicResources();
-        this.physicsPlugin = plugin;
-        this.applySimulationRate();
-        this.scene.enablePhysics(new Vector3(0, -this.gravityAcceleration, 0), plugin);
-
-        this.bulletPhysicsRuntime = null;
-        this.physicsRuntime = new MmdAmmoPhysics(this.scene);
-        (this.runtime as unknown as { _physics: MmdAmmoPhysics | null })._physics = this.physicsRuntime;
-        this.backend = "ammo";
-    }
-
     private applySimulationRate(): void {
-        const fixedTimeStep = 1 / this.simulationRateHz;
-        const maxSubSteps = this.simulationRateHz;
         if (this.bulletPhysicsRuntime) {
-            this.bulletPhysicsRuntime.fixedTimeStep = fixedTimeStep;
-            this.bulletPhysicsRuntime.maxSubSteps = maxSubSteps;
+            this.bulletPhysicsRuntime.fixedTimeStep = PHYSICS_FIXED_TIME_STEP_SECONDS;
+            this.bulletPhysicsRuntime.maxSubSteps = PHYSICS_MAX_SUB_STEPS;
         }
         if (this.runtime instanceof MmdWasmRuntime) {
             const wasmPhysics = this.runtime.physics;
             if (wasmPhysics) {
-                wasmPhysics.fixedTimeStep = fixedTimeStep;
-                wasmPhysics.maxSubSteps = maxSubSteps;
+                wasmPhysics.fixedTimeStep = PHYSICS_FIXED_TIME_STEP_SECONDS;
+                wasmPhysics.maxSubSteps = PHYSICS_MAX_SUB_STEPS;
             }
-        }
-        if (this.physicsPlugin) {
-            this.physicsPlugin.setMaxSteps(maxSubSteps);
-            this.physicsPlugin.setFixedTimeStep(fixedTimeStep);
         }
     }
 
@@ -374,39 +349,58 @@ export class PhysicsRuntimeController {
             this.runtime.physics?.setGravity(gravity);
             return;
         }
-
-        const physicsEngine = this.scene.getPhysicsEngine();
-        if (!physicsEngine) return;
-        physicsEngine.setGravity(gravity);
     }
 
     private installBulletStepTiming(runtime: MultiPhysicsRuntime): void {
         const originalAfterAnimations = runtime.afterAnimations.bind(runtime);
         runtime.afterAnimations = (deltaTime: number): void => {
+            const delta = this.normalizePhysicsDeltaMs(deltaTime);
             const startMs = performance.now();
             try {
-                originalAfterAnimations(deltaTime);
+                originalAfterAnimations(delta.usedMs);
             } finally {
                 this.recordStepDuration(performance.now() - startMs);
             }
         };
     }
 
-    private installAmmoStepTiming(plugin: MmdAmmoJSPlugin): void {
-        const pluginWithStep = plugin as unknown as {
-            _stepSimulation?: (timeStep?: number, maxSteps?: number, fixedTimeStep?: number) => void;
+    private installWasmPhysicsDeltaClamp(runtime: MmdWasmRuntime): void {
+        const runtimeWithClock = runtime as unknown as {
+            _physicsClock?: {
+                getDeltaTime: () => number | undefined;
+            };
         };
-        if (typeof pluginWithStep._stepSimulation !== "function") return;
+        const originalClock = runtimeWithClock._physicsClock;
+        if (!originalClock || this.wrappedWasmPhysicsClocks.has(originalClock)) return;
 
-        const originalStepSimulation = pluginWithStep._stepSimulation.bind(plugin);
-        pluginWithStep._stepSimulation = (timeStep = 1 / 60, maxSteps = 10, fixedTimeStep = 1 / 60): void => {
-            const startMs = performance.now();
-            try {
-                originalStepSimulation(timeStep, maxSteps, fixedTimeStep);
-            } finally {
-                this.recordStepDuration(performance.now() - startMs);
-            }
+        const wrappedClock = {
+            getDeltaTime: (): number | undefined => {
+                const deltaSeconds = originalClock.getDeltaTime();
+                if (deltaSeconds === undefined) return undefined;
+
+                const delta = this.normalizePhysicsDeltaMs(deltaSeconds * 1000);
+                return delta.usedMs / 1000;
+            },
         };
+        this.wrappedWasmPhysicsClocks.add(wrappedClock);
+        runtimeWithClock._physicsClock = wrappedClock;
+    }
+
+    private normalizePhysicsDeltaMs(deltaTimeMs: number): { rawMs: number; usedMs: number } {
+        const rawMs = Number.isFinite(deltaTimeMs) && deltaTimeMs > 0
+            ? deltaTimeMs
+            : DEFAULT_PHYSICS_DELTA_MS;
+        const usedMs = rawMs;
+        this.recordPhysicsDelta(rawMs, usedMs);
+        return { rawMs, usedMs };
+    }
+
+    private recordPhysicsDelta(rawMs: number, usedMs: number): void {
+        this.deltaTimingStats.samples += 1;
+        this.deltaTimingStats.rawMaxMs = Math.max(this.deltaTimingStats.rawMaxMs, rawMs);
+        this.deltaTimingStats.usedMaxMs = Math.max(this.deltaTimingStats.usedMaxMs, usedMs);
+        this.deltaTimingStats.lastRawMs = rawMs;
+        this.deltaTimingStats.lastUsedMs = usedMs;
     }
 
     private recordStepDuration(durationMs: number): void {
@@ -437,6 +431,18 @@ export class PhysicsRuntimeController {
             maxMs: samples > 0 ? maxMs : null,
             lastMs,
         };
+    }
+
+    private consumeDeltaTimingStats(): PhysicsDeltaTimingStats {
+        const stats = this.deltaTimingStats;
+        this.deltaTimingStats = {
+            samples: 0,
+            rawMaxMs: 0,
+            usedMaxMs: 0,
+            lastRawMs: stats.lastRawMs,
+            lastUsedMs: stats.lastUsedMs,
+        };
+        return stats;
     }
 
     private formatStepTimingValue(valueMs: number | null): number | null {
@@ -476,9 +482,8 @@ export class PhysicsRuntimeController {
             this.scene.disablePhysicsEngine();
         }
         if (!(this.runtime instanceof MmdWasmRuntime)) {
-            (this.runtime as unknown as { _physics: MmdAmmoPhysics | MmdBulletPhysics | null })._physics = null;
+            (this.runtime as unknown as { _physics: MmdBulletPhysics | null })._physics = null;
         }
-        this.physicsPlugin = null;
         this.physicsRuntime = null;
         if (this.backend !== "wasm-mpr") {
             this.backend = "none";
@@ -486,10 +491,8 @@ export class PhysicsRuntimeController {
     }
 
     public static normalizeSimulationRate(value: number): PhysicsSimulationRateHz {
-        if (value === 30 || value === 120) {
-            return value;
-        }
-        return 60;
+        void value;
+        return PHYSICS_SIMULATION_RATE_HZ;
     }
 
     public static getBackendLabelForBackend(backend: PhysicsBackend): PhysicsBackendLabel {
@@ -501,9 +504,6 @@ export class PhysicsRuntimeController {
         }
         if (backend === "wasm-mpr") {
             return "WASM MPR";
-        }
-        if (backend === "ammo") {
-            return "Ammo";
         }
         return "Off";
     }

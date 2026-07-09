@@ -4,7 +4,17 @@ import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
 import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
 import type { MmdWasmModel } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmModel";
+import { logDebugIfEnabled } from "../app-logger";
 import type { WebmPhysicsModelSnapshot, WebmPhysicsRigidBodySnapshot } from "../types";
+
+const MMD_CONSTRAINT_SOLVER_PARAMETER_VALUE = 0.25;
+const MMD_CONSTRAINT_AXIS_COUNT = 6;
+const MMD_CONSTRAINT_PARAMETER_IDS = [
+    1, // ConstraintERP
+    2, // ConstraintStopERP
+    3, // ConstraintCFM
+    4, // ConstraintStopCFM
+] as const;
 
 export type PhysicsRuntimeModel = MmdModel | MmdWasmModel;
 export type PhysicsMmdRuntime = MmdRuntime | MmdWasmRuntime;
@@ -40,6 +50,7 @@ type ClassicPhysicsNodeLike = {
 type ClassicPhysicsModelLike = {
     _nodes?: Array<ClassicPhysicsNodeLike | null>;
     _bodies?: Array<PhysicsBodyLike | null>;
+    _constraints?: Array<PhysicsConstraintParamContainerLike | null>;
     commitBodyStates?: (states: Uint8Array) => void;
     syncBones?: () => void;
 };
@@ -60,6 +71,7 @@ type BulletPhysicsBundleLike = {
 
 type BulletPhysicsModelLike = {
     _bundle?: BulletPhysicsBundleLike | null;
+    _constraints?: Array<PhysicsConstraintParamTargetLike | null>;
     _rigidBodyIndexMap?: Int32Array | number[];
     commitBodyStates?: (states: Uint8Array) => void;
     syncBones?: () => void;
@@ -67,6 +79,14 @@ type BulletPhysicsModelLike = {
 
 type PhysicsModelInternal = {
     _physicsModel?: ClassicPhysicsModelLike | BulletPhysicsModelLike | null;
+};
+
+type PhysicsConstraintParamTargetLike = {
+    setParam?: (num: number, value: number, axis: number) => void;
+};
+
+type PhysicsConstraintParamContainerLike = PhysicsConstraintParamTargetLike & {
+    physicsJoint?: PhysicsConstraintParamTargetLike | null;
 };
 
 type PhysicsRuntimeInitializationSetLike = {
@@ -83,10 +103,19 @@ type PhysicsRuntimeWithInitializationQueues = {
     _physicsRuntime?: PhysicsRuntimeInitializerLike | null;
 };
 
+export type PhysicsRigidBodyDiagnosticEntry = {
+    name: string;
+    boneIndex: number;
+    shapeType: number;
+    physicsMode: number;
+};
+
 export type PhysicsModelControllerOptions = {
     getRuntime: () => PhysicsMmdRuntime;
     getPhysicsEnabled: () => boolean;
     isSimulationActive: () => boolean;
+    getPhysicsBackendLabel: () => string;
+    getPhysicsEvaluationTypeLabel: () => string;
     syncCpuSkinnedMorphSourceBuffers: (model: PhysicsRuntimeModel) => void;
     addRuntimeDiagnostic: (message: string) => void;
 };
@@ -95,14 +124,19 @@ export class PhysicsModelController {
     private readonly getRuntime: () => PhysicsMmdRuntime;
     private readonly getPhysicsEnabled: () => boolean;
     private readonly isSimulationActive: () => boolean;
+    private readonly getPhysicsBackendLabel: () => string;
+    private readonly getPhysicsEvaluationTypeLabel: () => string;
     private readonly syncCpuSkinnedMorphSourceBuffers: (model: PhysicsRuntimeModel) => void;
     private readonly addRuntimeDiagnostic: (message: string) => void;
     private readonly afterPhysicsPatchedModels = new WeakSet<object>();
+    private readonly solverParameterConfiguredPhysicsModels = new WeakSet<object>();
 
     constructor(options: PhysicsModelControllerOptions) {
         this.getRuntime = options.getRuntime;
         this.getPhysicsEnabled = options.getPhysicsEnabled;
         this.isSimulationActive = options.isSimulationActive;
+        this.getPhysicsBackendLabel = options.getPhysicsBackendLabel;
+        this.getPhysicsEvaluationTypeLabel = options.getPhysicsEvaluationTypeLabel;
         this.syncCpuSkinnedMorphSourceBuffers = options.syncCpuSkinnedMorphSourceBuffers;
         this.addRuntimeDiagnostic = options.addRuntimeDiagnostic;
     }
@@ -114,7 +148,85 @@ export class PhysicsModelController {
         model.rigidBodyStates.fill(shouldSimulatePhysics ? 1 : 0);
         if (shouldSimulatePhysics) {
             this.getRuntime().initializeMmdModelPhysics(model as never);
+            this.applyMmdConstraintSolverParameters(model);
         }
+    }
+
+    public applyMmdConstraintSolverParameters(model: PhysicsRuntimeModel): void {
+        const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
+        if (!physicsModel || typeof physicsModel !== "object") return;
+
+        const physicsModelObject = physicsModel as object;
+        if (this.solverParameterConfiguredPhysicsModels.has(physicsModelObject)) return;
+
+        const targets = PhysicsModelController.collectConstraintParamTargets(physicsModel);
+        if (targets.length === 0) return;
+
+        let appliedCount = 0;
+        for (const target of targets) {
+            if (PhysicsModelController.applyMmdConstraintSolverParametersToTarget(target)) {
+                appliedCount += 1;
+            }
+        }
+
+        if (appliedCount === 0) return;
+
+        this.solverParameterConfiguredPhysicsModels.add(physicsModelObject);
+        logDebugIfEnabled("physics", "physics", "MMD constraint solver parameters applied", {
+            backend: this.getPhysicsBackendLabel(),
+            evaluationType: this.getPhysicsEvaluationTypeLabel(),
+            constraintCount: appliedCount,
+            value: MMD_CONSTRAINT_SOLVER_PARAMETER_VALUE,
+            params: ["ERP", "StopERP", "CFM", "StopCFM"],
+            axisCount: MMD_CONSTRAINT_AXIS_COUNT,
+        });
+    }
+
+    public logPhysicsStateApplication(
+        model: PhysicsRuntimeModel,
+        modelName: string,
+        rigidBodies: readonly PhysicsRigidBodyDiagnosticEntry[],
+        reason: string,
+    ): void {
+        if (model.rigidBodyStates.length === 0) return;
+
+        const stateCounts = PhysicsModelController.countRigidBodyStates(model.rigidBodyStates);
+        logDebugIfEnabled("physics", "physics", "physics state applied to model", {
+            reason,
+            modelName,
+            rigidBodyCount: model.rigidBodyStates.length,
+            stateOnCount: stateCounts.on,
+            stateOffCount: stateCounts.off,
+            physicsEnabled: this.getPhysicsEnabled(),
+            simulationActive: this.isSimulationActive(),
+            backend: this.getPhysicsBackendLabel(),
+            evaluationType: this.getPhysicsEvaluationTypeLabel(),
+            hasPhysicsModel: PhysicsModelController.hasPhysicsModel(model, model.rigidBodyStates.length),
+            rigidBodyModes: PhysicsModelController.countRigidBodyModes(rigidBodies),
+            diagnosticRigidBodies: PhysicsModelController.pickDiagnosticRigidBodies(rigidBodies),
+        });
+    }
+
+    public logModelPhysicsMetadata(
+        model: PhysicsRuntimeModel,
+        modelName: string,
+        rigidBodies: readonly PhysicsRigidBodyDiagnosticEntry[],
+        reason: string,
+    ): void {
+        if (rigidBodies.length === 0 && model.rigidBodyStates.length === 0) return;
+
+        logDebugIfEnabled("physics", "physics", "model physics metadata", {
+            reason,
+            modelName,
+            rigidBodyCount: rigidBodies.length,
+            runtimeRigidBodyStateCount: model.rigidBodyStates.length,
+            backend: this.getPhysicsBackendLabel(),
+            evaluationType: this.getPhysicsEvaluationTypeLabel(),
+            hasPhysicsModel: PhysicsModelController.hasPhysicsModel(model, model.rigidBodyStates.length),
+            rigidBodyModes: PhysicsModelController.countRigidBodyModes(rigidBodies),
+            shapeTypes: PhysicsModelController.countRigidBodyShapeTypes(rigidBodies),
+            diagnosticRigidBodies: PhysicsModelController.pickDiagnosticRigidBodies(rigidBodies),
+        });
     }
 
     public patchModelAfterPhysicsForPausedState(model: PhysicsRuntimeModel): void {
@@ -337,6 +449,116 @@ export class PhysicsModelController {
     public static hasPhysicsModel(model: PhysicsRuntimeModel, rigidBodyCount: number): boolean {
         const modelInternal = model as unknown as { _physicsModel?: unknown } | null;
         return Boolean(modelInternal?._physicsModel && rigidBodyCount > 0);
+    }
+
+    private static collectConstraintParamTargets(
+        physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike,
+    ): PhysicsConstraintParamTargetLike[] {
+        const targets: PhysicsConstraintParamTargetLike[] = [];
+
+        const constraints = physicsModel._constraints;
+        if (Array.isArray(constraints)) {
+            for (const constraint of constraints) {
+                PhysicsModelController.appendConstraintParamTarget(targets, constraint);
+            }
+        }
+
+        return targets;
+    }
+
+    private static appendConstraintParamTarget(
+        targets: PhysicsConstraintParamTargetLike[],
+        constraint: PhysicsConstraintParamContainerLike | null | undefined,
+    ): void {
+        if (!constraint) return;
+        if (typeof constraint.setParam === "function") {
+            targets.push(constraint);
+            return;
+        }
+        if (constraint.physicsJoint && typeof constraint.physicsJoint.setParam === "function") {
+            targets.push(constraint.physicsJoint);
+        }
+    }
+
+    private static applyMmdConstraintSolverParametersToTarget(target: PhysicsConstraintParamTargetLike): boolean {
+        if (typeof target.setParam !== "function") return false;
+
+        for (let axis = 0; axis < MMD_CONSTRAINT_AXIS_COUNT; axis += 1) {
+            for (const paramId of MMD_CONSTRAINT_PARAMETER_IDS) {
+                target.setParam(paramId, MMD_CONSTRAINT_SOLVER_PARAMETER_VALUE, axis);
+            }
+        }
+        return true;
+    }
+
+    private static countRigidBodyStates(states: Uint8Array): { on: number; off: number } {
+        let on = 0;
+        let off = 0;
+        for (const state of states) {
+            if (state) on += 1;
+            else off += 1;
+        }
+        return { on, off };
+    }
+
+    private static countRigidBodyModes(
+        rigidBodies: readonly PhysicsRigidBodyDiagnosticEntry[],
+    ): Record<string, number> {
+        const counts: Record<string, number> = {};
+        for (const rigidBody of rigidBodies) {
+            const key = String(rigidBody.physicsMode);
+            counts[key] = (counts[key] ?? 0) + 1;
+        }
+        return counts;
+    }
+
+    private static countRigidBodyShapeTypes(
+        rigidBodies: readonly PhysicsRigidBodyDiagnosticEntry[],
+    ): Record<string, number> {
+        const counts: Record<string, number> = {};
+        for (const rigidBody of rigidBodies) {
+            const key = String(rigidBody.shapeType);
+            counts[key] = (counts[key] ?? 0) + 1;
+        }
+        return counts;
+    }
+
+    private static pickDiagnosticRigidBodies(
+        rigidBodies: readonly PhysicsRigidBodyDiagnosticEntry[],
+    ): Array<{ index: number; name: string; boneIndex: number; physicsMode: number; shapeType: number; category: string }> {
+        const picked: Array<{
+            index: number;
+            name: string;
+            boneIndex: number;
+            physicsMode: number;
+            shapeType: number;
+            category: string;
+        }> = [];
+        for (let index = 0; index < rigidBodies.length; index += 1) {
+            const rigidBody = rigidBodies[index];
+            const category = PhysicsModelController.classifyRigidBodyName(rigidBody.name);
+            if (category === "other" && picked.length >= 12) continue;
+            if (category !== "other" || picked.length < 6) {
+                picked.push({
+                    index,
+                    name: rigidBody.name,
+                    boneIndex: rigidBody.boneIndex,
+                    physicsMode: rigidBody.physicsMode,
+                    shapeType: rigidBody.shapeType,
+                    category,
+                });
+            }
+            if (picked.length >= 24) break;
+        }
+        return picked;
+    }
+
+    private static classifyRigidBodyName(name: string): string {
+        const normalized = name.toLowerCase();
+        if (/髪|前髪|後髪|横髪|毛|hair|bang|tail|braid|pony/.test(normalized)) return "hair";
+        if (/スカート|袖|裾|布|cloth|skirt|sleeve|ribbon/.test(normalized)) return "cloth";
+        if (/胸|乳|breast/.test(normalized)) return "soft-body";
+        return "other";
     }
 
     public static captureWebmPhysicsModelSnapshot(

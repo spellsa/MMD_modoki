@@ -340,6 +340,7 @@ import {
 } from "./physics/physics-runtime-controller";
 import {
     PhysicsModelController,
+    type PhysicsRigidBodyDiagnosticEntry,
     type PhysicsRuntimeModel,
 } from "./physics/physics-model-controller";
 import { applyMmdOutlineTaperingShader } from "./render/mmd-outline-tuning";
@@ -727,7 +728,7 @@ type SceneModelRigidBodyEntry = {
     shapeType: number;
     shapeSize: [number, number, number];
     physicsMode: number;
-};
+} & PhysicsRigidBodyDiagnosticEntry;
 
 type SceneModelEntry = {
     mesh: MmdMesh;
@@ -4126,14 +4127,18 @@ ${beforeFogAppendBlock}
 
     public setExternalPlaybackSimulationEnabled(enabled: boolean): boolean {
         this.externalPlaybackSimulationEnabled = Boolean(enabled);
-        this.physicsController.syncBulletEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback(this._isPlaying);
         this.applyPhysicsStateToAllModels();
         this.syncScenePhysicsSimulationState();
         return this.externalPlaybackSimulationEnabled;
     }
 
     public setPhysicsEnabled(enabled: boolean): boolean {
-        const nextEnabled = this.physicsController.setEnabled(enabled, enabled || this.externalPlaybackSimulationEnabled);
+        const nextEnabled = this.physicsController.setEnabled(
+            enabled,
+            enabled || this.externalPlaybackSimulationEnabled,
+            this._isPlaying,
+        );
         this.applyPhysicsStateToAllModels();
         return nextEnabled;
     }
@@ -4479,6 +4484,8 @@ ${beforeFogAppendBlock}
             getRuntime: () => this.mmdRuntime,
             getPhysicsEnabled: () => this.getPhysicsEnabled(),
             isSimulationActive: () => this.isPhysicsSimulationActive(),
+            getPhysicsBackendLabel: () => this.getPhysicsBackendLabel(),
+            getPhysicsEvaluationTypeLabel: () => this.physicsController.getEvaluationTypeLabel(),
             syncCpuSkinnedMorphSourceBuffers: (model) => this.syncCpuSkinnedMorphSourceBuffers(model),
             addRuntimeDiagnostic: (message) => this.addRuntimeDiagnostic(message),
         });
@@ -5314,8 +5321,17 @@ ${beforeFogAppendBlock}
         return `${value.x.toFixed(3)},${value.y.toFixed(3)},${value.z.toFixed(3)}`;
     }
 
-    private applyPhysicsStateToModel(model: RuntimeModel): void {
+    private applyPhysicsStateToModel(model: RuntimeModel, reason = "direct"): void {
         this.physicsModelController.applyPhysicsStateToModel(model);
+        const sceneModel = this.sceneModels.find((entry) => entry.model === model);
+        if (sceneModel) {
+            this.physicsModelController.logPhysicsStateApplication(
+                model,
+                sceneModel.info.name,
+                sceneModel.rigidBodies,
+                reason,
+            );
+        }
     }
 
     private patchModelAfterPhysicsForPausedState(model: RuntimeModel): void {
@@ -5395,7 +5411,7 @@ ${beforeFogAppendBlock}
 
     private applyPhysicsStateToAllModels(): void {
         for (const sceneModel of this.sceneModels) {
-            this.applyPhysicsStateToModel(sceneModel.model);
+            this.applyPhysicsStateToModel(sceneModel.model, "all-models");
         }
     }
 
@@ -6293,7 +6309,7 @@ ${beforeFogAppendBlock}
             this.applyPhysicsStateToAllModels();
         }
         this.syncScenePhysicsSimulationState();
-        this.physicsController.syncBulletEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback(true);
         this.mmdRuntime.playAnimation();
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
@@ -6302,7 +6318,7 @@ ${beforeFogAppendBlock}
     pause(): void {
         this._isPlaying = false;
         this.manualPlaybackWithoutAudio = false;
-        this.physicsController.syncBulletEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback(false);
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
@@ -6314,7 +6330,7 @@ ${beforeFogAppendBlock}
         this._isPlaying = false;
         this.manualPlaybackWithoutAudio = false;
         this.manualPlaybackFrameCursor = 0;
-        this.physicsController.syncBulletEvaluationTypeForPlayback();
+        this.physicsController.syncBulletEvaluationTypeForPlayback(false);
         this.syncBoneVisualizerVisibility();
         this.updateBoneGizmoTarget();
         this.syncScenePhysicsSimulationState();
@@ -6342,6 +6358,9 @@ ${beforeFogAppendBlock}
         }
         if (this.manualPlaybackWithoutAudio) {
             this.manualPlaybackFrameCursor = this._currentFrame;
+        }
+        if (this._isPlaying) {
+            this.physicsController.syncBulletEvaluationTypeForPlayback(true);
         }
         this.syncBackgroundVideoFrame(true);
         this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
