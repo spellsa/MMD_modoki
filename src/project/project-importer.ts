@@ -602,7 +602,7 @@ export async function importProjectState(
         : 1024;
     host.mirroringFloorEnabled = typeof data.viewport.mirroringFloorEnabled === "boolean"
         ? data.viewport.mirroringFloorEnabled
-        : true;
+        : false;
     if (typeof data.viewport.backgroundVideoPath === "string" && data.viewport.backgroundVideoPath.trim().length > 0) {
         try {
             await host.setBackgroundVideoFromPath(data.viewport.backgroundVideoPath);

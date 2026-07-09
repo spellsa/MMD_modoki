@@ -36,6 +36,10 @@ export type TimelineSelectionChange = {
     selectedBoneTracks: TimelineBoneTrackSelectionRef[];
 };
 
+export type TimelineFrameUpdateOptions = {
+    lightweight?: boolean;
+};
+
 // ── Layout ─────────────────────────────────────────────────────────
 const RULER_H = 20;
 const ROW_H = 18;
@@ -54,6 +58,8 @@ const CURRENT_FRAME_GLOW = "rgba(255,79,163,0.5)";
 const UI_FONT_FAMILY = "'Noto Sans CJK OTC', 'Noto Sans CJK JP', 'Segoe UI Variable', 'Segoe UI', 'Yu Gothic UI', 'Meiryo UI', sans-serif";
 const SELECTION_KEY_SEPARATOR = "\u001f";
 const RECT_SELECTION_THRESHOLD_PX = 4;
+const FRAME_PAN_BUFFER_PX = 192;
+const LIGHTWEIGHT_FRAME_REDRAW_PX = 144;
 const MULTI_BONE_TRACK_ROW_BG = "rgba(57,197,187,0.12)";
 const MULTI_BONE_LABEL_BG = "rgba(57,197,187,0.16)";
 const EMPTY_FRAMES = new Uint32Array(0);
@@ -175,6 +181,7 @@ export class Timeline {
     private labelCtx: CanvasRenderingContext2D;
     private waveformCanvas: HTMLCanvasElement | null;
     private waveformCtx: CanvasRenderingContext2D | null;
+    private playheadTrackLine: HTMLDivElement;
     private labelsEl: HTMLElement;
     private trackScrollEl: HTMLElement;
 
@@ -204,6 +211,8 @@ export class Timeline {
     } | null = null;
     private waveformPeaks: Float32Array | null = null;
     private rotationOverlay: TimelineRotationOverlay | null = null;
+    private staticRenderViewOffset = 0;
+    private waveformRenderViewOffset = 0;
 
     // RAF
     private staticRaf: number | null = null;
@@ -236,6 +245,7 @@ export class Timeline {
         this.overlayCtx = getCanvasRenderingContext2D(this.overlayCanvas, "timeline-overlay-canvas");
         this.labelCtx = getCanvasRenderingContext2D(this.labelCanvas, labelCanvasId);
         this.waveformCtx = this.waveformCanvas?.getContext("2d") ?? null;
+        this.playheadTrackLine = this.createPlayheadTrackLine();
 
         this.setupEvents();
         this.resize();
@@ -296,15 +306,35 @@ export class Timeline {
         return Math.max(12, Math.round((trackWidth - labelWidth) / 2));
     }
 
+    private getBufferedPlayheadX(): number {
+        return this.getPlayheadX() + FRAME_PAN_BUFFER_PX;
+    }
+
     // ── Public API ───────────────────────────────────────────────────
 
-    setCurrentFrame(frame: number): void {
+    setCurrentFrame(frame: number, options: TimelineFrameUpdateOptions = {}): void {
         const normalized = Math.max(0, Math.floor(frame));
         if (this.currentFrame === normalized) return;
         this.currentFrame = normalized;
         this.viewOffset = normalized * PX_PER_F;
         this.scheduleOverlay(); // ruler + playhead
+        if (options.lightweight) {
+            this.applyFrameCanvasPan();
+            if (Math.abs(this.viewOffset - this.staticRenderViewOffset) >= LIGHTWEIGHT_FRAME_REDRAW_PX) {
+                this.scheduleStatic();
+            }
+            if (Math.abs(this.viewOffset - this.waveformRenderViewOffset) >= LIGHTWEIGHT_FRAME_REDRAW_PX) {
+                this.scheduleWaveform();
+            }
+            return;
+        }
         this.scheduleStatic();  // keyframe dots scroll with playhead
+        this.scheduleWaveform();
+    }
+
+    refreshFrameContent(): void {
+        this.scheduleStatic();
+        this.scheduleOverlay();
         this.scheduleWaveform();
     }
 
@@ -474,13 +504,15 @@ export class Timeline {
         const trackRowsH = this.getTrackRowsHeight();
         const trackContentH = trackRowsH + RULER_H;
         const tw = this.trackScrollEl.clientWidth || 400;
+        const bufferedTrackWidth = tw + FRAME_PAN_BUFFER_PX * 2;
 
         // Static canvas (track rows + bottom spacer to match the label column height)
-        this.staticCanvas.width = tw * dpr;
+        this.staticCanvas.width = bufferedTrackWidth * dpr;
         this.staticCanvas.height = trackContentH * dpr;
-        this.staticCanvas.style.width = `${tw}px`;
+        this.staticCanvas.style.width = `${bufferedTrackWidth}px`;
         this.staticCanvas.style.height = `${trackContentH}px`;
         this.staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.setStaticCanvasTransform();
 
         // Overlay canvas (ruler, RULER_H tall, full width, above scroll)
         this.overlayCanvas.width = tw * dpr;
@@ -499,13 +531,15 @@ export class Timeline {
         this.labelCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
         if (this.waveformCanvas && this.waveformCtx) {
-            this.waveformCanvas.width = tw * dpr;
+            this.waveformCanvas.width = bufferedTrackWidth * dpr;
             this.waveformCanvas.height = WAVEFORM_H * dpr;
-            this.waveformCanvas.style.width = `${tw}px`;
+            this.waveformCanvas.style.width = `${bufferedTrackWidth}px`;
             this.waveformCanvas.style.height = `${WAVEFORM_H}px`;
             this.waveformCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            this.setWaveformCanvasTransform();
         }
 
+        this.positionPlayheadTrackLine();
         this.scheduleStatic();
         this.scheduleOverlay();
         this.scheduleLabel();
@@ -547,9 +581,11 @@ export class Timeline {
 
     private drawStatic(): void {
         const ctx = this.staticCtx;
+        this.staticRenderViewOffset = this.viewOffset;
+        this.setStaticCanvasTransform();
         const w = this.staticCanvas.width / (window.devicePixelRatio || 1);
         const h = this.staticCanvas.height / (window.devicePixelRatio || 1);
-        const playheadX = this.getPlayheadX();
+        const playheadX = this.getBufferedPlayheadX();
 
         ctx.fillStyle = "#12121a";
         ctx.fillRect(0, 0, w, h);
@@ -651,17 +687,6 @@ export class Timeline {
             ctx.fillRect(sx, 0, 1, h);
         }
 
-        // Playhead continuation line (into track area)
-        ctx.save();
-        ctx.shadowColor = CURRENT_FRAME_GLOW;
-        ctx.shadowBlur = 6;
-        ctx.strokeStyle = CURRENT_FRAME_GLOW;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(playheadX, 0);
-        ctx.lineTo(playheadX, h);
-        ctx.stroke();
-        ctx.restore();
     }
 
     // ── Overlay layer: ruler + playhead diamond ──────────────────────
@@ -724,10 +749,12 @@ export class Timeline {
         if (!this.waveformCanvas || !this.waveformCtx) return;
 
         const ctx = this.waveformCtx;
+        this.waveformRenderViewOffset = this.viewOffset;
+        this.setWaveformCanvasTransform();
         const w = this.waveformCanvas.width / (window.devicePixelRatio || 1);
         const h = this.waveformCanvas.height / (window.devicePixelRatio || 1);
         const midY = h / 2;
-        const playheadX = this.getPlayheadX();
+        const playheadX = this.getBufferedPlayheadX();
 
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = "#0c0c14";
@@ -770,18 +797,46 @@ export class Timeline {
             ctx.fillText("Waveform", 8, midY);
         }
 
-        ctx.save();
-        ctx.shadowColor = CURRENT_FRAME_GLOW;
-        ctx.shadowBlur = 6;
-        ctx.strokeStyle = CURRENT_FRAME_GLOW;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(playheadX, 0);
-        ctx.lineTo(playheadX, h);
-        ctx.stroke();
-        ctx.restore();
-
         this.drawRectangleSelection(ctx);
+    }
+
+    private applyFrameCanvasPan(): void {
+        const staticDelta = this.staticRenderViewOffset - this.viewOffset;
+        this.setStaticCanvasTransform(staticDelta);
+
+        if (!this.waveformCanvas) return;
+        const waveformDelta = this.waveformRenderViewOffset - this.viewOffset;
+        this.setWaveformCanvasTransform(waveformDelta);
+    }
+
+    private setStaticCanvasTransform(deltaX = 0): void {
+        const x = Math.round(deltaX - FRAME_PAN_BUFFER_PX);
+        this.staticCanvas.style.transform = `translateX(${x}px)`;
+    }
+
+    private setWaveformCanvasTransform(deltaX = 0): void {
+        if (!this.waveformCanvas) return;
+        const x = Math.round(deltaX - FRAME_PAN_BUFFER_PX);
+        this.waveformCanvas.style.transform = `translateX(${x}px)`;
+    }
+
+    private createPlayheadTrackLine(): HTMLDivElement {
+        const line = document.createElement("div");
+        line.className = "timeline-playhead-track-line";
+        line.style.position = "absolute";
+        line.style.top = `${RULER_H}px`;
+        line.style.bottom = "0";
+        line.style.width = "1px";
+        line.style.pointerEvents = "none";
+        line.style.zIndex = "4";
+        line.style.background = CURRENT_FRAME_GLOW;
+        line.style.boxShadow = `0 0 6px ${CURRENT_FRAME_GLOW}`;
+        this.trackScrollEl.parentElement?.appendChild(line);
+        return line;
+    }
+
+    private positionPlayheadTrackLine(): void {
+        this.playheadTrackLine.style.left = `${this.getPlayheadX()}px`;
     }
 
     // ── Label column ─────────────────────────────────────────────────
@@ -974,7 +1029,7 @@ export class Timeline {
         const localY = e.clientY - rect.top;
         if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) return;
 
-        const frame = Math.max(0, Math.round(this.frameFromCanvasX(localX)));
+        const frame = Math.max(0, Math.round(this.frameFromRulerCanvasX(localX)));
         this.selectAllKeysAtFrame(frame);
     }
 
@@ -1070,7 +1125,7 @@ export class Timeline {
         const lastRow = this.getRowIndexAtOffset(bounds.bottom, true);
         if (firstRow < 0 || lastRow < 0) return [];
 
-        const playheadX = this.getPlayheadX();
+        const playheadX = this.getBufferedPlayheadX();
         const leftFrame = this.frameFromCanvasX(bounds.left);
         const rightFrame = this.frameFromCanvasX(bounds.right);
         const minFrame = Math.max(0, Math.floor(Math.min(leftFrame, rightFrame)) - 1);
@@ -1110,6 +1165,10 @@ export class Timeline {
     }
 
     private frameFromCanvasX(x: number): number {
+        return this.currentFrame + (x - this.getBufferedPlayheadX()) / PX_PER_F;
+    }
+
+    private frameFromRulerCanvasX(x: number): number {
         return this.currentFrame + (x - this.getPlayheadX()) / PX_PER_F;
     }
 
@@ -1180,7 +1239,7 @@ export class Timeline {
     private pickFrameOnTrackFromX(track: KeyframeTrack, localX: number): number | null {
         if (track.frames.length === 0) return null;
 
-        const playheadX = this.getPlayheadX();
+        const playheadX = this.getBufferedPlayheadX();
         const frameAtCursor = this.currentFrame + (localX - playheadX) / PX_PER_F;
         const nearestFrame = Math.round(frameAtCursor);
         const idx = lowerBound(track.frames, nearestFrame);
@@ -1332,7 +1391,7 @@ export class Timeline {
     ): void {
         if (startIndex > endIndex) return;
 
-        const playheadX = this.getPlayheadX();
+        const playheadX = this.getBufferedPlayheadX();
         const topY = rowTop + ROTATION_OVERLAY_PAD_Y;
         const bottomY = topY + innerHeight;
         ctx.save();

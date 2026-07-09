@@ -1446,7 +1446,7 @@ ${beforeFogAppendBlock}
     private mirroringFloor: Mesh | null = null;
     private mirroringFloorMaterial: StandardMaterial | null = null;
     private mirroringFloorTexture: MirrorTexture | null = null;
-    private mirroringFloorEnabledValue = true;
+    private mirroringFloorEnabledValue = false;
     private mirroringFloorShapeValue: MirroringFloorShape = "square";
     private mirroringFloorReflectanceValue = 0.3;
     private mirroringFloorSizeValue = 100;

@@ -1453,9 +1453,19 @@ export class UIController {
             }
             this.totalFramesEl.textContent = String(total);
             this.timeline.setTotalFrames(total);
-            this.timeline.setCurrentFrame(frame);
+            this.timeline.setCurrentFrame(frame, { lightweight: this.mmdManager.isPlaying });
             const frameChanged = this.lastObservedFrame !== frame;
             this.lastObservedFrame = frame;
+
+            if (this.mmdManager.isPlaying) {
+                this.refreshPlaybackFrameBar();
+                const { endFrame } = this.getPlaybackFrameRange();
+                if (this.isPlaybackFrameStopEnabled() && frame >= endFrame) {
+                    this.stopAtPlaybackEnd(endFrame);
+                }
+                return;
+            }
+
             this.debugKeyframeFlow("frame update", {
                 frame,
                 total,
@@ -1486,7 +1496,7 @@ export class UIController {
             } else {
                 this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
             }
-            this.bottomPanel.syncSelectedMorphFrameSlidersFromRuntime(true);
+            this.syncMorphPanelFromRuntimeIfPlaybackIdle();
 
             this.cameraPanelController?.refresh(false, sourcePose?.distance ?? this.mmdManager.getCameraDistance());
             this.dofPanelController?.refreshAutoFocusReadout();
@@ -3281,6 +3291,19 @@ export class UIController {
             rotation: this.mmdManager.getCameraRotation(),
             distance: this.mmdManager.getCameraDistance(),
             fov: this.mmdManager.getCameraFov(),
+        });
+    }
+
+    private refreshPlaybackFrameBar(): void {
+        this.viewportSeekBarController?.refresh({
+            currentFrame: this.mmdManager.currentFrame,
+            totalFrames: this.mmdManager.totalFrames,
+            isPlaying: true,
+            playbackRange: {
+                ...this.getPlaybackFrameRange(),
+                frameStartEnabled: this.isPlaybackFrameStartEnabled(),
+                frameStopEnabled: this.isPlaybackFrameStopEnabled(),
+            },
         });
     }
 
@@ -9590,6 +9613,7 @@ export class UIController {
             this.mmdManager.seekTo(startFrame);
         }
         this.mmdManager.play();
+        this.updateSectionKeyframeButtons();
         this.btnPlay.style.display = "none";
         this.btnPause.style.display = "flex";
         if (updateStatus) this.setStatus("Playing", false);
@@ -9598,6 +9622,9 @@ export class UIController {
 
     private pause(updateStatus = true): void {
         this.mmdManager.pause();
+        this.timeline.refreshFrameContent();
+        this.syncModelPanelFromRuntimeIfPlaybackIdle();
+        this.updateTimelineEditState();
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         if (updateStatus) this.setStatus("Paused", false);
@@ -9606,9 +9633,12 @@ export class UIController {
 
     private stop(): void {
         this.mmdManager.pause();
+        this.timeline.refreshFrameContent();
+        this.syncModelPanelFromRuntimeIfPlaybackIdle();
         if (!this.isPlaybackFrameStopEnabled()) {
             this.mmdManager.seekToBoundary(this.getPlaybackFrameRange().startFrame);
         }
+        this.updateTimelineEditState();
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
@@ -9617,11 +9647,34 @@ export class UIController {
 
     private stopAtPlaybackEnd(endFrame: number): void {
         this.mmdManager.pause();
+        this.timeline.refreshFrameContent();
+        this.syncModelPanelFromRuntimeIfPlaybackIdle();
         this.mmdManager.seekToBoundary(endFrame);
+        this.updateTimelineEditState();
         this.btnPlay.style.display = "flex";
         this.btnPause.style.display = "none";
         this.setStatus("Stopped", false);
         this.refreshViewportBottomBar();
+    }
+
+    private syncModelPanelFromRuntimeIfPlaybackIdle(frame = this.mmdManager.currentFrame): void {
+        if (this.mmdManager.isPlaying) return;
+
+        const sourcePose = this.getDisplayBonePoseSnapshot(frame);
+        if (sourcePose) {
+            this.bottomPanel.syncSelectedBoneSlidersFromSnapshot(sourcePose, true);
+        } else {
+            this.bottomPanel.syncSelectedBoneSlidersFromRuntime(true);
+        }
+        this.syncMorphPanelFromRuntimeIfPlaybackIdle();
+        this.cameraPanelController?.refresh(false, sourcePose?.distance ?? this.mmdManager.getCameraDistance());
+        this.dofPanelController?.refreshAutoFocusReadout();
+        this.lensEffectController?.refreshAutoReadout();
+    }
+
+    private syncMorphPanelFromRuntimeIfPlaybackIdle(): void {
+        if (this.mmdManager.isPlaying) return;
+        this.bottomPanel.syncSelectedMorphFrameSlidersFromRuntime(true);
     }
 
     private setStatus(text: string, loading: boolean): void {

@@ -348,7 +348,7 @@ describe("importProjectState", () => {
 
         await importProjectState(host, project);
 
-        expect(host.mirroringFloorEnabled).toBe(true);
+        expect(host.mirroringFloorEnabled).toBe(false);
         expect(host.mirroringFloorShape).toBe("square");
         expect(host.mirroringFloorReflectance).toBe(0.3);
         expect(host.mirroringFloorSize).toBe(100);
