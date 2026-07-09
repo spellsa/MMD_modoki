@@ -207,6 +207,8 @@ export type EffectAction =
     | { type: "effect.setShadowMaxZ"; source: ActionSource; value: number }
     | { type: "effect.setShadowFilteringQuality"; source: ActionSource; value: number }
     | { type: "effect.setShadowBlurKernel"; source: ActionSource; value: number }
+    | { type: "effect.setShadowBlurScale"; source: ActionSource; value: number }
+    | { type: "effect.setShadowBlurBoxOffset"; source: ActionSource; value: number }
     | { type: "effect.setShadowPenumbra"; source: ActionSource; enabled: boolean }
     | { type: "effect.setShadowPenumbraSize"; source: ActionSource; value: number }
     | { type: "effect.setTransparentShadow"; source: ActionSource; enabled: boolean }

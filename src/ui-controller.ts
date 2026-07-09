@@ -2464,6 +2464,12 @@ export class UIController {
         this.actionDispatcher.register("effect.setShadowBlurKernel", (action) => {
             this.mmdManager.shadowBlurKernel = action.value;
         });
+        this.actionDispatcher.register("effect.setShadowBlurScale", (action) => {
+            this.mmdManager.shadowBlurScale = action.value;
+        });
+        this.actionDispatcher.register("effect.setShadowBlurBoxOffset", (action) => {
+            this.mmdManager.shadowBlurBoxOffset = action.value;
+        });
         this.actionDispatcher.register("effect.setShadowPenumbra", (action) => {
             this.mmdManager.shadowPenumbraEnabled = action.enabled;
         });

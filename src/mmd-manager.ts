@@ -244,7 +244,9 @@ import {
     getShadowColor as getShadowColorImpl,
     getShadowEnabled as getShadowEnabledImpl,
     getShadowBias as getShadowBiasImpl,
+    getShadowBlurBoxOffset as getShadowBlurBoxOffsetImpl,
     getShadowBlurKernel as getShadowBlurKernelImpl,
+    getShadowBlurScale as getShadowBlurScaleImpl,
     getShadowMaxZ as getShadowMaxZImpl,
     getShadowNormalBias as getShadowNormalBiasImpl,
     getShadowPenumbraEnabled as getShadowPenumbraEnabledImpl,
@@ -255,7 +257,9 @@ import {
     setShadowColor as setShadowColorImpl,
     setShadowEnabled as setShadowEnabledImpl,
     setShadowBias as setShadowBiasImpl,
+    setShadowBlurBoxOffset as setShadowBlurBoxOffsetImpl,
     setShadowBlurKernel as setShadowBlurKernelImpl,
+    setShadowBlurScale as setShadowBlurScaleImpl,
     setShadowMaxZ as setShadowMaxZImpl,
     setShadowNormalBias as setShadowNormalBiasImpl,
     setShadowPenumbraEnabled as setShadowPenumbraEnabledImpl,
@@ -416,7 +420,17 @@ const FRAME_PERFORMANCE_SECTIONS: readonly FramePerformanceSection[] = [
 let bundledMprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 let bundledSprWasmInstancePromise: Promise<IMmdWasmInstance> | null = null;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
+const DEFAULT_CSM_CASCADE_COUNT = 3;
+const DEFAULT_CSM_LAMBDA = 0.9;
+const DEFAULT_CSM_CASCADE_BLEND = 0.1;
+const DEFAULT_CSM_DEPTH_BOUNDS_REFRESH_RATE = 1;
+const PCSS_CSM_LAMBDA = 0.6;
+const PCSS_CSM_CASCADE_BLEND = 0.2;
+const PCSS_CSM_LIGHT_SIZE_SCALE = 0.1;
+const PCSS_CSM_MAX_LIGHT_SIZE_UV_RATIO = 0.02;
+const PCSS_CSM_PENUMBRA_DARKNESS = 0.17;
 const FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE = 0.5;
+const DEFAULT_CAMERA_MAX_Z = 10000;
 const VIEWPORT_CAMERA_ROTATE_SENSIBILITY = 400;
 const VIEWPORT_CAMERA_PAN_SCALE = 0.0022;
 const VIEWPORT_CAMERA_DRAG_ZOOM_SCALE = 0.0075;
@@ -1472,6 +1486,7 @@ ${beforeFogAppendBlock}
     private dirLight!: DirectionalLight;
     private hemiLight!: HemisphericLight;
     private shadowGenerator!: ShadowGenerator;
+    private shadowSceneContentRefreshScheduled = false;
     private iblShadowsPipeline: IblShadowsRenderPipeline | null = null;
     private iblFallbackEnvironmentTexture: RawCubeTexture | null = null;
     private iblTestEnvironmentTexture: HDRCubeTexture | null = null;
@@ -1561,23 +1576,25 @@ ${beforeFogAppendBlock}
         false,
     );
     private shadowEnabled = true;
-    private shadowDarknessValue = 0.0;
-    private shadowModeValue: ShadowMode = "standard";
+    private shadowDarknessValue = 0.2;
+    private shadowModeValue: ShadowMode = "cascaded";
     private shadowFrustumSizeValue = 220;
     private shadowMaxZValue = 1000;
     private shadowBiasValue = 0.0005;
     private shadowNormalBiasValue = 0.01;
-    private shadowFilteringQualityValue = ShadowGenerator.QUALITY_MEDIUM;
+    private shadowFilteringQualityValue = ShadowGenerator.QUALITY_HIGH;
     private shadowBlurKernelValue = 0;
+    private shadowBlurScaleValue = 2;
+    private shadowBlurBoxOffsetValue = 1;
     private shadowPenumbraEnabledValue = false;
-    private shadowPenumbraSizeValue = 0.035;
+    private shadowPenumbraSizeValue = 0.08;
     private transparentShadowEnabledValue = true;
     private softTransparentShadowEnabledValue = true;
     private iblShadowsEnabledValue = false;
     private iblShadowOpacityValue = 0.6;
     private iblShadowDistanceScaleValue = 4;
     private selfShadowEdgeSoftnessValue = 0.05;
-    private occlusionShadowEdgeSoftnessValue = 0.05;
+    private occlusionShadowEdgeSoftnessValue = 0.1;
     private toonShadowInfluenceValue = 1;
 
     private lightColorTemperatureKelvin = 6500;
@@ -2344,6 +2361,29 @@ ${beforeFogAppendBlock}
         }
     }
 
+    public refreshShadowAfterSceneContentChanged(): void {
+        const refresh = (): void => {
+            if (!this.dirLight || !this.shadowGenerator) return;
+            this.applyShadowFrustumSize();
+            this.applyShadowEdgeSoftness();
+            this.applyShadowCasterStateToAllModels();
+            const direction = this.getSerializedLightDirection();
+            this.setLightDirection(direction.x, direction.y, direction.z);
+            this.scene.markAllMaterialsAsDirty(Material.AllDirtyFlag);
+            this.engine.releaseEffects();
+        };
+
+        refresh();
+        if (this.shadowSceneContentRefreshScheduled) return;
+        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") return;
+
+        this.shadowSceneContentRefreshScheduled = true;
+        window.requestAnimationFrame(() => {
+            this.shadowSceneContentRefreshScheduled = false;
+            refresh();
+        });
+    }
+
     private createConfiguredShadowGenerator(dirLight: DirectionalLight): ShadowGenerator {
         const maxTextureSize = this.engine.getCaps().maxTextureSize ?? 4096;
         const shadowMapSize = Math.min(8192, maxTextureSize);
@@ -2353,11 +2393,14 @@ ${beforeFogAppendBlock}
             : new ShadowGenerator(shadowMapSize, dirLight);
 
         if (shadowGenerator instanceof CascadedShadowGenerator) {
-            shadowGenerator.numCascades = 2;
-            shadowGenerator.stabilizeCascades = true;
-            shadowGenerator.lambda = 0.82;
-            shadowGenerator.cascadeBlendPercentage = 0.05;
-            shadowGenerator.autoCalcDepthBounds = true;
+            shadowGenerator.numCascades = DEFAULT_CSM_CASCADE_COUNT;
+            shadowGenerator.stabilizeCascades = !this.shadowPenumbraEnabledValue;
+            shadowGenerator.lambda = this.shadowPenumbraEnabledValue ? PCSS_CSM_LAMBDA : DEFAULT_CSM_LAMBDA;
+            shadowGenerator.cascadeBlendPercentage = this.shadowPenumbraEnabledValue ? PCSS_CSM_CASCADE_BLEND : DEFAULT_CSM_CASCADE_BLEND;
+            shadowGenerator.autoCalcDepthBounds = !this.shadowPenumbraEnabledValue;
+            shadowGenerator.autoCalcDepthBoundsRefreshRate = DEFAULT_CSM_DEPTH_BOUNDS_REFRESH_RATE;
+            shadowGenerator.depthClamp = !this.shadowPenumbraEnabledValue;
+            shadowGenerator.penumbraDarkness = this.shadowPenumbraEnabledValue ? PCSS_CSM_PENUMBRA_DARKNESS : 1.0;
             shadowGenerator.shadowMaxZ = this.shadowMaxZValue;
             dirLight.shadowFrustumSize = DEFAULT_CSM_FRUSTUM_SIZE;
             dirLight.shadowMaxZ = this.shadowMaxZValue;
@@ -2365,17 +2408,20 @@ ${beforeFogAppendBlock}
 
         if (this.shadowPenumbraEnabledValue) {
             shadowGenerator.filter = ShadowGenerator.FILTER_PCSS;
-        } else if (this.shadowBlurKernelValue > 0) {
+        } else if (this.shadowBlurKernelValue > 0 && !(shadowGenerator instanceof CascadedShadowGenerator)) {
             shadowGenerator.filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP;
             shadowGenerator.useKernelBlur = true;
-            shadowGenerator.blurScale = 2;
+            shadowGenerator.blurScale = this.shadowBlurScaleValue;
+            shadowGenerator.blurBoxOffset = this.shadowBlurBoxOffsetValue;
             shadowGenerator.blurKernel = this.shadowBlurKernelValue;
         } else {
             shadowGenerator.filter = ShadowGenerator.FILTER_PCF;
         }
-        shadowGenerator.filteringQuality = this.shadowFilteringQualityValue;
+        shadowGenerator.filteringQuality = shadowGenerator instanceof CascadedShadowGenerator
+            ? ShadowGenerator.QUALITY_HIGH
+            : this.shadowFilteringQualityValue;
         shadowGenerator.contactHardeningLightSizeUVRatio = shadowGenerator instanceof CascadedShadowGenerator
-            ? Math.max(0.001, Math.min(0.04, this.shadowPenumbraSizeValue * 0.25))
+            ? Math.min(PCSS_CSM_MAX_LIGHT_SIZE_UV_RATIO, Math.max(0.001, this.shadowPenumbraSizeValue * PCSS_CSM_LIGHT_SIZE_SCALE))
             : this.shadowPenumbraSizeValue;
 
         shadowGenerator.bias = this.shadowBiasValue;
@@ -2420,6 +2466,7 @@ ${beforeFogAppendBlock}
             const direction = this.getSerializedLightDirection();
             this.setLightDirection(direction.x, direction.y, direction.z);
         }
+        this.scene.markAllMaterialsAsDirty(Material.AllDirtyFlag);
         this.engine.releaseEffects();
     }
 
@@ -4194,6 +4241,7 @@ ${beforeFogAppendBlock}
             WebGPUTintWASM.DisableUniformityAnalysis = true;
             const engine = await WebGPUEngine.CreateAsync(canvas, {
                 ...MmdManager.RENDER_ENGINE_OPTIONS,
+                setMaximumLimits: true,
                 glslangOptions: {
                     jsPath: glslangJsUrl,
                     wasmPath: glslangWasmUrl,
@@ -4337,7 +4385,7 @@ ${beforeFogAppendBlock}
         );
         this.camera.fov = (30 * Math.PI) / 180;
         this.camera.minZ = 0.15;
-        this.camera.maxZ = 100000;
+        this.camera.maxZ = DEFAULT_CAMERA_MAX_Z;
         this.camera.lowerRadiusLimit = 3;
         this.camera.upperRadiusLimit = null;
         this.camera.angularSensibilityX = VIEWPORT_CAMERA_ROTATE_SENSIBILITY;
@@ -9226,7 +9274,7 @@ ${beforeFogAppendBlock}
         this.applyToonShadowInfluenceToAllModels();
     }
 
-    /** Shadow darkness (0.0=no shadow, 1.0=full black shadow) */
+    /** Babylon shadow darkness is a visibility floor: 0.0 keeps the darkest shadow, 1.0 removes darkening. */
     get shadowDarkness(): number { return this.shadowDarknessValue; }
     set shadowDarkness(v: number) {
         this.shadowDarknessValue = Math.max(0, Math.min(1, v));
@@ -9270,11 +9318,13 @@ ${beforeFogAppendBlock}
         return this.shadowFilteringQualityValue;
     }
     set shadowFilteringQuality(v: number) {
-        const fallback = ShadowGenerator.QUALITY_MEDIUM;
+        const fallback = ShadowGenerator.QUALITY_HIGH;
         const rounded = Math.round(Number.isFinite(v) ? v : fallback);
         this.shadowFilteringQualityValue = Math.max(ShadowGenerator.QUALITY_HIGH, Math.min(ShadowGenerator.QUALITY_LOW, rounded));
         if (this.shadowGenerator) {
-            this.shadowGenerator.filteringQuality = this.shadowFilteringQualityValue;
+            this.shadowGenerator.filteringQuality = this.shadowGenerator instanceof CascadedShadowGenerator
+                ? ShadowGenerator.QUALITY_HIGH
+                : this.shadowFilteringQualityValue;
             this.engine.releaseEffects();
         }
     }
@@ -9284,6 +9334,20 @@ ${beforeFogAppendBlock}
     }
     set shadowBlurKernel(v: number) {
         setShadowBlurKernelImpl(this, v);
+    }
+
+    get shadowBlurScale(): number {
+        return getShadowBlurScaleImpl(this);
+    }
+    set shadowBlurScale(v: number) {
+        setShadowBlurScaleImpl(this, v);
+    }
+
+    get shadowBlurBoxOffset(): number {
+        return getShadowBlurBoxOffsetImpl(this);
+    }
+    set shadowBlurBoxOffset(v: number) {
+        setShadowBlurBoxOffsetImpl(this, v);
     }
 
     get shadowPenumbraEnabled(): boolean {

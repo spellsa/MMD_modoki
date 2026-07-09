@@ -98,6 +98,8 @@ type ProjectImportHost = {
     shadowNormalBiasValue: number;
     shadowFilteringQuality: number;
     shadowBlurKernel: number;
+    shadowBlurScale: number;
+    shadowBlurBoxOffset: number;
     shadowPenumbraEnabled: boolean;
     shadowPenumbraSize: number;
     transparentShadowEnabled: boolean;
@@ -650,7 +652,7 @@ export async function importProjectState(
         : 1;
     host.shadowDarkness = typeof data.lighting.shadowDarkness === "number" && Number.isFinite(data.lighting.shadowDarkness)
         ? data.lighting.shadowDarkness
-        : 0;
+        : 0.2;
     host.shadowFrustumSize = typeof data.lighting.shadowFrustumSize === "number" && Number.isFinite(data.lighting.shadowFrustumSize)
         ? data.lighting.shadowFrustumSize
         : host.shadowFrustumSizeValue;
@@ -665,16 +667,22 @@ export async function importProjectState(
         : host.shadowNormalBiasValue;
     host.shadowFilteringQuality = typeof data.lighting.shadowFilteringQuality === "number" && Number.isFinite(data.lighting.shadowFilteringQuality)
         ? data.lighting.shadowFilteringQuality
-        : 1;
+        : 0;
     host.shadowBlurKernel = typeof data.lighting.shadowBlurKernel === "number" && Number.isFinite(data.lighting.shadowBlurKernel)
         ? data.lighting.shadowBlurKernel
         : 0;
+    host.shadowBlurScale = typeof data.lighting.shadowBlurScale === "number" && Number.isFinite(data.lighting.shadowBlurScale)
+        ? data.lighting.shadowBlurScale
+        : 2;
+    host.shadowBlurBoxOffset = typeof data.lighting.shadowBlurBoxOffset === "number" && Number.isFinite(data.lighting.shadowBlurBoxOffset)
+        ? data.lighting.shadowBlurBoxOffset
+        : 1;
     host.shadowPenumbraEnabled = typeof data.lighting.shadowPenumbraEnabled === "boolean"
         ? data.lighting.shadowPenumbraEnabled
         : false;
     host.shadowPenumbraSize = typeof data.lighting.shadowPenumbraSize === "number" && Number.isFinite(data.lighting.shadowPenumbraSize)
         ? data.lighting.shadowPenumbraSize
-        : 0.035;
+        : 0.08;
     host.transparentShadowEnabled = typeof data.lighting.transparentShadowEnabled === "boolean"
         ? data.lighting.transparentShadowEnabled
         : true;
@@ -710,7 +718,7 @@ export async function importProjectState(
         : legacyShadowEdgeSoftness;
     const occlusionShadowEdgeSoftness = typeof data.lighting.occlusionShadowEdgeSoftness === "number" && Number.isFinite(data.lighting.occlusionShadowEdgeSoftness)
         ? data.lighting.occlusionShadowEdgeSoftness
-        : legacyShadowEdgeSoftness ?? selfShadowEdgeSoftness;
+        : legacyShadowEdgeSoftness ?? 0.1;
     if (typeof selfShadowEdgeSoftness === "number") host.selfShadowEdgeSoftness = selfShadowEdgeSoftness;
     if (typeof occlusionShadowEdgeSoftness === "number") host.occlusionShadowEdgeSoftness = occlusionShadowEdgeSoftness;
     host.setShadowEnabled(Boolean(data.lighting.shadowEnabled));

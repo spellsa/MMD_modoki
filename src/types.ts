@@ -300,6 +300,8 @@ export interface ProjectLightingState {
     shadowNormalBias?: number;
     shadowFilteringQuality?: number;
     shadowBlurKernel?: number;
+    shadowBlurScale?: number;
+    shadowBlurBoxOffset?: number;
     shadowPenumbraEnabled?: boolean;
     shadowPenumbraSize?: number;
     transparentShadowEnabled?: boolean;

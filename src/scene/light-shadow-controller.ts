@@ -43,6 +43,8 @@ type LightShadowHost = {
     shadowNormalBiasValue: number;
     shadowFilteringQualityValue: number;
     shadowBlurKernelValue: number;
+    shadowBlurScaleValue: number;
+    shadowBlurBoxOffsetValue: number;
     shadowPenumbraEnabledValue: boolean;
     shadowPenumbraSizeValue: number;
     transparentShadowEnabledValue: boolean;
@@ -92,7 +94,7 @@ function clampShadowFrustumSize(v: number): number {
 
 function clampShadowMaxZ(v: number): number {
     if (!Number.isFinite(v)) return DEFAULT_CSM_SHADOW_MAX_Z;
-    return Math.max(500, Math.min(100000, v));
+    return Math.max(500, Math.min(MAX_SHADOW_MAX_Z, v));
 }
 
 function clampShadowBias(v: number): number {
@@ -116,15 +118,35 @@ function clampShadowBlurKernel(v: number): number {
     return Math.max(0, Math.min(64, Math.round(v)));
 }
 
+function clampShadowBlurScale(v: number): number {
+    if (!Number.isFinite(v)) return 2;
+    return Math.max(1, Math.min(8, Math.round(v)));
+}
+
+function clampShadowBlurBoxOffset(v: number): number {
+    if (!Number.isFinite(v)) return 1;
+    return Math.max(1, Math.min(8, Math.round(v)));
+}
+
 function clampShadowPenumbraSize(v: number): number {
-    if (!Number.isFinite(v)) return 0.035;
+    if (!Number.isFinite(v)) return 0.08;
     return Math.max(0.001, Math.min(0.2, v));
 }
 
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
 const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
+const MAX_SHADOW_MAX_Z = 10000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const DEFAULT_CSM_LIGHT_DISTANCE = 220;
+const DEFAULT_CSM_CASCADE_COUNT = 3;
+const DEFAULT_CSM_LAMBDA = 0.9;
+const DEFAULT_CSM_CASCADE_BLEND = 0.1;
+const DEFAULT_CSM_DEPTH_BOUNDS_REFRESH_RATE = 1;
+const PCSS_CSM_LAMBDA = 0.6;
+const PCSS_CSM_CASCADE_BLEND = 0.2;
+const PCSS_CSM_LIGHT_SIZE_SCALE = 0.1;
+const PCSS_CSM_MAX_LIGHT_SIZE_UV_RATIO = 0.02;
+const PCSS_CSM_PENUMBRA_DARKNESS = 0.17;
 
 function applyShadowBiasSettings(host: LightShadowHost): void {
     if (!host.shadowGenerator) return;
@@ -145,20 +167,33 @@ function applyShadowFilterSettings(host: LightShadowHost): void {
 
     const blurKernel = clampShadowBlurKernel(host.shadowBlurKernelValue);
     const penumbraEnabled = Boolean(host.shadowPenumbraEnabledValue);
+    const isCascaded = host.shadowGenerator instanceof CascadedShadowGenerator;
     if (penumbraEnabled) {
         host.shadowGenerator.filter = ShadowGenerator.FILTER_PCSS;
-    } else if (blurKernel > 0) {
+    } else if (blurKernel > 0 && !isCascaded) {
         host.shadowGenerator.filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP;
         host.shadowGenerator.useKernelBlur = true;
-        host.shadowGenerator.blurScale = 2;
+        host.shadowGenerator.blurScale = clampShadowBlurScale(host.shadowBlurScaleValue);
+        host.shadowGenerator.blurBoxOffset = clampShadowBlurBoxOffset(host.shadowBlurBoxOffsetValue);
         host.shadowGenerator.blurKernel = blurKernel;
     } else {
         host.shadowGenerator.filter = ShadowGenerator.FILTER_PCF;
     }
 
-    host.shadowGenerator.filteringQuality = clampShadowFilteringQuality(host.shadowFilteringQualityValue);
-    host.shadowGenerator.contactHardeningLightSizeUVRatio = host.shadowGenerator instanceof CascadedShadowGenerator
-        ? Math.max(0.001, Math.min(0.04, clampShadowPenumbraSize(host.shadowPenumbraSizeValue) * 0.25))
+    if (isCascaded) {
+        host.shadowGenerator.stabilizeCascades = !penumbraEnabled;
+        host.shadowGenerator.lambda = penumbraEnabled ? PCSS_CSM_LAMBDA : DEFAULT_CSM_LAMBDA;
+        host.shadowGenerator.cascadeBlendPercentage = penumbraEnabled ? PCSS_CSM_CASCADE_BLEND : DEFAULT_CSM_CASCADE_BLEND;
+        host.shadowGenerator.autoCalcDepthBounds = !penumbraEnabled;
+        host.shadowGenerator.autoCalcDepthBoundsRefreshRate = DEFAULT_CSM_DEPTH_BOUNDS_REFRESH_RATE;
+        host.shadowGenerator.depthClamp = !penumbraEnabled;
+        host.shadowGenerator.penumbraDarkness = penumbraEnabled ? PCSS_CSM_PENUMBRA_DARKNESS : 1.0;
+    }
+    host.shadowGenerator.filteringQuality = isCascaded
+        ? ShadowGenerator.QUALITY_HIGH
+        : clampShadowFilteringQuality(host.shadowFilteringQualityValue);
+    host.shadowGenerator.contactHardeningLightSizeUVRatio = isCascaded
+        ? Math.min(PCSS_CSM_MAX_LIGHT_SIZE_UV_RATIO, Math.max(0.001, clampShadowPenumbraSize(host.shadowPenumbraSizeValue) * PCSS_CSM_LIGHT_SIZE_SCALE))
         : clampShadowPenumbraSize(host.shadowPenumbraSizeValue);
 }
 
@@ -170,11 +205,14 @@ function createShadowGenerator(host: LightShadowHost, dirLight: DirectionalLight
         ? new CascadedShadowGenerator(shadowMapSize, dirLight, undefined, camera)
         : new ShadowGenerator(shadowMapSize, dirLight);
     if (shadowGenerator instanceof CascadedShadowGenerator) {
-        shadowGenerator.numCascades = 2;
+        shadowGenerator.numCascades = DEFAULT_CSM_CASCADE_COUNT;
         shadowGenerator.stabilizeCascades = true;
-        shadowGenerator.lambda = 0.82;
-        shadowGenerator.cascadeBlendPercentage = 0.05;
+        shadowGenerator.lambda = DEFAULT_CSM_LAMBDA;
+        shadowGenerator.cascadeBlendPercentage = DEFAULT_CSM_CASCADE_BLEND;
         shadowGenerator.autoCalcDepthBounds = true;
+        shadowGenerator.autoCalcDepthBoundsRefreshRate = DEFAULT_CSM_DEPTH_BOUNDS_REFRESH_RATE;
+        shadowGenerator.depthClamp = true;
+        shadowGenerator.penumbraDarkness = 1.0;
         shadowGenerator.shadowMaxZ = DEFAULT_CSM_SHADOW_MAX_Z;
     }
     host.shadowGenerator = shadowGenerator;
@@ -435,6 +473,26 @@ export function setShadowBlurKernel(host: LightShadowHost, v: number): void {
     host.engine?.releaseEffects?.();
 }
 
+export function getShadowBlurScale(host: LightShadowHost): number {
+    return clampShadowBlurScale(host.shadowBlurScaleValue);
+}
+
+export function setShadowBlurScale(host: LightShadowHost, v: number): void {
+    host.shadowBlurScaleValue = clampShadowBlurScale(v);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
+export function getShadowBlurBoxOffset(host: LightShadowHost): number {
+    return clampShadowBlurBoxOffset(host.shadowBlurBoxOffsetValue);
+}
+
+export function setShadowBlurBoxOffset(host: LightShadowHost, v: number): void {
+    host.shadowBlurBoxOffsetValue = clampShadowBlurBoxOffset(v);
+    applyShadowFilterSettings(host);
+    host.engine?.releaseEffects?.();
+}
+
 export function getShadowPenumbraEnabled(host: LightShadowHost): boolean {
     return Boolean(host.shadowPenumbraEnabledValue);
 }
@@ -585,7 +643,9 @@ export function applyShadowFrustumSize(host: LightShadowHost): void {
     if (!host.dirLight) return;
     const csmEnabled = host.shadowGenerator instanceof CascadedShadowGenerator;
     const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
-    host.dirLight.shadowFrustumSize = csmEnabled ? DEFAULT_CSM_FRUSTUM_SIZE : shadowMaxZ;
+    host.dirLight.shadowFrustumSize = csmEnabled
+        ? DEFAULT_CSM_FRUSTUM_SIZE
+        : clampShadowFrustumSize(host.shadowFrustumSizeValue);
     host.dirLight.shadowMinZ = 1;
     host.dirLight.shadowMaxZ = shadowMaxZ;
     if (csmEnabled) {
@@ -619,10 +679,9 @@ export function setLightDirection(host: LightShadowHost, x: number, y: number, z
     const direction = rawDirection.clone();
     direction.normalize();
     host.dirLight.direction = direction;
-    const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
     const dist = host.shadowGenerator instanceof CascadedShadowGenerator
         ? DEFAULT_CSM_LIGHT_DISTANCE
-        : Math.max(90, shadowMaxZ * 0.35);
+        : Math.max(90, clampShadowFrustumSize(host.shadowFrustumSizeValue));
     host.dirLight.position = new Vector3(
         -direction.x * dist,
         Math.abs(direction.y) * dist + 5,

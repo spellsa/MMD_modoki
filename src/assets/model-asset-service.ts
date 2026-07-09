@@ -489,6 +489,7 @@ type ModelAssetHost = {
     syncLuminousGlowLayer?: () => void;
     syncGlobalIlluminationSceneModels?: () => void;
     syncIblShadowsScene?: () => void;
+    refreshShadowAfterSceneContentChanged?: () => void;
     refreshFrameGraphPostEffectsBackendForStackStateChange?: () => void;
     dumpRenderDiagnostics?: (reason: string) => void;
     shouldActivateAsCurrent(modelInfo: ModelInfo): boolean;
@@ -1391,6 +1392,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         host.syncLuminousGlowLayer?.();
         host.syncGlobalIlluminationSceneModels?.();
         host.syncIblShadowsScene?.();
+        host.refreshShadowAfterSceneContentChanged?.();
         host.refreshFrameGraphPostEffectsBackendForStackStateChange?.();
         host.dumpRenderDiagnostics?.("after model scene sync");
 

@@ -58,8 +58,9 @@ PMX の材質フラグには、影に関するビットがあります。
 
 - マップ解像度: `min(8192, GPU上限)`
 - フィルタ既定: `PCF`
-- 品質: `QUALITY_MEDIUM`
-- `Contact Hardening` / `Blur ESM` は既定では無効
+- 品質: `QUALITY_HIGH`
+- `Contact Hardening` / PCSS は実験用。既定では無効
+- `Blur ESM` は既定では無効
 - 接地感調整
   - `bias = 0.0005`
   - `normalBias = 0.01`
@@ -74,20 +75,30 @@ PMX の材質フラグには、影に関するビットがあります。
 - Babylon.js の soft transparent shadow は、fragment alpha を元に shadow map へ dithering pattern を生成する方式です。
 - 公式 Shadows ドキュメントでも、PCF などの filtering を使っていても拡大時や対象によって pattern が見える場合があり、filtering method の比較が必要とされています。
 - 現行の `CascadedShadowGenerator` は Babylon.js 実装上 `PCF / PCSS / None` 系の filter に制限されるため、Blur Exponential 系は通常の `ShadowGenerator` 時の実験項目として扱います。
-- 2026-06 時点では、照明/影品質設定に `影ぼかし` / `半影` / `半影サイズ` / `透過影` を実験用に追加しています。
-- `PCSS` は CSM を維持したまま `useContactHardeningShadow = true` を使う比較を行いましたが、半透明影の pattern は改善しませんでした。
+- 2026-07-09 時点では、ステージへの落ち影と全体の安定を優先し、起動時の既定を `CascadedShadowGenerator + PCF + Soft Transparent Shadows` にしています。
+- 通常 `ShadowGenerator` は近景の影密度を取りやすい一方、広いステージでは影範囲調整が必要になりやすいため、比較用として残します。
+- `PCSS` は `useContactHardeningShadow = true` を使う実験経路です。通常 `ShadowGenerator` / `CascadedShadowGenerator` の両方で、PCSS 有効時だけ落ち影が本体からずれる現象が繰り返し出たため、既定から外しています。
 - `Blur Exponential` は `useBlurExponentialShadowMap = true` を使う比較を行いましたが、CSM ではなくなるため、遠景や広いステージの影安定性が PCF より落ちました。
+- WebGPU 起動時は Babylon.js `WebGPUEngine.CreateAsync` に `setMaximumLimits: true` を指定しています。影 shader / MMD 材質 shader が device limits に当たる可能性の切り分け用で、adapter が公開する最大 limits を required limits として要求します。
+- 標準影と CSM を切り替えると shadow texture の view dimension が `2D` / `2DArray` で変わります。WebGPU では古い shader/bind group layout が残ると validation error になるため、切替時は全 material を dirty にして effect を解放します。
+- PMX / X / GLB 読み込み直後は、CSM の caster / depth bounds / shader layout が一拍古い状態で描画され、影が極端にぼけることがあります。読み込み完了時は shadow caster の再登録、frustum 再適用、material dirty、effect 解放を即時と次フレームの両方で実行して、ステージ表示切替などを待たずに影を安定させます。
 
 影フィルタ実験 UI:
 
 - `半影` ON:
   - `filter = ShadowGenerator.FILTER_PCSS`
   - `半影サイズ` を `contactHardeningLightSizeUVRatio` に反映する
-- `半影` OFF かつ `影ぼかし > 0`:
+  - CSM 時は `filteringQuality = QUALITY_HIGH` / `stabilizeCascades = false` / `lambda = 0.6` / `cascadeBlendPercentage = 0.2` とし、cascade 境界で PCSS の硬さが目立ちすぎないか比較する
+  - CSM 時の `contactHardeningLightSizeUVRatio` は UI 値をそのまま渡さず、`半影サイズ * 0.1` に縮小して `0.001..0.02` に制限する。CSM の cascade 補正が乗るため、通常 `ShadowGenerator` より小さい値で扱う。
+  - 通常 `ShadowGenerator` / `CascadedShadowGenerator` の両方で PCSS 時だけ落ち影のずれが再発しているため、既定では使わない。
+- `半影` OFF かつ `影ぼかし > 0` かつ通常 `ShadowGenerator`:
   - `filter = ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP`
   - `useKernelBlur = true`
-  - `blurScale = 2`
+  - `blurScale = ぼかし縮小`（既定 `2`）
+  - `blurBoxOffset = ぼかし範囲`（既定 `1`）
   - `blurKernel = 影ぼかし`
+  - `CascadedShadowGenerator` では Blur Exponential 系を使わず、PCF / PCSS 側に寄せる
+  - `影ぼかし` / `ぼかし縮小` / `ぼかし範囲` は CSM 既定では効果が薄いため、照明/影品質設定 UI からは外しています。保存値と importer/exporter の互換は残します。
 - `半影` OFF かつ `影ぼかし = 0`:
   - `filter = ShadowGenerator.FILTER_PCF`
 - `透過影` OFF:
@@ -97,20 +108,34 @@ PMX の材質フラグには、影に関するビットがあります。
 
 `CascadedShadowGenerator` 使用時の設定:
 
-- `numCascades = 2`
-- `stabilizeCascades = true`
-- `lambda = 0.82`
-- `cascadeBlendPercentage = 0.05`
-- `autoCalcDepthBounds = true`
+- `numCascades = 3`
+- 通常時:
+  - `stabilizeCascades = true`
+  - `lambda = 0.9`
+  - `cascadeBlendPercentage = 0.1`
+  - `autoCalcDepthBounds = true`
+  - `autoCalcDepthBoundsRefreshRate = 1`
+  - `depthClamp = true`
+- PCSS 時:
+  - `stabilizeCascades = false`
+  - `lambda = 0.6`
+  - `cascadeBlendPercentage = 0.2`
+  - `contactHardeningLightSizeUVRatio = clamp(半影サイズ * 0.1, 0.001, 0.02)`
+  - `penumbraDarkness = 0.17`
+- `autoCalcDepthBounds`
+  - PCF 時: `true`
+  - PCSS 時: `false`
 - `shadowFrustumSize = 960`（固定）
 - `shadowMaxZ = 1000`（既定値、UI で調整可能）
+- camera far plane は `maxZ = 10000`
 - 光源位置距離: `220`
-- フィルタは `PCF + QUALITY_MEDIUM`
+- 半影 OFF 時のフィルタは `PCF + QUALITY_HIGH`
+- 半影 ON 時のみ、実験用として `PCSS + QUALITY_HIGH`
 
 投影範囲の考え方:
 
 - 通常 `ShadowGenerator`:
-  - `dirLight.shadowFrustumSize = shadowMaxZ`
+  - `dirLight.shadowFrustumSize = shadowFrustumSize`
   - `dirLight.shadowMinZ = 1`
   - `dirLight.shadowMaxZ = shadowMaxZ`
 - `CascadedShadowGenerator`:
@@ -121,10 +146,10 @@ PMX の材質フラグには、影に関するビットがあります。
 
 補足:
 
-- 近景キャラと遠景背景で必要な影密度が異なるため、現行実装では `CascadedShadowGenerator` を優先します。
-- 通常 `ShadowGenerator` では、UI の `影描画距離` が描画距離と投影範囲の両方を広げます。
+- 近景キャラと遠景背景で必要な影密度が異なるため、現行既定は CSM です。半透明影の見た目が崩れる場合の比較用として、通常 `ShadowGenerator` も残します。
+- 通常 `ShadowGenerator` では、`shadowFrustumSize` が投影幅、`shadowMaxZ` が深度方向の描画距離です。`shadowMaxZ` を投影幅に流用すると近景モデルの shadow map 密度が大きく落ちるため、両者は分離します。
 - ただし `CascadedShadowGenerator` 使用時は、現行仕様では `影範囲` フェーダーを無視します。
-- `shadowFrustumSize` は旧 project 互換の内部値として残していますが、標準 UI では直接操作しません。
+- `shadowFrustumSize` は `影範囲` として UI に表示します。近景キャラの影を優先する場合は小さく、広いステージの落ち影を出す場合は大きくします。
 - `shadowMaxZ` を遠くしすぎると、近景の自己影や床影に使える精度が薄まります。
 - 描画限界まで影を出すより、「演出上ほしい距離まで」に絞る方が見た目は安定しやすいです。
 
@@ -303,13 +328,16 @@ UI:
 - そのため、描画限界よりも「演出上必要な距離」を基準に調整するのが自然
 
 既定値は `1000` とし、影欄の `影描画距離` で調整できるようにしています。
+Babylon.js 公式 CSM ドキュメントでは、camera の `maxZ` が大きすぎると CSM の cascade 分割が粗くなり shadow quality が落ちると説明されています。
+MMD_modoki では遠方ステージ表示との両立のため camera `maxZ` は `10000`、影描画距離の UI 上限も `10000` にします。
+新規既定の `shadowMaxZ = 1000` は、この far plane 全体を使い切らず、近景キャラと中距離ステージの影密度を優先するための値です。
 
 ## UI との関係
 
 影設定は、材質フラグとは別に照明 UI で制御します。
 
 - `index.html`
-  - `#light-shadow`（影の濃さ、現状は非表示）
+  - `#light-shadow`（影の薄さ、現状は非表示）
   - `#light-shadow-frustum-size`（影範囲）
   - `#light-shadow-max-z`（影描画距離）
   - `#light-shadow-bias`（現状は非表示）
@@ -326,7 +354,98 @@ UI:
   - プロジェクト保存 / 読み込みで `castsShadow` として復元する
 
 現在は UI 上では常時 ON で運用し、主に影範囲と境界幅を調整します。
-`shadowDarkness` は内部値としては保持しますが、既定値 `0.0` で UI からは隠しています。
+Babylon.js の `shadowGenerator.darkness` は名前に反して「影の濃さ」ではなく、shadow factor の下限値です。`0.0` が最も濃い影で、`1.0` に近づくほど影が薄くなります。極端に濃くするとぼかしの階調が潰れて見えるため、現行既定は `0.2` とし、UI では `影の薄さ` として扱います。
+
+PMX ステージで標準床より半影が硬く見える場合は、shadow map filter だけでなく MMD material 側の toon/shadow 合成を疑います。現行の WGSL パッチは `shadow` を `smoothstep(...)` や toon texture sampling に通すため、PCSS / Blur ESM が返す中間値が受け側材質で再び硬くなることがあります。床やステージ材質だけ non-toon shadow receiver 寄りにする実験は有力候補です。
+
+## 2026-07-09 影品質調整メモ
+
+目的:
+
+- MMD モデルの半透明材質を含む落ち影を、標準床と PMX ステージの両方で破綻しにくくする
+- MMD らしい編集画面の読みやすさを残しつつ、Babylon.js の shadow filter を活かす
+- 影設定のノブを増やしすぎず、実際に効くものだけ UI に残す
+
+試したこと:
+
+- 通常 `ShadowGenerator` + PCSS
+  - 近景の影密度は取りやすい
+  - `contactHardeningLightSizeUVRatio` を上げると、半透明影や cascade 相当の深度差で影が本体からずれたように見えるケースがあった
+  - 標準床ではぼけが分かりやすい一方、広い PMX ステージでは影範囲調整が必要になりやすい
+- `CascadedShadowGenerator` + PCSS
+  - 広いステージへの落ち影を扱いやすい
+  - `lambda = 0.6` / `cascadeBlendPercentage = 0.2` / `stabilizeCascades = false` を試し、cascade 境界の硬さを少し抑えた
+  - CSM に UI 値をそのまま `contactHardeningLightSizeUVRatio` として渡すと、体感では半影サイズが大きすぎた。UI の `0.08` は CSM では `0.008` として Babylon に渡す。
+  - 公式 CSM ドキュメントの `penumbraDarkness` 例を参考に、PCSS 時のみ `0.17` を設定した。半影で影色が薄まりすぎる場合の補正値として扱う。
+  - `filteringQuality = QUALITY_LOW` も試したが、ぼけ量そのものにはほぼ影響しなかった。PCSS の品質設定はサンプル数/ノイズ/負荷に効くもので、今回の大きな半影量の主因ではなさそう。
+  - CSM + PCSS では cascade ごとの `lightSizeUVCorrection` / `depthCorrection` が最終半影に乗るため、`autoCalcDepthBounds = false` にして scene bounds / 読み込み順 / ステージ表示切替による実効半影の揺れを抑える方針にした
+  - 現時点では、この強いぼけが PCSS として正しい距離減衰なのか、CSM の depth bounds / light size 解釈が過剰なのか未確定
+- Blur Exponential Shadow Map
+  - 公式ドキュメント上は soft shadow の品質向上候補
+  - `useBlurExponentialShadowMap` / `useKernelBlur` / `blurScale` / `blurBoxOffset` / `blurKernel` を UI に出した
+  - ただし Babylon.js の `CascadedShadowGenerator` では Blur Exponential 系を使わず、通常 `ShadowGenerator` 用の互換設定として残した
+  - CSM 既定では効果が薄いため、`影ぼかし` / `ぼかし縮小` / `ぼかし範囲` は照明/影品質設定 UI から外した
+- shadow darkness
+  - Babylon.js の `shadowGenerator.darkness` は「影の濃さ」ではなく shadow factor の下限値
+  - `0.0` は最も濃く、`1.0` に近づくほど影が薄くなる
+  - `0.0` だと PCSS / Blur の階調が潰れて見えやすいため、`0.2` を既定にした
+- 遮蔽影境界
+  - `occlusionShadowEdgeSoftness = 0.1` で、モデル表面の shadow/toon 境界が丸まりすぎず階調も潰れにくい
+  - `selfShadowEdgeSoftness` は `0.05` を維持
+- WebGPU 起動設定
+  - shader / shadow 周りの device limit 切り分けとして `setMaximumLimits: true` を設定
+  - 影のぼけそのものの解決には直結しなかった
+- 読み込み直後の CSM 再同期
+  - 読み込み直後だけ影が極端にぼけ、ステージ表示切替などで見た目が変わる現象があった
+  - PMX / X / GLB 読み込み完了後に caster 再登録、frustum 再適用、material dirty、effect 解放を即時と次フレームで実行するようにした
+  - ただし `半影サイズ = 0.04` でもボケが強く残るため、読み込み順だけが原因ではない可能性が高い
+- PCSS なしの CSM 最適化
+  - 公式 CSM 実装では PCF / PCSS / None 系の filter が主経路で、Blur Exponential 系は通常 `ShadowGenerator` 用として扱う
+  - PCSS を既定から外したため、CSM 既定は `numCascades = 3` / `lambda = 0.9` / `cascadeBlendPercentage = 0.1` / `depthClamp = true` / `PCF QUALITY_HIGH` に寄せた
+  - `autoCalcDepthBounds = true` / `autoCalcDepthBoundsRefreshRate = 1` で、MMD 再生中のカメラ・モデル変化に追従させる
+  - `QUALITY_HIGH` は PCF 5x5 kernel。CSM + PCF では物理的な半影ブラーは出ないが、Medium の 3x3 より境界 aliasing は抑えやすい。
+  - 既存 project に `shadowFilteringQuality = Medium` などが保存されていても、CSM 使用中は実行時に `QUALITY_HIGH` を強制する。CSM のフィルタ品質 UI は通常表示しないため、保存値で PCF が弱いままになる経路を避ける。
+  - `cascadeBlendPercentage` は cascade 同士の切替線をなじませる値で、落ち影そのものの輪郭を半影としてぼかす値ではない。影の輪郭が硬い場合は PCF 品質、shadow density、材質側 shadow factor の丸めを別途見る。
+  - 2 cascade より負荷は上がるが、近景キャラと中距離ステージの影密度を優先する
+
+現時点の暫定既定:
+
+- 影方式: `cascaded`
+- cascade 数: `3`
+- 半影: `OFF`
+- 半影サイズ: `0.08`（実験 ON 時の初期値）
+- 影の薄さ: `0.2`
+- セルフ影境界: `0.05`
+- 遮蔽影境界: `0.1`
+- 影ぼかし / ぼかし縮小 / ぼかし範囲: UI から非表示、project 互換値として保存/読込は維持
+
+未解決:
+
+- PCSS 有効時だけ、通常 `ShadowGenerator` / `CascadedShadowGenerator` の両方で落ち影が本体からずれる現象が繰り返し出る
+- CSM で UI 値をそのまま `contactHardeningLightSizeUVRatio` に渡すと、床から離れた影がかなり大きくぼける
+- これが PCSS の物理的に自然な結果なのか、MMD 編集画面として過剰なのか判断が割れる
+- CSM + PCSS では cascade ごとに depth scale が変わるため、penumbra 計算が期待より大きく出ている可能性がある
+- 半透明影の dithering pattern と PCSS の多点サンプリングが干渉し、輪郭のぼけ・穴あき・雲状ノイズが混ざる可能性がある
+- PMX ステージ材質では、受け側材質の toon/shadow 合成が shadow filter の中間値を再加工している可能性がある
+- CSM + PCF の落ち影が、期待よりかなりくっきり出る事象が残っている
+  - `filter = FILTER_PCF` / `filteringQuality = QUALITY_HIGH` を強制しても、見た目の硬さは大きく変わらなかった
+  - `lambda`、`cascadeBlendPercentage`、`shadowMaxZ`、camera `maxZ`、`depthClamp`、`autoCalcDepthBounds`、読み込み直後の shadow 再同期、保存済み quality 値の上書きなどを試したが、輪郭の硬さは決定的には改善しなかった
+  - Babylon.js の CSM + PCF は 5x5 PCF による aliasing 軽減が主で、PCSS / Blur ESM のような大きな半影ブラーを出すものではない可能性が高い
+  - ただし、同条件でも PMX ステージや材質によって硬さの印象が違うため、shadow map 側だけでなく receiver material 側の shadow/toon 合成が中間値を潰している可能性も残る
+  - 現時点では「カスケードシャドウが謎にくっきりしすぎる既知事象」として扱い、PCSS に戻して解決しようとしない
+
+次に見る候補:
+
+- CSM + PCF 既定を維持し、PCSS は実験 ON として通常影 / CSM の両方で原因を切り分ける
+- CSM 時の `半影サイズ * 0.1` 補正で、実効値が小さすぎる / 大きすぎるケースを比較する
+- `numCascades` / `lambda` / `shadowMaxZ` の組み合わせで、penumbra が過剰に出る条件を切り分ける
+- 標準床と PMX ステージで receiver material の shadow 合成を分ける実験をする
+- 「見た目の MMD らしさ」を優先するなら、PCSS より PCF + 薄めの影 + toon 境界調整を既定にする案も残す
+- 次回以降の別案として、Babylon.js の FrameGraph 影タスクを試す
+  - 現在の依存には `FrameGraphShadowGeneratorTask` が存在する
+  - CSM 用にも `FrameGraphCascadedShadowGeneratorTask` / `NodeRenderGraphCascadedShadowGeneratorBlock` が存在する
+  - MMD_modoki は WebGPU 前提に寄っているため、Classic `ShadowGenerator` / `CascadedShadowGenerator` 経路で詰まる場合は、FrameGraph に shadow pass を移す実験価値がある
+  - ただし現時点では実装しない。既存の MMD 描画、MMD material shader、transparent shadow、FrameGraph post stack との接続検証が必要なので、影品質調整とは別タスクとして扱う
 
 照明欄の初期値:
 
@@ -334,19 +453,20 @@ UI:
 - 方向Y: `-0.5`
 - 方向Z: `0.5`
 - 光の強さ: `0.8`
-- 影の濃さ: `0.0`（UI非表示）
+- 影方式: `cascaded`
+- 影の薄さ: `0.2`（Babylon.js `shadowGenerator.darkness`）
 - 影範囲: `220`
 - 影描画距離: `1000`
-- 影ぼかし: `0`
+- 影ぼかし: `0`（UI非表示、通常 `ShadowGenerator` 用の互換値）
 - 半影: `OFF`
-- 半影サイズ: `0.035`
+- 半影サイズ: `0.08`（実験 ON 時の初期値）
 - 透過影: `ON`
 - Shadow Bias: `0.0005`（UI非表示）
 - Normal Bias: `0.01`（UI非表示）
 
 照明欄の制約:
 
-- `shadowMaxZ` の UI 範囲は `500..100000`
+- `shadowMaxZ` の UI 範囲は `500..10000`
 - 範囲を広げるほど影密度は下がるため、必要以上に大きくしない方が見た目は安定しやすい
 - 光方向は角度ではなく `X / Y / Z` ベクトルとして扱います
 - `setLightDirection(x, y, z)` ではベクトルを正規化して `DirectionalLight.direction` に適用します
@@ -358,7 +478,7 @@ UI:
 - モデル表面の遮蔽影には、toon 側の境界グラデを入れます
 - 現在の既定値
   - `selfShadowEdgeSoftness = 0.05`
-  - `occlusionShadowEdgeSoftness = 0.05`
+  - `occlusionShadowEdgeSoftness = 0.1`
 
 このため、現行仕様では次の見た目は意図通りです。
 
@@ -369,7 +489,7 @@ UI:
 
 - 影の内部に帯状の段差が見える
 - カスケード切替境界が見える
-- カメラ距離で影の濃さが不自然に跳ぶ
+- カメラ距離で影の薄さやぼけ方が不自然に跳ぶ
 
 ## 既知の制限
 

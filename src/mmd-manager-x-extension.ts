@@ -78,6 +78,7 @@ type XLoadHost = {
     setCameraTarget?: (x: number, y: number, z: number) => void;
     setCameraDistance?: (distance: number) => void;
     syncIblShadowsScene?: () => void;
+    refreshShadowAfterSceneContentChanged?: () => void;
 };
 
 type AccessoryEntry = {
@@ -1163,6 +1164,7 @@ if (!mmdManagerProto.loadX) {
             );
             host.applyToonShadowInfluenceToMeshes?.(result.meshes as Mesh[]);
             host.syncIblShadowsScene?.();
+            host.refreshShadowAfterSceneContentChanged?.();
 
             logInfo("asset", "x accessory load completed", {
                 filePath,
@@ -1223,6 +1225,7 @@ if (!mmdManagerProto.loadGlb) {
                 GLB_ACCESSORY_IMPORT_SCALE,
             );
             host.syncIblShadowsScene?.();
+            host.refreshShadowAfterSceneContentChanged?.();
 
             logInfo("asset", "glb accessory load completed", {
                 filePath,

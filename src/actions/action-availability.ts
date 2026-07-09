@@ -175,6 +175,8 @@ export function canExecuteEditorAction(
         case "effect.setShadowMaxZ":
         case "effect.setShadowFilteringQuality":
         case "effect.setShadowBlurKernel":
+        case "effect.setShadowBlurScale":
+        case "effect.setShadowBlurBoxOffset":
         case "effect.setShadowPenumbra":
         case "effect.setShadowPenumbraSize":
         case "effect.setTransparentShadow":

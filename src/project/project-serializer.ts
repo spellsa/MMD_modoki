@@ -52,6 +52,8 @@ type ProjectExportHost = {
     shadowNormalBias: number;
     shadowFilteringQuality: number;
     shadowBlurKernel: number;
+    shadowBlurScale: number;
+    shadowBlurBoxOffset: number;
     shadowPenumbraEnabled: boolean;
     shadowPenumbraSize: number;
     transparentShadowEnabled: boolean;
@@ -304,6 +306,8 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             shadowNormalBias: host.shadowNormalBias,
             shadowFilteringQuality: host.shadowFilteringQuality,
             shadowBlurKernel: host.shadowBlurKernel,
+            shadowBlurScale: host.shadowBlurScale,
+            shadowBlurBoxOffset: host.shadowBlurBoxOffset,
             shadowPenumbraEnabled: host.shadowPenumbraEnabled,
             shadowPenumbraSize: host.shadowPenumbraSize,
             transparentShadowEnabled: host.transparentShadowEnabled,

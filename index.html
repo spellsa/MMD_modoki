@@ -924,13 +924,13 @@
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowMaxZ">影描画距離</span>
-              <input type="range" id="light-shadow-max-z" class="light-slider" min="500" max="100000" value="4800" step="500">
-              <span id="light-shadow-max-z-val" class="light-value">4800</span>
+              <input type="range" id="light-shadow-max-z" class="light-slider" min="500" max="10000" value="1000" step="500">
+              <span id="light-shadow-max-z-val" class="light-value">1000</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.shadowQuality">影品質</span>
-              <input type="range" id="light-shadow-filter-quality" class="light-slider" min="0" max="2" value="1" step="1">
-              <span id="light-shadow-filter-quality-val" class="light-value">Med</span>
+              <input type="range" id="light-shadow-filter-quality" class="light-slider" min="0" max="2" value="0" step="1">
+              <span id="light-shadow-filter-quality-val" class="light-value">High</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.softTransparentShadow">半透明影</span>
@@ -985,8 +985,8 @@
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
               <span class="light-label" data-i18n="label.occlusionShadowEdge">遮蔽影境界</span>
-              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="50" step="1">
-              <span id="light-occlusion-shadow-softness-val" class="light-value">0.050</span>
+              <input type="range" id="light-occlusion-shadow-softness" class="light-slider" min="5" max="120" value="100" step="1">
+              <span id="light-occlusion-shadow-softness-val" class="light-value">0.100</span>
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowStrength">照度</span>
@@ -994,11 +994,11 @@
               <span id="light-intensity-val" class="light-value">1.0</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>
-              <span class="light-label" data-i18n="label.shadowDarkness">影の濃さ</span>
-              <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="0" step="1">
-              <span id="light-shadow-val" class="light-value">0.00</span>
+              <span class="light-label" data-i18n="label.shadowDarkness">影の薄さ</span>
+              <input type="range" id="light-shadow" class="light-slider" min="0" max="100" value="20" step="1">
+              <span id="light-shadow-val" class="light-value">0.20</span>
             </div>
-            <div class="light-row light-row--shadow light-row--always-hidden" hidden>
+            <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowFrustumSize">影範囲</span>
               <input type="range" id="light-shadow-frustum-size" class="light-slider" min="120" max="30000" value="220" step="100">
               <span id="light-shadow-frustum-size-val" class="light-value">220</span>

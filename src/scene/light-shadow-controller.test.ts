@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     getSerializedLightDirection,
     setShadowBlurKernel,
+    setShadowFilteringQuality,
     setShadowFrustumSize,
     setLightDirection,
     setShadowPenumbraEnabled,
@@ -11,6 +12,7 @@ import {
     setTransparentShadowEnabled,
 } from "./light-shadow-controller";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
+import { CascadedShadowGenerator } from "@babylonjs/core/Lights/Shadows/cascadedShadowGenerator";
 
 function createHost() {
     return {
@@ -57,23 +59,23 @@ describe("light direction serialization", () => {
 });
 
 describe("shadow projection range", () => {
-    it("uses shadowMaxZ as the standard shadow draw distance", () => {
+    it("keeps standard shadow frustum size independent from shadowMaxZ", () => {
         const host = createHost();
 
         setShadowFrustumSize(host, 220);
         setShadowMaxZ(host, 4800);
 
-        expect(host.dirLight.shadowFrustumSize).toBe(4800);
+        expect(host.dirLight.shadowFrustumSize).toBe(220);
         expect(host.dirLight.shadowMaxZ).toBe(4800);
     });
 
-    it("uses shadowMaxZ for aerial standard shadow coverage", () => {
+    it("clamps aerial shadowMaxZ without expanding standard shadow frustum", () => {
         const host = createHost();
 
         setShadowMaxZ(host, 100000);
 
-        expect(host.dirLight.shadowFrustumSize).toBe(100000);
-        expect(host.dirLight.shadowMaxZ).toBe(100000);
+        expect(host.dirLight.shadowFrustumSize).toBe(220);
+        expect(host.dirLight.shadowMaxZ).toBe(10000);
     });
 });
 
@@ -137,6 +139,8 @@ describe("shadow filter controls", () => {
         const host = {
             ...createHost(),
             shadowBlurKernelValue: 0,
+            shadowBlurScaleValue: 3,
+            shadowBlurBoxOffsetValue: 2,
             shadowPenumbraEnabledValue: false,
             shadowPenumbraSizeValue: 0.035,
             shadowFilteringQualityValue: ShadowGenerator.QUALITY_MEDIUM,
@@ -145,6 +149,7 @@ describe("shadow filter controls", () => {
                 filteringQuality: ShadowGenerator.QUALITY_MEDIUM,
                 useKernelBlur: false,
                 blurScale: 1,
+                blurBoxOffset: 1,
                 blurKernel: 0,
                 contactHardeningLightSizeUVRatio: 0,
             },
@@ -157,7 +162,8 @@ describe("shadow filter controls", () => {
 
         expect(host.shadowGenerator.filter).toBe(ShadowGenerator.FILTER_BLUREXPONENTIALSHADOWMAP);
         expect(host.shadowGenerator.useKernelBlur).toBe(true);
-        expect(host.shadowGenerator.blurScale).toBe(2);
+        expect(host.shadowGenerator.blurScale).toBe(3);
+        expect(host.shadowGenerator.blurBoxOffset).toBe(2);
         expect(host.shadowGenerator.blurKernel).toBe(24);
     });
 
@@ -165,6 +171,8 @@ describe("shadow filter controls", () => {
         const host = {
             ...createHost(),
             shadowBlurKernelValue: 24,
+            shadowBlurScaleValue: 2,
+            shadowBlurBoxOffsetValue: 1,
             shadowPenumbraEnabledValue: false,
             shadowPenumbraSizeValue: 0.035,
             shadowFilteringQualityValue: ShadowGenerator.QUALITY_MEDIUM,
@@ -183,5 +191,40 @@ describe("shadow filter controls", () => {
 
         expect(host.shadowGenerator.filter).toBe(ShadowGenerator.FILTER_PCSS);
         expect(host.shadowGenerator.contactHardeningLightSizeUVRatio).toBeCloseTo(0.08);
+    });
+
+    it("forces high PCF quality for cascaded shadows even when saved quality is lower", () => {
+        const csmShadowGenerator = {
+            filter: ShadowGenerator.FILTER_PCF,
+            filteringQuality: ShadowGenerator.QUALITY_LOW,
+            contactHardeningLightSizeUVRatio: 0,
+            stabilizeCascades: true,
+            lambda: 0,
+            cascadeBlendPercentage: 0,
+            autoCalcDepthBounds: false,
+            autoCalcDepthBoundsRefreshRate: 0,
+            depthClamp: false,
+            penumbraDarkness: 1,
+        };
+        Object.setPrototypeOf(csmShadowGenerator, CascadedShadowGenerator.prototype);
+        const host = {
+            ...createHost(),
+            shadowBlurKernelValue: 0,
+            shadowBlurScaleValue: 2,
+            shadowBlurBoxOffsetValue: 1,
+            shadowPenumbraEnabledValue: false,
+            shadowPenumbraSizeValue: 0.08,
+            shadowFilteringQualityValue: ShadowGenerator.QUALITY_LOW,
+            shadowGenerator: csmShadowGenerator,
+            engine: {
+                releaseEffects: vi.fn(),
+            },
+        };
+
+        setShadowFilteringQuality(host, ShadowGenerator.QUALITY_LOW);
+
+        expect(host.shadowGenerator.filter).toBe(ShadowGenerator.FILTER_PCF);
+        expect(host.shadowGenerator.filteringQuality).toBe(ShadowGenerator.QUALITY_HIGH);
+        expect(host.shadowFilteringQualityValue).toBe(ShadowGenerator.QUALITY_LOW);
     });
 });
