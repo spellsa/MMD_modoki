@@ -216,9 +216,11 @@ async function initializeApp(): Promise<void> {
     };
     const engine = mmdManager.getEngineType();
     const physicsBackend = mmdManager.getPhysicsBackendLabel();
+    const physicsEvaluationType = mmdManager.getPhysicsEvaluationTypeLabel();
     logInfo("renderer", "MmdManager initialized", {
       engine,
       physicsBackend,
+      physicsEvaluationType,
     });
     const timeline = new Timeline(
       "timeline-canvas",

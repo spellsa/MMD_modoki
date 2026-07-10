@@ -15,6 +15,7 @@ import { logError, logInfo, logWarn, toLogErrorData } from "../app-logger";
 export type PhysicsSimulationRateHz = 60;
 export type PhysicsBackend = "none" | "bullet-mpr" | "bullet-spr" | "wasm-mpr";
 type BulletPhysicsBackend = Extract<PhysicsBackend, "bullet-mpr" | "bullet-spr">;
+export type PreferredBulletPhysicsBackend = "auto" | BulletPhysicsBackend;
 export type PhysicsBackendLabel = "Bullet MPR" | "Bullet SPR" | "WASM MPR" | "Off";
 export type PhysicsEvaluationTypeLabel = "Immediate" | "Buffered" | "WasmImmediate";
 type RuntimeMmdRuntime = MmdRuntime | MmdWasmRuntime;
@@ -54,9 +55,10 @@ export type PhysicsRuntimeControllerOptions = {
 
 const PHYSICS_SIMULATION_RATE_HZ: PhysicsSimulationRateHz = 60;
 const PHYSICS_FIXED_TIME_STEP_SECONDS = 1 / PHYSICS_SIMULATION_RATE_HZ;
-const PHYSICS_MAX_SUB_STEPS = 2;
+const DEFAULT_PHYSICS_MAX_SUB_STEPS = 2;
 const DEFAULT_PHYSICS_DELTA_MS = 1000 / 60;
-const USE_BUFFERED_EVALUATION_DURING_PLAYBACK = true;
+const DEFAULT_USE_BUFFERED_EVALUATION_DURING_PLAYBACK = true;
+const PHYSICS_DELTA_WARNING_INTERVAL_MS = 5000;
 
 type BulletFloorCollisionBody = {
     shape: PhysicsStaticPlaneShape;
@@ -79,13 +81,17 @@ export class PhysicsRuntimeController {
     private floorCollisionBody: BulletFloorCollisionBody | null = null;
     private available = false;
     private backend: PhysicsBackend = "none";
+    private preferredBulletBackend: PreferredBulletPhysicsBackend = "auto";
     private enabled = true;
     private floorCollisionEnabled = true;
+    private bufferedEvaluationDuringPlayback = DEFAULT_USE_BUFFERED_EVALUATION_DURING_PLAYBACK;
     private simulationRateHz: PhysicsSimulationRateHz = PHYSICS_SIMULATION_RATE_HZ;
+    private maxSubSteps = DEFAULT_PHYSICS_MAX_SUB_STEPS;
     private gravityAcceleration = 98;
     private gravityDirection = new Vector3(0, -100, 0);
     private bulletEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
     private nextPerformanceLogMs = performance.now() + 10_000;
+    private nextDeltaWarningMs = 0;
     private stepTimingStats: PhysicsStepTimingStats = {
         samples: 0,
         totalMs: 0,
@@ -114,14 +120,28 @@ export class PhysicsRuntimeController {
         this.runtime = runtime;
     }
 
+    public getPreferredBulletBackend(): PreferredBulletPhysicsBackend {
+        return this.preferredBulletBackend;
+    }
+
+    public setPreferredBulletBackend(backend: PreferredBulletPhysicsBackend): PreferredBulletPhysicsBackend {
+        this.preferredBulletBackend = backend;
+        return this.preferredBulletBackend;
+    }
+
     public async initializeClassic(): Promise<boolean> {
         try {
             await this.initializeBulletPhysicsBackend();
             this.available = true;
             logInfo("physics", "physics backend initialized", {
                 backend: this.getBackendLabel(),
+                preferredBulletBackend: this.preferredBulletBackend,
                 fallback: this.backend === "bullet-spr",
                 simulationRateHz: this.simulationRateHz,
+                maxSubSteps: this.maxSubSteps,
+                fixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
+                bufferedEvaluationDuringPlayback: this.bufferedEvaluationDuringPlayback,
+                evaluationType: this.getEvaluationTypeLabel(),
             });
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
@@ -206,6 +226,21 @@ export class PhysicsRuntimeController {
         return this.simulationRateHz;
     }
 
+    public getMaxSubSteps(): number {
+        return this.maxSubSteps;
+    }
+
+    public setMaxSubSteps(value: number): number {
+        this.maxSubSteps = PhysicsRuntimeController.normalizeMaxSubSteps(value);
+        this.applySimulationRate();
+        logInfo("physics", "physics max substeps changed", {
+            maxSubSteps: this.maxSubSteps,
+            simulationRateHz: this.simulationRateHz,
+            fixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
+        });
+        return this.maxSubSteps;
+    }
+
     public setSimulationRateHz(value: number): PhysicsSimulationRateHz {
         const normalized = PhysicsRuntimeController.normalizeSimulationRate(value);
         this.simulationRateHz = normalized;
@@ -237,15 +272,25 @@ export class PhysicsRuntimeController {
         this.applyGravity();
     }
 
+    public getBufferedEvaluationDuringPlayback(): boolean {
+        return this.bufferedEvaluationDuringPlayback;
+    }
+
+    public setBufferedEvaluationDuringPlayback(enabled: boolean, playbackActive = false): boolean {
+        this.bufferedEvaluationDuringPlayback = Boolean(enabled);
+        this.syncBulletEvaluationTypeForPlayback(playbackActive);
+        return this.bufferedEvaluationDuringPlayback;
+    }
+
     public syncScenePhysicsSimulationState(simulationActive: boolean): void {
         this.scene.physicsEnabled = this.getEnabled() && simulationActive;
     }
 
     public syncBulletEvaluationTypeForPlayback(playbackActive = false): void {
-        const useBuffered = USE_BUFFERED_EVALUATION_DURING_PLAYBACK
+        const useBuffered = this.bufferedEvaluationDuringPlayback
             && playbackActive
             && this.getEnabled()
-            && this.backend === "bullet-mpr";
+            && this.bulletPhysicsRuntime !== null;
         this.setBulletEvaluationType(
             useBuffered ? PhysicsRuntimeEvaluationType.Buffered : PhysicsRuntimeEvaluationType.Immediate,
             playbackActive ? "playback active" : "playback inactive",
@@ -293,7 +338,7 @@ export class PhysicsRuntimeController {
             physicsStepMaxMs: this.formatStepTimingValue(physicsStepTiming.maxMs),
             physicsStepLastMs: this.formatStepTimingValue(physicsStepTiming.lastMs),
             physicsFixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
-            physicsMaxSubSteps: PHYSICS_MAX_SUB_STEPS,
+            physicsMaxSubSteps: this.maxSubSteps,
             physicsDeltaSamples: physicsDeltaTiming.samples,
             physicsDeltaRawMaxMs: this.formatStepTimingValue(physicsDeltaTiming.rawMaxMs),
             physicsDeltaUsedMaxMs: this.formatStepTimingValue(physicsDeltaTiming.usedMaxMs),
@@ -305,17 +350,28 @@ export class PhysicsRuntimeController {
     }
 
     private async initializeBulletPhysicsBackend(): Promise<void> {
+        if (this.preferredBulletBackend === "bullet-spr") {
+            await this.initializeBulletSprPhysicsBackend();
+            return;
+        }
+
         const mprUnavailableReason = this.getMprUnavailableReason();
         if (mprUnavailableReason === null) {
             try {
                 await this.initializeBulletMprPhysicsBackend();
                 return;
             } catch (err: unknown) {
+                if (this.preferredBulletBackend === "bullet-mpr") {
+                    throw err;
+                }
                 const message = err instanceof Error ? err.message : String(err);
                 console.warn("Bullet MPR physics initialization failed. Falling back to SPR:", message);
                 logWarn("physics", "Bullet MPR physics initialization failed; falling back to SPR", toLogErrorData(err));
             }
         } else {
+            if (this.preferredBulletBackend === "bullet-mpr") {
+                throw new Error(mprUnavailableReason);
+            }
             logWarn("physics", "Bullet MPR physics skipped; falling back to SPR", {
                 reason: mprUnavailableReason,
             });
@@ -354,13 +410,13 @@ export class PhysicsRuntimeController {
     private applySimulationRate(): void {
         if (this.bulletPhysicsRuntime) {
             this.bulletPhysicsRuntime.fixedTimeStep = PHYSICS_FIXED_TIME_STEP_SECONDS;
-            this.bulletPhysicsRuntime.maxSubSteps = PHYSICS_MAX_SUB_STEPS;
+            this.bulletPhysicsRuntime.maxSubSteps = this.maxSubSteps;
         }
         if (this.runtime instanceof MmdWasmRuntime) {
             const wasmPhysics = this.runtime.physics;
             if (wasmPhysics) {
                 wasmPhysics.fixedTimeStep = PHYSICS_FIXED_TIME_STEP_SECONDS;
-                wasmPhysics.maxSubSteps = PHYSICS_MAX_SUB_STEPS;
+                wasmPhysics.maxSubSteps = this.maxSubSteps;
             }
         }
     }
@@ -503,6 +559,7 @@ export class PhysicsRuntimeController {
         this.deltaTimingStats.usedMaxMs = Math.max(this.deltaTimingStats.usedMaxMs, usedMs);
         this.deltaTimingStats.lastRawMs = rawMs;
         this.deltaTimingStats.lastUsedMs = usedMs;
+        this.logDeltaSubstepWarningIfNeeded(rawMs, usedMs);
     }
 
     private recordStepDuration(durationMs: number): void {
@@ -561,9 +618,12 @@ export class PhysicsRuntimeController {
         try {
             this.bulletPhysicsRuntime.evaluationType = evaluationType;
             this.bulletEvaluationType = evaluationType;
+            const label = this.getEvaluationTypeLabel();
             logInfo("physics", "Bullet physics evaluation type changed", {
-                evaluationType: this.getEvaluationTypeLabel(),
+                backend: this.getBackendLabel(),
+                evaluationType: label,
                 reason,
+                bufferedEvaluationDuringPlayback: this.bufferedEvaluationDuringPlayback,
             });
         } catch (err: unknown) {
             logWarn("physics", "Failed to change Bullet physics evaluation type", {
@@ -596,6 +656,34 @@ export class PhysicsRuntimeController {
     public static normalizeSimulationRate(value: number): PhysicsSimulationRateHz {
         void value;
         return PHYSICS_SIMULATION_RATE_HZ;
+    }
+
+    public static normalizeMaxSubSteps(value: number): number {
+        if (!Number.isFinite(value)) {
+            return DEFAULT_PHYSICS_MAX_SUB_STEPS;
+        }
+        return Math.max(1, Math.min(8, Math.round(value)));
+    }
+
+    private logDeltaSubstepWarningIfNeeded(rawMs: number, usedMs: number): void {
+        const maxStepMs = PHYSICS_FIXED_TIME_STEP_SECONDS * this.maxSubSteps * 1000;
+        if (usedMs <= maxStepMs + 0.01) return;
+
+        const nowMs = performance.now();
+        if (nowMs < this.nextDeltaWarningMs) return;
+        this.nextDeltaWarningMs = nowMs + PHYSICS_DELTA_WARNING_INTERVAL_MS;
+
+        const requiredSubSteps = Math.ceil(usedMs / (PHYSICS_FIXED_TIME_STEP_SECONDS * 1000));
+        const data = {
+            backend: this.getBackendLabel(),
+            evaluationType: this.getEvaluationTypeLabel(),
+            rawDeltaMs: this.formatStepTimingValue(rawMs),
+            usedDeltaMs: this.formatStepTimingValue(usedMs),
+            fixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
+            maxSubSteps: this.maxSubSteps,
+            requiredSubSteps,
+        };
+        logWarn("physics", "physics delta exceeds max substeps; cloth/constraints may lag or stretch", data);
     }
 
     public static getBackendLabelForBackend(backend: PhysicsBackend): PhysicsBackendLabel {

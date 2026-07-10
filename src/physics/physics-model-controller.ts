@@ -7,13 +7,14 @@ import type { MmdWasmModel } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmMode
 import { logDebugIfEnabled } from "../app-logger";
 import type { WebmPhysicsModelSnapshot, WebmPhysicsRigidBodySnapshot } from "../types";
 
-const MMD_CONSTRAINT_SOLVER_PARAMETER_VALUE = 0.25;
+const MMD_CONSTRAINT_ERP_VALUE = 0.475;
+const MMD_CONSTRAINT_CFM_VALUE = 0;
 const MMD_CONSTRAINT_AXIS_COUNT = 6;
-const MMD_CONSTRAINT_PARAMETER_IDS = [
-    1, // ConstraintERP
-    2, // ConstraintStopERP
-    3, // ConstraintCFM
-    4, // ConstraintStopCFM
+const MMD_CONSTRAINT_PARAMETERS = [
+    { id: 1, name: "ERP", value: MMD_CONSTRAINT_ERP_VALUE },
+    { id: 2, name: "StopERP", value: MMD_CONSTRAINT_ERP_VALUE },
+    { id: 3, name: "CFM", value: MMD_CONSTRAINT_CFM_VALUE },
+    { id: 4, name: "StopCFM", value: MMD_CONSTRAINT_CFM_VALUE },
 ] as const;
 
 export type PhysicsRuntimeModel = MmdModel | MmdWasmModel;
@@ -79,6 +80,7 @@ type BulletPhysicsModelLike = {
 
 type PhysicsModelInternal = {
     _physicsModel?: ClassicPhysicsModelLike | BulletPhysicsModelLike | null;
+    initializePhysics?: () => void;
 };
 
 type PhysicsConstraintParamTargetLike = {
@@ -141,13 +143,16 @@ export class PhysicsModelController {
         this.addRuntimeDiagnostic = options.addRuntimeDiagnostic;
     }
 
-    public applyPhysicsStateToModel(model: PhysicsRuntimeModel): void {
+    public applyPhysicsStateToModel(model: PhysicsRuntimeModel, options: { resetPose?: boolean } = {}): void {
         if (model.rigidBodyStates.length === 0) return;
 
         const shouldSimulatePhysics = this.getPhysicsEnabled() && this.isSimulationActive();
         model.rigidBodyStates.fill(shouldSimulatePhysics ? 1 : 0);
         if (shouldSimulatePhysics) {
             this.getRuntime().initializeMmdModelPhysics(model as never);
+            if (options.resetPose) {
+                this.resetPhysicsModelToCurrentPose(model);
+            }
             this.applyMmdConstraintSolverParameters(model);
         }
     }
@@ -176,8 +181,9 @@ export class PhysicsModelController {
             backend: this.getPhysicsBackendLabel(),
             evaluationType: this.getPhysicsEvaluationTypeLabel(),
             constraintCount: appliedCount,
-            value: MMD_CONSTRAINT_SOLVER_PARAMETER_VALUE,
-            params: ["ERP", "StopERP", "CFM", "StopCFM"],
+            erp: MMD_CONSTRAINT_ERP_VALUE,
+            cfm: MMD_CONSTRAINT_CFM_VALUE,
+            params: MMD_CONSTRAINT_PARAMETERS.map((param) => param.name),
             axisCount: MMD_CONSTRAINT_AXIS_COUNT,
         });
     }
@@ -466,6 +472,50 @@ export class PhysicsModelController {
         return targets;
     }
 
+    private resetPhysicsModelToCurrentPose(model: PhysicsRuntimeModel): void {
+        const modelInternal = model as unknown as PhysicsModelInternal;
+        const physicsModel = modelInternal._physicsModel;
+        if (!physicsModel || typeof physicsModel !== "object") return;
+
+        modelInternal.initializePhysics?.();
+        physicsModel.commitBodyStates?.(model.rigidBodyStates);
+        PhysicsModelController.clearPhysicsModelVelocities(physicsModel);
+        PhysicsModelController.commitBufferedPhysicsModelState(physicsModel);
+        logDebugIfEnabled("physics", "physics", "physics model reset to current pose", {
+            backend: this.getPhysicsBackendLabel(),
+            evaluationType: this.getPhysicsEvaluationTypeLabel(),
+            rigidBodyCount: model.rigidBodyStates.length,
+        });
+    }
+
+    private static clearPhysicsModelVelocities(physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike): void {
+        const zero = Vector3.Zero();
+        const bundle = (physicsModel as BulletPhysicsModelLike)._bundle;
+        if (bundle) {
+            for (let index = 0; index < bundle.count; index += 1) {
+                bundle.setLinearVelocity?.(index, zero, true);
+                bundle.setAngularVelocity?.(index, zero, true);
+            }
+            return;
+        }
+
+        const bodies = (physicsModel as ClassicPhysicsModelLike)._bodies;
+        if (!Array.isArray(bodies)) return;
+        for (const body of bodies) {
+            body?.setLinearVelocity?.(zero);
+            body?.setAngularVelocity?.(zero);
+        }
+    }
+
+    private static commitBufferedPhysicsModelState(physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike): void {
+        const bundle = (physicsModel as BulletPhysicsModelLike)._bundle;
+        if (!bundle) return;
+        if (bundle.needToCommit === true) {
+            bundle.commitToWasm?.();
+        }
+        bundle.updateBufferedMotionStates?.(true);
+    }
+
     private static appendConstraintParamTarget(
         targets: PhysicsConstraintParamTargetLike[],
         constraint: PhysicsConstraintParamContainerLike | null | undefined,
@@ -484,8 +534,8 @@ export class PhysicsModelController {
         if (typeof target.setParam !== "function") return false;
 
         for (let axis = 0; axis < MMD_CONSTRAINT_AXIS_COUNT; axis += 1) {
-            for (const paramId of MMD_CONSTRAINT_PARAMETER_IDS) {
-                target.setParam(paramId, MMD_CONSTRAINT_SOLVER_PARAMETER_VALUE, axis);
+            for (const param of MMD_CONSTRAINT_PARAMETERS) {
+                target.setParam(param.id, param.value, axis);
             }
         }
         return true;

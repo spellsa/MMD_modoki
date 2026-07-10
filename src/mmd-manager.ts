@@ -340,6 +340,8 @@ import {
 import {
     PhysicsRuntimeController,
     type PhysicsBackendLabel,
+    type PhysicsEvaluationTypeLabel,
+    type PreferredBulletPhysicsBackend,
     type PhysicsSimulationRateHz,
 } from "./physics/physics-runtime-controller";
 import {
@@ -794,6 +796,9 @@ export class MmdManager {
     private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.75;
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
+    private static readonly PHYSICS_PREFERRED_BULLET_BACKEND_STORAGE_KEY = "mmd_modoki.physics.preferredBulletBackend";
+    private static readonly PHYSICS_BUFFERED_EVALUATION_STORAGE_KEY = "mmd_modoki.physics.bufferedEvaluation";
+    private static readonly PHYSICS_MAX_SUB_STEPS_STORAGE_KEY = "mmd_modoki.physics.maxSubSteps";
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
     private static readonly FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY = "mmd_modoki.debug.forceModelDebugMaterial";
@@ -1447,6 +1452,17 @@ ${beforeFogAppendBlock}
     private _playbackSpeed = 1;
     private manualPlaybackWithoutAudio = false;
     private externalPlaybackSimulationEnabled = false;
+    private preferredBulletPhysicsBackend = MmdManager.readPreferredBulletBackendLocalStorage();
+    private physicsBufferedEvaluationDuringPlayback = MmdManager.readBooleanLocalStorage(
+        MmdManager.PHYSICS_BUFFERED_EVALUATION_STORAGE_KEY,
+        true,
+    );
+    private physicsMaxSubSteps = MmdManager.readNumberLocalStorage(
+        MmdManager.PHYSICS_MAX_SUB_STEPS_STORAGE_KEY,
+        2,
+        1,
+        8,
+    );
     private manualPlaybackFrameCursor = 0;
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
@@ -4163,6 +4179,61 @@ ${beforeFogAppendBlock}
         return this.physicsController.toggleFloorCollisionEnabled();
     }
 
+    public getPhysicsBufferedEvaluationEnabled(): boolean {
+        return this.physicsController.getBufferedEvaluationDuringPlayback();
+    }
+
+    public setPhysicsBufferedEvaluationEnabled(enabled: boolean): boolean {
+        this.physicsBufferedEvaluationDuringPlayback = Boolean(enabled);
+        const next = this.physicsController.setBufferedEvaluationDuringPlayback(
+            this.physicsBufferedEvaluationDuringPlayback,
+            this._isPlaying,
+        );
+        MmdManager.writeBooleanLocalStorage(MmdManager.PHYSICS_BUFFERED_EVALUATION_STORAGE_KEY, next);
+        return next;
+    }
+
+    public getPhysicsMaxSubSteps(): number {
+        return this.physicsController.getMaxSubSteps();
+    }
+
+    public setPhysicsMaxSubSteps(value: number): number {
+        this.physicsMaxSubSteps = PhysicsRuntimeController.normalizeMaxSubSteps(value);
+        const next = this.physicsController.setMaxSubSteps(this.physicsMaxSubSteps);
+        MmdManager.writeNumberLocalStorage(MmdManager.PHYSICS_MAX_SUB_STEPS_STORAGE_KEY, next);
+        return next;
+    }
+
+    public getPreferredBulletPhysicsBackend(): PreferredBulletPhysicsBackend {
+        return this.preferredBulletPhysicsBackend;
+    }
+
+    public async setPreferredBulletPhysicsBackend(backend: PreferredBulletPhysicsBackend): Promise<PreferredBulletPhysicsBackend> {
+        const next = MmdManager.normalizePreferredBulletBackend(backend);
+        if (this.preferredBulletPhysicsBackend === next) {
+            return this.preferredBulletPhysicsBackend;
+        }
+
+        this.preferredBulletPhysicsBackend = next;
+        this.physicsController.setPreferredBulletBackend(next);
+        MmdManager.writePreferredBulletBackendLocalStorage(next);
+
+        if (this.runtimeMode !== "wasm") {
+            await this.physicsController.initializeClassic();
+            this.physicsController.syncBulletEvaluationTypeForPlayback(this._isPlaying);
+            this.syncScenePhysicsSimulationState();
+            this.applyPhysicsStateToAllModels();
+        }
+
+        logInfo("physics", "preferred Bullet physics backend changed", {
+            preferredBulletBackend: next,
+            activeBackend: this.getPhysicsBackendLabel(),
+            evaluationType: this.getPhysicsEvaluationTypeLabel(),
+            bufferedEvaluationDuringPlayback: this.getPhysicsBufferedEvaluationEnabled(),
+        });
+        return this.preferredBulletPhysicsBackend;
+    }
+
     public async waitForPhysicsInitialization(): Promise<boolean> {
         return this.physicsInitializationPromise;
     }
@@ -4197,12 +4268,17 @@ ${beforeFogAppendBlock}
     }
 
     public setPhysicsEnabled(enabled: boolean): boolean {
+        const wasEnabled = this.getPhysicsEnabled();
+        const isResumingPhysics = enabled && !wasEnabled;
         const nextEnabled = this.physicsController.setEnabled(
             enabled,
             enabled || this.externalPlaybackSimulationEnabled,
-            this._isPlaying,
+            isResumingPhysics ? false : this._isPlaying,
         );
-        this.applyPhysicsStateToAllModels();
+        this.applyPhysicsStateToAllModels(nextEnabled && isResumingPhysics);
+        if (isResumingPhysics) {
+            this.physicsController.syncBulletEvaluationTypeForPlayback(this._isPlaying);
+        }
         return nextEnabled;
     }
 
@@ -4295,6 +4371,52 @@ ${beforeFogAppendBlock}
     private static writeBooleanLocalStorage(key: string, value: boolean): void {
         try {
             globalThis.localStorage?.setItem(key, value ? "1" : "0");
+        } catch {
+            // Ignore persistence failures for optional experiment flags.
+        }
+    }
+
+    private static readNumberLocalStorage(key: string, fallback: number, min: number, max: number): number {
+        try {
+            const value = Number(globalThis.localStorage?.getItem(key));
+            if (Number.isFinite(value)) {
+                return Math.max(min, Math.min(max, value));
+            }
+        } catch {
+            // Optional experiment flags must never block startup.
+        }
+        return fallback;
+    }
+
+    private static writeNumberLocalStorage(key: string, value: number): void {
+        try {
+            globalThis.localStorage?.setItem(key, String(value));
+        } catch {
+            // Ignore persistence failures for optional experiment flags.
+        }
+    }
+
+    private static normalizePreferredBulletBackend(value: string): PreferredBulletPhysicsBackend {
+        if (value === "bullet-mpr" || value === "bullet-spr") {
+            return value;
+        }
+        return "auto";
+    }
+
+    private static readPreferredBulletBackendLocalStorage(): PreferredBulletPhysicsBackend {
+        try {
+            return MmdManager.normalizePreferredBulletBackend(
+                globalThis.localStorage?.getItem(MmdManager.PHYSICS_PREFERRED_BULLET_BACKEND_STORAGE_KEY) ?? "auto",
+            );
+        } catch {
+            // Optional experiment flags must never block startup.
+            return "auto";
+        }
+    }
+
+    private static writePreferredBulletBackendLocalStorage(value: PreferredBulletPhysicsBackend): void {
+        try {
+            globalThis.localStorage?.setItem(MmdManager.PHYSICS_PREFERRED_BULLET_BACKEND_STORAGE_KEY, value);
         } catch {
             // Ignore persistence failures for optional experiment flags.
         }
@@ -4544,6 +4666,9 @@ ${beforeFogAppendBlock}
             onStateChanged: (enabled, available) => this.onPhysicsStateChanged?.(enabled, available),
             onError: (message) => this.onError?.(message),
         });
+        this.physicsController.setPreferredBulletBackend(this.preferredBulletPhysicsBackend);
+        this.physicsController.setBufferedEvaluationDuringPlayback(this.physicsBufferedEvaluationDuringPlayback);
+        this.physicsController.setMaxSubSteps(this.physicsMaxSubSteps);
         this.physicsModelController = new PhysicsModelController({
             getRuntime: () => this.mmdRuntime,
             getPhysicsEnabled: () => this.getPhysicsEnabled(),
@@ -4734,6 +4859,7 @@ ${beforeFogAppendBlock}
             logInfo("physics", "experimental MMD WASM runtime initialized", {
                 runtimeMode: this.runtimeMode,
                 backend: this.getPhysicsBackendLabel(),
+                evaluationType: this.getPhysicsEvaluationTypeLabel(),
                 simulationRateHz: this.getPhysicsSimulationRateHz(),
             });
             return true;
@@ -5385,8 +5511,8 @@ ${beforeFogAppendBlock}
         return `${value.x.toFixed(3)},${value.y.toFixed(3)},${value.z.toFixed(3)}`;
     }
 
-    private applyPhysicsStateToModel(model: RuntimeModel, reason = "direct"): void {
-        this.physicsModelController.applyPhysicsStateToModel(model);
+    private applyPhysicsStateToModel(model: RuntimeModel, reason = "direct", resetPose = false): void {
+        this.physicsModelController.applyPhysicsStateToModel(model, { resetPose });
         const sceneModel = this.sceneModels.find((entry) => entry.model === model);
         if (sceneModel) {
             this.physicsModelController.logPhysicsStateApplication(
@@ -5473,9 +5599,9 @@ ${beforeFogAppendBlock}
         this.physicsModelController.normalizeRuntimeBoneEvaluationOrder(model);
     }
 
-    private applyPhysicsStateToAllModels(): void {
+    private applyPhysicsStateToAllModels(resetPose = false): void {
         for (const sceneModel of this.sceneModels) {
-            this.applyPhysicsStateToModel(sceneModel.model, "all-models");
+            this.applyPhysicsStateToModel(sceneModel.model, "all-models", resetPose);
         }
     }
 
@@ -8143,6 +8269,10 @@ ${beforeFogAppendBlock}
 
     getPhysicsBackendLabel(): PhysicsBackendLabel {
         return this.physicsController.getBackendLabel();
+    }
+
+    getPhysicsEvaluationTypeLabel(): PhysicsEvaluationTypeLabel {
+        return this.physicsController.getEvaluationTypeLabel();
     }
 
     private addRuntimeDiagnostic(message: string): void {

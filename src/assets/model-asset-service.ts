@@ -462,6 +462,11 @@ type ModelAssetHost = {
         createMmdModel(mesh: MmdMesh, options: object): ModelAssetRuntimeModel;
     };
     isPhysicsAvailable(): boolean;
+    getPhysicsBackendLabel?: () => string;
+    getPhysicsEvaluationTypeLabel?: () => string;
+    getPreferredBulletPhysicsBackend?: () => string;
+    getPhysicsBufferedEvaluationEnabled?: () => boolean;
+    getPhysicsMaxSubSteps?: () => number;
     normalizeRuntimeBoneTransformStages?: (model: ModelAssetRuntimeModel) => void;
     normalizeRuntimeBoneEvaluationOrder?: (model: ModelAssetRuntimeModel) => void;
     patchModelAfterPhysicsForPausedState?: (model: ModelAssetRuntimeModel) => void;
@@ -505,6 +510,25 @@ type ModelAssetHost = {
     onSceneModelLoaded?: (modelInfo: ModelInfo, modelCount: number, activateAsCurrent: boolean) => void;
     onError?: (message: string) => void;
 };
+
+function createMmdModelWithPhysicsDiagnostics(
+    host: ModelAssetHost,
+    mmdMesh: MmdMesh,
+    options: object,
+): ModelAssetRuntimeModel {
+    const physicsAvailable = host.isPhysicsAvailable();
+    const physicsDiagnostics = {
+        physicsAvailable,
+        backend: host.getPhysicsBackendLabel?.() ?? "unknown",
+        evaluationType: host.getPhysicsEvaluationTypeLabel?.() ?? "unknown",
+        preferredBulletBackend: host.getPreferredBulletPhysicsBackend?.() ?? "unknown",
+        bufferedEvaluationDuringPlayback: host.getPhysicsBufferedEvaluationEnabled?.() ?? false,
+        maxSubSteps: host.getPhysicsMaxSubSteps?.() ?? null,
+    };
+    logInfo("physics", "MMD model physics creation path", physicsDiagnostics);
+
+    return host.mmdRuntime.createMmdModel(mmdMesh, options);
+}
 
 function visitModelMaterials(
     mesh: Mesh,
@@ -1188,7 +1212,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         logAlphaTextureKeptOpaqueCandidates(fileName, result.meshes as Mesh[], "after-material-setup");
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[]);
 
-        const mmdModel = host.mmdRuntime.createMmdModel(mmdMesh, {
+        const mmdModel = createMmdModelWithPhysicsDiagnostics(host, mmdMesh, {
             materialProxyConstructor: MmdStandardMaterialProxy,
             buildPhysics: host.isPhysicsAvailable()
                 ? { disableOffsetForConstraintFrame: true }

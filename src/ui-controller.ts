@@ -2668,6 +2668,7 @@ export class UIController {
             const engineType = this.mmdManager.getEngineType();
             const shaderType = this.mmdManager.getShaderRuntimeLabel();
             const physicsType = this.mmdManager.getPhysicsBackendLabel();
+            const physicsEvaluationType = this.mmdManager.getPhysicsEvaluationTypeLabel();
             const applyMutedBadgeStyle = (element: HTMLElement): void => {
                 element.style.background = "rgba(255,255,255,0.045)";
                 element.style.color = "#9a9aa3";
@@ -2680,12 +2681,17 @@ export class UIController {
                     : shaderType;
             engineEl.textContent = engineType;
             shaderEl.textContent = shaderBadgeLabel;
-            physicsEl.textContent = physicsType;
+            physicsEl.textContent = physicsEvaluationType === "WasmImmediate" || physicsType === "Off"
+                ? physicsType
+                : `${physicsType} ${physicsEvaluationType}`;
             shaderEl.title = shaderType === "WGSL-custom"
                 ? "WGSL renderer with custom material presets or external WGSL toon shaders"
                 : shaderType === "WGSL-first"
                     ? "WGSL renderer with standard MMD material presets"
                     : "GLSL renderer";
+            physicsEl.title = physicsEvaluationType === "WasmImmediate"
+                ? "WASM runtime physics evaluation"
+                : `Bullet physics evaluation: ${physicsEvaluationType}`;
 
             applyMutedBadgeStyle(engineEl);
             applyMutedBadgeStyle(shaderEl);

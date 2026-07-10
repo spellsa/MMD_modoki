@@ -108,13 +108,38 @@
 - Bullet MPR / SPR、WASM runtime 実験経路とも `fixedTimeStep = 1 / 60`、`maxSubSteps = 2` に揃える。
 - `MultiPhysicsRuntime.useDeltaForWorldStep` は既定 `true` のまま。
 - solver iteration 数は MMD_modoki から明示設定していない。現行 Bullet MPR / SPR binding には、確認範囲では `getSolverInfo` / `setNumIterations` 相当の public export がない。
-- MMD joint constraint へ ERP / stop ERP / CFM / stop CFM `0.25` を 6 軸に明示適用する。
-- babylon-mmd 側の MMD joint 生成では constraint stop ERP `0.475` が入るが、MMD_modoki 側で後段上書きする。
+- MMD joint constraint へ ERP / stop ERP `0.475`、CFM / stop CFM `0` を 6 軸に明示適用する。
+- babylon-mmd 側の MMD joint 生成では constraint stop ERP `0.475` が入る。MMD_modoki 側も ERP は標準寄りへ戻し、CFM 系は布垂れ対策として `0` に戻す。
 - 次に必要な確認:
   - 実 substep 数をログに出せるか。
   - Bullet の solver iteration 設定に upstream API 追加または wasm binding patch が必要か。
-  - ERP / CFM `0.25` 適用後の長髪・スカート・袖モデルの挙動差。
+  - ERP `0.475` / CFM `0` 適用後の長髪・スカート・袖モデルの挙動差。
   - frame skip 時に 60Hz substep catch-up が効いているか。
+
+### 2026-07-10 Classic Bullet 布垂れ切り分け
+
+- Classic runtime + Bullet MPR で、特定モデルの布・袖・スカートが WASM runtime より垂れる症状を確認した。
+- 再生中だけでなく停止時にも同じ傾向が出るため、`Buffered` / `Immediate` の評価方式差は主因ではなさそう。
+- `Generic6DofSpringConstraint#setStiffness` の補正値変更は主因ではなさそうだったため、UI と補正処理を撤去した。
+- ERP / StopERP を `0.25` から `0.475` に戻すと若干変化したが、垂れは残った。
+- CFM / StopCFM を `0.25` から `0` に戻すと大きく改善した。CFM が constraint を柔らかくしすぎていた可能性が高い。
+- 現時点の基準値は ERP / StopERP `0.475`、CFM / StopCFM `0`。
+- Buffered は速度面で有望なまま。布垂れ原因からはほぼ外し、Classic Bullet MPR + Buffered を実用候補として継続検証する。
+
+### 2026-07-10 再生中の物理 ON/OFF 復帰仕様
+
+- メニューバーや toolbar からグローバル物理を OFF にすると、各モデルの `rigidBodyStates` を 0 にして、物理剛体を kinematic / follow bone 寄りにする。
+- OFF 中もアニメーション本体は進むため、ON 復帰時に Bullet 側の剛体姿勢や Buffered motion state が古いままだと、モデルは動くのに物理だけその場に残る。
+- そのため、グローバル物理を OFF -> ON に戻す瞬間は、再生中でも一度 `Immediate` として物理を有効化する。
+- ON 復帰時の処理順:
+  1. `PhysicsRuntimeController.setEnabled(..., playbackActive=false)` で Immediate 状態に寄せる。
+  2. 各モデルの `rigidBodyStates` を 1 に戻す。
+  3. `initializePhysics()` で現在ボーン姿勢を剛体へ再初期化する。
+  4. `commitBodyStates()` で rigid body state を反映する。
+  5. 線形速度・角速度を 0 にクリアする。
+  6. Buffered 経路では `commitToWasm()` / `updateBufferedMotionStates(true)` で worker / buffer 側へ現在状態を同期する。
+  7. 再生中かつ Buffered が有効なら、最後に `syncBulletEvaluationTypeForPlayback(true)` で Buffered に戻す。
+- 最初から Buffered として ON 復帰すると、OFF 中の古い motion state を拾って物理だけ置き去りになることがあるため、この Immediate 挟み込みは仕様として維持する。
 
 ### 2026-07-09 frame skip 対策
 
