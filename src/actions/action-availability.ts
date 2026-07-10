@@ -94,6 +94,7 @@ export function canExecuteEditorAction(
         case "runtime.toggleAntialias":
         case "runtime.togglePhysics":
         case "runtime.toggleShadow":
+        case "runtime.toggleFloorCollision":
         case "runtime.toggleRigidBodies":
         case "runtime.toggleGlobalIllumination":
         case "model.selectTimelineTarget":

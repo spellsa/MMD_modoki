@@ -73,6 +73,7 @@ function createHost() {
         getBackgroundVideoPath: (): null => null,
         physicsEnabled: true,
         getPhysicsEnabled: (): boolean => true,
+        getPhysicsFloorCollisionEnabled: (): boolean => true,
         getPhysicsSimulationRateHz: (): number => 60,
         getPhysicsGravityAcceleration: (): number => 98,
         getPhysicsGravityDirection: (): { x: number; y: number; z: number } => ({ x: 0, y: -100, z: 0 }),
@@ -225,6 +226,15 @@ describe("exportProjectState", () => {
         expect(project.viewport.mirroringFloorSize).toBe(60);
         expect(project.viewport.mirroringFloorHeight).toBe(0.02);
         expect(project.viewport.mirroringFloorResolution).toBe(1024);
+    });
+
+    it("writes physics floor collision setting", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            getPhysicsFloorCollisionEnabled: () => false,
+        });
+
+        expect(project.physics.floorCollisionEnabled).toBe(false);
     });
 
     it("writes model edge color settings", () => {

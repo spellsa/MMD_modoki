@@ -3,6 +3,10 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MmdBulletPhysics } from "babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics";
 import { MultiPhysicsRuntime } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime";
 import { PhysicsRuntimeEvaluationType } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/physicsRuntimeEvaluationType";
+import { MotionType } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/motionType";
+import { PhysicsStaticPlaneShape } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/physicsShape";
+import { RigidBody } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/rigidBody";
+import { RigidBodyConstructionInfo } from "babylon-mmd/esm/Runtime/Optimized/Physics/Bind/rigidBodyConstructionInfo";
 import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
 import { MmdWasmRuntime } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmRuntime";
 import type { IMmdWasmInstance } from "babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance";
@@ -54,6 +58,13 @@ const PHYSICS_MAX_SUB_STEPS = 2;
 const DEFAULT_PHYSICS_DELTA_MS = 1000 / 60;
 const USE_BUFFERED_EVALUATION_DURING_PLAYBACK = true;
 
+type BulletFloorCollisionBody = {
+    shape: PhysicsStaticPlaneShape;
+    info: RigidBodyConstructionInfo;
+    body: RigidBody;
+    added: boolean;
+};
+
 export class PhysicsRuntimeController {
     private readonly scene: Scene;
     private runtime: RuntimeMmdRuntime;
@@ -65,9 +76,11 @@ export class PhysicsRuntimeController {
     private readonly wrappedWasmPhysicsClocks = new WeakSet<object>();
     private bulletPhysicsRuntime: MultiPhysicsRuntime | null = null;
     private physicsRuntime: MmdBulletPhysics | null = null;
+    private floorCollisionBody: BulletFloorCollisionBody | null = null;
     private available = false;
     private backend: PhysicsBackend = "none";
     private enabled = true;
+    private floorCollisionEnabled = true;
     private simulationRateHz: PhysicsSimulationRateHz = PHYSICS_SIMULATION_RATE_HZ;
     private gravityAcceleration = 98;
     private gravityDirection = new Vector3(0, -100, 0);
@@ -154,6 +167,24 @@ export class PhysicsRuntimeController {
 
     public getEnabled(): boolean {
         return this.available && this.enabled;
+    }
+
+    public isFloorCollisionAvailable(): boolean {
+        return this.available && this.bulletPhysicsRuntime !== null;
+    }
+
+    public getFloorCollisionEnabled(): boolean {
+        return this.floorCollisionEnabled;
+    }
+
+    public setFloorCollisionEnabled(enabled: boolean): boolean {
+        this.floorCollisionEnabled = Boolean(enabled);
+        this.syncFloorCollisionBody();
+        return this.getFloorCollisionEnabled();
+    }
+
+    public toggleFloorCollisionEnabled(): boolean {
+        return this.setFloorCollisionEnabled(!this.floorCollisionEnabled);
     }
 
     public setEnabled(enabled: boolean, simulationActive: boolean, playbackActive = false): boolean {
@@ -309,6 +340,7 @@ export class PhysicsRuntimeController {
         this.bulletEvaluationType = PhysicsRuntimeEvaluationType.Immediate;
         runtime.evaluationType = this.bulletEvaluationType;
         this.applySimulationRate();
+        this.syncFloorCollisionBody();
     }
 
     private async initializeBulletMprPhysicsBackend(): Promise<void> {
@@ -348,6 +380,76 @@ export class PhysicsRuntimeController {
         if (this.runtime instanceof MmdWasmRuntime) {
             this.runtime.physics?.setGravity(gravity);
             return;
+        }
+    }
+
+    private syncFloorCollisionBody(): void {
+        if (!this.bulletPhysicsRuntime || !this.floorCollisionEnabled) {
+            this.disposeFloorCollisionBody();
+            return;
+        }
+        if (this.floorCollisionBody?.added) return;
+
+        let shape: PhysicsStaticPlaneShape | null = null;
+        let info: RigidBodyConstructionInfo | null = null;
+        let body: RigidBody | null = null;
+        try {
+            shape = new PhysicsStaticPlaneShape(this.bulletPhysicsRuntime, new Vector3(0, 1, 0), 0);
+            info = new RigidBodyConstructionInfo(this.bulletPhysicsRuntime.wasmInstance);
+            info.shape = shape;
+            info.motionType = MotionType.Static;
+            info.mass = 0;
+            info.friction = 1;
+            info.restitution = 0;
+
+            body = new RigidBody(this.bulletPhysicsRuntime, info);
+            const added = this.bulletPhysicsRuntime.addRigidBodyToGlobal(body);
+            if (!added) {
+                body.dispose();
+                info.dispose();
+                shape.dispose();
+                body = null;
+                info = null;
+                shape = null;
+                logWarn("physics", "Failed to add floor collision rigid body");
+                return;
+            }
+
+            this.floorCollisionBody = { shape, info, body, added };
+            logInfo("physics", "floor collision rigid body enabled", {
+                backend: this.getBackendLabel(),
+                plane: "Y=0",
+            });
+        } catch (err: unknown) {
+            try {
+                body?.dispose();
+                info?.dispose();
+                shape?.dispose();
+            } catch (disposeErr: unknown) {
+                logWarn("physics", "Failed to clean up partial floor collision rigid body", toLogErrorData(disposeErr));
+            }
+            logWarn("physics", "Failed to enable floor collision rigid body", toLogErrorData(err));
+            this.floorCollisionBody = null;
+        }
+    }
+
+    private disposeFloorCollisionBody(): void {
+        const floor = this.floorCollisionBody;
+        if (!floor) return;
+        this.floorCollisionBody = null;
+
+        try {
+            if (floor.added && this.bulletPhysicsRuntime) {
+                this.bulletPhysicsRuntime.removeRigidBodyFromGlobal(floor.body);
+            }
+            floor.body.dispose();
+            floor.info.dispose();
+            floor.shape.dispose();
+            logInfo("physics", "floor collision rigid body disabled", {
+                backend: this.getBackendLabel(),
+            });
+        } catch (err: unknown) {
+            logWarn("physics", "Failed to dispose floor collision rigid body", toLogErrorData(err));
         }
     }
 
@@ -473,6 +575,7 @@ export class PhysicsRuntimeController {
     }
 
     private disposeClassicResources(): void {
+        this.disposeFloorCollisionBody();
         if (this.bulletPhysicsRuntime) {
             this.bulletPhysicsRuntime.unregister();
             this.bulletPhysicsRuntime.dispose();

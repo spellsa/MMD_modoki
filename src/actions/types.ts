@@ -85,6 +85,7 @@ export type RuntimeAction =
     | { type: "runtime.toggleAntialias"; source: ActionSource }
     | { type: "runtime.togglePhysics"; source: ActionSource }
     | { type: "runtime.toggleShadow"; source: ActionSource }
+    | { type: "runtime.toggleFloorCollision"; source: ActionSource }
     | { type: "runtime.toggleRigidBodies"; source: ActionSource }
     | { type: "runtime.toggleGlobalIllumination"; source: ActionSource };
 

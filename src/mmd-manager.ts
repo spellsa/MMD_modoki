@@ -4147,6 +4147,22 @@ ${beforeFogAppendBlock}
         return this.physicsController.getEnabled();
     }
 
+    public isPhysicsFloorCollisionAvailable(): boolean {
+        return this.physicsController.isFloorCollisionAvailable();
+    }
+
+    public getPhysicsFloorCollisionEnabled(): boolean {
+        return this.physicsController.getFloorCollisionEnabled();
+    }
+
+    public setPhysicsFloorCollisionEnabled(enabled: boolean): boolean {
+        return this.physicsController.setFloorCollisionEnabled(enabled);
+    }
+
+    public togglePhysicsFloorCollisionEnabled(): boolean {
+        return this.physicsController.toggleFloorCollisionEnabled();
+    }
+
     public async waitForPhysicsInitialization(): Promise<boolean> {
         return this.physicsInitializationPromise;
     }

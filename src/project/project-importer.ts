@@ -116,6 +116,7 @@ type ProjectImportHost = {
     setPhysicsSimulationRateHz(value: number): void;
     setPhysicsGravityAcceleration(value: number): void;
     setPhysicsGravityDirection(x: number, y: number, z: number): void;
+    setPhysicsFloorCollisionEnabled(enabled: boolean): void;
     isPhysicsAvailable(): boolean;
     setPhysicsEnabled(enabled: boolean): void;
     dofEnabled: boolean;
@@ -730,6 +731,7 @@ export async function importProjectState(
         data.physics.gravityDirection.y,
         data.physics.gravityDirection.z,
     );
+    host.setPhysicsFloorCollisionEnabled(data.physics.floorCollisionEnabled ?? true);
     if (host.isPhysicsAvailable()) {
         host.setPhysicsEnabled(Boolean(data.physics.enabled));
     } else if (data.physics.enabled) {

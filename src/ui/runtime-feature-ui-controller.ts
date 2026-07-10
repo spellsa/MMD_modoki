@@ -164,6 +164,19 @@ export class RuntimeFeatureUiController {
         this.showToast(enabled ? t("toast.shadow.on") : t("toast.shadow.off"), "info");
     }
 
+    public toggleFloorCollision(): void {
+        if (!this.mmdManager.isPhysicsFloorCollisionAvailable()) {
+            this.showToast(t("toast.physics.floorCollision.unavailable"), "error");
+            return;
+        }
+
+        const enabled = this.mmdManager.togglePhysicsFloorCollisionEnabled();
+        this.showToast(
+            enabled ? t("toast.physics.floorCollision.on") : t("toast.physics.floorCollision.off"),
+            "info",
+        );
+    }
+
     public toggleRigidBodies(): void {
         if (!this.mmdManager.isRigidBodyVisualizerAvailable()) {
             this.refreshRigidBodies();

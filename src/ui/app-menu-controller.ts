@@ -260,6 +260,12 @@ export class AppMenuController {
                 return { checked: false, disabled: true };
             case "physics.togglePhysics":
                 return { checked: this.mmdManager.getPhysicsEnabled(), disabled: !this.mmdManager.isPhysicsAvailable() };
+            case "physics.toggleFloorCollision":
+                return {
+                    checked: this.mmdManager.isPhysicsFloorCollisionAvailable()
+                        && this.mmdManager.getPhysicsFloorCollisionEnabled(),
+                    disabled: !this.mmdManager.isPhysicsFloorCollisionAvailable(),
+                };
             case "physics.toggleRigidBodies":
                 return {
                     checked: this.mmdManager.isRigidBodyVisualizerAvailable() && this.mmdManager.isRigidBodyVisualizerEnabled(),
@@ -425,6 +431,9 @@ export class AppMenuController {
                 return;
             case "physics.togglePhysics":
                 this.dispatchAction({ type: "runtime.togglePhysics", source: "menu" });
+                return;
+            case "physics.toggleFloorCollision":
+                this.dispatchAction({ type: "runtime.toggleFloorCollision", source: "menu" });
                 return;
             case "physics.toggleRigidBodies":
                 this.dispatchAction({ type: "runtime.toggleRigidBodies", source: "menu" });

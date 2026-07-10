@@ -180,6 +180,7 @@ type ProjectExportHost = {
     getCameraFov: () => number;
     getCameraDistance: () => number;
     getPhysicsEnabled: () => boolean;
+    getPhysicsFloorCollisionEnabled: () => boolean;
     getPhysicsSimulationRateHz: () => number;
     getPhysicsGravityAcceleration: () => number;
     getPhysicsGravityDirection: () => { x: number; y: number; z: number };
@@ -337,6 +338,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
         },
         physics: {
             enabled: host.getPhysicsEnabled(),
+            floorCollisionEnabled: host.getPhysicsFloorCollisionEnabled(),
             simulationRateHz: host.getPhysicsSimulationRateHz(),
             gravityAcceleration: host.getPhysicsGravityAcceleration(),
             gravityDirection: host.getPhysicsGravityDirection(),

@@ -99,6 +99,7 @@ function createHost() {
         setPhysicsSimulationRateHz: vi.fn(),
         setPhysicsGravityAcceleration: vi.fn(),
         setPhysicsGravityDirection: vi.fn(),
+        setPhysicsFloorCollisionEnabled: vi.fn(),
         setPhysicsEnabled: vi.fn(),
         isPhysicsAvailable: vi.fn(() => false),
         setDofFocusTargetByPath: vi.fn(),
@@ -208,6 +209,30 @@ describe("importProjectState", () => {
 
         expect(host.modelEdgeColorOverrideEnabled).toBe(true);
         expect(host.setModelEdgeColor).toHaveBeenCalledWith(0.2, 0.3, 0.4);
+    });
+
+    it("restores physics floor collision setting with a legacy-on default", async () => {
+        const host = createHost();
+        await importProjectState(host, createProject({
+            physics: {
+                ...createProject().physics,
+                floorCollisionEnabled: false,
+            },
+        }));
+
+        expect(host.setPhysicsFloorCollisionEnabled).toHaveBeenCalledWith(false);
+
+        const legacyHost = createHost();
+        await importProjectState(legacyHost, createProject({
+            physics: {
+                enabled: false,
+                simulationRateHz: 60,
+                gravityAcceleration: 9.8,
+                gravityDirection: { x: 0, y: -1, z: 0 },
+            },
+        }));
+
+        expect(legacyHost.setPhysicsFloorCollisionEnabled).toHaveBeenCalledWith(true);
     });
 
     it("restores normalized FrameGraph post effect stack order", async () => {

@@ -2183,6 +2183,9 @@ export class UIController {
         this.actionDispatcher.register("runtime.toggleShadow", () => {
             this.runtimeFeatureUiController?.toggleShadow();
         });
+        this.actionDispatcher.register("runtime.toggleFloorCollision", () => {
+            this.runtimeFeatureUiController?.toggleFloorCollision();
+        });
         this.actionDispatcher.register("runtime.toggleRigidBodies", () => {
             this.runtimeFeatureUiController?.toggleRigidBodies();
         });

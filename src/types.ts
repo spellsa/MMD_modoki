@@ -335,6 +335,7 @@ export type MirroringFloorShape = "square" | "circle";
 
 export interface ProjectPhysicsState {
     enabled: boolean;
+    floorCollisionEnabled?: boolean;
     simulationRateHz?: number;
     gravityAcceleration: number;
     gravityDirection: { x: number; y: number; z: number };
