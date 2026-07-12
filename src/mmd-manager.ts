@@ -799,10 +799,10 @@ export class MmdManager {
     };
     private static readonly RENDER_HARDWARE_SCALING_LEVEL = 0.75;
     private static readonly WEBGPU_COMPATIBILITY_MODE = true;
+    private static readonly PHYSICS_SCENE_MAX_DELTA_MS = 3_000;
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
     private static readonly PHYSICS_PREFERRED_BULLET_BACKEND_STORAGE_KEY = "mmd_modoki.physics.preferredBulletBackend";
     private static readonly PHYSICS_BUFFERED_EVALUATION_STORAGE_KEY = "mmd_modoki.physics.bufferedEvaluation";
-    private static readonly PHYSICS_MAX_SUB_STEPS_STORAGE_KEY = "mmd_modoki.physics.maxSubSteps";
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
     private static readonly FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY = "mmd_modoki.debug.forceModelDebugMaterial";
@@ -1461,12 +1461,7 @@ ${beforeFogAppendBlock}
         MmdManager.PHYSICS_BUFFERED_EVALUATION_STORAGE_KEY,
         true,
     );
-    private physicsMaxSubSteps = MmdManager.readNumberLocalStorage(
-        MmdManager.PHYSICS_MAX_SUB_STEPS_STORAGE_KEY,
-        2,
-        1,
-        8,
-    );
+    private physicsMaxSubSteps = PhysicsRuntimeController.normalizeMaxSubSteps(0);
     private manualPlaybackFrameCursor = 0;
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
@@ -4229,7 +4224,6 @@ ${beforeFogAppendBlock}
     public setPhysicsMaxSubSteps(value: number): number {
         this.physicsMaxSubSteps = PhysicsRuntimeController.normalizeMaxSubSteps(value);
         const next = this.physicsController.setMaxSubSteps(this.physicsMaxSubSteps);
-        MmdManager.writeNumberLocalStorage(MmdManager.PHYSICS_MAX_SUB_STEPS_STORAGE_KEY, next);
         return next;
     }
 
@@ -4566,6 +4560,7 @@ ${beforeFogAppendBlock}
 
         // Create scene
         this.scene = new Scene(this.engine);
+        Scene.MaxDeltaTime = MmdManager.PHYSICS_SCENE_MAX_DELTA_MS;
         if (this.framePerformanceLogEnabled) {
             this.sceneInstrumentation = new SceneInstrumentation(this.scene);
             this.sceneInstrumentation.captureActiveMeshesEvaluationTime = true;

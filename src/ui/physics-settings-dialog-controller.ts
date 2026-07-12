@@ -37,16 +37,10 @@ export class PhysicsSettingsDialogController implements PopupContentController {
 
         const maxSubSteps = document.createElement("input");
         maxSubSteps.className = "popup-form-control";
-        maxSubSteps.type = "number";
-        maxSubSteps.min = "1";
-        maxSubSteps.max = "8";
-        maxSubSteps.step = "1";
+        maxSubSteps.type = "text";
         maxSubSteps.value = String(this.mmdManager.getPhysicsMaxSubSteps());
+        maxSubSteps.readOnly = true;
         maxSubSteps.disabled = !this.mmdManager.isPhysicsAvailable();
-        maxSubSteps.addEventListener("change", () => {
-            const next = this.mmdManager.setPhysicsMaxSubSteps(Number(maxSubSteps.value));
-            maxSubSteps.value = String(next);
-        });
         grid.appendChild(createPopupFormField(t("dialog.physics.maxSubSteps"), maxSubSteps));
 
         const runtime = document.createElement("select");

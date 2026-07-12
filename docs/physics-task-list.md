@@ -120,8 +120,8 @@
   - 例: `rawDeltaMs: 642.25`, `maxSubSteps: 1`, `requiredSubSteps: 39` 相当。
   - 以前のログでは `rawDeltaMs` が数秒から十数秒になる区間もあった。
 - `maxSubSteps = 1` の場合、1 frame あたり 16.667ms ぶんしか Bullet が処理しないため、大きな delta をそのまま渡すと長髪 joint chain が追いつけず伸びる可能性が高い。
-- ただし delta だけで説明できるかは未確定。delta clamp 後も溶ける場合は constraint / sync 側へ進む。
-- delta clamp 後の 2026-07-11 実機ログでは、髪剛体 snapshot 側で `minY` が `10.672` から `-23.255` まで落ち、`totalDistanceRatio` が `1.953` まで増えた。
+- ただし delta だけで説明できるかは未確定。delta 記録後も溶ける場合は constraint / sync 側へ進む。
+- 2026-07-11 実機ログでは、髪剛体 snapshot 側で `minY` が `10.672` から `-23.255` まで落ち、`totalDistanceRatio` が `1.953` まで増えた。
   - これは表示だけ / bone sync だけではなく、Bullet 内の髪剛体 chain 自体が伸びて落ちている可能性が高い。
   - `disableOffsetForConstraintFrame: true` について、babylon-mmd の型定義には constraint が壊れる場合があり、その場合は `fixedTimeStep` を `1 / 120` 以下にする、とある。
   - そのため一時的に 120Hz / `maxSubSteps >= 2` を試したが、髪溶けは改善しなかった。
@@ -129,9 +129,9 @@
 
 現在残してよい対応:
 
-- `PhysicsRuntimeController.normalizePhysicsDeltaMs()` で、Bullet / WASM physics へ渡す delta を `fixedTimeStep * maxSubSteps` 以下に clamp する。
-- performance log では `rawDeltaMs` と `usedDeltaMs` を分けて記録し、clamp が効いたか確認する。
-- `physics delta exceeded max substeps and was clamped` が出た場合は、`rawDeltaMs` は観測値、`usedDeltaMs` が実際に物理へ渡した値。
+- `PhysicsRuntimeController.normalizePhysicsDeltaMs()` は、Bullet / WASM physics へ渡る delta を記録するだけに戻した。
+- MMD_modoki 側では delta を `fixedTimeStep * maxSubSteps` 以下へ clamp しない。`rawDeltaMs` と `usedDeltaMs` は通常同じ値になる。
+- `physics delta exceeds max substeps; cloth/constraints may lag or stretch` が出た場合は、1 frame の delta が `maxSubSteps` の消化量を超え、物理が描画に追いつききらない可能性を見る。
 - `physics chain distance diagnostics` には最大 segment の前後剛体名 / index も出し、複数房またぎの集計ノイズと特定 joint 区間の伸びを分けて見る。
 - PMX joint の A/B 接続から connected component を作る `jointGraphChains` 診断を追加する。
   - hair / cloth / soft-body らしい剛体を含む joint graph を chain 単位で集計する。
@@ -290,7 +290,7 @@
 1. 停止中にも低速で伸び続けるため、タイムライン再生ではなく scene physics step / runtime `beforePhysics` / `afterPhysics` が継続しているかを確認する。
    - `physics chain distance diagnostics` に `playing`、`scenePhysicsEnabled`、`currentFrameTime`、`raw/used delta` 近傍を足し、停止中に joint distance が増えているかを見る。
    - 停止中に physics step が進んでいるなら、Auto physics の意図と「停止時は pose を保持する」挙動を分ける必要がある。
-2. delta clamp 後のログで `rawDeltaMs` と `usedDeltaMs` が分かれているか確認する。
+2. frame skip 時のログで `rawDeltaMs` と `usedDeltaMs` が一致しているか確認する。
 3. それでも髪が溶ける場合、MMD_modoki 側の後段 solver parameter 適用を疑う。
    - 2026-07-11 に `applyPhysicsStateToModel()` から `applyMmdConstraintSolverParameters()` 呼び出しを外して比較したが、Klukai の髪溶けは改善しなかった。
    - 布垂れ改善履歴があるため、後段適用は戻す。
@@ -316,7 +316,7 @@
 ### 2026-07-09 物理設定値の現状
 
 - simulation rate は `60Hz` 固定。MMD 本体寄せを優先し、通常 UI から `30 / 120Hz` 選択は出さない。
-- Bullet MPR / SPR、WASM runtime 実験経路とも `fixedTimeStep = 1 / 60`、`maxSubSteps = 2` に揃える。
+- Bullet MPR / SPR、WASM runtime 実験経路とも `fixedTimeStep = 1 / 60`、`maxSubSteps = 180` に揃える。
 - `MultiPhysicsRuntime.useDeltaForWorldStep` は既定 `true` のまま。
 - solver iteration 数は MMD_modoki から明示設定していない。現行 Bullet MPR / SPR binding には、確認範囲では `getSolverInfo` / `setNumIterations` 相当の public export がない。
 - MMD joint constraint へ ERP / stop ERP `0.475`、CFM / stop CFM `0` を 6 軸に明示適用する。
@@ -405,24 +405,25 @@
 ### 2026-07-09 frame skip 対策
 
 - 重いモデルで frame skip が出たとき、babylon-mmd 物理 runtime に大きな delta が渡ると、physics が長い時間を一度に追いつこうとして貫通を誘発する可能性がある。
-- MMD_modoki では `fixedTimeStep = 1 / 60` を維持しつつ、`maxSubSteps = 2` で 1 frame あたりの catch-up を最大 2 step までに制限する。
+- MMD_modoki では `Scene.MaxDeltaTime = 3000ms`、`fixedTimeStep = 1 / 60`、`maxSubSteps = 180` とし、frame skip 分も最大 3 秒まで 60Hz substep としてまとめて消化できるようにする。
   - Classic Bullet MPR / SPR: `MultiPhysicsRuntime.afterAnimations()` の入口で delta を記録し、そのまま runtime へ渡す。
   - WASM runtime 実験経路: `MmdWasmRuntime` の physics clock を wrap して delta を記録し、そのまま返す。
 - performance log に `physicsFixedTimeStepMs`, `physicsMaxSubSteps`, `physicsDeltaRawMaxMs`, `physicsDeltaUsedMaxMs` を追加した。
+- `physicsDeltaUsedMaxMs` は、MMD_modoki 側で delta clamp していないかを確認するために残す。通常は `physicsDeltaRawMaxMs` と同じ値になる。
 - 破綻モデルでは、貫通が出た時間帯の `physicsDeltaRawMaxMs` と `physicsStepMaxMs` を見る。
-- 重いモデルで 14fps まで落ちるケースでは、`maxSubSteps = 60` が 1 frame あたり 4〜5 physics step の catch-up を起こし、さらに FPS を落とす death spiral になり得る。`Buffered + maxSubSteps = 2` で 60fps 上限に張り付くか、必要なら `1` と比較する。
+- 重いモデルで 14fps まで落ちるケースでは、1 frame あたり 4〜5 physics step の catch-up を起こす。負荷は増えるが、体だけ先に進んで布や髪が物理的に置き去りになる状態を避ける。
 
 ### 2026-07-09 Buffered 再試行
 
 - Classic runtime + Bullet MPR + 再生中だけ `PhysicsRuntimeEvaluationType.Buffered` を使う実験を入れた。
 - pause / stop / seek では `Immediate` に戻す。
 - Bullet SPR と WASM runtime 実験経路では、現時点では `Immediate` のまま。
-- performance log の `evaluationType` が `Buffered`、`physicsMaxSubSteps` が `2` になっている区間で、FPS と `physicsStepAvgMs` を確認する。
+- performance log の `evaluationType` が `Buffered`、`physicsMaxSubSteps` が `180` になっている区間で、FPS と `physicsStepAvgMs` を確認する。
 - 以前の検証では `Buffered` で剛体がボーンへ追従せず崩れたため、長髪 / スカート / 袖の追従崩れも同時に見る。
 - 実機確認:
   - `Buffered + maxSubSteps = 1`: 通常 60fps 付近まで改善。
   - `Buffered + maxSubSteps = 2`: 通常 55fps 前後、影なし 60fps。MMD 本体にかなり近い速度まで改善。
-- 現時点では `Buffered + maxSubSteps = 2` を標準候補にし、品質確認を続ける。
+- 現時点では `Buffered + maxSubSteps = 180` を標準候補にし、品質確認を続ける。
 
 ### 2026-07-09 Classic / WASM runtime 比較の注意
 

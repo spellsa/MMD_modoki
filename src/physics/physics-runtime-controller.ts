@@ -55,7 +55,7 @@ export type PhysicsRuntimeControllerOptions = {
 
 const PHYSICS_SIMULATION_RATE_HZ: PhysicsSimulationRateHz = 60;
 const PHYSICS_FIXED_TIME_STEP_SECONDS = 1 / PHYSICS_SIMULATION_RATE_HZ;
-const DEFAULT_PHYSICS_MAX_SUB_STEPS = 2;
+const DEFAULT_PHYSICS_MAX_SUB_STEPS = 180;
 const DEFAULT_PHYSICS_DELTA_MS = 1000 / 60;
 const DEFAULT_USE_BUFFERED_EVALUATION_DURING_PLAYBACK = true;
 const PHYSICS_DELTA_WARNING_INTERVAL_MS = 5000;
@@ -548,8 +548,7 @@ export class PhysicsRuntimeController {
         const rawMs = Number.isFinite(deltaTimeMs) && deltaTimeMs > 0
             ? deltaTimeMs
             : DEFAULT_PHYSICS_DELTA_MS;
-        const maxStepMs = PHYSICS_FIXED_TIME_STEP_SECONDS * this.maxSubSteps * 1000;
-        const usedMs = Math.min(rawMs, maxStepMs);
+        const usedMs = rawMs;
         this.recordPhysicsDelta(rawMs, usedMs);
         return { rawMs, usedMs };
     }
@@ -660,15 +659,13 @@ export class PhysicsRuntimeController {
     }
 
     public static normalizeMaxSubSteps(value: number): number {
-        if (!Number.isFinite(value)) {
-            return DEFAULT_PHYSICS_MAX_SUB_STEPS;
-        }
-        return Math.max(1, Math.min(8, Math.round(value)));
+        void value;
+        return DEFAULT_PHYSICS_MAX_SUB_STEPS;
     }
 
     private logDeltaSubstepWarningIfNeeded(rawMs: number, usedMs: number): void {
         const maxStepMs = PHYSICS_FIXED_TIME_STEP_SECONDS * this.maxSubSteps * 1000;
-        if (rawMs <= maxStepMs + 0.01) return;
+        if (usedMs <= maxStepMs + 0.01) return;
 
         const nowMs = performance.now();
         if (nowMs < this.nextDeltaWarningMs) return;
@@ -683,9 +680,8 @@ export class PhysicsRuntimeController {
             fixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
             maxSubSteps: this.maxSubSteps,
             requiredSubSteps,
-            clamped: usedMs < rawMs,
         };
-        logWarn("physics", "physics delta exceeded max substeps and was clamped", data);
+        logWarn("physics", "physics delta exceeds max substeps; cloth/constraints may lag or stretch", data);
     }
 
     public static getBackendLabelForBackend(backend: PhysicsBackend): PhysicsBackendLabel {

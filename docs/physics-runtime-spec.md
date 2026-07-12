@@ -88,13 +88,16 @@ WASM runtime は `MmdWasmRuntime` + `MmdWasmPhysics` を使う実験経路。`Mm
 frame skip 対策:
 
 - babylon-mmd の `MultiPhysicsRuntime` は `scene.getEngine().getDeltaTime()` を受け、内部で最大 `Scene.MaxDeltaTime` まで physics step に渡す。
+- MMD_modoki では `Scene.MaxDeltaTime = 3000ms` にし、長い frame skip 後も最大 3 秒分を物理 runtime へ渡せるようにする。
 - Bullet の fixed timestep 経路に寄せるため、physics step は `fixedTimeStep = 1/60` に固定する。
-- `maxSubSteps = 2` にして、frame skip 時の catch-up を最大 2 step まで許す。
-- `Buffered` 併用で FPS への直撃が減るか、貫通 / 遅れが改善するかを見る。必要なら `1 / 2` を比較する。
-- 物理時間は Bullet 側の accumulator に渡すが、1 frame あたりの消化量を制限するため、負荷が高い場面では物理が描画に追いつききらない可能性がある。
+- `maxSubSteps = 180` にして、frame skip 時も最大 3 秒分を 60Hz substep で消化できるようにする。
+- `Buffered` 併用で FPS への直撃を抑えつつ、物理が詰まった場合は FPS を落としてでも物理時間を消化し、体だけ先に進んで布や髪が追いつかない状態を避ける。
+- 物理時間は Bullet 側の accumulator にそのまま渡す。MMD_modoki 側では delta を clamp しない。
+- 1 frame あたりの消化量は Bullet の fixed timestep / maxSubSteps に任せるため、負荷が高い場面では物理が描画に追いつききらない可能性がある。
+- 3 秒上限は「長い詰まりをある程度復元する」ための妥協値であり、極端な剛体数 / joint 数のモデルで実時間より物理 step が遅い場合の追いつきは保証しない。10 秒級の一括消化はアプリフリーズに見えやすいため避ける。
 - Classic Bullet MPR / SPR は `MultiPhysicsRuntime.afterAnimations()` の入口で delta を記録し、そのまま runtime へ渡す。
 - WASM runtime 実験経路は `MmdWasmRuntime` の physics clock を wrap し、delta を記録したうえでそのまま返す。
-- performance log には `physicsFixedTimeStepMs`, `physicsMaxSubSteps`, `physicsDeltaRawMaxMs`, `physicsDeltaUsedMaxMs` を出す。
+- performance log には `physicsFixedTimeStepMs`, `physicsMaxSubSteps`, `physicsDeltaRawMaxMs`, `physicsDeltaUsedMaxMs` を出す。通常は raw / used が同じ値になる。
 
 Buffered 再試行:
 
