@@ -153,6 +153,16 @@
 - 120Hz / `maxSubSteps >= 2` への変更は効果なし。戻す。
 - `patchModelAfterPhysicsForPausedState()` は髪溶け対策としては戻さない。
 - `normalizeRuntimeBoneTransformStages()` は髪溶け対策としては戻さない。
+- 2026-07-12 の再調査で、`model-asset-service` が `sceneModels.push()` より前に `normalizeRuntimeBoneEvaluationOrder()` / `applyPhysicsStateToModel()` を呼んでいたことを確認した。
+  - そのため `mmd-manager` 側から sceneModel が見つからず、物理ボーン名 / joint metadata を使った診断や低め質量補正条件が初回ロード時に渡らない可能性があった。
+  - 呼び出し順を sceneModel 登録後へ移し、評価順ログに `physicsBoneSamples` / `beforePhysicsBoneCount` / `afterPhysicsBoneCount` / `parentOrderViolationCount` を出す。
+  - 物理ボーンの親子順確認として、`physicsBoneSamples` に `parentName` / `parentSortedIndex` / `parentBeforeChild` / `parentStageMismatch` を追加した。
+  - `physicsBoneParentOrderViolationCount` が 0 でない場合は、物理ボーンの親子順が runtime 評価順で逆転している。
+  - `physicsBoneParentStageMismatchCount` が大きい場合は、親子が beforePhysics / afterPhysics の別 stage に分かれており、物理後の戻りや append 評価が本家と違う可能性を見る。
+  - 2026-07-12 15:01 のログでは、runtime は `beforePhysicsBoneCount: 247` / `afterPhysicsBoneCount: 0` だった。
+  - PMXE の「物理後」ボタンは、ON のとき色付きになる表示形式だったため、スクリーンショット上の髪ボーンは物理後ではなかった。
+  - そのため metadata の `flag & 0x1000` を runtime bone へ同期する補正実験は戻した。
+  - 評価順補正の切り分けは `localStorage.setItem("mmd_modoki.physics.disableBoneOrderNormalization", "1")` 後に reload して行う。
 - stiffness 補正 UI / 補正値変更は、過去の布垂れ切り分けで主因ではなさそうだったため戻さない。
 
 試したが戻した対応:
@@ -225,7 +235,21 @@
   - MMD 本体では伸びが小さいため、MMD 互換の異常値 sanitize として、`mass > 100` の dynamic body を `1.0` へ寄せる `unit` モードを試した。
   - 2026-07-12 の実機確認では、`unit` モードは伸び幅が増えたため既定から外した。軽くすれば解決ではなく、ある程度の質量 / 慣性が chain を張る方向に効いている可能性がある。
   - 既定は 10 進 mantissa 復元へ戻す。比較用に `localStorage.setItem("mmd_modoki.physics.abnormalMassMode", "unit")` で `1.0` 固定へ戻せる。
+  - さらに、MMD 本家が異常質量を 0 近傍へ丸めている可能性を試すため、`localStorage.setItem("mmd_modoki.physics.abnormalMassMode", "tiny")` で `0.1` 固定を試せるようにした。
+  - `tiny` の値は `localStorage.setItem("mmd_modoki.physics.abnormalMassTinyValue", "0.01")` のように `0 < value <= 1` の範囲で変更できる。
+  - `tiny` 実験を戻す場合は `localStorage.removeItem("mmd_modoki.physics.abnormalMassMode")` 後に reload する。
   - `localStorage.setItem("mmd_modoki.physics.abnormalMassMode", "clamp")` で従来の `1000` clamp だけにも戻せる。
+  - 2026-07-12 12:35 の実機ログでは、`HairC2-B10` が `massB: 51.2` / `suspiciousMassScale: large-mass>=50 ratio=50` のまま残っていた。
+  - `102.4 -> 1.024` の次の tail mass と見ると `51.2 -> 0.512` の可能性が高いため、`50 < mass <= 100` も 10 進異常質量として `/100` する対象に含めた。
+  - 2026-07-12 14:19 の実機ログでは、`51.2 -> 0.512` は適用されたが、次段の `HairC2-B11` が `massA: 0.512` / `massB: 25.6` / `large-ratio>=20 ratio=50` で残っていた。
+  - 同じ系列の取り逃がしとして、`25 < mass <= 100` まで `/100` 補正対象を広げ、`25.6 -> 0.256` も拾う。
+  - 正常な `mass=25..100` を持つモデルへの誤爆を避けるため、低め補正はゼロ制限 6DOF かつ spring 値なしの joint に参加している dynamic body だけに限定する。
+  - 2026-07-12 15:20 の物理ボーン表示確認では、`HairC2-B11 -> HairC2-B12` で `0.256` 対 `12.8` の 50 倍差が残っていた。
+  - そのため、ゼロ制限 6DOF かつ spring 値なしの joint に参加している dynamic body については、`0 < mass <= 100` を `/100` の 10 進 mantissa 復元対象に広げる。
+  - これにより `12.8 -> 0.128` も拾う。通常モデルへの誤爆を避けるため、対象はゼロ制限 6DOF 参加 body に限定する。
+  - `100` 超の明らかな異常質量は従来通り補正対象にする。
+  - ログには `lowMassEligibility: zero-limit-6dof-joint-only` と `lowMassEligibleRigidBodyCount` を出す。
+  - この変更もモデル名、剛体名、joint 名では分岐しない。無効化は同じ `mmd_modoki.physics.disableAbnormalMassClamp` を使う。
   - 2026-07-12 に「引っ張り / バネ復元力が足りない」方向へ調査を移した。
   - babylon-mmd の Bullet 経路では、linear spring は `springPosition != 0` の軸だけ有効化される。
   - 一方で angular spring は `springRotation` が 0 でも 3 軸すべて `enableSpring(true)` される。
@@ -234,13 +258,32 @@
   - PMXE では該当髪剛体の移動減衰 / 回転減衰が `1` で、Bullet では速度がほぼ打ち消され、FollowBone 側からの引っ張りに追従しない可能性がある。
   - 次の実験として、非 FollowBone 剛体の runtime linear / angular damping が `1.0` 相当の場合だけ `0.99` へ落とす補正を追加した。
   - モデル名、剛体名、joint 名では分岐しない。
-  - 無効化する場合は `localStorage.setItem("mmd_modoki.physics.disableDampingCap", "1")` 後に reload する。
+  - 2026-07-12 の再確認で、一度 `1.0` のままに戻して切り分けたが、引っ張りが消えきるわけではなく判断が難しいため、既定では `0.99` 補正を再度有効にした。
+  - その後、`0.99` は強めに減衰を崩す可能性があるため、まずは `1.0` からわずかに外す目的で cap を `0.9999` へ緩和した。
+  - 2026-07-12 の追加確認では見た目の差が小さかったため、重力補正と組み合わせる実験として cap を `0.9` へ戻した。
+  - 正解値を固定しづらいため、物理演算詳細ポップアップに `減衰補正量` / `重力補正量` / `質量 1寄せ量` スライダーを追加した。
+  - 各スライダーは `0.00..1.00` の補正量として扱う。既定はすべて `1.00`。
+  - 同ポップアップに `物理互換補正` チェックボックスを追加し、補正全体を ON/OFF できるようにした。既定は ON。
+  - UI には「0は補正なし、1は最大補正。減衰/重力は移動減衰と回転減衰が1の剛体にのみ有効。質量1寄せはゼロ制限6DOF系の質量補正に有効」と注記する。
+  - 現行仕様は [物理互換補正メモ 2026-07-12](./physics-compatibility-corrections-2026-07-12.md) に分離してまとめる。
+  - `減衰補正量` は `localStorage` の `mmd_modoki.physics.dampingCorrectionAmount` に保存する。`0.00` は cap `1.0`、`0.00` より大きい値は cap `0.999..0.901` に変換する。ロード済みモデルにも、元が `1.0` 相当だった body index を記録して再適用する。
+  - `重力補正量` は `localStorage` の `mmd_modoki.physics.fullyDampedGravityCorrectionAmount` に保存する。`0.00` は gravity scale `1.0`、`1.00` は `0.75` に変換する。
+  - `質量 1寄せ量` は `localStorage` の `mmd_modoki.physics.abnormalMassTowardUnit` に保存する。補正後の mass をログ空間で `1.0` に寄せるため、遠い値ほど絶対変化量が大きく、`0.00` では従来の質量補正値をそのまま使う。
+  - 補正適用時に元の mass / local inertia を記録し、チェック OFF で復元する。
+  - 後で切り分ける場合は `localStorage.setItem("mmd_modoki.physics.disableDampingCap", "1")` 後に reload する。
+  - joint 側の追加診断として、伸びている runtime constraint について body A/B の linear velocity、relative velocity、anchor separation 方向への相対速度を出す。
+  - `relativeVelocityVsAnchor: closing` なら constraint anchor 間を閉じる向きの速度がある。
+  - `relativeVelocityVsAnchor: separating` なら anchor 間がさらに開く向きの速度があり、親追従 / damping / solver step のどこかで引っ張りが負けている。
+  - `relativeVelocityVsAnchor: neutral` なのに `anchorWorldDistance` が大きい場合は、速度というより position correction / ERP / solver iteration の不足を疑う。
   - 2026-07-12 09:15 の実機確認では、無限に溶ける挙動は改善したが、体の動きに髪が追従せずその場に残るような違和感が残った。
   - babylon-mmd の `MmdBulletPhysicsModel.syncBodies()` では、FollowBone 剛体は `setTransformMatrix()` でボーン姿勢へ移動するが、速度は明示されていない。
   - dynamic 髪剛体を constraint で引く親側剛体が「瞬間移動しているが速度 0」に近い扱いだと、慣性 / 引っ張りが MMD 本体とずれる可能性がある。
   - 次の汎用実験として、FollowBone 剛体の前回 transform との差分から線形速度 / 角速度を合成し、`syncBodies()` 後に Bullet bundle へ渡す処理を追加した。
   - モデル名、剛体名、joint 名では分岐しない。
   - 無効化する場合は `localStorage.setItem("mmd_modoki.physics.disableFollowBoneVelocitySync", "1")` 後に reload する。
+  - 追加実験として、移動減衰 / 回転減衰が `1.0` 相当の dynamic body だけ、実効重力を半減する補正を追加した。
+  - babylon-mmd / Bullet wrapper には per-body gravity factor がないため、`syncBodies()` 後に `mass * gravity * 0.5` 相当の反対向き中心力を入れて実効重力を下げる。
+  - 現在は `重力補正量` スライダーで調整する。補正量 `1.00` のとき gravity scale は `0.75`。無効化する場合は `localStorage.setItem("mmd_modoki.physics.disableFullyDampedGravityScale", "1")` 後に reload する。
 
 次に見る順番:
 
@@ -293,6 +336,56 @@
 - CFM / StopCFM を `0.25` から `0` に戻すと大きく改善した。CFM が constraint を柔らかくしすぎていた可能性が高い。
 - 現時点の基準値は ERP / StopERP `0.475`、CFM / StopCFM `0`。
 - Buffered は速度面で有望なまま。布垂れ原因からはほぼ外し、Classic Bullet MPR + Buffered を実用候補として継続検証する。
+
+### 2026-07-12 ゼロ制限 6DOF ジョイントのドリフト診断
+
+- PMX の「バネ付き6DOF」は Bullet の `Generic6DofSpringConstraint` 系だが、対象モデルでは `positionLimit = 0..0`、`rotationLimit = 0..0`、`springPosition = 0`、`springRotation = 0` のジョイントが多い。
+- この場合はバネ値ではなく、6 軸固定制約を Bullet solver の位置補正で維持する挙動になる。
+- `physics chain distance diagnostics` に `constraintDriftSummary` を追加した。
+- `constraintDriftSummary` の読み方:
+  - `anchorWorldDistance`: constraint frame A/B のワールドアンカー距離。ゼロ制限なら小さいほどよい。
+  - `relativeVelocityVsAnchor = separating`: アンカー同士が離れる向きに速度を持っている。
+  - `relativeVelocityVsAnchor = closing`: 戻る向きの速度はあるが、まだ距離が残っている。
+  - `relativeVelocityVsAnchor = neutral`: 距離はあるが、アンカー方向の相対速度がほぼ死んでいる。
+  - `diagnosisHint = zero-limit-6dof-drift-without-closing-velocity`: 6 軸固定なのに戻る速度がなく、ERP / solver iteration / constraint stabilization 側を疑う。
+- 次に見る候補:
+  - `anchorWorldDistance` が大きいジョイントで `neutral` が続くか。
+  - `separating` が続く場合、FollowBone 側の速度継承や質量比がまだ悪さしていないか。
+  - `closing` なのに距離が落ちない場合、solver iteration 相当または ERP 強化の実験対象にする。
+- `closing-but-not-settled` が多かったため、ゼロ制限 6DOF かつ metadata spring なしの joint だけ ERP / StopERP を `0.8` に上げる実験を行った。
+- 実機確認では `solverERP: 0.8` は適用されたが、`anchorWorldDistance` のレンジは大きく改善せず、復元の主因ではなさそうだった。
+- 標準挙動は通常の MMD constraint 基準値 `ERP 0.475 / CFM 0` に戻した。
+- 再試行する場合だけ `localStorage.setItem("mmd_modoki.physics.zeroLimit6DofErp", "0.8")` のように設定して reload する。
+- 値を消して標準へ戻す場合は `localStorage.removeItem("mmd_modoki.physics.zeroLimit6DofErp")` 後に reload する。
+- `constraintDriftSummary` / `runtimeConstraints` の `zeroLimit6DofErpBoosted` と `solverERP` で適用状況を確認する。
+
+### 2026-07-12 Bullet 2.75 / 3.25 constraint 差の外部調査
+
+- babylon-mmd 公式ドキュメントの `Apply Physics To MMD Models` / `Fix Constraint Behavior` に、MMD 本家は Bullet Physics `2.75` を使う一方、新しい Bullet Physics `3.25` では constraint behavior が変わって一部 MMD モデルで制約が正しく動かないことがある、と明記されている。
+- 公式の推奨対策は `MmdModelPhysicsCreationOptions.disableOffsetForConstraintFrame = true`。
+- MMD_modoki の現行ロード経路では、物理有効時にすでに `buildPhysics: { disableOffsetForConstraintFrame: true }` を渡している。
+- babylon-mmd `1.2.0` の実装では、この option により `Generic6DofSpringConstraint` 作成後に `constraint.useFrameOffset(false)` が呼ばれる。
+- 同実装ではその後、6 軸に `ConstraintStopERP = 0.475` を設定し、PMX joint の linear / angular limit と spring を反映している。
+- babylon-mmd `CHANGELOG.md` には `0.64.0` で `MmdBulletPhysics` / `MmdWasmPhysics` の `disableOffsetForConstraintFrame` mode における constraint stability 修正が入った記録がある。現行 `1.2.0` にはこの修正が含まれているはず。
+- Bullet 側の公式ソースでは、`btGeneric6DofConstraint` は lower / upper limit が等しい軸を locked として扱い、ERP / CFM は `setParam` で軸ごとに指定できる。
+- Bullet の `btContactSolverInfo` では solver iteration の既定値が `m_numIterations = 10`。現行 babylon-mmd の公開 JS binding から solver iteration を変更できるかは未確認で、次の調査候補。
+- ここまでの結論:
+  - `disableOffsetForConstraintFrame` 未設定が原因、という線は薄い。
+  - ERP / StopERP 強化だけでも大きく改善しなかった。
+  - 残る候補は、`disableOffsetForConstraintFrame` mode でも今回モデルの constraint frame が MMD 本家相当に組まれていない、または solver iteration / substep / Bullet 3.25 側の収束条件差が出ている可能性。
+- 次に見る候補:
+  - babylon-mmd の `Generic6DofSpringConstraint` frame A/B と MMD 本家または PMXE 表示から推定される joint frame の差。
+  - `constraint.useFrameOffset(false)` が runtime constraint に実際に反映されているかをログで確認する方法。
+  - solver iteration を babylon-mmd binding 経由で取得 / 設定できるか。できない場合は upstream issue / binding 追加候補。
+  - issue 化する場合は、`disableOffsetForConstraintFrame: true` かつ `solverERP: 0.475 / 0.8` の両方で `anchorWorldDistance` が 1.2 前後残る `constraintDriftSummary` を添える。
+- 追加診断として、伸びている constraint ごとに以下をログへ出す:
+  - `frameOffsetExpected`: MMD_modoki のロード経路では `disableOffsetForConstraintFrame` により frame offset 無効を期待している。
+  - `frameOffsetSetterAvailable`: runtime constraint wrapper に `useFrameOffset()` setter があるか。
+  - `frameOffsetReadable`: 現行 babylon-mmd は getter を公開していないため `false`。
+  - `wasmConstraintUseFrameOffsetAvailable`: wasm binding に `constraintUseFrameOffset` が見えるか。
+  - `wasmConstraintSetParamAvailable`: wasm binding に `constraintSetParam` が見えるか。
+  - `solverIterationApiCandidates`: wasm binding 上に `solver` / `iteration` 系関数名が見えるか。
+  - `suspiciousMassScale`: `51.2` 系や質量比が大きい joint を後で拾うための粗い目印。
 
 ### 2026-07-10 再生中の物理 ON/OFF 復帰仕様
 

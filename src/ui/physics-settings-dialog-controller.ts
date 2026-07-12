@@ -1,7 +1,7 @@
 import { t } from "../i18n";
 import type { MmdManager } from "../mmd-manager";
 import type { PopupContentController } from "./popup-dialog-controller";
-import { createPopupFormField } from "./popup-form-helpers";
+import { createPopupFormField, createPopupFormRange, createPopupFormValueText } from "./popup-form-helpers";
 
 export type PhysicsSettingsDialogControllerDeps = {
     mmdManager: MmdManager;
@@ -111,7 +111,101 @@ export class PhysicsSettingsDialogController implements PopupContentController {
         });
         grid.appendChild(createPopupFormField(t("dialog.physics.bufferedEvaluation"), buffered));
 
+        const fullyDampedCorrection = document.createElement("input");
+        fullyDampedCorrection.type = "checkbox";
+        fullyDampedCorrection.className = "popup-form-checkbox";
+        fullyDampedCorrection.checked = this.mmdManager.getFullyDampedRigidBodyCorrectionEnabled();
+        fullyDampedCorrection.disabled = !this.mmdManager.isPhysicsAvailable();
+        grid.appendChild(createPopupFormField(t("dialog.physics.fullyDampedCorrection"), fullyDampedCorrection));
+
+        const dampingCorrection = this.createUnitRange(
+            this.mmdManager.getFullyDampedRigidBodyDampingCorrectionAmount(),
+            (value) => this.mmdManager.setFullyDampedRigidBodyDampingCorrectionAmount(value),
+        );
+        grid.appendChild(createPopupFormField(
+            t("dialog.physics.dampingCap"),
+            dampingCorrection,
+            "div",
+        ));
+
+        const gravityCorrection = this.createUnitRange(
+            this.mmdManager.getFullyDampedRigidBodyGravityCorrectionAmount(),
+            (value) => this.mmdManager.setFullyDampedRigidBodyGravityCorrectionAmount(value),
+        );
+        grid.appendChild(createPopupFormField(
+            t("dialog.physics.gravityScale"),
+            gravityCorrection,
+            "div",
+        ));
+
+        const massTowardUnit = this.createUnitRange(
+            this.mmdManager.getAbnormalDynamicRigidBodyMassTowardUnit(),
+            (value) => this.mmdManager.setAbnormalDynamicRigidBodyMassTowardUnit(value),
+        );
+        grid.appendChild(createPopupFormField(
+            t("dialog.physics.massScale"),
+            massTowardUnit,
+            "div",
+        ));
+
+        const note = document.createElement("p");
+        note.className = "popup-form-note";
+        note.textContent = t("dialog.physics.fullyDampedNote");
+        form.appendChild(note);
+
+        const syncFullyDampedControls = (): void => {
+            const enabled = fullyDampedCorrection.checked && this.mmdManager.isPhysicsAvailable();
+            PhysicsSettingsDialogController.setRangeDisabled(dampingCorrection, !enabled);
+            PhysicsSettingsDialogController.setRangeDisabled(gravityCorrection, !enabled);
+            PhysicsSettingsDialogController.setRangeDisabled(massTowardUnit, !enabled);
+        };
+        fullyDampedCorrection.addEventListener("change", () => {
+            const enabled = this.mmdManager.setFullyDampedRigidBodyCorrectionEnabled(fullyDampedCorrection.checked);
+            fullyDampedCorrection.checked = enabled;
+            syncFullyDampedControls();
+        });
+        syncFullyDampedControls();
+
         container.appendChild(form);
+    }
+
+    private createUnitRange(initialValue: number, applyValue: (value: number) => number): HTMLElement {
+        return this.createRange(initialValue, 0, 1, 0.01, applyValue);
+    }
+
+    private createRange(
+        initialValue: number,
+        min: number,
+        max: number,
+        step: number,
+        applyValue: (value: number) => number,
+    ): HTMLElement {
+        const input = document.createElement("input");
+        input.className = "popup-form-control";
+        input.type = "range";
+        input.min = String(min);
+        input.max = String(max);
+        input.step = String(step);
+        input.value = PhysicsSettingsDialogController.formatUnitValue(initialValue);
+        input.disabled = !this.mmdManager.isPhysicsAvailable();
+        const value = createPopupFormValueText(PhysicsSettingsDialogController.formatUnitValue(input.value));
+        input.addEventListener("input", () => {
+            const next = applyValue(Number(input.value));
+            input.value = PhysicsSettingsDialogController.formatUnitValue(next);
+            value.textContent = PhysicsSettingsDialogController.formatUnitValue(next);
+        });
+        return createPopupFormRange(input, value);
+    }
+
+    private static setRangeDisabled(container: HTMLElement, disabled: boolean): void {
+        const input = container.querySelector<HTMLInputElement>("input");
+        if (input) input.disabled = disabled;
+    }
+
+    private static formatUnitValue(value: string | number): string {
+        const numberValue = typeof value === "number" ? value : Number(value);
+        if (!Number.isFinite(numberValue)) return "0.90";
+        return numberValue.toFixed(2);
     }
 
     private static normalizeBulletBackendValue(value: string): "auto" | "bullet-mpr" | "bullet-spr" {

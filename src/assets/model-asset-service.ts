@@ -1262,8 +1262,6 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
                 ? { disableOffsetForConstraintFrame: true }
                 : false,
         });
-        host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
-        host.applyPhysicsStateToModel(mmdModel);
         logModelMaterialVisibilitySummary(fileName, result.meshes as Mesh[], "after-runtime-model-created");
         logSuspiciousMaterialAlphaDiagnostics(fileName, result.meshes as Mesh[], "after-runtime-model-created");
         logAlphaTextureKeptOpaqueCandidates(fileName, result.meshes as Mesh[], "after-runtime-model-created");
@@ -1488,6 +1486,8 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             contactShadowMesh: null,
             castShadow: true,
         });
+        host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
+        host.applyPhysicsStateToModel(mmdModel);
         host.refreshRigidBodyVisualizerTarget();
         host.syncLuminousGlowLayer?.();
         host.syncGlobalIlluminationSceneModels?.();

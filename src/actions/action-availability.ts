@@ -78,6 +78,7 @@ export function canExecuteEditorAction(
         case "viewport.toggleBackgroundMedia":
         case "viewport.toggleBackgroundBlack":
         case "viewport.toggleSkydome":
+        case "viewport.togglePhysicsBones":
         case "project.openFile":
         case "project.openModel":
         case "project.openMotion":

@@ -1548,6 +1548,7 @@ ${beforeFogAppendBlock}
     private bonePickPointerDown: { pointerId: number; clientX: number; clientY: number } | null = null;
     private captureEditorOverlaysSuppressed = false;
     private rigidBodyVisualizerEnabled = false;
+    private showPhysicsBonesInViewport = false;
     private showPhysicsBonesInTimeline = false;
     private rigidBodyVisualizerTargets: {
         sceneModel: SceneModelEntry;
@@ -3388,6 +3389,13 @@ ${beforeFogAppendBlock}
             return visibleBoneNames;
         }
 
+        if (this.showPhysicsBonesInViewport) {
+            for (const boneName of this.activeModelInfo.physicsBoneNames) {
+                visibleBoneNames.add(boneName);
+            }
+            return visibleBoneNames;
+        }
+
         const animation = this.modelSourceAnimationsByModel.get(this.currentModel) ?? null;
         const physicsOffBoneNames = getPhysicsOffBoneNamesAtFrame(
             animation,
@@ -3651,6 +3659,22 @@ ${beforeFogAppendBlock}
 
     public toggleShowPhysicsBonesInTimeline(): boolean {
         return this.setShowPhysicsBonesInTimeline(!this.showPhysicsBonesInTimeline);
+    }
+
+    public getShowPhysicsBonesInViewport(): boolean {
+        return this.showPhysicsBonesInViewport;
+    }
+
+    public setShowPhysicsBonesInViewport(visible: boolean): boolean {
+        const next = Boolean(visible);
+        if (this.showPhysicsBonesInViewport === next) return next;
+        this.showPhysicsBonesInViewport = next;
+        this.updateBoneVisualizer();
+        return next;
+    }
+
+    public toggleShowPhysicsBonesInViewport(): boolean {
+        return this.setShowPhysicsBonesInViewport(!this.showPhysicsBonesInViewport);
     }
 
     public beginTimelineEditBatch(): void {
@@ -4209,6 +4233,55 @@ ${beforeFogAppendBlock}
         return next;
     }
 
+    public getFullyDampedRigidBodyDampingCap(): number {
+        return PhysicsModelController.getFullyDampedRigidBodyDampingCap();
+    }
+
+    public getFullyDampedRigidBodyCorrectionEnabled(): boolean {
+        return PhysicsModelController.getFullyDampedRigidBodyCorrectionEnabled();
+    }
+
+    public setFullyDampedRigidBodyCorrectionEnabled(enabled: boolean): boolean {
+        const next = PhysicsModelController.setFullyDampedRigidBodyCorrectionEnabled(enabled);
+        for (const sceneModel of this.sceneModels) {
+            this.physicsModelController.capFullyDampedRigidBodies(sceneModel.model);
+        }
+        this.applyPhysicsStateToAllModels();
+        return next;
+    }
+
+    public getFullyDampedRigidBodyDampingCorrectionAmount(): number {
+        return PhysicsModelController.getFullyDampedRigidBodyDampingCorrectionAmount();
+    }
+
+    public setFullyDampedRigidBodyDampingCorrectionAmount(value: number): number {
+        const next = PhysicsModelController.setFullyDampedRigidBodyDampingCorrectionAmount(value);
+        for (const sceneModel of this.sceneModels) {
+            this.physicsModelController.capFullyDampedRigidBodies(sceneModel.model);
+        }
+        return next;
+    }
+
+    public getFullyDampedRigidBodyGravityCorrectionAmount(): number {
+        return PhysicsModelController.getFullyDampedGravityCorrectionAmount();
+    }
+
+    public setFullyDampedRigidBodyGravityCorrectionAmount(value: number): number {
+        const next = PhysicsModelController.setFullyDampedGravityCorrectionAmount(value);
+        this.applyPhysicsStateToAllModels();
+        return next;
+    }
+
+    public getAbnormalDynamicRigidBodyMassTowardUnit(): number {
+        return PhysicsModelController.getAbnormalDynamicRigidBodyMassTowardUnit();
+    }
+
+    public setAbnormalDynamicRigidBodyMassTowardUnit(value: number): number {
+        const next = PhysicsModelController.setAbnormalDynamicRigidBodyMassTowardUnit(value);
+        this.applyPhysicsStateToAllModels();
+        return next;
+    }
+
     public getPreferredBulletPhysicsBackend(): PreferredBulletPhysicsBackend {
         return this.preferredBulletPhysicsBackend;
     }
@@ -4685,6 +4758,16 @@ ${beforeFogAppendBlock}
             getCurrentFrameTime: () => Number.isFinite(this.mmdRuntime?.currentFrameTime)
                 ? this.mmdRuntime.currentFrameTime
                 : null,
+            getPhysicsGravity: () => {
+                const direction = this.physicsController.getGravityDirection();
+                const gravity = new Vector3(direction.x, direction.y, direction.z);
+                if (gravity.lengthSquared() < 1e-6) {
+                    gravity.set(0, -1, 0);
+                } else {
+                    gravity.normalize();
+                }
+                return gravity.scale(this.physicsController.getGravityAcceleration());
+            },
         });
 
         // MMD camera runtime object (used for camera VMD evaluation)
@@ -5536,8 +5619,11 @@ ${beforeFogAppendBlock}
     }
 
     private applyPhysicsStateToModel(model: RuntimeModel, reason = "direct", resetPose = false): void {
-        this.physicsModelController.applyPhysicsStateToModel(model, { resetPose });
         const sceneModel = this.sceneModels.find((entry) => entry.model === model);
+        this.physicsModelController.applyPhysicsStateToModel(model, {
+            resetPose,
+            joints: sceneModel?.joints,
+        });
         if (sceneModel) {
             this.physicsModelController.logPhysicsStateApplication(
                 model,
@@ -5612,7 +5698,10 @@ ${beforeFogAppendBlock}
     }
 
     private normalizeRuntimeBoneEvaluationOrder(model: RuntimeModel): void {
-        this.physicsModelController.normalizeRuntimeBoneEvaluationOrder(model);
+        const sceneModel = this.sceneModels.find((entry) => entry.model === model);
+        this.physicsModelController.normalizeRuntimeBoneEvaluationOrder(model, {
+            physicsBoneNames: sceneModel?.info.physicsBoneNames,
+        });
     }
 
     private applyPhysicsStateToAllModels(resetPose = false): void {

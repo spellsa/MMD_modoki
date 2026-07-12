@@ -671,6 +671,7 @@ select.popup-form-control {
 .popup-form-checkbox {
   appearance: none;
   -webkit-appearance: none;
+  justify-self: start;
   width: 16px;
   height: 16px;
   margin: 0;

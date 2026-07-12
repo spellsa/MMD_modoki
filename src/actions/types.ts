@@ -61,6 +61,7 @@ export type ViewportAction =
     | { type: "viewport.toggleBackgroundMedia"; source: ActionSource }
     | { type: "viewport.toggleBackgroundBlack"; source: ActionSource }
     | { type: "viewport.toggleSkydome"; source: ActionSource }
+    | { type: "viewport.togglePhysicsBones"; source: ActionSource }
     | { type: "timeline.togglePhysicsBones"; source: ActionSource };
 
 export type ProjectAction =

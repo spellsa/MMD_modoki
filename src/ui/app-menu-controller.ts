@@ -250,6 +250,11 @@ export class AppMenuController {
                     checked: this.mmdManager.getShowPhysicsBonesInTimeline(),
                     disabled: this.mmdManager.getTimelineTarget() !== "model",
                 };
+            case "view.toggleViewportPhysicsBones":
+                return {
+                    checked: this.mmdManager.getShowPhysicsBonesInViewport(),
+                    disabled: this.mmdManager.getTimelineTarget() !== "model" || !this.hasActiveModel(),
+                };
             case "view.toggleActiveModel":
                 return { checked: this.isActiveModelVisible(), disabled: !this.hasActiveModel() };
             case "background.toggleMedia":
@@ -386,6 +391,9 @@ export class AppMenuController {
                 return;
             case "view.toggleTimelinePhysicsBones":
                 this.dispatchAction({ type: "timeline.togglePhysicsBones", source: "menu" });
+                return;
+            case "view.toggleViewportPhysicsBones":
+                this.dispatchAction({ type: "viewport.togglePhysicsBones", source: "menu" });
                 return;
             case "view.contactShadowSettings":
                 this.openContactShadowSettingsDialog(invoker ?? null);

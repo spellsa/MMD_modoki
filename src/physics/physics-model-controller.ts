@@ -10,16 +10,28 @@ import type { WebmPhysicsModelSnapshot, WebmPhysicsRigidBodySnapshot } from "../
 const MMD_CONSTRAINT_ERP_VALUE = 0.475;
 const MMD_CONSTRAINT_CFM_VALUE = 0;
 const MMD_CONSTRAINT_AXIS_COUNT = 6;
+const BONE_EVALUATION_ORDER_NORMALIZATION_DISABLE_KEY = "mmd_modoki.physics.disableBoneOrderNormalization";
+const ZERO_LIMIT_6DOF_ERP_BOOST_VALUE_KEY = "mmd_modoki.physics.zeroLimit6DofErp";
 const ABNORMAL_DYNAMIC_RIGID_BODY_MASS_LIMIT = 1000;
 const RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT = 100;
+const LOW_DECIMAL_MANTISSA_RECOVERED_MASS_LIMIT = 25;
 const ABNORMAL_DYNAMIC_RIGID_BODY_UNIT_MASS = 1;
+const ABNORMAL_DYNAMIC_RIGID_BODY_TINY_MASS = 0.1;
 const DECIMAL_MANTISSA_RECOVERED_MASS_MAX = 10;
 const ABNORMAL_DYNAMIC_RIGID_BODY_MASS_CLAMP_DISABLE_KEY = "mmd_modoki.physics.disableAbnormalMassClamp";
 const ABNORMAL_DYNAMIC_RIGID_BODY_MASS_MODE_KEY = "mmd_modoki.physics.abnormalMassMode";
+const ABNORMAL_DYNAMIC_RIGID_BODY_TINY_MASS_VALUE_KEY = "mmd_modoki.physics.abnormalMassTinyValue";
+const ABNORMAL_DYNAMIC_RIGID_BODY_MASS_TOWARD_UNIT_KEY = "mmd_modoki.physics.abnormalMassTowardUnit";
 const FOLLOW_BONE_RIGID_BODY_PHYSICS_MODE = 0;
-const MAX_RUNTIME_RIGID_BODY_DAMPING = 0.99;
+const FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT = 1;
+const RUNTIME_RIGID_BODY_DAMPING_CAP_MIN = 0.901;
+const RUNTIME_RIGID_BODY_DAMPING_CAP_MAX = 0.999;
 const RUNTIME_RIGID_BODY_DAMPING_LIMIT = 0.999999;
 const RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY = "mmd_modoki.physics.disableDampingCap";
+const RUNTIME_RIGID_BODY_DAMPING_CORRECTION_AMOUNT_KEY = "mmd_modoki.physics.dampingCorrectionAmount";
+const FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_MIN = 0.75;
+const FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY = "mmd_modoki.physics.disableFullyDampedGravityScale";
+const FULLY_DAMPED_RIGID_BODY_GRAVITY_CORRECTION_AMOUNT_KEY = "mmd_modoki.physics.fullyDampedGravityCorrectionAmount";
 const FOLLOW_BONE_VELOCITY_SYNC_DT_SECONDS = 1 / 60;
 const FOLLOW_BONE_VELOCITY_SYNC_DISABLE_KEY = "mmd_modoki.physics.disableFollowBoneVelocitySync";
 const MMD_CONSTRAINT_PARAMETERS = [
@@ -85,6 +97,7 @@ type BulletPhysicsBundleLike = {
     setMassProps?: (index: number, mass: number, localInertia: Vector3) => void;
     setDynamicTransformMatrix?: (index: number, matrix: Matrix, fallbackToSetTransformMatrix?: boolean) => void;
     setTransformMatrix?: (index: number, matrix: Matrix) => void;
+    applyCentralForce?: (index: number, force: Vector3) => void;
     getLinearVelocityToRef?: (index: number, target: Vector3) => Vector3;
     getAngularVelocityToRef?: (index: number, target: Vector3) => Vector3;
     setLinearVelocity?: (index: number, velocity: Vector3, shouldSynced: boolean) => void;
@@ -117,9 +130,19 @@ type PhysicsConstraintParamContainerLike = PhysicsConstraintParamTargetLike & {
     setDamping?: (index: number, damping: number) => void;
     setStiffness?: (index: number, stiffness: number) => void;
     enableSpring?: (index: number, enabled: boolean) => void;
+    useFrameOffset?: (frameOffsetOnOff: boolean) => void;
+};
+
+type ConstraintParamTargetEntry = {
+    target: PhysicsConstraintParamTargetLike;
+    joint: PhysicsJointDiagnosticEntry | null;
 };
 
 type RuntimeConstraintDiagnosticLike = PhysicsConstraintParamContainerLike & {
+    runtime?: {
+        wasmInstance?: unknown;
+        constructor?: { name?: string };
+    };
     ptr?: number;
     _inner?: {
         _ptr?: number;
@@ -146,7 +169,12 @@ type PhysicsRuntimeWithInitializationQueues = {
     _physicsRuntime?: PhysicsRuntimeInitializerLike | null;
 };
 
-type AbnormalMassMode = "unit" | "mantissa" | "clamp";
+type AbnormalMassMode = "unit" | "tiny" | "mantissa" | "clamp";
+
+type OriginalRigidBodyMassProps = {
+    mass: number;
+    localInertia: Vector3;
+};
 
 export type PhysicsRigidBodyDiagnosticEntry = {
     name: string;
@@ -188,6 +216,7 @@ export type PhysicsModelControllerOptions = {
     isPlaybackActive: () => boolean;
     isScenePhysicsEnabled: () => boolean;
     getCurrentFrameTime: () => number | null;
+    getPhysicsGravity: () => Vector3;
 };
 
 export class PhysicsModelController {
@@ -199,9 +228,12 @@ export class PhysicsModelController {
     private readonly isPlaybackActive: () => boolean;
     private readonly isScenePhysicsEnabled: () => boolean;
     private readonly getCurrentFrameTime: () => number | null;
+    private readonly getPhysicsGravity: () => Vector3;
     private readonly solverParameterConfiguredPhysicsModels = new WeakSet<object>();
-    private readonly abnormalMassClampedPhysicsModels = new WeakSet<object>();
+    private readonly originalMassPropsByPhysicsModel = new WeakMap<object, Map<number, OriginalRigidBodyMassProps>>();
     private readonly dampingCappedPhysicsModels = new WeakSet<object>();
+    private readonly dampingCapBodyIndicesByPhysicsModel = new WeakMap<object, number[]>();
+    private readonly fullyDampedGravityScaledPhysicsModels = new WeakSet<object>();
     private readonly followBoneVelocitySyncedPhysicsModels = new WeakSet<object>();
     private readonly physicsChainDistanceBaselines = new WeakMap<object, Map<string, number>>();
 
@@ -214,9 +246,13 @@ export class PhysicsModelController {
         this.isPlaybackActive = options.isPlaybackActive;
         this.isScenePhysicsEnabled = options.isScenePhysicsEnabled;
         this.getCurrentFrameTime = options.getCurrentFrameTime;
+        this.getPhysicsGravity = options.getPhysicsGravity;
     }
 
-    public applyPhysicsStateToModel(model: PhysicsRuntimeModel, options: { resetPose?: boolean } = {}): void {
+    public applyPhysicsStateToModel(
+        model: PhysicsRuntimeModel,
+        options: { resetPose?: boolean; joints?: readonly PhysicsJointDiagnosticEntry[] } = {},
+    ): void {
         if (model.rigidBodyStates.length === 0) return;
 
         const shouldSimulatePhysics = this.getPhysicsEnabled() && this.isSimulationActive();
@@ -224,30 +260,42 @@ export class PhysicsModelController {
         if (shouldSimulatePhysics) {
             this.getRuntime().initializeMmdModelPhysics(model as never);
             this.installFollowBoneRigidBodyVelocitySync(model);
-            this.clampAbnormalDynamicRigidBodyMasses(model);
+            this.installFullyDampedRigidBodyGravityScale(model);
+            this.clampAbnormalDynamicRigidBodyMasses(model, options.joints);
             this.capFullyDampedRigidBodies(model);
             if (options.resetPose) {
                 this.resetPhysicsModelToCurrentPose(model);
             }
-            this.applyMmdConstraintSolverParameters(model);
+            this.applyMmdConstraintSolverParameters(model, options.joints);
         }
     }
 
-    public applyMmdConstraintSolverParameters(model: PhysicsRuntimeModel): void {
+    public applyMmdConstraintSolverParameters(
+        model: PhysicsRuntimeModel,
+        joints: readonly PhysicsJointDiagnosticEntry[] = [],
+    ): void {
         const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
         if (!physicsModel || typeof physicsModel !== "object") return;
 
         const physicsModelObject = physicsModel as object;
         if (this.solverParameterConfiguredPhysicsModels.has(physicsModelObject)) return;
 
-        const targets = PhysicsModelController.collectConstraintParamTargets(physicsModel);
+        const targets = PhysicsModelController.collectConstraintParamTargets(physicsModel, joints);
         if (targets.length === 0) return;
 
         let appliedCount = 0;
-        for (const target of targets) {
-            if (PhysicsModelController.applyMmdConstraintSolverParametersToTarget(target)) {
+        let zeroLimit6DofBoostedCount = 0;
+        const zeroLimit6DofErp = PhysicsModelController.getZeroLimit6DofErpBoostValue();
+        for (const entry of targets) {
+            const result = PhysicsModelController.applyMmdConstraintSolverParametersToTarget(
+                entry.target,
+                entry.joint,
+                zeroLimit6DofErp,
+            );
+            if (result.applied) {
                 appliedCount += 1;
             }
+            if (result.zeroLimit6DofBoosted) zeroLimit6DofBoostedCount += 1;
         }
 
         if (appliedCount === 0) return;
@@ -259,19 +307,20 @@ export class PhysicsModelController {
             constraintCount: appliedCount,
             erp: MMD_CONSTRAINT_ERP_VALUE,
             cfm: MMD_CONSTRAINT_CFM_VALUE,
+            zeroLimit6DofErp,
+            zeroLimit6DofBoostedCount,
+            zeroLimit6DofErpKey: ZERO_LIMIT_6DOF_ERP_BOOST_VALUE_KEY,
+            zeroLimit6DofErpDefault: "disabled",
             params: MMD_CONSTRAINT_PARAMETERS.map((param) => param.name),
             axisCount: MMD_CONSTRAINT_AXIS_COUNT,
         });
     }
 
     public capFullyDampedRigidBodies(model: PhysicsRuntimeModel): void {
-        if (PhysicsModelController.isDampingCapDisabled()) return;
-
         const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
         if (!physicsModel || typeof physicsModel !== "object") return;
 
         const physicsModelObject = physicsModel as object;
-        if (this.dampingCappedPhysicsModels.has(physicsModelObject)) return;
 
         const bundle = PhysicsModelController.getBulletPhysicsBundle(physicsModel);
         if (
@@ -283,13 +332,21 @@ export class PhysicsModelController {
             return;
         }
 
+        let bodyIndices = this.dampingCapBodyIndicesByPhysicsModel.get(physicsModelObject);
+        if (!bodyIndices) {
+            bodyIndices = PhysicsModelController.collectFullyDampedDynamicRigidBodyIndices(bundle);
+            this.dampingCapBodyIndicesByPhysicsModel.set(physicsModelObject, bodyIndices);
+        }
+        if (bodyIndices.length === 0) return;
+
+        const dampingCap = PhysicsModelController.isDampingCapDisabled()
+            ? 1
+            : PhysicsModelController.getFullyDampedRigidBodyDampingCap();
         const samples: Array<Record<string, unknown>> = [];
         let adjustedCount = 0;
         let linearAdjustedCount = 0;
         let angularAdjustedCount = 0;
-        for (let index = 0; index < bundle.count; index += 1) {
-            if (bundle.rigidBodyData?.[index]?.physicsMode === FOLLOW_BONE_RIGID_BODY_PHYSICS_MODE) continue;
-
+        for (const index of bodyIndices) {
             let originalLinearDamping: number;
             let originalAngularDamping: number;
             try {
@@ -300,12 +357,8 @@ export class PhysicsModelController {
             }
             if (!Number.isFinite(originalLinearDamping) || !Number.isFinite(originalAngularDamping)) continue;
 
-            const adjustedLinearDamping = originalLinearDamping >= RUNTIME_RIGID_BODY_DAMPING_LIMIT
-                ? MAX_RUNTIME_RIGID_BODY_DAMPING
-                : originalLinearDamping;
-            const adjustedAngularDamping = originalAngularDamping >= RUNTIME_RIGID_BODY_DAMPING_LIMIT
-                ? MAX_RUNTIME_RIGID_BODY_DAMPING
-                : originalAngularDamping;
+            const adjustedLinearDamping = dampingCap;
+            const adjustedAngularDamping = dampingCap;
             if (
                 adjustedLinearDamping === originalLinearDamping
                 && adjustedAngularDamping === originalAngularDamping
@@ -325,7 +378,7 @@ export class PhysicsModelController {
             if (samples.length < 12) {
                 samples.push({
                     index,
-                    originalLinearDamping: PhysicsModelController.roundDiagnosticNumber(originalLinearDamping),
+            originalLinearDamping: PhysicsModelController.roundDiagnosticNumber(originalLinearDamping),
                     originalAngularDamping: PhysicsModelController.roundDiagnosticNumber(originalAngularDamping),
                     adjustedLinearDamping: PhysicsModelController.roundDiagnosticNumber(adjustedLinearDamping),
                     adjustedAngularDamping: PhysicsModelController.roundDiagnosticNumber(adjustedAngularDamping),
@@ -341,13 +394,82 @@ export class PhysicsModelController {
             backend: this.getPhysicsBackendLabel(),
             evaluationType: this.getPhysicsEvaluationTypeLabel(),
             limit: RUNTIME_RIGID_BODY_DAMPING_LIMIT,
-            cap: MAX_RUNTIME_RIGID_BODY_DAMPING,
+            cap: dampingCap,
+            correctionAmount: PhysicsModelController.getFullyDampedRigidBodyDampingCorrectionAmount(),
+            valueKey: RUNTIME_RIGID_BODY_DAMPING_CORRECTION_AMOUNT_KEY,
             adjustedCount,
             linearAdjustedCount,
             angularAdjustedCount,
             disableKey: RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY,
             samples,
         });
+    }
+
+    private installFullyDampedRigidBodyGravityScale(model: PhysicsRuntimeModel): void {
+        if (PhysicsModelController.isFullyDampedGravityScaleDisabled()) return;
+
+        const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
+        if (!physicsModel || typeof physicsModel !== "object") return;
+
+        const physicsModelObject = physicsModel as object;
+        if (this.fullyDampedGravityScaledPhysicsModels.has(physicsModelObject)) return;
+
+        const bundle = PhysicsModelController.getBulletPhysicsBundle(physicsModel);
+        if (
+            !bundle
+            || typeof physicsModel.syncBodies !== "function"
+            || typeof bundle.getLinearDamping !== "function"
+            || typeof bundle.getAngularDamping !== "function"
+            || typeof bundle.getMass !== "function"
+            || typeof bundle.applyCentralForce !== "function"
+        ) {
+            return;
+        }
+
+        const bodyIndices = PhysicsModelController.collectFullyDampedDynamicRigidBodyIndices(bundle);
+
+        if (bodyIndices.length === 0) return;
+
+        const originalSyncBodies = physicsModel.syncBodies.bind(physicsModel);
+        const compensationForce = Vector3.Zero();
+        let sampleLogged = false;
+
+        physicsModel.syncBodies = (): void => {
+            originalSyncBodies();
+
+            if (PhysicsModelController.isFullyDampedGravityScaleDisabled()) return;
+            const gravityScale = PhysicsModelController.getFullyDampedGravityScale();
+            if (gravityScale >= 0.999999) return;
+            const gravity = this.getPhysicsGravity();
+            if (!PhysicsModelController.isFiniteVector(gravity)) return;
+            for (const index of bodyIndices) {
+                const mass = PhysicsModelController.safeGetRuntimeBodyMass(bundle, index);
+                if (!Number.isFinite(mass) || mass <= 0) continue;
+                compensationForce.copyFrom(gravity).scaleInPlace((gravityScale - 1) * mass);
+                if (!PhysicsModelController.isFiniteVector(compensationForce)) continue;
+                try {
+                    bundle.applyCentralForce?.(index, compensationForce);
+                } catch {
+                    continue;
+                }
+            }
+
+            if (!sampleLogged) {
+                sampleLogged = true;
+                logWarn("physics", "fully damped rigid body gravity scaled", {
+                    backend: this.getPhysicsBackendLabel(),
+                    evaluationType: this.getPhysicsEvaluationTypeLabel(),
+                    gravityScale,
+                    correctionAmount: PhysicsModelController.getFullyDampedGravityCorrectionAmount(),
+                    bodyCount: bodyIndices.length,
+                    sampleIndices: bodyIndices.slice(0, 16),
+                    disableKey: FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY,
+                    valueKey: FULLY_DAMPED_RIGID_BODY_GRAVITY_CORRECTION_AMOUNT_KEY,
+                });
+            }
+        };
+
+        this.fullyDampedGravityScaledPhysicsModels.add(physicsModelObject);
     }
 
     private installFollowBoneRigidBodyVelocitySync(model: PhysicsRuntimeModel): void {
@@ -465,15 +587,14 @@ export class PhysicsModelController {
         return { updatedCount, sample };
     }
 
-    public clampAbnormalDynamicRigidBodyMasses(model: PhysicsRuntimeModel): void {
-        if (PhysicsModelController.isAbnormalMassClampDisabled()) return;
-
+    public clampAbnormalDynamicRigidBodyMasses(
+        model: PhysicsRuntimeModel,
+        joints: readonly PhysicsJointDiagnosticEntry[] = [],
+    ): void {
         const physicsModel = (model as unknown as PhysicsModelInternal)._physicsModel;
         if (!physicsModel || typeof physicsModel !== "object") return;
 
         const physicsModelObject = physicsModel as object;
-        if (this.abnormalMassClampedPhysicsModels.has(physicsModelObject)) return;
-
         const bundle = PhysicsModelController.getBulletPhysicsBundle(physicsModel);
         if (
             !bundle
@@ -484,27 +605,59 @@ export class PhysicsModelController {
             return;
         }
 
+        if (
+            PhysicsModelController.isAbnormalMassClampDisabled()
+            || !PhysicsModelController.getFullyDampedRigidBodyCorrectionEnabled()
+        ) {
+            this.restoreOriginalRigidBodyMassProps(physicsModelObject, bundle);
+            return;
+        }
+
         const adjustedSamples: Array<Record<string, unknown>> = [];
         const abnormalMassMode = PhysicsModelController.getAbnormalMassMode();
+        const massEligibleRigidBodyIndices = PhysicsModelController.collectZeroLimit6DofRigidBodyIndices(joints);
+        if (massEligibleRigidBodyIndices.size === 0) return;
+
+        let originalMassProps = this.originalMassPropsByPhysicsModel.get(physicsModelObject);
+        if (!originalMassProps) {
+            originalMassProps = new Map<number, OriginalRigidBodyMassProps>();
+            this.originalMassPropsByPhysicsModel.set(physicsModelObject, originalMassProps);
+        }
+
         let adjustedCount = 0;
         let recoveredCount = 0;
         let unitAdjustedCount = 0;
         let clampedFallbackCount = 0;
         let maxOriginalMass = 0;
-        for (let index = 0; index < bundle.count; index += 1) {
-            const originalMass = PhysicsModelController.safeGetRuntimeBodyMass(bundle, index);
-            if (!Number.isFinite(originalMass) || originalMass <= RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT) continue;
+        for (const index of massEligibleRigidBodyIndices) {
+            if (bundle.rigidBodyData?.[index]?.physicsMode === FOLLOW_BONE_RIGID_BODY_PHYSICS_MODE) continue;
+            const existingOriginal = originalMassProps.get(index);
+            const originalMass = existingOriginal?.mass ?? PhysicsModelController.safeGetRuntimeBodyMass(bundle, index);
+            if (!Number.isFinite(originalMass) || originalMass <= 0) continue;
 
-            const originalInertia = PhysicsModelController.safeGetRuntimeBodyLocalInertia(bundle, index);
+            let originalInertia = existingOriginal?.localInertia.clone() ?? null;
+            if (!originalInertia) {
+                originalInertia = PhysicsModelController.safeGetRuntimeBodyLocalInertia(bundle, index);
+            }
             if (!originalInertia) continue;
+            if (!existingOriginal) {
+                originalMassProps.set(index, {
+                    mass: originalMass,
+                    localInertia: originalInertia.clone(),
+                });
+            }
 
             const adjustedMassResult = PhysicsModelController.resolveAbnormalDynamicRigidBodyMass(
                 originalMass,
                 abnormalMassMode,
+                { recoverLowMass: true },
             );
             if (!adjustedMassResult) continue;
 
-            const adjustedMass = adjustedMassResult.mass;
+            const adjustedMass = PhysicsModelController.moveMassTowardUnit(
+                adjustedMassResult.mass,
+                PhysicsModelController.getAbnormalDynamicRigidBodyMassTowardUnit(),
+            );
             const scale = adjustedMass / originalMass;
             const adjustedInertia = originalInertia.scale(scale);
             try {
@@ -528,13 +681,15 @@ export class PhysicsModelController {
                     originalMass: PhysicsModelController.roundDiagnosticNumber(originalMass),
                     adjustedMass: PhysicsModelController.roundDiagnosticNumber(adjustedMass),
                     mode: adjustedMassResult.mode,
+                    reason: originalMass <= RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT
+                        ? "zero-limit-6dof-low-mass-series"
+                        : "high-abnormal-mass",
                     originalLocalInertia: PhysicsModelController.formatVector3(originalInertia),
                     adjustedLocalInertia: PhysicsModelController.formatVector3(adjustedInertia),
                 });
             }
         }
 
-        this.abnormalMassClampedPhysicsModels.add(physicsModelObject);
         if (adjustedCount === 0) return;
 
         logWarn("physics", "abnormal dynamic rigid body masses adjusted", {
@@ -542,8 +697,16 @@ export class PhysicsModelController {
             evaluationType: this.getPhysicsEvaluationTypeLabel(),
             limit: ABNORMAL_DYNAMIC_RIGID_BODY_MASS_LIMIT,
             recoveredLimit: RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT,
+            lowMassLimit: LOW_DECIMAL_MANTISSA_RECOVERED_MASS_LIMIT,
+            lowMassEligibility: "zero-limit-6dof-joint-only",
+            lowMassEligibilityBehavior: "zero-limit 6DOF dynamic bodies recover decimal mantissa for 0<mass<=100",
+            lowMassEligibleRigidBodyCount: massEligibleRigidBodyIndices.size,
             mode: abnormalMassMode,
             modeKey: ABNORMAL_DYNAMIC_RIGID_BODY_MASS_MODE_KEY,
+            tinyMass: PhysicsModelController.getAbnormalTinyMassValue(),
+            tinyMassValueKey: ABNORMAL_DYNAMIC_RIGID_BODY_TINY_MASS_VALUE_KEY,
+            massTowardUnit: PhysicsModelController.getAbnormalDynamicRigidBodyMassTowardUnit(),
+            massTowardUnitKey: ABNORMAL_DYNAMIC_RIGID_BODY_MASS_TOWARD_UNIT_KEY,
             adjustedCount,
             recoveredCount,
             unitAdjustedCount,
@@ -551,6 +714,40 @@ export class PhysicsModelController {
             maxOriginalMass: PhysicsModelController.roundDiagnosticNumber(maxOriginalMass),
             disableKey: ABNORMAL_DYNAMIC_RIGID_BODY_MASS_CLAMP_DISABLE_KEY,
             samples: adjustedSamples,
+        });
+    }
+
+    private restoreOriginalRigidBodyMassProps(
+        physicsModelObject: object,
+        bundle: BulletPhysicsBundleLike,
+    ): void {
+        const originalMassProps = this.originalMassPropsByPhysicsModel.get(physicsModelObject);
+        if (!originalMassProps || originalMassProps.size === 0 || typeof bundle.setMassProps !== "function") return;
+
+        let restoredCount = 0;
+        const samples: Array<Record<string, unknown>> = [];
+        for (const [index, original] of originalMassProps) {
+            try {
+                bundle.setMassProps(index, original.mass, original.localInertia);
+            } catch {
+                continue;
+            }
+            restoredCount += 1;
+            if (samples.length < 12) {
+                samples.push({
+                    index,
+                    restoredMass: PhysicsModelController.roundDiagnosticNumber(original.mass),
+                    restoredLocalInertia: PhysicsModelController.formatVector3(original.localInertia),
+                });
+            }
+        }
+
+        if (restoredCount === 0) return;
+        logWarn("physics", "abnormal dynamic rigid body masses restored", {
+            backend: this.getPhysicsBackendLabel(),
+            evaluationType: this.getPhysicsEvaluationTypeLabel(),
+            restoredCount,
+            samples,
         });
     }
 
@@ -645,6 +842,7 @@ export class PhysicsModelController {
             joints,
             jointEdges,
         );
+        const constraintDriftSummary = PhysicsModelController.collectConstraintDriftSummary(runtimeConstraints);
         for (const category of ["hair", "cloth", "soft-body"]) {
             const samples = PhysicsModelController.collectPhysicsChainSamples(snapshot, rigidBodies, category);
             if (samples.length < 2) continue;
@@ -692,6 +890,7 @@ export class PhysicsModelController {
             chains,
             jointGraphChains,
             jointEdges,
+            constraintDriftSummary,
             runtimeConstraints,
         });
     }
@@ -714,7 +913,20 @@ export class PhysicsModelController {
         });
     }
 
-    public normalizeRuntimeBoneEvaluationOrder(model: PhysicsRuntimeModel): void {
+    public normalizeRuntimeBoneEvaluationOrder(
+        model: PhysicsRuntimeModel,
+        options: {
+            physicsBoneNames?: readonly string[];
+        } = {},
+    ): void {
+        if (PhysicsModelController.isBoneEvaluationOrderNormalizationDisabled()) {
+            logWarn("physics", "runtime bone evaluation order normalization skipped", {
+                model: typeof model.mesh?.name === "string" ? model.mesh.name : "model",
+                disableKey: BONE_EVALUATION_ORDER_NORMALIZATION_DISABLE_KEY,
+            });
+            return;
+        }
+
         const modelInternal = model as unknown as {
             _sortedRuntimeBones?: Array<{
                 name?: string;
@@ -811,14 +1023,27 @@ export class PhysicsModelController {
             }
         }
         if (!changed) {
+            logDebugIfEnabled("physics", "physics", "runtime bone evaluation order already parent-first", {
+                model: typeof model.mesh?.name === "string" ? model.mesh.name : "model",
+                runtimeBoneCount: sortedRuntimeBones.length,
+                ...PhysicsModelController.summarizeRuntimeBoneEvaluationOrder(
+                    sortedRuntimeBones,
+                    options.physicsBoneNames ?? [],
+                ),
+            });
             return;
         }
 
         sortedRuntimeBones.splice(0, sortedRuntimeBones.length, ...reorderedBones);
         const modelName = typeof model.mesh?.name === "string" ? model.mesh.name : "model";
-        console.warn(`[PMX] Normalized runtime bone evaluation order for parent-first traversal. ${modelName}.`, {
+        logWarn("physics", "runtime bone evaluation order normalized", {
             model: modelName,
             runtimeBoneCount: sortedRuntimeBones.length,
+            disableKey: BONE_EVALUATION_ORDER_NORMALIZATION_DISABLE_KEY,
+            ...PhysicsModelController.summarizeRuntimeBoneEvaluationOrder(
+                sortedRuntimeBones,
+                options.physicsBoneNames ?? [],
+            ),
         });
     }
 
@@ -829,13 +1054,18 @@ export class PhysicsModelController {
 
     private static collectConstraintParamTargets(
         physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike,
-    ): PhysicsConstraintParamTargetLike[] {
-        const targets: PhysicsConstraintParamTargetLike[] = [];
+        joints: readonly PhysicsJointDiagnosticEntry[] = [],
+    ): ConstraintParamTargetEntry[] {
+        const targets: ConstraintParamTargetEntry[] = [];
 
         const constraints = physicsModel._constraints;
         if (Array.isArray(constraints)) {
-            for (const constraint of constraints) {
-                PhysicsModelController.appendConstraintParamTarget(targets, constraint);
+            for (let index = 0; index < constraints.length; index += 1) {
+                PhysicsModelController.appendConstraintParamTarget(
+                    targets,
+                    constraints[index],
+                    joints[index] ?? null,
+                );
             }
         }
 
@@ -887,28 +1117,42 @@ export class PhysicsModelController {
     }
 
     private static appendConstraintParamTarget(
-        targets: PhysicsConstraintParamTargetLike[],
+        targets: ConstraintParamTargetEntry[],
         constraint: PhysicsConstraintParamContainerLike | null | undefined,
+        joint: PhysicsJointDiagnosticEntry | null,
     ): void {
         if (!constraint) return;
         if (typeof constraint.setParam === "function") {
-            targets.push(constraint);
+            targets.push({ target: constraint, joint });
             return;
         }
         if (constraint.physicsJoint && typeof constraint.physicsJoint.setParam === "function") {
-            targets.push(constraint.physicsJoint);
+            targets.push({ target: constraint.physicsJoint, joint });
         }
     }
 
-    private static applyMmdConstraintSolverParametersToTarget(target: PhysicsConstraintParamTargetLike): boolean {
-        if (typeof target.setParam !== "function") return false;
+    private static applyMmdConstraintSolverParametersToTarget(
+        target: PhysicsConstraintParamTargetLike,
+        joint: PhysicsJointDiagnosticEntry | null,
+        zeroLimit6DofErp: number | null,
+    ): { applied: boolean; zeroLimit6DofBoosted: boolean } {
+        if (typeof target.setParam !== "function") {
+            return { applied: false, zeroLimit6DofBoosted: false };
+        }
+
+        const shouldBoostZeroLimit6Dof = zeroLimit6DofErp !== null
+            && joint !== null
+            && PhysicsModelController.shouldBoostZeroLimit6DofErp(joint);
 
         for (let axis = 0; axis < MMD_CONSTRAINT_AXIS_COUNT; axis += 1) {
             for (const param of MMD_CONSTRAINT_PARAMETERS) {
-                target.setParam(param.id, param.value, axis);
+                const value = shouldBoostZeroLimit6Dof && (param.name === "ERP" || param.name === "StopERP")
+                    ? zeroLimit6DofErp
+                    : param.value;
+                target.setParam(param.id, value, axis);
             }
         }
-        return true;
+        return { applied: true, zeroLimit6DofBoosted: shouldBoostZeroLimit6Dof };
     }
 
     private static countRigidBodyStates(states: Uint8Array): { on: number; off: number } {
@@ -1191,7 +1435,15 @@ export class PhysicsModelController {
                     scalingFactor,
                 )
                 : null;
+            const velocityDiagnostics = PhysicsModelController.calculateRuntimeConstraintVelocityDiagnostics(
+                snapshot,
+                joint,
+                anchorDiagnostics,
+            );
             const restoringDiagnostics = PhysicsModelController.describeJointRestoringForceDiagnostics(joint, constraint);
+            const solverErp = PhysicsModelController.shouldBoostZeroLimit6DofErp(joint)
+                ? PhysicsModelController.getZeroLimit6DofErpBoostValue()
+                : MMD_CONSTRAINT_ERP_VALUE;
             diagnostics.push({
                 jointIndex,
                 joint: joint.name,
@@ -1240,11 +1492,42 @@ export class PhysicsModelController {
                 anchorWorldA: anchorDiagnostics?.anchorWorldA ?? null,
                 anchorWorldB: anchorDiagnostics?.anchorWorldB ?? null,
                 anchorWorldDistance: anchorDiagnostics?.anchorWorldDistance ?? null,
+                anchorSeparation: anchorDiagnostics?.anchorSeparation ?? null,
                 bodyOriginDistance: anchorDiagnostics?.bodyOriginDistance ?? null,
+                bodyALinearVelocity: velocityDiagnostics?.bodyALinearVelocity ?? null,
+                bodyBLinearVelocity: velocityDiagnostics?.bodyBLinearVelocity ?? null,
+                relativeLinearVelocity: velocityDiagnostics?.relativeLinearVelocity ?? null,
+                bodyASpeed: velocityDiagnostics?.bodyASpeed ?? null,
+                bodyBSpeed: velocityDiagnostics?.bodyBSpeed ?? null,
+                relativeSpeed: velocityDiagnostics?.relativeSpeed ?? null,
+                relativeVelocityAlongAnchor: velocityDiagnostics?.relativeVelocityAlongAnchor ?? null,
+                relativeVelocityVsAnchor: velocityDiagnostics?.relativeVelocityVsAnchor ?? null,
                 positionLimit: PhysicsModelController.formatJointVectorRange(joint.positionMin, joint.positionMax),
                 rotationLimit: PhysicsModelController.formatJointVectorRange(joint.rotationMin, joint.rotationMax),
                 springPosition: PhysicsModelController.formatJointVector(joint.springPosition),
                 springRotation: PhysicsModelController.formatJointVector(joint.springRotation),
+                solverERP: solverErp,
+                solverCFM: MMD_CONSTRAINT_CFM_VALUE,
+                solverParamsAppliedByModoki: true,
+                zeroLimit6DofErpBoosted: solverErp !== MMD_CONSTRAINT_ERP_VALUE,
+                zeroLimit6DofErpKey: ZERO_LIMIT_6DOF_ERP_BOOST_VALUE_KEY,
+                frameOffsetExpected: "disabled-by-disableOffsetForConstraintFrame",
+                frameOffsetSetterAvailable: PhysicsModelController.hasRuntimeConstraintUseFrameOffsetSetter(constraint),
+                frameOffsetReadable: false,
+                frameOffsetReadNote: "babylon-mmd exposes useFrameOffset(setter) but no public getter",
+                wasmConstraintUseFrameOffsetAvailable: PhysicsModelController.hasRuntimeConstraintWasmFunction(
+                    constraint,
+                    "constraintUseFrameOffset",
+                ),
+                wasmConstraintSetParamAvailable: PhysicsModelController.hasRuntimeConstraintWasmFunction(
+                    constraint,
+                    "constraintSetParam",
+                ),
+                solverIterationApiCandidates: PhysicsModelController.collectRuntimeConstraintWasmFunctionNames(
+                    constraint,
+                    /solver|iteration/i,
+                ),
+                suspiciousMassScale: PhysicsModelController.describeSuspiciousMassScale(runtimeBodyA, runtimeBodyB),
                 zeroLinearLimitAxes: restoringDiagnostics.zeroLinearLimitAxes,
                 zeroAngularLimitAxes: restoringDiagnostics.zeroAngularLimitAxes,
                 fixedAxisCount: restoringDiagnostics.fixedAxisCount,
@@ -1259,11 +1542,166 @@ export class PhysicsModelController {
         return diagnostics;
     }
 
+    private static collectConstraintDriftSummary(
+        runtimeConstraints: readonly Record<string, unknown>[],
+    ): Array<Record<string, unknown>> {
+        const summaries: Array<Record<string, unknown>> = [];
+        for (const constraint of runtimeConstraints) {
+            const anchorWorldDistance = typeof constraint.anchorWorldDistance === "number"
+                ? constraint.anchorWorldDistance
+                : null;
+            const bodyOriginDistance = typeof constraint.bodyOriginDistance === "number"
+                ? constraint.bodyOriginDistance
+                : null;
+            const relativeVelocityAlongAnchor = typeof constraint.relativeVelocityAlongAnchor === "number"
+                ? constraint.relativeVelocityAlongAnchor
+                : null;
+            const relativeVelocityVsAnchor = typeof constraint.relativeVelocityVsAnchor === "string"
+                ? constraint.relativeVelocityVsAnchor
+                : null;
+            const fixedAxisCount = typeof constraint.fixedAxisCount === "number"
+                ? constraint.fixedAxisCount
+                : null;
+
+            summaries.push({
+                joint: constraint.joint ?? null,
+                constraintKind: constraint.constraintKind ?? null,
+                bodyA: constraint.bodyA ?? null,
+                bodyB: constraint.bodyB ?? null,
+                anchorWorldDistance,
+                bodyOriginDistance,
+                relativeVelocityAlongAnchor,
+                relativeVelocityVsAnchor,
+                relativeSpeed: constraint.relativeSpeed ?? null,
+                bodyASpeed: constraint.bodyASpeed ?? null,
+                bodyBSpeed: constraint.bodyBSpeed ?? null,
+                massA: constraint.runtimeBodyAMass ?? null,
+                massB: constraint.runtimeBodyBMass ?? null,
+                dampingA: constraint.runtimeBodyADamping ?? null,
+                dampingB: constraint.runtimeBodyBDamping ?? null,
+                fixedAxisCount,
+                zeroLinearLimitAxes: constraint.zeroLinearLimitAxes ?? null,
+                zeroAngularLimitAxes: constraint.zeroAngularLimitAxes ?? null,
+                linearSpringEnabledAxes: constraint.linearSpringEnabledAxes ?? null,
+                angularSpringEnabledAxes: constraint.angularSpringEnabledAxes ?? null,
+                solverERP: constraint.solverERP ?? null,
+                solverCFM: constraint.solverCFM ?? null,
+                solverParamsAppliedByModoki: constraint.solverParamsAppliedByModoki ?? null,
+                frameOffsetExpected: constraint.frameOffsetExpected ?? null,
+                frameOffsetSetterAvailable: constraint.frameOffsetSetterAvailable ?? null,
+                wasmConstraintUseFrameOffsetAvailable: constraint.wasmConstraintUseFrameOffsetAvailable ?? null,
+                solverIterationApiCandidates: constraint.solverIterationApiCandidates ?? null,
+                suspiciousMassScale: constraint.suspiciousMassScale ?? null,
+                diagnosisHint: PhysicsModelController.describeConstraintDriftHint(
+                    anchorWorldDistance,
+                    relativeVelocityAlongAnchor,
+                    relativeVelocityVsAnchor,
+                    fixedAxisCount,
+                ),
+            });
+        }
+
+        summaries.sort((a, b) => {
+            const distanceA = typeof a.anchorWorldDistance === "number" ? a.anchorWorldDistance : 0;
+            const distanceB = typeof b.anchorWorldDistance === "number" ? b.anchorWorldDistance : 0;
+            return distanceB - distanceA;
+        });
+        return summaries.slice(0, 8);
+    }
+
+    private static describeConstraintDriftHint(
+        anchorWorldDistance: number | null,
+        relativeVelocityAlongAnchor: number | null,
+        relativeVelocityVsAnchor: string | null,
+        fixedAxisCount: number | null,
+    ): string {
+        if (anchorWorldDistance === null) return "anchor-distance-unavailable";
+        if (anchorWorldDistance <= 0.02) return "constraint-anchor-close";
+        if (relativeVelocityVsAnchor === "separating") return "constraint-anchors-still-separating";
+        if (relativeVelocityVsAnchor === "closing") return "constraint-anchors-closing-but-not-settled";
+        if (relativeVelocityVsAnchor === "neutral" && fixedAxisCount === 6) {
+            return "zero-limit-6dof-drift-without-closing-velocity";
+        }
+        if (relativeVelocityAlongAnchor === null) return "constraint-drift-velocity-unavailable";
+        return "constraint-drift-unclassified";
+    }
+
     private static getBulletPhysicsBundle(
         physicsModel: ClassicPhysicsModelLike | BulletPhysicsModelLike | null | undefined,
     ): BulletPhysicsBundleLike | null {
         if (!physicsModel || !("_bundle" in physicsModel)) return null;
         return physicsModel._bundle ?? null;
+    }
+
+    private static hasRuntimeConstraintUseFrameOffsetSetter(
+        constraint: RuntimeConstraintDiagnosticLike | null | undefined,
+    ): boolean | null {
+        if (!constraint) return null;
+        if (typeof constraint.useFrameOffset === "function") return true;
+        const physicsJoint = constraint.physicsJoint as RuntimeConstraintDiagnosticLike | null | undefined;
+        if (physicsJoint && physicsJoint !== constraint) {
+            return PhysicsModelController.hasRuntimeConstraintUseFrameOffsetSetter(physicsJoint);
+        }
+        return false;
+    }
+
+    private static hasRuntimeConstraintWasmFunction(
+        constraint: RuntimeConstraintDiagnosticLike | null | undefined,
+        functionName: string,
+    ): boolean | null {
+        if (!constraint) return null;
+        const wasmInstance = PhysicsModelController.getRuntimeConstraintWasmInstance(constraint);
+        if (!wasmInstance) return null;
+        return typeof (wasmInstance as Record<string, unknown>)[functionName] === "function";
+    }
+
+    private static collectRuntimeConstraintWasmFunctionNames(
+        constraint: RuntimeConstraintDiagnosticLike | null | undefined,
+        pattern: RegExp,
+    ): string[] | null {
+        const wasmInstance = PhysicsModelController.getRuntimeConstraintWasmInstance(constraint);
+        if (!wasmInstance) return null;
+        const names = new Set<string>();
+        let current: object | null = wasmInstance as object;
+        let depth = 0;
+        while (current && depth < 4) {
+            for (const name of Object.getOwnPropertyNames(current)) {
+                if (!pattern.test(name)) continue;
+                const value = (wasmInstance as Record<string, unknown>)[name];
+                if (typeof value === "function") names.add(name);
+            }
+            current = Object.getPrototypeOf(current);
+            depth += 1;
+        }
+        return Array.from(names).sort().slice(0, 24);
+    }
+
+    private static getRuntimeConstraintWasmInstance(
+        constraint: RuntimeConstraintDiagnosticLike | null | undefined,
+    ): unknown | null {
+        if (!constraint) return null;
+        if (constraint.runtime?.wasmInstance) return constraint.runtime.wasmInstance;
+        const physicsJoint = constraint.physicsJoint as RuntimeConstraintDiagnosticLike | null | undefined;
+        if (physicsJoint && physicsJoint !== constraint) {
+            return PhysicsModelController.getRuntimeConstraintWasmInstance(physicsJoint);
+        }
+        return null;
+    }
+
+    private static describeSuspiciousMassScale(
+        runtimeBodyA: ReturnType<typeof PhysicsModelController.captureRuntimeBundleRigidBodyDiagnostics>,
+        runtimeBodyB: ReturnType<typeof PhysicsModelController.captureRuntimeBundleRigidBodyDiagnostics>,
+    ): string {
+        const massA = runtimeBodyA?.mass;
+        const massB = runtimeBodyB?.mass;
+        if (typeof massA !== "number" || typeof massB !== "number") return "unavailable";
+        const maxMass = Math.max(massA, massB);
+        const minMass = Math.min(massA, massB);
+        if (maxMass <= 0 || minMass <= 0) return "non-positive";
+        const ratio = maxMass / minMass;
+        if (maxMass >= 50) return `large-mass>=50 ratio=${PhysicsModelController.roundDiagnosticNumber(ratio)}`;
+        if (ratio >= 20) return `large-ratio>=20 ratio=${PhysicsModelController.roundDiagnosticNumber(ratio)}`;
+        return "normal";
     }
 
     private static describeJointRestoringForceDiagnostics(
@@ -1379,14 +1817,371 @@ export class PhysicsModelController {
         }
     }
 
+    public static getFullyDampedRigidBodyDampingCap(): number {
+        return PhysicsModelController.convertDampingCorrectionAmountToCap(
+            PhysicsModelController.getFullyDampedRigidBodyDampingCorrectionAmount(),
+        );
+    }
+
+    public static getFullyDampedRigidBodyDampingCorrectionAmount(): number {
+        try {
+            const rawValue = globalThis.localStorage?.getItem(RUNTIME_RIGID_BODY_DAMPING_CORRECTION_AMOUNT_KEY);
+            if (rawValue !== null && rawValue !== undefined && rawValue.trim() !== "") {
+                return PhysicsModelController.normalizeCorrectionAmountValue(Number(rawValue));
+            }
+        } catch {
+            // fall through to default
+        }
+        return FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT;
+    }
+
+    public static setFullyDampedRigidBodyDampingCorrectionAmount(value: number): number {
+        const normalized = PhysicsModelController.normalizeCorrectionAmountValue(value);
+        try {
+            globalThis.localStorage?.setItem(RUNTIME_RIGID_BODY_DAMPING_CORRECTION_AMOUNT_KEY, String(normalized));
+        } catch {
+            // UI can still use the normalized value for the current session.
+        }
+        return normalized;
+    }
+
+    public static getFullyDampedRigidBodyCorrectionEnabled(): boolean {
+        return !PhysicsModelController.isDampingCapDisabled()
+            && !PhysicsModelController.isFullyDampedGravityScaleDisabled();
+    }
+
+    public static setFullyDampedRigidBodyCorrectionEnabled(enabled: boolean): boolean {
+        const next = Boolean(enabled);
+        try {
+            if (next) {
+                globalThis.localStorage?.removeItem(RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY);
+                globalThis.localStorage?.removeItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY);
+            } else {
+                globalThis.localStorage?.setItem(RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY, "1");
+                globalThis.localStorage?.setItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY, "1");
+            }
+        } catch {
+            // Current session still observes the returned state where possible.
+        }
+        return next;
+    }
+
+    private static convertDampingCorrectionAmountToCap(value: number): number {
+        const amount = PhysicsModelController.normalizeCorrectionAmountValue(value);
+        if (amount <= 0) return 1;
+        return RUNTIME_RIGID_BODY_DAMPING_CAP_MAX
+            - amount * (RUNTIME_RIGID_BODY_DAMPING_CAP_MAX - RUNTIME_RIGID_BODY_DAMPING_CAP_MIN);
+    }
+
+    private static isFullyDampedGravityScaleDisabled(): boolean {
+        try {
+            const storage = globalThis.localStorage;
+            return storage?.getItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY) === "1";
+        } catch {
+            return false;
+        }
+    }
+
+    public static getFullyDampedGravityScale(): number {
+        return PhysicsModelController.convertGravityCorrectionAmountToScale(
+            PhysicsModelController.getFullyDampedGravityCorrectionAmount(),
+        );
+    }
+
+    public static getFullyDampedGravityCorrectionAmount(): number {
+        try {
+            const rawValue = globalThis.localStorage?.getItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_CORRECTION_AMOUNT_KEY);
+            if (rawValue !== null && rawValue !== undefined && rawValue.trim() !== "") {
+                return PhysicsModelController.normalizeCorrectionAmountValue(Number(rawValue));
+            }
+        } catch {
+            // fall through to default
+        }
+        return FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT;
+    }
+
+    public static setFullyDampedGravityCorrectionAmount(value: number): number {
+        const normalized = PhysicsModelController.normalizeCorrectionAmountValue(value);
+        try {
+            globalThis.localStorage?.setItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_CORRECTION_AMOUNT_KEY, String(normalized));
+        } catch {
+            // UI can still use the normalized value for the current session.
+        }
+        return normalized;
+    }
+
+    private static convertGravityCorrectionAmountToScale(value: number): number {
+        const amount = PhysicsModelController.normalizeCorrectionAmountValue(value);
+        return 1 - amount * (1 - FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_MIN);
+    }
+
+    private static normalizeCorrectionAmountValue(value: number): number {
+        if (!Number.isFinite(value)) return FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT;
+        return Math.max(0, Math.min(1, value));
+    }
+
+    private static isBoneEvaluationOrderNormalizationDisabled(): boolean {
+        try {
+            return globalThis.localStorage?.getItem(BONE_EVALUATION_ORDER_NORMALIZATION_DISABLE_KEY) === "1";
+        } catch {
+            return false;
+        }
+    }
+
+    private static summarizeRuntimeBoneEvaluationOrder(
+        sortedRuntimeBones: readonly Array<{
+            name?: string;
+            parentBone?: object | null;
+            transformAfterPhysics?: boolean;
+        }>,
+        physicsBoneNames: readonly string[],
+    ): Record<string, unknown> {
+        const orderByBone = new Map<object, number>();
+        const nameByBone = new Map<object, string>();
+        const boneByName = new Map<string, {
+            name?: string;
+            parentBone?: object | null;
+            transformAfterPhysics?: boolean;
+        }>();
+        let beforePhysicsCount = 0;
+        let afterPhysicsCount = 0;
+        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
+            const bone = sortedRuntimeBones[index];
+            orderByBone.set(bone as unknown as object, index);
+            if (bone.transformAfterPhysics) afterPhysicsCount += 1;
+            else beforePhysicsCount += 1;
+            if (typeof bone.name === "string" && bone.name.length > 0) {
+                nameByBone.set(bone as unknown as object, bone.name);
+                if (!boneByName.has(bone.name)) {
+                    boneByName.set(bone.name, bone);
+                }
+            }
+        }
+
+        let parentOrderViolationCount = 0;
+        const parentOrderViolationSamples: Array<Record<string, unknown>> = [];
+        for (let index = 0; index < sortedRuntimeBones.length; index += 1) {
+            const bone = sortedRuntimeBones[index];
+            const parentBone = bone.parentBone as object | null | undefined;
+            if (!parentBone) continue;
+            const parentIndex = orderByBone.get(parentBone);
+            if (parentIndex === undefined || parentIndex < index) continue;
+            parentOrderViolationCount += 1;
+            if (parentOrderViolationSamples.length < 8) {
+                parentOrderViolationSamples.push({
+                    bone: bone.name ?? null,
+                    index,
+                    parentIndex,
+                    transformAfterPhysics: Boolean(bone.transformAfterPhysics),
+                });
+            }
+        }
+
+        const physicsBoneSamples: Array<Record<string, unknown>> = [];
+        const physicsBoneParentOrderViolationSamples: Array<Record<string, unknown>> = [];
+        let physicsBoneMissingRuntimeCount = 0;
+        let physicsBoneParentOrderViolationCount = 0;
+        let physicsBoneParentStageMismatchCount = 0;
+        for (const boneName of physicsBoneNames) {
+            const bone = boneByName.get(boneName);
+            if (!bone) {
+                physicsBoneMissingRuntimeCount += 1;
+                continue;
+            }
+            const sortedIndex = orderByBone.get(bone as unknown as object) ?? null;
+            const parentBone = bone.parentBone as object | null | undefined;
+            const parentSortedIndex = parentBone ? orderByBone.get(parentBone) ?? null : null;
+            const parentTransformAfterPhysics = parentBone
+                ? Boolean((parentBone as { transformAfterPhysics?: boolean }).transformAfterPhysics)
+                : null;
+            const parentBeforeChild = sortedIndex !== null && parentSortedIndex !== null
+                ? parentSortedIndex < sortedIndex
+                : null;
+            const stageMismatch = parentTransformAfterPhysics !== null
+                && parentTransformAfterPhysics !== Boolean(bone.transformAfterPhysics);
+            if (parentBeforeChild === false) {
+                physicsBoneParentOrderViolationCount += 1;
+                if (physicsBoneParentOrderViolationSamples.length < 12) {
+                    physicsBoneParentOrderViolationSamples.push({
+                        name: boneName,
+                        sortedIndex,
+                        parentName: parentBone ? nameByBone.get(parentBone) ?? null : null,
+                        parentSortedIndex,
+                        transformAfterPhysics: Boolean(bone.transformAfterPhysics),
+                        parentTransformAfterPhysics,
+                    });
+                }
+            }
+            if (stageMismatch) physicsBoneParentStageMismatchCount += 1;
+            physicsBoneSamples.push({
+                name: boneName,
+                sortedIndex,
+                parentName: parentBone ? nameByBone.get(parentBone) ?? null : null,
+                parentSortedIndex,
+                parentBeforeChild,
+                transformAfterPhysics: Boolean(bone.transformAfterPhysics),
+                parentTransformAfterPhysics,
+                parentStageMismatch: stageMismatch,
+            });
+            if (physicsBoneSamples.length >= 16) break;
+        }
+
+        return {
+            beforePhysicsBoneCount: beforePhysicsCount,
+            afterPhysicsBoneCount: afterPhysicsCount,
+            physicsBoneNameCount: physicsBoneNames.length,
+            physicsBoneMissingRuntimeCount,
+            physicsBoneParentOrderViolationCount,
+            physicsBoneParentStageMismatchCount,
+            physicsBoneSamples,
+            physicsBoneParentOrderViolationSamples,
+            parentOrderViolationCount,
+            parentOrderViolationSamples,
+        };
+    }
+
+    private static getZeroLimit6DofErpBoostValue(): number | null {
+        try {
+            const storage = globalThis.localStorage;
+            const rawValue = storage?.getItem(ZERO_LIMIT_6DOF_ERP_BOOST_VALUE_KEY);
+            if (rawValue !== null && rawValue !== undefined && rawValue.trim() !== "") {
+                const parsedValue = Number(rawValue);
+                if (Number.isFinite(parsedValue) && parsedValue >= 0 && parsedValue <= 1) {
+                    return parsedValue;
+                }
+            }
+        } catch {
+            return null;
+        }
+        return null;
+    }
+
     private static getAbnormalMassMode(): AbnormalMassMode {
         try {
             const value = globalThis.localStorage?.getItem(ABNORMAL_DYNAMIC_RIGID_BODY_MASS_MODE_KEY);
-            if (value === "unit" || value === "clamp") return value;
+            if (value === "unit" || value === "tiny" || value === "clamp") return value;
         } catch {
             // fall through to the current best experiment default
         }
         return "mantissa";
+    }
+
+    private static getAbnormalTinyMassValue(): number {
+        try {
+            const value = globalThis.localStorage?.getItem(ABNORMAL_DYNAMIC_RIGID_BODY_TINY_MASS_VALUE_KEY);
+            const parsedValue = value !== null && value !== undefined ? Number(value) : Number.NaN;
+            if (Number.isFinite(parsedValue) && parsedValue > 0 && parsedValue <= 1) {
+                return parsedValue;
+            }
+        } catch {
+            // fall through to default tiny mass
+        }
+        return ABNORMAL_DYNAMIC_RIGID_BODY_TINY_MASS;
+    }
+
+    private static collectFullyDampedDynamicRigidBodyIndices(bundle: BulletPhysicsBundleLike): number[] {
+        if (
+            typeof bundle.getLinearDamping !== "function"
+            || typeof bundle.getAngularDamping !== "function"
+        ) {
+            return [];
+        }
+
+        const indices: number[] = [];
+        for (let index = 0; index < bundle.count; index += 1) {
+            if (bundle.rigidBodyData?.[index]?.physicsMode === FOLLOW_BONE_RIGID_BODY_PHYSICS_MODE) continue;
+
+            let linearDamping: number;
+            let angularDamping: number;
+            try {
+                linearDamping = bundle.getLinearDamping(index);
+                angularDamping = bundle.getAngularDamping(index);
+            } catch {
+                continue;
+            }
+            if (!Number.isFinite(linearDamping) || !Number.isFinite(angularDamping)) continue;
+            if (
+                linearDamping >= RUNTIME_RIGID_BODY_DAMPING_LIMIT
+                && angularDamping >= RUNTIME_RIGID_BODY_DAMPING_LIMIT
+            ) {
+                indices.push(index);
+            }
+        }
+        return indices;
+    }
+
+    private static collectZeroLimit6DofRigidBodyIndices(
+        joints: readonly PhysicsJointDiagnosticEntry[],
+    ): Set<number> {
+        const indices = new Set<number>();
+        for (const joint of joints) {
+            if (!PhysicsModelController.isZeroLimit6DofWithoutSpring(joint)) continue;
+            if (joint.rigidbodyIndexA >= 0) indices.add(joint.rigidbodyIndexA);
+            if (joint.rigidbodyIndexB >= 0) indices.add(joint.rigidbodyIndexB);
+        }
+        return indices;
+    }
+
+    public static getAbnormalDynamicRigidBodyMassTowardUnit(): number {
+        try {
+            const rawValue = globalThis.localStorage?.getItem(ABNORMAL_DYNAMIC_RIGID_BODY_MASS_TOWARD_UNIT_KEY);
+            if (rawValue !== null && rawValue !== undefined && rawValue.trim() !== "") {
+                return PhysicsModelController.normalizeMassTowardUnitValue(Number(rawValue));
+            }
+        } catch {
+            // fall through to default
+        }
+        return FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT;
+    }
+
+    public static setAbnormalDynamicRigidBodyMassTowardUnit(value: number): number {
+        const normalized = PhysicsModelController.normalizeMassTowardUnitValue(value);
+        try {
+            globalThis.localStorage?.setItem(ABNORMAL_DYNAMIC_RIGID_BODY_MASS_TOWARD_UNIT_KEY, String(normalized));
+        } catch {
+            // UI can still use the normalized value for the current session.
+        }
+        return normalized;
+    }
+
+    private static normalizeMassTowardUnitValue(value: number): number {
+        if (!Number.isFinite(value)) return FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT;
+        return Math.max(0, Math.min(1, value));
+    }
+
+    private static moveMassTowardUnit(mass: number, strength: number): number {
+        if (!Number.isFinite(mass) || mass <= 0) return mass;
+        const normalizedStrength = PhysicsModelController.normalizeMassTowardUnitValue(strength);
+        if (normalizedStrength <= 0) return mass;
+        if (normalizedStrength >= 1) return ABNORMAL_DYNAMIC_RIGID_BODY_UNIT_MASS;
+        return Math.exp(Math.log(mass) * (1 - normalizedStrength));
+    }
+
+    private static shouldBoostZeroLimit6DofErp(joint: PhysicsJointDiagnosticEntry): boolean {
+        if (PhysicsModelController.getZeroLimit6DofErpBoostValue() === null) return false;
+        return PhysicsModelController.isZeroLimit6DofWithoutSpring(joint);
+    }
+
+    private static isZeroLimit6DofWithoutSpring(joint: PhysicsJointDiagnosticEntry): boolean {
+        const fixedAxisCount = PhysicsModelController.collectZeroLimitAxes(
+            joint.positionMin,
+            joint.positionMax,
+            ["x", "y", "z"],
+        ).length + PhysicsModelController.collectZeroLimitAxes(
+            joint.rotationMin,
+            joint.rotationMax,
+            ["rx", "ry", "rz"],
+        ).length;
+        if (fixedAxisCount !== MMD_CONSTRAINT_AXIS_COUNT) return false;
+
+        const springAxisCount = PhysicsModelController.collectNonZeroAxes(
+            joint.springPosition,
+            ["x", "y", "z"],
+        ).length + PhysicsModelController.collectNonZeroAxes(
+            joint.springRotation,
+            ["rx", "ry", "rz"],
+        ).length;
+        return springAxisCount === 0;
     }
 
     private static isFiniteVector(value: PhysicsVectorLike): boolean {
@@ -1404,8 +2199,14 @@ export class PhysicsModelController {
     private static resolveAbnormalDynamicRigidBodyMass(
         originalMass: number,
         mode: AbnormalMassMode,
-    ): { mass: number; mode: "unit" | "decimal-mantissa-recovered" | "clamped" } | null {
-        if (!Number.isFinite(originalMass) || originalMass <= RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT) {
+        options: { recoverLowMass?: boolean } = {},
+    ): { mass: number; mode: "unit" | "tiny" | "decimal-mantissa-recovered" | "clamped" } | null {
+        const recoverLowMass = options.recoverLowMass === true;
+        if (
+            !Number.isFinite(originalMass)
+            || originalMass <= 0
+            || (!recoverLowMass && originalMass <= LOW_DECIMAL_MANTISSA_RECOVERED_MASS_LIMIT)
+        ) {
             return null;
         }
 
@@ -1413,8 +2214,12 @@ export class PhysicsModelController {
             return { mass: ABNORMAL_DYNAMIC_RIGID_BODY_UNIT_MASS, mode: "unit" };
         }
 
+        if (mode === "tiny") {
+            return { mass: PhysicsModelController.getAbnormalTinyMassValue(), mode: "tiny" };
+        }
+
         if (mode === "mantissa") {
-            const recoveredMass = PhysicsModelController.tryRecoverAbnormalFloat32Mass(originalMass);
+            const recoveredMass = PhysicsModelController.tryRecoverAbnormalFloat32Mass(originalMass, recoverLowMass);
             if (recoveredMass !== null) {
                 return { mass: recoveredMass, mode: "decimal-mantissa-recovered" };
             }
@@ -1426,8 +2231,19 @@ export class PhysicsModelController {
         return { mass: ABNORMAL_DYNAMIC_RIGID_BODY_MASS_LIMIT, mode: "clamped" };
     }
 
-    private static tryRecoverAbnormalFloat32Mass(value: number): number | null {
-        if (!Number.isFinite(value) || value <= RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT) return null;
+    private static tryRecoverAbnormalFloat32Mass(value: number, recoverLowMass = false): number | null {
+        if (
+            !Number.isFinite(value)
+            || value <= 0
+            || (!recoverLowMass && value <= LOW_DECIMAL_MANTISSA_RECOVERED_MASS_LIMIT)
+        ) {
+            return null;
+        }
+
+        if (value <= RECOVERED_DYNAMIC_RIGID_BODY_MASS_LIMIT) {
+            const lowMassCandidate = value / 100;
+            return lowMassCandidate > 0 ? lowMassCandidate : null;
+        }
 
         let candidate = Math.abs(value);
         while (candidate > DECIMAL_MANTISSA_RECOVERED_MASS_MAX) {
@@ -1550,6 +2366,7 @@ export class PhysicsModelController {
     ): {
         anchorWorldA: string;
         anchorWorldB: string;
+        anchorSeparation: [number, number, number];
         anchorWorldDistance: number;
         bodyOriginDistance: number;
     } | null {
@@ -1567,13 +2384,70 @@ export class PhysicsModelController {
 
         const anchorWorldA = Vector3.TransformCoordinates(frameA.getTranslation(), bodyWorldA);
         const anchorWorldB = Vector3.TransformCoordinates(frameB.getTranslation(), bodyWorldB);
+        const anchorSeparation = anchorWorldB.subtract(anchorWorldA);
         const bodyOriginA = bodyWorldA.getTranslation();
         const bodyOriginB = bodyWorldB.getTranslation();
         return {
             anchorWorldA: PhysicsModelController.formatVector3(anchorWorldA),
             anchorWorldB: PhysicsModelController.formatVector3(anchorWorldB),
+            anchorSeparation: PhysicsModelController.vectorToTuple(anchorSeparation),
             anchorWorldDistance: PhysicsModelController.roundDiagnosticNumber(Vector3.Distance(anchorWorldA, anchorWorldB)),
             bodyOriginDistance: PhysicsModelController.roundDiagnosticNumber(Vector3.Distance(bodyOriginA, bodyOriginB)),
+        };
+    }
+
+    private static calculateRuntimeConstraintVelocityDiagnostics(
+        snapshot: WebmPhysicsModelSnapshot,
+        joint: PhysicsJointDiagnosticEntry,
+        anchorDiagnostics: { anchorSeparation: [number, number, number]; anchorWorldDistance: number } | null,
+    ): {
+        bodyALinearVelocity: string;
+        bodyBLinearVelocity: string;
+        relativeLinearVelocity: string;
+        bodyASpeed: number;
+        bodyBSpeed: number;
+        relativeSpeed: number;
+        relativeVelocityAlongAnchor: number | null;
+        relativeVelocityVsAnchor: string | null;
+    } | null {
+        const bodySnapshotA = snapshot.rigidBodies[joint.rigidbodyIndexA];
+        const bodySnapshotB = snapshot.rigidBodies[joint.rigidbodyIndexB];
+        if (!bodySnapshotA || !bodySnapshotB) return null;
+
+        const velocityA = Vector3.Zero();
+        const velocityB = Vector3.Zero();
+        PhysicsModelController.tupleToVector(bodySnapshotA.linearVelocity, velocityA);
+        PhysicsModelController.tupleToVector(bodySnapshotB.linearVelocity, velocityB);
+        const relativeVelocity = velocityB.subtract(velocityA);
+        const relativeSpeed = relativeVelocity.length();
+        let relativeVelocityAlongAnchor: number | null = null;
+        let relativeVelocityVsAnchor: string | null = null;
+        if (anchorDiagnostics && anchorDiagnostics.anchorWorldDistance > 1e-6) {
+            const separation = Vector3.Zero();
+            PhysicsModelController.tupleToVector(anchorDiagnostics.anchorSeparation, separation);
+            const separationLength = separation.length();
+            if (separationLength > 1e-6) {
+                separation.scaleInPlace(1 / separationLength);
+                relativeVelocityAlongAnchor = PhysicsModelController.roundDiagnosticNumber(
+                    Vector3.Dot(relativeVelocity, separation),
+                );
+                relativeVelocityVsAnchor = relativeVelocityAlongAnchor > 1e-4
+                    ? "separating"
+                    : relativeVelocityAlongAnchor < -1e-4
+                        ? "closing"
+                        : "neutral";
+            }
+        }
+
+        return {
+            bodyALinearVelocity: PhysicsModelController.formatVector3(velocityA),
+            bodyBLinearVelocity: PhysicsModelController.formatVector3(velocityB),
+            relativeLinearVelocity: PhysicsModelController.formatVector3(relativeVelocity),
+            bodyASpeed: PhysicsModelController.roundDiagnosticNumber(velocityA.length()),
+            bodyBSpeed: PhysicsModelController.roundDiagnosticNumber(velocityB.length()),
+            relativeSpeed: PhysicsModelController.roundDiagnosticNumber(relativeSpeed),
+            relativeVelocityAlongAnchor,
+            relativeVelocityVsAnchor,
         };
     }
 

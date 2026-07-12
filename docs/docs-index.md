@@ -205,6 +205,7 @@
 
 - [物理ランタイム仕様](./physics-runtime-spec.md)
 - [物理演算タスクリスト](./physics-task-list.md)
+- [物理互換補正メモ 2026-07-12](./physics-compatibility-corrections-2026-07-12.md)
 - [v0.2 物理演算調査メモ](./v0.2-physics-investigation-note.md)
 - [v0.1.1 物理 backend 変更メモ](./physics-backend-migration-v0.1.1.md)
 - [babylon-mmd 物理調査](./babylon-mmd-physics-research.md)
