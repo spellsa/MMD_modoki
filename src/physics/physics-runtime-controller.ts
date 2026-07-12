@@ -548,7 +548,8 @@ export class PhysicsRuntimeController {
         const rawMs = Number.isFinite(deltaTimeMs) && deltaTimeMs > 0
             ? deltaTimeMs
             : DEFAULT_PHYSICS_DELTA_MS;
-        const usedMs = rawMs;
+        const maxStepMs = PHYSICS_FIXED_TIME_STEP_SECONDS * this.maxSubSteps * 1000;
+        const usedMs = Math.min(rawMs, maxStepMs);
         this.recordPhysicsDelta(rawMs, usedMs);
         return { rawMs, usedMs };
     }
@@ -667,13 +668,13 @@ export class PhysicsRuntimeController {
 
     private logDeltaSubstepWarningIfNeeded(rawMs: number, usedMs: number): void {
         const maxStepMs = PHYSICS_FIXED_TIME_STEP_SECONDS * this.maxSubSteps * 1000;
-        if (usedMs <= maxStepMs + 0.01) return;
+        if (rawMs <= maxStepMs + 0.01) return;
 
         const nowMs = performance.now();
         if (nowMs < this.nextDeltaWarningMs) return;
         this.nextDeltaWarningMs = nowMs + PHYSICS_DELTA_WARNING_INTERVAL_MS;
 
-        const requiredSubSteps = Math.ceil(usedMs / (PHYSICS_FIXED_TIME_STEP_SECONDS * 1000));
+        const requiredSubSteps = Math.ceil(rawMs / (PHYSICS_FIXED_TIME_STEP_SECONDS * 1000));
         const data = {
             backend: this.getBackendLabel(),
             evaluationType: this.getEvaluationTypeLabel(),
@@ -682,8 +683,9 @@ export class PhysicsRuntimeController {
             fixedTimeStepMs: this.formatStepTimingValue(PHYSICS_FIXED_TIME_STEP_SECONDS * 1000),
             maxSubSteps: this.maxSubSteps,
             requiredSubSteps,
+            clamped: usedMs < rawMs,
         };
-        logWarn("physics", "physics delta exceeds max substeps; cloth/constraints may lag or stretch", data);
+        logWarn("physics", "physics delta exceeded max substeps and was clamped", data);
     }
 
     public static getBackendLabelForBackend(backend: PhysicsBackend): PhysicsBackendLabel {

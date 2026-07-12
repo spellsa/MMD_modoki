@@ -467,9 +467,7 @@ type ModelAssetHost = {
     getPreferredBulletPhysicsBackend?: () => string;
     getPhysicsBufferedEvaluationEnabled?: () => boolean;
     getPhysicsMaxSubSteps?: () => number;
-    normalizeRuntimeBoneTransformStages?: (model: ModelAssetRuntimeModel) => void;
     normalizeRuntimeBoneEvaluationOrder?: (model: ModelAssetRuntimeModel) => void;
-    patchModelAfterPhysicsForPausedState?: (model: ModelAssetRuntimeModel) => void;
     applyPhysicsStateToModel(model: ModelAssetRuntimeModel): void;
     modelKeyframeTracksByModel: WeakMap<ModelAssetRuntimeModel, Map<string, Uint32Array>>;
     modelSourceAnimationsByModel: WeakMap<ModelAssetRuntimeModel, object>;
@@ -484,7 +482,30 @@ type ModelAssetHost = {
             boneIndex: number;
             shapeType: number;
             shapeSize: [number, number, number];
+            shapePosition: [number, number, number];
+            shapeRotation: [number, number, number];
             physicsMode: number;
+            mass: number;
+            linearDamping: number;
+            angularDamping: number;
+            repulsion: number;
+            friction: number;
+            collisionGroup: number;
+            collisionMask: number;
+        }>;
+        joints: Array<{
+            name: string;
+            rigidbodyIndexA: number;
+            rigidbodyIndexB: number;
+            type: number;
+            position: [number, number, number];
+            rotation: [number, number, number];
+            positionMin: [number, number, number];
+            positionMax: [number, number, number];
+            rotationMin: [number, number, number];
+            rotationMax: [number, number, number];
+            springPosition: [number, number, number];
+            springRotation: [number, number, number];
         }>;
         shadowCasterMeshes: Mesh[];
         contactShadowMesh: null;
@@ -1172,8 +1193,31 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
                 name?: string;
                 shapeType?: number;
                 shapeSize?: readonly [number, number, number];
+                shapePosition?: readonly [number, number, number];
+                shapeRotation?: readonly [number, number, number];
                 physicsMode?: number;
                 boneIndex?: number;
+                mass?: number;
+                linearDamping?: number;
+                angularDamping?: number;
+                repulsion?: number;
+                friction?: number;
+                collisionGroup?: number;
+                collisionMask?: number;
+            }[];
+            joints?: readonly {
+                name?: string;
+                type?: number;
+                rigidbodyIndexA?: number;
+                rigidbodyIndexB?: number;
+                position?: readonly [number, number, number];
+                rotation?: readonly [number, number, number];
+                positionMin?: readonly [number, number, number];
+                positionMax?: readonly [number, number, number];
+                rotationMin?: readonly [number, number, number];
+                rotationMax?: readonly [number, number, number];
+                springPosition?: readonly [number, number, number];
+                springRotation?: readonly [number, number, number];
             }[];
         };
         const materialFlagMap = host.buildPmxMaterialFlagMap(mmdMetadata);
@@ -1218,9 +1262,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
                 ? { disableOffsetForConstraintFrame: true }
                 : false,
         });
-        host.normalizeRuntimeBoneTransformStages?.(mmdModel);
         host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
-        host.patchModelAfterPhysicsForPausedState?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);
         logModelMaterialVisibilitySummary(fileName, result.meshes as Mesh[], "after-runtime-model-created");
         logSuspiciousMaterialAlphaDiagnostics(fileName, result.meshes as Mesh[], "after-runtime-model-created");
@@ -1266,6 +1308,14 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         const boneControlInfos: BoneControlInfo[] = [];
         const metadataBones = Array.isArray(mmdMetadata.bones) ? mmdMetadata.bones : [];
         const metadataRigidBodies = Array.isArray(mmdMetadata.rigidBodies) ? mmdMetadata.rigidBodies : [];
+        const metadataJoints = Array.isArray(mmdMetadata.joints) ? mmdMetadata.joints : [];
+        const toPhysicsVector = (value: readonly [number, number, number] | undefined): [number, number, number] => {
+            return [
+                Number(value?.[0] ?? 0),
+                Number(value?.[1] ?? 0),
+                Number(value?.[2] ?? 0),
+            ];
+        };
         const sceneRigidBodies = metadataRigidBodies.map((rigidBody, index) => {
             const rawShapeSize = Array.isArray(rigidBody?.shapeSize) ? rigidBody.shapeSize : [0.5, 0.5, 0.5];
             return {
@@ -1277,7 +1327,32 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
                     Number(rawShapeSize[1] ?? rawShapeSize[0] ?? 0.5),
                     Number(rawShapeSize[2] ?? rawShapeSize[0] ?? 0.5),
                 ] as [number, number, number],
+                shapePosition: toPhysicsVector(rigidBody?.shapePosition),
+                shapeRotation: toPhysicsVector(rigidBody?.shapeRotation),
                 physicsMode: typeof rigidBody?.physicsMode === "number" ? rigidBody.physicsMode : 0,
+                mass: typeof rigidBody?.mass === "number" ? rigidBody.mass : 0,
+                linearDamping: typeof rigidBody?.linearDamping === "number" ? rigidBody.linearDamping : 0,
+                angularDamping: typeof rigidBody?.angularDamping === "number" ? rigidBody.angularDamping : 0,
+                repulsion: typeof rigidBody?.repulsion === "number" ? rigidBody.repulsion : 0,
+                friction: typeof rigidBody?.friction === "number" ? rigidBody.friction : 0,
+                collisionGroup: typeof rigidBody?.collisionGroup === "number" ? rigidBody.collisionGroup : 0,
+                collisionMask: typeof rigidBody?.collisionMask === "number" ? rigidBody.collisionMask : 0,
+            };
+        });
+        const sceneJoints = metadataJoints.map((joint, index) => {
+            return {
+                name: joint?.name || `Joint ${index + 1}`,
+                rigidbodyIndexA: typeof joint?.rigidbodyIndexA === "number" ? joint.rigidbodyIndexA : -1,
+                rigidbodyIndexB: typeof joint?.rigidbodyIndexB === "number" ? joint.rigidbodyIndexB : -1,
+                type: typeof joint?.type === "number" ? joint.type : 0,
+                position: toPhysicsVector(joint?.position),
+                rotation: toPhysicsVector(joint?.rotation),
+                positionMin: toPhysicsVector(joint?.positionMin),
+                positionMax: toPhysicsVector(joint?.positionMax),
+                rotationMin: toPhysicsVector(joint?.rotationMin),
+                rotationMax: toPhysicsVector(joint?.rotationMax),
+                springPosition: toPhysicsVector(joint?.springPosition),
+                springRotation: toPhysicsVector(joint?.springRotation),
             };
         });
         const physicsBoneIndices = new Set<number>();
@@ -1408,6 +1483,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
             info: modelInfo,
             materials: sceneMaterials,
             rigidBodies: sceneRigidBodies,
+            joints: sceneJoints,
             shadowCasterMeshes,
             contactShadowMesh: null,
             castShadow: true,

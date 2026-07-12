@@ -346,6 +346,7 @@ import {
 } from "./physics/physics-runtime-controller";
 import {
     PhysicsModelController,
+    type PhysicsJointDiagnosticEntry,
     type PhysicsRigidBodyDiagnosticEntry,
     type PhysicsRuntimeModel,
 } from "./physics/physics-model-controller";
@@ -746,12 +747,15 @@ type SceneModelRigidBodyEntry = {
     physicsMode: number;
 } & PhysicsRigidBodyDiagnosticEntry;
 
+type SceneModelJointEntry = PhysicsJointDiagnosticEntry;
+
 type SceneModelEntry = {
     mesh: MmdMesh;
     model: RuntimeModel;
     info: ModelInfo;
     materials: SceneModelMaterialEntry[];
     rigidBodies: SceneModelRigidBodyEntry[];
+    joints: SceneModelJointEntry[];
     shadowCasterMeshes: Mesh[];
     contactShadowMesh: Mesh | null;
     castShadow: boolean;
@@ -1469,6 +1473,7 @@ ${beforeFogAppendBlock}
     private renderFpsLimit = 0;
     private nextRenderStabilityDiagnosticMs = 0;
     private nextFramePerformanceLogMs = performance.now() + MmdManager.FRAME_PERFORMANCE_LOG_INTERVAL_MS;
+    private nextPhysicsChainDiagnosticsMs = 0;
     private readonly framePerformanceProfiler = new PerformanceProfiler(FRAME_PERFORMANCE_SECTIONS);
     private readonly framePerformancePhaseStartMs = new Map<FramePerformanceSection, number>();
     private readonly performanceHookedRuntimes = new WeakSet<object>();
@@ -4675,8 +4680,11 @@ ${beforeFogAppendBlock}
             isSimulationActive: () => this.isPhysicsSimulationActive(),
             getPhysicsBackendLabel: () => this.getPhysicsBackendLabel(),
             getPhysicsEvaluationTypeLabel: () => this.physicsController.getEvaluationTypeLabel(),
-            syncCpuSkinnedMorphSourceBuffers: (model) => this.syncCpuSkinnedMorphSourceBuffers(model),
-            addRuntimeDiagnostic: (message) => this.addRuntimeDiagnostic(message),
+            isPlaybackActive: () => this._isPlaying,
+            isScenePhysicsEnabled: () => this.scene.physicsEnabled,
+            getCurrentFrameTime: () => Number.isFinite(this.mmdRuntime?.currentFrameTime)
+                ? this.mmdRuntime.currentFrameTime
+                : null,
         });
 
         // MMD camera runtime object (used for camera VMD evaluation)
@@ -4809,6 +4817,7 @@ ${beforeFogAppendBlock}
                 this.recordFramePerformanceSection("sceneRender", afterRenderMs - renderBlockStartMs);
             }
             this.logPhysicsPerformanceSample(afterRenderMs);
+            this.logPhysicsChainDiagnostics(afterRenderMs);
             if (!this._isPlaying) {
                 if (this.framePerformanceLogEnabled) {
                     this.recordFramePerformanceSection("frameTotal", afterRenderMs - frameStartMs);
@@ -4921,6 +4930,21 @@ ${beforeFogAppendBlock}
             modelCount: this.sceneModels.length,
             simulationActive: this.isPhysicsSimulationActive(),
         });
+    }
+
+    private logPhysicsChainDiagnostics(nowMs: number): void {
+        if (!isDebugLogEnabled("physics")) return;
+        if (nowMs < this.nextPhysicsChainDiagnosticsMs) return;
+        this.nextPhysicsChainDiagnosticsMs = nowMs + 2000;
+
+        for (const sceneModel of this.sceneModels) {
+            this.physicsModelController.logPhysicsChainDistanceDiagnostics(
+                sceneModel.model,
+                sceneModel.info.name,
+                sceneModel.rigidBodies,
+                sceneModel.joints,
+            );
+        }
     }
 
     private recordFramePerformanceSection(section: FramePerformanceSection, durationMs: number): void {
@@ -5524,10 +5548,6 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private patchModelAfterPhysicsForPausedState(model: RuntimeModel): void {
-        this.physicsModelController.patchModelAfterPhysicsForPausedState(model);
-    }
-
     private syncCpuSkinnedMorphSourceBuffers(model: RuntimeModel): void {
         const meshes = PhysicsModelController.collectMeshesForCpuMorphSync(model);
 
@@ -5589,10 +5609,6 @@ ${beforeFogAppendBlock}
                 meshInternal.geometry._softwareSkinningFrameId = -1;
             }
         }
-    }
-
-    private normalizeRuntimeBoneTransformStages(model: RuntimeModel): void {
-        this.physicsModelController.normalizeRuntimeBoneTransformStages(model);
     }
 
     private normalizeRuntimeBoneEvaluationOrder(model: RuntimeModel): void {
