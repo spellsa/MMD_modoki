@@ -88,7 +88,8 @@ export type RuntimeAction =
     | { type: "runtime.toggleShadow"; source: ActionSource }
     | { type: "runtime.toggleFloorCollision"; source: ActionSource }
     | { type: "runtime.toggleRigidBodies"; source: ActionSource }
-    | { type: "runtime.toggleGlobalIllumination"; source: ActionSource };
+    | { type: "runtime.toggleGlobalIllumination"; source: ActionSource }
+    | { type: "runtime.setRenderFpsLimit"; source: ActionSource; limit: number };
 
 export type ModelAction =
     | { type: "model.selectTimelineTarget"; source: ActionSource; value: string; showToast: boolean }

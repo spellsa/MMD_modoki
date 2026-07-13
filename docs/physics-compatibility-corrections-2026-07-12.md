@@ -154,12 +154,20 @@ mmd_modoki.physics.abnormalMassScale
 新しいキー:
 
 ```text
+mmd_modoki.physics.compatibilityCorrectionEnabled
 mmd_modoki.physics.dampingCorrectionAmount
 mmd_modoki.physics.fullyDampedGravityCorrectionAmount
 mmd_modoki.physics.abnormalMassTowardUnit
 ```
 
 旧キーが残っていても、新しい補正量スライダーには使わない。
+
+2026-07-13 変更:
+
+- `物理互換補正` は未設定時の既定を OFF にする。
+- 明示的に ON にした場合は `mmd_modoki.physics.compatibilityCorrectionEnabled = "1"` を保存する。
+- 明示的に OFF にした場合は `mmd_modoki.physics.compatibilityCorrectionEnabled = "0"` を保存し、旧 disable 系キーも ON にする。
+- 旧 disable 系キーだけが残っている場合でも、新キーが未設定なら安全側として OFF 扱いにする。
 
 ## ログで見る項目
 

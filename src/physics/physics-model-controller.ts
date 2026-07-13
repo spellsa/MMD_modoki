@@ -27,6 +27,7 @@ const FULLY_DAMPED_RIGID_BODY_CORRECTION_AMOUNT = 1;
 const RUNTIME_RIGID_BODY_DAMPING_CAP_MIN = 0.901;
 const RUNTIME_RIGID_BODY_DAMPING_CAP_MAX = 0.999;
 const RUNTIME_RIGID_BODY_DAMPING_LIMIT = 0.999999;
+const PHYSICS_COMPATIBILITY_CORRECTION_ENABLED_KEY = "mmd_modoki.physics.compatibilityCorrectionEnabled";
 const RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY = "mmd_modoki.physics.disableDampingCap";
 const RUNTIME_RIGID_BODY_DAMPING_CORRECTION_AMOUNT_KEY = "mmd_modoki.physics.dampingCorrectionAmount";
 const FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_MIN = 0.75;
@@ -1811,9 +1812,10 @@ export class PhysicsModelController {
     private static isDampingCapDisabled(): boolean {
         try {
             const storage = globalThis.localStorage;
-            return storage?.getItem(RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY) === "1";
+            return !PhysicsModelController.readCompatibilityCorrectionEnabled()
+                || storage?.getItem(RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY) === "1";
         } catch {
-            return false;
+            return true;
         }
     }
 
@@ -1846,13 +1848,26 @@ export class PhysicsModelController {
     }
 
     public static getFullyDampedRigidBodyCorrectionEnabled(): boolean {
-        return !PhysicsModelController.isDampingCapDisabled()
+        return PhysicsModelController.readCompatibilityCorrectionEnabled()
+            && !PhysicsModelController.isDampingCapDisabled()
             && !PhysicsModelController.isFullyDampedGravityScaleDisabled();
+    }
+
+    private static readCompatibilityCorrectionEnabled(): boolean {
+        try {
+            const rawValue = globalThis.localStorage?.getItem(PHYSICS_COMPATIBILITY_CORRECTION_ENABLED_KEY);
+            if (rawValue === "1") return true;
+            if (rawValue === "0") return false;
+        } catch {
+            // Fall through to the safe default.
+        }
+        return false;
     }
 
     public static setFullyDampedRigidBodyCorrectionEnabled(enabled: boolean): boolean {
         const next = Boolean(enabled);
         try {
+            globalThis.localStorage?.setItem(PHYSICS_COMPATIBILITY_CORRECTION_ENABLED_KEY, next ? "1" : "0");
             if (next) {
                 globalThis.localStorage?.removeItem(RUNTIME_RIGID_BODY_DAMPING_CAP_DISABLE_KEY);
                 globalThis.localStorage?.removeItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY);
@@ -1876,9 +1891,10 @@ export class PhysicsModelController {
     private static isFullyDampedGravityScaleDisabled(): boolean {
         try {
             const storage = globalThis.localStorage;
-            return storage?.getItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY) === "1";
+            return !PhysicsModelController.readCompatibilityCorrectionEnabled()
+                || storage?.getItem(FULLY_DAMPED_RIGID_BODY_GRAVITY_SCALE_DISABLE_KEY) === "1";
         } catch {
-            return false;
+            return true;
         }
     }
 

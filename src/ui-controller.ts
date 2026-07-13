@@ -2197,6 +2197,10 @@ export class UIController {
         this.actionDispatcher.register("runtime.toggleGlobalIllumination", () => {
             this.runtimeFeatureUiController?.toggleGlobalIllumination();
         });
+        this.actionDispatcher.register("runtime.setRenderFpsLimit", (action) => {
+            this.mmdManager.setRenderFpsLimit(action.limit);
+            this.appMenuController?.refresh();
+        });
         this.actionDispatcher.register("model.selectTimelineTarget", (action) => {
             this.modelInfoPanelController?.selectTimelineTarget(action.value, action.showToast);
         });

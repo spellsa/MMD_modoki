@@ -99,6 +99,12 @@ frame skip 対策:
 - WASM runtime 実験経路は `MmdWasmRuntime` の physics clock を wrap し、delta を記録したうえでそのまま返す。
 - performance log には `physicsFixedTimeStepMs`, `physicsMaxSubSteps`, `physicsDeltaRawMaxMs`, `physicsDeltaUsedMaxMs` を出す。通常は raw / used が同じ値になる。
 
+FPS 固定モード:
+
+- 表示メニューから `fps無制限` / `60fps制限` / `30fps制限` を選択できる。
+- 既定値は `60fps制限`。選択値は `mmd_modoki.render.fpsLimit` に保存する。
+- `1fpsセーフモード` は試したが、物理の置いていかれ / Buffered 評価遅延との相性が悪く、v0.2.1 前の標準機能からは外す。
+
 Buffered 再試行:
 
 - `USE_BUFFERED_EVALUATION_DURING_PLAYBACK = true` とし、Classic runtime + Bullet MPR + 再生中だけ `PhysicsRuntimeEvaluationType.Buffered` を使う。

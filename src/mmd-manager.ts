@@ -803,6 +803,7 @@ export class MmdManager {
     private static readonly WEBGPU_SDEF_CPU_FALLBACK_STORAGE_KEY = "mmd_modoki.webGpuSdefCpuFallback";
     private static readonly PHYSICS_PREFERRED_BULLET_BACKEND_STORAGE_KEY = "mmd_modoki.physics.preferredBulletBackend";
     private static readonly PHYSICS_BUFFERED_EVALUATION_STORAGE_KEY = "mmd_modoki.physics.bufferedEvaluation";
+    private static readonly RENDER_FPS_LIMIT_STORAGE_KEY = "mmd_modoki.render.fpsLimit";
     private static readonly RUNTIME_MODE_STORAGE_KEY = "mmd_modoki.runtimeMode";
     private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
     private static readonly FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY = "mmd_modoki.debug.forceModelDebugMaterial";
@@ -1465,7 +1466,12 @@ ${beforeFogAppendBlock}
     private manualPlaybackFrameCursor = 0;
     private lastRenderTimestampMs = performance.now();
     private nextRenderDueTimestampMs = performance.now();
-    private renderFpsLimit = 0;
+    private renderFpsLimit = MmdManager.normalizeRenderFpsLimit(MmdManager.readNumberLocalStorage(
+        MmdManager.RENDER_FPS_LIMIT_STORAGE_KEY,
+        60,
+        0,
+        60,
+    ));
     private nextRenderStabilityDiagnosticMs = 0;
     private nextFramePerformanceLogMs = performance.now() + MmdManager.FRAME_PERFORMANCE_LOG_INTERVAL_MS;
     private nextPhysicsChainDiagnosticsMs = 0;
@@ -11262,15 +11268,25 @@ ${beforeFogAppendBlock}
         this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
     }
 
-    public setRenderFpsLimit(limit: number): void {
-        if (!Number.isFinite(limit)) {
-            this.renderFpsLimit = 0;
-        } else {
-            this.renderFpsLimit = Math.max(0, Math.floor(limit));
-        }
+    public getRenderFpsLimit(): number {
+        return this.renderFpsLimit;
+    }
+
+    public setRenderFpsLimit(limit: number): number {
+        this.renderFpsLimit = MmdManager.normalizeRenderFpsLimit(limit);
+        MmdManager.writeNumberLocalStorage(MmdManager.RENDER_FPS_LIMIT_STORAGE_KEY, this.renderFpsLimit);
         const now = performance.now();
         this.lastRenderTimestampMs = now;
         this.nextRenderDueTimestampMs = now;
+        return this.renderFpsLimit;
+    }
+
+    private static normalizeRenderFpsLimit(limit: number): number {
+        if (!Number.isFinite(limit)) return 60;
+        const rounded = Math.floor(limit);
+        if (rounded <= 0) return 0;
+        if (rounded <= 30) return 30;
+        return 60;
     }
 
     dispose(): void {

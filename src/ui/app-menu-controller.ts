@@ -255,6 +255,12 @@ export class AppMenuController {
                     checked: this.mmdManager.getShowPhysicsBonesInViewport(),
                     disabled: this.mmdManager.getTimelineTarget() !== "model" || !this.hasActiveModel(),
                 };
+            case "view.fpsUnlimited":
+                return { checked: this.mmdManager.getRenderFpsLimit() === 0, disabled: false };
+            case "view.fps60":
+                return { checked: this.mmdManager.getRenderFpsLimit() === 60, disabled: false };
+            case "view.fps30":
+                return { checked: this.mmdManager.getRenderFpsLimit() === 30, disabled: false };
             case "view.toggleActiveModel":
                 return { checked: this.isActiveModelVisible(), disabled: !this.hasActiveModel() };
             case "background.toggleMedia":
@@ -394,6 +400,15 @@ export class AppMenuController {
                 return;
             case "view.toggleViewportPhysicsBones":
                 this.dispatchAction({ type: "viewport.togglePhysicsBones", source: "menu" });
+                return;
+            case "view.fpsUnlimited":
+                this.dispatchAction({ type: "runtime.setRenderFpsLimit", source: "menu", limit: 0 });
+                return;
+            case "view.fps60":
+                this.dispatchAction({ type: "runtime.setRenderFpsLimit", source: "menu", limit: 60 });
+                return;
+            case "view.fps30":
+                this.dispatchAction({ type: "runtime.setRenderFpsLimit", source: "menu", limit: 30 });
                 return;
             case "view.contactShadowSettings":
                 this.openContactShadowSettingsDialog(invoker ?? null);
