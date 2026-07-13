@@ -3321,11 +3321,12 @@ export class UIController {
             return;
         }
 
+        const cameraPose = this.mmdManager.getCameraKeyframePose();
         this.viewportAxisHandleController?.updateCameraTransform({
-            target: this.mmdManager.getCameraTarget(),
-            rotation: this.mmdManager.getCameraRotation(),
-            distance: this.mmdManager.getCameraDistance(),
-            fov: this.mmdManager.getCameraFov(),
+            target: cameraPose.target,
+            rotation: cameraPose.rotation,
+            distance: cameraPose.distance,
+            fov: cameraPose.fov,
         });
     }
 
@@ -6022,11 +6023,12 @@ export class UIController {
     }
 
     private captureCameraTransformCommandSnapshot(): CameraTransformCommandSnapshot {
+        const cameraPose = this.mmdManager.getCameraKeyframePose();
         return {
-            target: this.mmdManager.getCameraTarget(),
-            rotation: this.mmdManager.getCameraRotation(),
-            distance: this.mmdManager.getCameraDistance(),
-            fov: this.mmdManager.getCameraFov(),
+            target: cameraPose.target,
+            rotation: cameraPose.rotation,
+            distance: cameraPose.distance,
+            fov: cameraPose.fov,
         };
     }
 
