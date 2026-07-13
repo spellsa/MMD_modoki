@@ -271,6 +271,10 @@ export interface ProjectCameraState {
     rotation: { x: number; y: number; z: number };
     fov: number;
     distance: number;
+    externalParent?: {
+        modelPath: string | null;
+        boneName: string | null;
+    } | null;
 }
 
 export interface ProjectRgbColor {
@@ -526,6 +530,12 @@ export interface ProjectSerializedCameraTrack {
     fovInterpolations: ProjectNumberArray;
 }
 
+export interface ProjectSerializedCameraExternalParentTrack {
+    frameNumbers: ProjectNumberArray;
+    modelPaths: Array<string | null>;
+    boneNames: Array<string | null>;
+}
+
 export interface ProjectPackedArray {
     encoding: "u8-b64" | "f32-b64" | "u32-delta-varint-b64";
     length: number;
@@ -550,6 +560,7 @@ export interface ProjectKeyframeModelAnimation {
 export interface ProjectKeyframeBundle {
     modelAnimations: ProjectKeyframeModelAnimation[];
     cameraAnimation: ProjectSerializedCameraTrack | null;
+    cameraExternalParents?: ProjectSerializedCameraExternalParentTrack | null;
     accessoryTransformAnimations?: Array<ProjectSerializedAccessoryTransformTrack | null>;
 }
 

@@ -112,6 +112,7 @@ export function canExecuteEditorAction(
         case "accessory.toggleVisibility":
         case "accessory.deleteSelected":
         case "camera.setViewPreset":
+        case "camera.setExternalParent":
         case "camera.setMirroringFloorEnabled":
         case "camera.setMirroringFloorResolution":
         case "output.applyPreset":

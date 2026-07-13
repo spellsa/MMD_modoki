@@ -105,6 +105,10 @@ type TimelineEditHost = {
     onFrameUpdate?: (currentFrame: number, totalFrames: number) => void;
     onKeyframesLoaded?: (tracks: KeyframeTrack[]) => void;
     getActiveModelVisibility?: () => boolean;
+    readCameraExternalParentKeyframe?: (frame: number) => CameraExternalParentKeyframePayload | null;
+    upsertCameraExternalParentKeyframe?: (frame: number, payload: CameraExternalParentKeyframePayload) => boolean;
+    removeCameraExternalParentKeyframes?: (frames: readonly number[]) => boolean;
+    moveCameraExternalParentKeyframe?: (fromFrame: number, toFrame: number) => boolean;
 };
 
 export type BoneKeyframePayload = {
@@ -138,6 +142,12 @@ export type CameraKeyframePayload = {
     distanceInterpolations: number[];
     fovs: number[];
     fovInterpolations: number[];
+    externalParent: CameraExternalParentKeyframePayload;
+};
+
+export type CameraExternalParentKeyframePayload = {
+    modelPath: string | null;
+    boneName: string | null;
 };
 
 export type TimelineKeyframePayload =
@@ -903,6 +913,7 @@ export function removeTimelineKeyframe(host: TimelineEditHost, track: Pick<Keyfr
         const nextFrames = removeFrameNumber(host.cameraKeyframeFrames, normalized);
         if (nextFrames === host.cameraKeyframeFrames) return false;
         host.cameraKeyframeFrames = nextFrames;
+        host.removeCameraExternalParentKeyframes?.([normalized]);
         emitMergedKeyframeTracks(host);
         return true;
     }
@@ -931,6 +942,7 @@ export function moveTimelineKeyframe(
         const nextFrames = moveFrameNumber(host.cameraKeyframeFrames, normalizedFrom, normalizedTo);
         if (nextFrames === host.cameraKeyframeFrames) return false;
         host.cameraKeyframeFrames = nextFrames;
+        host.moveCameraExternalParentKeyframe?.(normalizedFrom, normalizedTo);
         emitMergedKeyframeTracks(host);
         return true;
     }
@@ -968,6 +980,10 @@ export function readTimelineKeyframePayload(
             distanceInterpolations: readUint8FrameBlock(cameraTrack.distanceInterpolations, frameIndex, 4),
             fovs: readFloatFrameBlock(cameraTrack.fovs, frameIndex, 1),
             fovInterpolations: readUint8FrameBlock(cameraTrack.fovInterpolations, frameIndex, 4),
+            externalParent: host.readCameraExternalParentKeyframe?.(normalized) ?? {
+                modelPath: null,
+                boneName: null,
+            },
         };
     }
 
@@ -1071,6 +1087,7 @@ export function removeTimelineKeyframePayloads(
         cameraTrack.distanceInterpolations = removeUint8ValuesByIndexes(cameraTrack.distanceInterpolations, 4, frameEdit.removedIndexes);
         cameraTrack.fovs = removeFloatValuesByIndexes(cameraTrack.fovs, 1, frameEdit.removedIndexes);
         cameraTrack.fovInterpolations = removeUint8ValuesByIndexes(cameraTrack.fovInterpolations, 4, frameEdit.removedIndexes);
+        host.removeCameraExternalParentKeyframes?.([...normalizedFrames]);
         refreshAnimationFrameRange(host.cameraSourceAnimation);
         host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
         emitMergedKeyframeTracks(host);
@@ -1146,6 +1163,7 @@ function applyCameraKeyframePayload(
     cameraTrack.distanceInterpolations = upsertUint8Values(cameraTrack.distanceInterpolations, 4, frameEdit.index, frameEdit.exists, payload.distanceInterpolations);
     cameraTrack.fovs = upsertFloatValuesForPayload(cameraTrack.fovs, 1, frameEdit.index, frameEdit.exists, payload.fovs);
     cameraTrack.fovInterpolations = upsertUint8Values(cameraTrack.fovInterpolations, 4, frameEdit.index, frameEdit.exists, payload.fovInterpolations);
+    host.upsertCameraExternalParentKeyframe?.(frame, payload.externalParent);
     refreshAnimationFrameRange(host.cameraSourceAnimation);
     host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
     emitMergedKeyframeTracks(host);
@@ -1259,6 +1277,7 @@ function removeTimelineKeyframePayload(
         cameraTrack.distanceInterpolations = removeUint8Values(cameraTrack.distanceInterpolations, 4, frameIndex);
         cameraTrack.fovs = removeFloatValues(cameraTrack.fovs, 1, frameIndex);
         cameraTrack.fovInterpolations = removeUint8Values(cameraTrack.fovInterpolations, 4, frameIndex);
+        host.removeCameraExternalParentKeyframes?.([normalized]);
         refreshAnimationFrameRange(host.cameraSourceAnimation);
         host.cameraKeyframeFrames = new Uint32Array(cameraTrack.frameNumbers);
         emitMergedKeyframeTracks(host);

@@ -1532,6 +1532,9 @@ export class UIController {
             if (active) {
                 this.applyActiveModelSelectionUI();
             }
+            if (this.mmdManager.getTimelineTarget() === "camera") {
+                this.cameraPanelController?.refresh(true);
+            }
             this.refreshModelSelector();
             this.dofPanelController?.refreshFocusTargetControls();
             this.refreshShaderPanel();
@@ -2242,6 +2245,14 @@ export class UIController {
         });
         this.actionDispatcher.register("camera.setViewPreset", (action) => {
             this.cameraPanelController?.setCameraViewPreset(action.view);
+        });
+        this.actionDispatcher.register("camera.setExternalParent", () => {
+            this.cameraPanelController?.setExternalParentFromPanel();
+            this.tryRegisterEditorCameraKeyframe({
+                name: "Camera",
+                category: "camera",
+                frames: new Uint32Array(0),
+            }, this.captureCurrentBonePoseSnapshot("Camera"));
         });
         this.actionDispatcher.register("camera.setMirroringFloorEnabled", (action) => {
             this.mmdManager.mirroringFloorEnabled = action.enabled;
@@ -6572,13 +6583,7 @@ export class UIController {
 
     private captureCurrentBonePoseSnapshot(boneName: string): SelectedBonePoseSnapshot | null {
         if (boneName === "Camera") {
-            const snapshot = {
-                position: this.mmdManager.getCameraPosition(),
-                rotation: this.mmdManager.getCameraRotation(),
-                target: this.mmdManager.getCameraTarget(),
-                distance: this.mmdManager.getCameraDistance(),
-                fov: this.mmdManager.getCameraFov(),
-            };
+            const snapshot = this.mmdManager.getCameraKeyframePose();
             this.debugKeyframeFlow("capture camera pose snapshot", {
                 boneName,
                 snapshot: this.formatBonePoseSnapshotForLog(snapshot),
@@ -8362,6 +8367,7 @@ export class UIController {
             distanceInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-dist")),
             fovs: [fov],
             fovInterpolations: this.curveToBlock(this.getCurveFromSnapshot(curves, "cam-fov")),
+            externalParent: this.mmdManager.getCameraExternalParentPayload(),
         };
     }
 
@@ -9356,6 +9362,10 @@ export class UIController {
                     distanceInterpolations: [...payload.distanceInterpolations],
                     fovs: [...payload.fovs],
                     fovInterpolations: [...payload.fovInterpolations],
+                    externalParent: {
+                        modelPath: payload.externalParent.modelPath,
+                        boneName: payload.externalParent.boneName,
+                    },
                 };
             case "movableBone":
                 return {

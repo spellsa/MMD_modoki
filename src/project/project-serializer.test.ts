@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { exportProjectState } from "./project-serializer";
+import type { ProjectMotionImport } from "../types";
 
 function createHost() {
     return {
         sceneModels: [],
-        modelMotionImportsByModel: new WeakMap<object, unknown[]>(),
+        modelMotionImportsByModel: new WeakMap<object, ProjectMotionImport[]>(),
         modelSourceAnimationsByModel: new WeakMap<object, unknown>(),
         activeModelInfo: null,
-        timelineTarget: "model",
+        timelineTarget: "model" as const,
         _currentFrame: 0,
         _playbackSpeed: 1,
         cameraMotionPath: null,
@@ -28,6 +29,7 @@ function createHost() {
             y: -0.65,
             z: -0.35,
         }),
+        getLightDirection: () => ({ x: -0.64, y: -0.65, z: -0.35 }),
         lightIntensity: 1,
         ambientIntensity: 0,
         lightColorTemperature: 6500,
@@ -159,7 +161,8 @@ function createHost() {
         postEffectLutEnabled: false,
         postEffectLutIntensity: 1,
         postEffectLutPreset: "anime-soft",
-        postEffectLutSourceMode: "builtin",
+        postEffectLutSourceMode: "builtin" as const,
+        postEffectLutExternalPath: null,
         getPostEffectExternalLutPath: (): null => null,
         getExternalWgslToonShaderPath: (): null => null,
         postEffectMotionBlurEnabled: false,
@@ -235,6 +238,53 @@ describe("exportProjectState", () => {
         });
 
         expect(project.physics.floorCollisionEnabled).toBe(false);
+    });
+
+    it("writes camera external parent by model path and bone name", () => {
+        const host = {
+            ...createHost(),
+            sceneModels: [{
+                info: { path: "C:/models/parent.pmx" },
+                mesh: {},
+                model: {},
+            }],
+            getCameraProjectState: () => ({
+                position: { x: 1, y: 2, z: 3 },
+                target: { x: 4, y: 5, z: 6 },
+                rotation: { x: 7, y: 8, z: 9 },
+                fov: 30,
+                distance: 45,
+                externalParent: {
+                    modelPath: "C:/models/parent.pmx",
+                    boneName: "頭",
+                },
+            }),
+        };
+
+        const project = exportProjectState(host);
+
+        expect(project.camera.externalParent).toEqual({
+            modelPath: "C:/models/parent.pmx",
+            boneName: "頭",
+        });
+        expect(project.camera.target).toEqual({ x: 4, y: 5, z: 6 });
+    });
+
+    it("writes camera external parent keyframes", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            getCameraExternalParentKeyframes: () => ({
+                frameNumbers: [0, 120],
+                modelPaths: [null, "C:/models/parent.pmx"],
+                boneNames: [null, "頭"],
+            }),
+        });
+
+        expect(project.keyframes?.cameraExternalParents).toEqual({
+            frameNumbers: [0, 120],
+            modelPaths: [null, "C:/models/parent.pmx"],
+            boneNames: [null, "頭"],
+        });
     });
 
     it("writes model edge color settings", () => {

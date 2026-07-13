@@ -146,6 +146,8 @@ function createHost() {
         setFrameGraphPostEffectStackEntries: vi.fn(),
         refreshTotalFramesFromContent: vi.fn(),
         setRenderFpsLimit: vi.fn(),
+        setCameraExternalParent: vi.fn(),
+        setCameraExternalParentKeyframes: vi.fn(),
         seekTo: vi.fn(),
         setPlaybackSpeed: vi.fn(),
         setTimelineTarget: vi.fn(),
@@ -409,6 +411,69 @@ describe("importProjectState", () => {
         const [animation, sourcePath] = host.applyCameraAnimation.mock.calls[0];
         expect(sourcePath).toBeNull();
         expect(Array.from(animation.cameraTrack.frameNumbers)).toEqual([0]);
+    });
+
+    it("restores camera external parent after loading models", async () => {
+        const host = createHost();
+        host.loadPMX.mockImplementation(async (path: string) => {
+            host.sceneModels.push({
+                info: { path },
+                mesh: {},
+                model: {},
+            });
+            return { name: "model", path };
+        });
+        const baseProject = createProject();
+        const project = createProject({
+            scene: {
+                ...baseProject.scene,
+                models: [{
+                    path: "C:/models/parent.pmx",
+                    visible: true,
+                    motionImports: [],
+                }],
+            },
+            camera: {
+                ...baseProject.camera,
+                externalParent: {
+                    modelPath: "C:/models/parent.pmx",
+                    boneName: "頭",
+                },
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.setCameraExternalParent).toHaveBeenCalledWith(0, "頭");
+    });
+
+    it("restores camera external parent keyframes before legacy camera parent", async () => {
+        const host = createHost();
+        const baseProject = createProject();
+        const cameraExternalParents = {
+            frameNumbers: [0, 90],
+            modelPaths: [null, "C:/models/parent.pmx"],
+            boneNames: [null, "頭"],
+        };
+        const project = createProject({
+            camera: {
+                ...baseProject.camera,
+                externalParent: {
+                    modelPath: "C:/models/legacy.pmx",
+                    boneName: "センター",
+                },
+            },
+            keyframes: {
+                modelAnimations: [],
+                cameraAnimation: null,
+                cameraExternalParents,
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.setCameraExternalParentKeyframes).toHaveBeenCalledWith(cameraExternalParents);
+        expect(host.setCameraExternalParent).not.toHaveBeenCalled();
     });
 
     it("reapplies render state after seek for dof, light, and model shaders", async () => {

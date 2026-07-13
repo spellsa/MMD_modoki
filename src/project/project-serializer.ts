@@ -4,6 +4,7 @@ import type {
     ProjectKeyframeBundle,
     ProjectModelMaterialShaderState,
     ProjectMotionImport,
+    ProjectSerializedCameraExternalParentTrack,
     ProjectSerializedAccessoryTransformTrack,
 } from "../types";
 import type { FrameGraphPostEffectStackEntry } from "../shared/frame-graph-post-effect-stack";
@@ -37,6 +38,7 @@ type ProjectExportHost = {
     modelMotionImportsByModel: WeakMap<object, ProjectMotionImport[]>;
     modelSourceAnimationsByModel: WeakMap<object, unknown>;
     cameraSourceAnimation: { cameraTrack?: unknown } | null;
+    getCameraExternalParentKeyframes?: () => ProjectSerializedCameraExternalParentTrack | null;
     lightIntensity: number;
     ambientIntensity: number;
     lightColorTemperature: number;
@@ -179,6 +181,18 @@ type ProjectExportHost = {
     getShadowColor: () => { r: number; g: number; b: number };
     getCameraFov: () => number;
     getCameraDistance: () => number;
+    getCameraExternalParent?: () => { modelIndex: number | null; boneName: string | null } | null;
+    getCameraProjectState?: () => {
+        position: { x: number; y: number; z: number };
+        target: { x: number; y: number; z: number };
+        rotation: { x: number; y: number; z: number };
+        fov: number;
+        distance: number;
+        externalParent?: {
+            modelPath: string | null;
+            boneName: string | null;
+        } | null;
+    };
     getPhysicsEnabled: () => boolean;
     getPhysicsFloorCollisionEnabled: () => boolean;
     getPhysicsSimulationRateHz: () => number;
@@ -237,6 +251,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             animation: serializeModelAnimation(host.modelSourceAnimationsByModel.get(entry.model)),
         })),
         cameraAnimation: serializeCameraTrack(host.cameraSourceAnimation?.cameraTrack),
+        cameraExternalParents: host.getCameraExternalParentKeyframes?.() ?? null,
     };
 
     const accessoryTransformAnimations = (accessoryExtension.getLoadedAccessories?.() ?? [])
@@ -253,6 +268,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
         y: Number(serializedLightDirection?.y ?? 0),
         z: Number(serializedLightDirection?.z ?? 0),
     };
+    const serializedCamera = host.getCameraProjectState?.();
 
     return {
         format: "mmd_modoki_project",
@@ -269,7 +285,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             cameraVmdPath: host.cameraMotionPath,
             audioPath: host.audioSourcePath,
         },
-        camera: {
+        camera: serializedCamera ?? {
             position: {
                 x: host.camera.position.x,
                 y: host.camera.position.y,
@@ -287,6 +303,14 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             },
             fov: host.getCameraFov(),
             distance: host.getCameraDistance(),
+            externalParent: (() => {
+                const parent = host.getCameraExternalParent?.() ?? null;
+                if (typeof parent?.modelIndex !== "number" || parent.modelIndex < 0) return null;
+                return {
+                    modelPath: host.sceneModels[parent.modelIndex]?.info.path ?? null,
+                    boneName: parent.boneName ?? null,
+                };
+            })(),
         },
         lighting: {
             ...lightDirection,

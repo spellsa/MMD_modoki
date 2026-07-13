@@ -112,6 +112,7 @@ export type AccessoryAction =
 
 export type CameraAction =
     | { type: "camera.setViewPreset"; source: ActionSource; view: "left" | "front" | "right" | "top" | "back" | "bottom" }
+    | { type: "camera.setExternalParent"; source: ActionSource }
     | { type: "camera.setMirroringFloorEnabled"; source: ActionSource; enabled: boolean }
     | { type: "camera.setMirroringFloorResolution"; source: ActionSource; resolution: number };
 

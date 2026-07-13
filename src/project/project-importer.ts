@@ -4,6 +4,7 @@ import type {
     ProjectModelMaterialShaderState,
     ProjectMotionImport,
     ProjectSerializedAccessoryTransformTrack,
+    ProjectSerializedCameraExternalParentTrack,
     ProjectSerializedModelAnimation,
 } from "../types";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
@@ -66,6 +67,8 @@ type ProjectImportHost = {
         distance: number,
         fov: number,
     ): void;
+    setCameraExternalParent?: (modelIndex: number | null, boneName: string | null) => boolean;
+    setCameraExternalParentKeyframes?: (track: ProjectSerializedCameraExternalParentTrack | null) => boolean;
     setGroundVisible(visible: boolean): void;
     setSkydomeVisible(visible: boolean): void;
     antialiasEnabled: boolean;
@@ -469,6 +472,34 @@ export async function importProjectState(
             fallbackDistance,
             fallbackFov,
         );
+    }
+
+    const cameraExternalParentTrack = data.keyframes?.cameraExternalParents ?? null;
+    if (cameraExternalParentTrack) {
+        host.setCameraExternalParentKeyframes?.(cameraExternalParentTrack);
+    }
+
+    const cameraExternalParent = cameraExternalParentTrack ? null : data.camera?.externalParent ?? null;
+    if (cameraExternalParent && typeof cameraExternalParent === "object") {
+        let parentModelIndex: number | null = null;
+        if (typeof cameraExternalParent.modelPath === "string" && cameraExternalParent.modelPath.trim().length > 0) {
+            const normalizedParentPath = normalizePathForCompare(cameraExternalParent.modelPath);
+            parentModelIndex = host.sceneModels.findIndex(
+                (entry) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
+            );
+            if (parentModelIndex < 0) {
+                warnings.push(`Camera external parent model not found: ${cameraExternalParent.modelPath}`);
+                parentModelIndex = null;
+            }
+        }
+        if (parentModelIndex !== null) {
+            host.setCameraExternalParent?.(
+                parentModelIndex,
+                typeof cameraExternalParent.boneName === "string" && cameraExternalParent.boneName.length > 0
+                    ? cameraExternalParent.boneName
+                    : null,
+            );
+        }
     }
 
     if (data.assets.audioPath) {
