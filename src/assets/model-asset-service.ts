@@ -31,6 +31,14 @@ function splitFilePath(filePath: string): { dir: string; fileName: string } {
     };
 }
 
+function localPathToFileUrl(pathText: string): string {
+    const normalized = pathText.replace(/\\/g, "/");
+    const rawUrl = /^[A-Za-z]:\//.test(normalized)
+        ? `file:///${normalized}`
+        : `file://${normalized}`;
+    return encodeURI(rawUrl);
+}
+
 type SceneModelMaterialEntry = {
     key: string;
     name: string;
@@ -517,7 +525,7 @@ type ModelAssetHost = {
     syncIblShadowsScene?: () => void;
     refreshShadowAfterSceneContentChanged?: () => void;
     refreshFrameGraphPostEffectsBackendForStackStateChange?: () => void;
-    dumpRenderDiagnostics?: (reason: string) => void;
+    dumpRenderDiagnostics?: (reason: string) => Record<string, unknown>;
     shouldActivateAsCurrent(modelInfo: ModelInfo): boolean;
     currentMesh: MmdMesh | null;
     currentModel: ModelAssetRuntimeModel | null;
@@ -1102,7 +1110,7 @@ export async function loadPMX(host: ModelAssetHost, filePath: string): Promise<M
         await host.physicsInitializationPromise;
 
         const { dir, fileName } = splitFilePath(filePath);
-        const fileUrl = `file:///${dir}`;
+        const fileUrl = localPathToFileUrl(dir);
 
         logInfo("asset", "model load started", { filePath, fileName });
         const materialBuilder = ensureSharedMmdMaterialBuilder(fileName);

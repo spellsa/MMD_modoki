@@ -5313,7 +5313,11 @@ ${beforeFogAppendBlock}
     public dumpRenderDiagnostics(reason: string): Record<string, unknown> {
         try {
             const snapshot = this.createRenderDiagnosticsSnapshot(reason);
-            logDebugIfEnabled("postfx", "render", "render diagnostics", snapshot);
+            if (reason.includes("model")) {
+                logInfo("render", "render diagnostics", snapshot);
+            } else {
+                logDebugIfEnabled("postfx", "render", "render diagnostics", snapshot);
+            }
             return snapshot;
         } catch (err) {
             const fallback = {
@@ -5338,6 +5342,40 @@ ${beforeFogAppendBlock}
             if (typeof color.a === "number") result.a = color.a;
             return Object.keys(result).length > 0 ? result : null;
         };
+        const textureToData = (value: unknown): Record<string, unknown> | null => {
+            if (!value || typeof value !== "object") return null;
+            const texture = value as {
+                name?: unknown;
+                url?: unknown;
+                isReady?: () => boolean;
+                hasAlpha?: unknown;
+                coordinatesIndex?: unknown;
+                level?: unknown;
+                metadata?: Record<string, unknown> | null;
+                getSize?: () => { width?: number; height?: number };
+            };
+            let ready: boolean | null = null;
+            try {
+                ready = texture.isReady?.() ?? null;
+            } catch {
+                ready = false;
+            }
+            const size = texture.getSize?.();
+            return {
+                name: typeof texture.name === "string" ? texture.name : null,
+                url: typeof texture.url === "string" ? texture.url : null,
+                ready,
+                hasAlpha: typeof texture.hasAlpha === "boolean" ? texture.hasAlpha : null,
+                coordinatesIndex: typeof texture.coordinatesIndex === "number" ? texture.coordinatesIndex : null,
+                level: typeof texture.level === "number" ? texture.level : null,
+                size: size && typeof size.width === "number" && typeof size.height === "number"
+                    ? { width: size.width, height: size.height }
+                    : null,
+                decodedDds: texture.metadata?.mmdModokiDecodedDdsFallback === true,
+                decodedBmp: texture.metadata?.mmdModokiDecodedBmpAlphaFallback === true,
+                whiteMattedAlpha: texture.metadata?.mmdModokiDecodedWhiteMattedAlpha ?? null,
+            };
+        };
 
         const materialSamples = this.sceneModels
             .find((sceneModel) => sceneModel.model === this.currentModel)
@@ -5351,20 +5389,56 @@ ${beforeFogAppendBlock}
                     specularColor?: unknown;
                     albedoColor?: unknown;
                     reflectivityColor?: unknown;
+                    alpha?: unknown;
+                    transparencyMode?: unknown;
+                    alphaCutOff?: unknown;
+                    forceDepthWrite?: unknown;
+                    disableColorWrite?: unknown;
+                    disableDepthWrite?: unknown;
+                    useAlphaFromDiffuseTexture?: unknown;
+                    useAlphaFromAlbedoTexture?: unknown;
+                    diffuseTexture?: unknown;
+                    albedoTexture?: unknown;
+                    opacityTexture?: unknown;
+                    specularTexture?: unknown;
+                    reflectionTexture?: unknown;
                     disableLighting?: unknown;
                     useLogarithmicDepth?: unknown;
                     imageProcessingConfiguration?: unknown;
+                    _pluginMaterial?: {
+                        isMock?: unknown;
+                        constructor?: { name?: unknown };
+                    };
                 };
                 return {
                     key: entry.key,
                     name: typeof material.name === "string" ? material.name : entry.name,
                     className: material.getClassName?.() ?? null,
+                    pluginName: typeof material._pluginMaterial?.constructor?.name === "string"
+                        ? material._pluginMaterial.constructor.name
+                        : null,
+                    pluginIsMock: typeof material._pluginMaterial?.isMock === "boolean"
+                        ? material._pluginMaterial.isMock
+                        : null,
+                    alpha: typeof material.alpha === "number" ? material.alpha : null,
+                    transparencyMode: typeof material.transparencyMode === "number" ? material.transparencyMode : null,
+                    alphaCutOff: typeof material.alphaCutOff === "number" ? material.alphaCutOff : null,
                     diffuseColor: colorToData(material.diffuseColor),
                     ambientColor: colorToData(material.ambientColor),
                     emissiveColor: colorToData(material.emissiveColor),
                     specularColor: colorToData(material.specularColor),
                     albedoColor: colorToData(material.albedoColor),
                     reflectivityColor: colorToData(material.reflectivityColor),
+                    diffuseTexture: textureToData(material.diffuseTexture),
+                    albedoTexture: textureToData(material.albedoTexture),
+                    opacityTexture: textureToData(material.opacityTexture),
+                    specularTexture: textureToData(material.specularTexture),
+                    reflectionTexture: textureToData(material.reflectionTexture),
+                    useAlphaFromDiffuseTexture: material.useAlphaFromDiffuseTexture,
+                    useAlphaFromAlbedoTexture: material.useAlphaFromAlbedoTexture,
+                    forceDepthWrite: material.forceDepthWrite,
+                    disableColorWrite: material.disableColorWrite,
+                    disableDepthWrite: material.disableDepthWrite,
                     disableLighting: material.disableLighting,
                     useLogarithmicDepth: material.useLogarithmicDepth,
                     hasOwnImageProcessingConfiguration: material.imageProcessingConfiguration !== undefined,
@@ -7288,8 +7362,9 @@ ${beforeFogAppendBlock}
         let pathname = decodeURIComponent(parsed.pathname);
         if (/^\/[A-Za-z]:\//.test(pathname)) {
             pathname = pathname.slice(1);
+            return pathname.replace(/\//g, "\\");
         }
-        return pathname.replace(/\//g, "\\");
+        return pathname;
     }
 
     private async localFileExistsForUrl(url: string): Promise<boolean | null> {

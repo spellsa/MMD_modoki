@@ -143,6 +143,7 @@
 - [MMD 顔 alpha 透過調査](./mmd-face-alpha-transparency-investigation-2026-06-27.md)
 - [DDS テクスチャ読み込み調査メモ](./dds-texture-webgpu-investigation-2026-06-27.md)
 - [BMP alpha transparency investigation](./bmp-alpha-transparency-investigation-2026-06-28.md)
+- [Mac / Linux file URL texture whiteout 調査](./mac-linux-file-url-texture-whiteout-2026-07-14.md)
 - [Material shader customization guide](./material-shader-customization-guide.md)
 - [WebGPU 不発 / 平坦化の調査メモ](./webgpu-not-working-investigation.md)
 - [WebGPU / WGSL 実現可能性メモ](./webgpu-wgsl-feasibility.md)
