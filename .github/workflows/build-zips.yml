@@ -1,4 +1,4 @@
-name: Build Zip Packages
+name: Build Release Packages
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  build-zips:
+  build-packages:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -19,24 +19,39 @@ jobs:
         include:
           - label: Windows Zip
             os: windows-latest
+            maker: zip
             forge_platform: win32
             forge_arch: x64
             release_platform: windows
             release_arch: x64
+            release_ext: zip
             artifact_name: mmd-modoki-windows-x64-zip
           - label: macOS Zip
             os: macos-15
+            maker: zip
+            forge_platform: darwin
+            forge_arch: ''
+            release_platform: mac
+            release_arch: ''
+            release_ext: zip
+            artifact_name: mmd-modoki-macos-zip
+          - label: macOS DMG
+            os: macos-15
+            maker: dmg
             forge_platform: darwin
             forge_arch: arm64
             release_platform: mac
             release_arch: arm64
-            artifact_name: mmd-modoki-macos-arm64-zip
+            release_ext: dmg
+            artifact_name: mmd-modoki-macos-arm64-dmg
           - label: Linux Zip
             os: ubuntu-latest
+            maker: zip
             forge_platform: linux
             forge_arch: x64
             release_platform: linux
             release_arch: x64
+            release_ext: zip
             artifact_name: mmd-modoki-linux-x64-zip
 
     steps:
@@ -61,51 +76,75 @@ jobs:
       - name: Critical typecheck
         run: npm run typecheck:critical
 
-      - name: Build zip package
-        run: npm run make:zip -- --platform=${{ matrix.forge_platform }} --arch=${{ matrix.forge_arch }}
-
-      - name: Rename zip for release
+      - name: Build release package
         shell: bash
         run: |
-          ZIP_DIR="out/make/zip/${{ matrix.forge_platform }}/${{ matrix.forge_arch }}"
-          shopt -s nullglob
-          zips=("$ZIP_DIR"/*.zip)
-          if [ "${#zips[@]}" -ne 1 ]; then
-            echo "Expected exactly one zip file in $ZIP_DIR, found:"
-            printf '  %s\n' "${zips[@]}"
+          ARGS=(-- --platform="${FORGE_PLATFORM}")
+          if [ -n "${FORGE_ARCH}" ]; then
+            ARGS+=(--arch="${FORGE_ARCH}")
+          fi
+          npm run "make:${MAKER}" "${ARGS[@]}"
+        env:
+          MAKER: ${{ matrix.maker }}
+          FORGE_PLATFORM: ${{ matrix.forge_platform }}
+          FORGE_ARCH: ${{ matrix.forge_arch }}
+
+      - name: Rename package for release
+        shell: bash
+        run: |
+          PACKAGE_DIR="out/make/${MAKER}/${FORGE_PLATFORM}"
+          if [ -n "${FORGE_ARCH}" ]; then
+            PACKAGE_DIR="$PACKAGE_DIR/${FORGE_ARCH}"
+          fi
+          shopt -s nullglob globstar
+          packages=("$PACKAGE_DIR"/**/*."$RELEASE_EXT")
+          if [ "${#packages[@]}" -ne 1 ]; then
+            echo "Expected exactly one .$RELEASE_EXT file under $PACKAGE_DIR, found:"
+            printf '  %s\n' "${packages[@]}"
             exit 1
           fi
           VERSION=$(node -p "require('./package.json').version")
-          SOURCE="${zips[0]}"
-          TARGET="$ZIP_DIR/MMD.modoki-${RELEASE_PLATFORM}-${RELEASE_ARCH}-${VERSION}.zip"
+          SOURCE="${packages[0]}"
+          TARGET_DIR="$(dirname "$SOURCE")"
+          if [ -n "$RELEASE_ARCH" ]; then
+            TARGET="$TARGET_DIR/MMD.modoki-${RELEASE_PLATFORM}-${RELEASE_ARCH}-${VERSION}.${RELEASE_EXT}"
+          else
+            TARGET="$TARGET_DIR/MMD.modoki-${RELEASE_PLATFORM}-${VERSION}.${RELEASE_EXT}"
+          fi
           if [ "$SOURCE" != "$TARGET" ]; then
             mv "$SOURCE" "$TARGET"
           fi
           echo "Renamed $(basename "$SOURCE") -> $(basename "$TARGET")"
         env:
+          MAKER: ${{ matrix.maker }}
+          FORGE_PLATFORM: ${{ matrix.forge_platform }}
+          FORGE_ARCH: ${{ matrix.forge_arch }}
           RELEASE_PLATFORM: ${{ matrix.release_platform }}
           RELEASE_ARCH: ${{ matrix.release_arch }}
+          RELEASE_EXT: ${{ matrix.release_ext }}
 
-      - name: Upload zip artifact
+      - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: out/make/**/*.zip
+          path: |
+            out/make/**/*.zip
+            out/make/**/*.dmg
           if-no-files-found: error
 
   publish-release:
     name: Publish GitHub Release Assets
-    needs: build-zips
+    needs: build-packages
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download built zip artifacts
+      - name: Download built package artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: mmd-modoki-*-zip
+          pattern: mmd-modoki-*
           path: release-assets
           merge-multiple: true
 
@@ -116,4 +155,6 @@ jobs:
           name: MMD modoki ${{ github.ref_name }}
           prerelease: true
           fail_on_unmatched_files: true
-          files: release-assets/**/*.zip
+          files: |
+            release-assets/**/*.zip
+            release-assets/**/*.dmg

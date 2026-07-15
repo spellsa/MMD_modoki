@@ -21,6 +21,7 @@
 - [テスト導入提案](./testing-strategy-proposal.md)
 - [テスト戦略メモ 2026-04-13](./testing-strategy-note-2026-04-13.md)
 - [リリース手順メモ](./release-process.md)
+- [macOS ZIP / DMG 配布メモ 2026-07-15](./macos-zip-dmg-distribution-note-2026-07-15.md)
 - [文字コード運用メモ](./dev-notes-encoding.md)
 - [エラーハンドリング方針棚卸し](./error-handling-policy-inventory-2026-06-08.md)
 - [ログ導入メモ](./logging-introduction-note.md)

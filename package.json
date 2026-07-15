@@ -10,6 +10,7 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "make:zip": "electron-forge make --targets @electron-forge/maker-zip",
+    "make:dmg": "electron-forge make --targets @electron-forge/maker-dmg",
     "publish": "electron-forge publish",
     "generate:luts": "node scripts/generate-builtin-luts.js",
     "smoke:launch": "node scripts/smoke-launch.mjs",
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@electron-forge/cli": "^7.11.1",
     "@electron-forge/maker-deb": "^7.11.1",
+    "@electron-forge/maker-dmg": "^7.11.1",
     "@electron-forge/maker-rpm": "^7.11.1",
     "@electron-forge/maker-squirrel": "^7.11.1",
     "@electron-forge/maker-zip": "^7.11.1",
