@@ -599,6 +599,10 @@ import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.vertex";
 applyMmdOutlineTaperingShader();
 import "@babylonjs/core/ShadersWGSL/volumetricLightingRenderVolume.fragment";
 import "@babylonjs/core/ShadersWGSL/volumetricLightingBlendVolume.fragment";
+import "babylon-mmd/esm/Loader/ShadersWGSL/mmdOutline.vertex";
+import "babylon-mmd/esm/Loader/ShadersWGSL/mmdOutline.fragment";
+import "babylon-mmd/esm/Loader/Shaders/mmdOutline.vertex";
+import "babylon-mmd/esm/Loader/Shaders/mmdOutline.fragment";
 import "babylon-mmd/esm/Loader/ShadersWGSL/textureAlphaChecker.vertex";
 import "babylon-mmd/esm/Loader/ShadersWGSL/textureAlphaChecker.fragment";
 

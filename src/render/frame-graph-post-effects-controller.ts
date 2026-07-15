@@ -2271,23 +2271,28 @@ export class FrameGraphPostEffectsController {
             geometryRendererTask.size = sourceTextureSize;
             geometryRendererTask.sizeIsPercentage = false;
             geometryRendererTask.samples = 1;
-            geometryRendererTask.textureDescriptions = [
-                {
-                    type: Constants.PREPASS_NORMAL_TEXTURE_TYPE,
-                    textureType: Constants.TEXTURETYPE_HALF_FLOAT,
-                    textureFormat: Constants.TEXTUREFORMAT_RGBA,
-                },
-                {
+            geometryRendererTask.textureDescriptions = [];
+            if (resourcePlan.requirementKeys.includes("viewDepth")) {
+                geometryRendererTask.textureDescriptions.push({
                     type: Constants.PREPASS_DEPTH_TEXTURE_TYPE,
                     textureType: Constants.TEXTURETYPE_HALF_FLOAT,
                     textureFormat: Constants.TEXTUREFORMAT_RED,
-                },
-                {
+                });
+            }
+            if (resourcePlan.requirementKeys.includes("viewNormal")) {
+                geometryRendererTask.textureDescriptions.push({
+                    type: Constants.PREPASS_NORMAL_TEXTURE_TYPE,
+                    textureType: Constants.TEXTURETYPE_HALF_FLOAT,
+                    textureFormat: Constants.TEXTUREFORMAT_RGBA,
+                });
+            }
+            if (resourcePlan.requirementKeys.includes("reflectivity")) {
+                geometryRendererTask.textureDescriptions.push({
                     type: Constants.PREPASS_REFLECTIVITY_TEXTURE_TYPE,
                     textureType: Constants.TEXTURETYPE_HALF_FLOAT,
                     textureFormat: Constants.TEXTUREFORMAT_RGBA,
-                },
-            ];
+                });
+            }
             geometryRendererTask.disabled = false;
             frameGraph.addTask(geometryRendererTask);
             this.geometryRendererTask = geometryRendererTask;

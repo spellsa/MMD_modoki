@@ -163,6 +163,7 @@
 - [Frame Graph post effects plan](./frame-graph-post-effects-plan-2026-04-28.md)
 - [Frame Graph post effects progress](./frame-graph-post-effects-progress-2026-04-28.md)
 - [FrameGraph Post Stack current spec 2026-07-01](./framegraph-post-stack-current-spec-2026-07-01.md)
+- [FrameGraph / MMDエッジ / SSAO 回帰メモ 2026-07-15](./framegraph-outline-ssao-regression-note-2026-07-15.md)
 - [Frame Graph effect stack order plan](./frame-graph-effect-stack-order-plan-2026-06-13.md)
 - [Frame Graph resource registry note](./frame-graph-resource-registry-note-2026-05-30.md)
 - [FrameGraph current resource inventory](./framegraph-current-resource-inventory-2026-06-14.md)
