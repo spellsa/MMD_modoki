@@ -151,6 +151,7 @@ export type FrameGraphPostEffectsSettings = {
     vignetteEnabled: boolean;
     vignetteWeight: number;
     edgeBlurStrength: number;
+    lensDistortionEnabled: boolean;
     lensDistortion: number;
     chromaticAberration: number;
     grainIntensity: number;
@@ -1939,6 +1940,7 @@ export class FrameGraphPostEffectsController {
             vignetteEnabled: false,
             vignetteWeight: 0.3,
             edgeBlurStrength: 0,
+            lensDistortionEnabled: false,
             lensDistortion: 0,
             chromaticAberration: 0,
             grainIntensity: 0,
@@ -2658,7 +2660,7 @@ export class FrameGraphPostEffectsController {
             this.getSettings,
         );
         lensDistortionTask.sourceTexture = vignetteEdgeBlurTask.outputTexture;
-        lensDistortionTask.disabled = Math.abs(initialSettings.lensDistortion) <= 0.0001;
+        lensDistortionTask.disabled = !isFrameGraphPostEffectActiveInSettings(initialSettings, "distortion");
         frameGraph.addTask(lensDistortionTask);
         this.lensDistortionTask = lensDistortionTask;
 
@@ -2816,7 +2818,7 @@ export class FrameGraphPostEffectsController {
             this.vignetteEdgeBlurTask.disabled = !this.isVignetteEdgeBlurEnabled(settings);
         }
         if (this.lensDistortionTask) {
-            this.lensDistortionTask.disabled = Math.abs(settings.lensDistortion) <= 0.0001;
+            this.lensDistortionTask.disabled = !this.isPostEffectActive(settings, "distortion");
         }
         if (this.fxaaTask) {
             this.fxaaTask.disabled = !settings.antialiasEnabled;

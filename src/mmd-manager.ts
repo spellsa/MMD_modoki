@@ -7944,6 +7944,7 @@ ${beforeFogAppendBlock}
             vignetteEnabled: this.isFrameGraphPostEffectActive("vignette"),
             vignetteWeight: this.postEffectVignetteWeightValue,
             edgeBlurStrength: this.isFrameGraphPostEffectActive("edgeBlur") ? this.dofLensEdgeBlurValue : 0,
+            lensDistortionEnabled: this.isFrameGraphPostEffectActive("distortion"),
             lensDistortion: this.isFrameGraphPostEffectActive("distortion") ? this.dofLensDistortionValue : 0,
             chromaticAberration: this.isFrameGraphPostEffectActive("chromatic") ? this.postEffectChromaticAberrationValue : 0,
             grainIntensity: this.isFrameGraphPostEffectActive("grain") ? this.postEffectGrainIntensityValue : 0,

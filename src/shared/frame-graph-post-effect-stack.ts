@@ -34,6 +34,7 @@ export type FrameGraphPostEffectActivationSettings = {
     vignetteEnabled: boolean;
     vignetteWeight: number;
     edgeBlurStrength: number;
+    lensDistortionEnabled: boolean;
     lensDistortion: number;
     ssaoEnabled: boolean;
     ssaoStrength: number;
@@ -129,7 +130,7 @@ export function isFrameGraphPostEffectActiveInSettings(
         case "edgeBlur":
             return settings.edgeBlurStrength > 0.0001;
         case "distortion":
-            return Math.abs(settings.lensDistortion) > 0.0001;
+            return settings.lensDistortionEnabled;
     }
 }
 

@@ -20,6 +20,7 @@ function createSettings(
         vignetteEnabled: false,
         vignetteWeight: 0,
         edgeBlurStrength: 0,
+        lensDistortionEnabled: false,
         lensDistortion: 0,
         ssaoEnabled: false,
         ssaoStrength: 1,

@@ -24,6 +24,7 @@ function createActivationSettings(
         vignetteEnabled: false,
         vignetteWeight: 0,
         edgeBlurStrength: 0,
+        lensDistortionEnabled: false,
         lensDistortion: 0,
         ssaoEnabled: false,
         ssaoStrength: 1,
@@ -86,6 +87,7 @@ describe("frame graph post effect stack helpers", () => {
             vignetteEnabled: true,
             vignetteWeight: 0,
             edgeBlurStrength: 0.25,
+            lensDistortionEnabled: true,
             lensDistortion: -0.1,
         });
 
@@ -96,6 +98,13 @@ describe("frame graph post effect stack helpers", () => {
         expect(isFrameGraphPostEffectActiveInSettings(settings, "offsetHighlight")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "edgeBlur")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "distortion")).toBe(true);
+    });
+
+    it("keeps lens distortion active even when FoV-linked amount is neutral", () => {
+        expect(isFrameGraphPostEffectActiveInSettings(createActivationSettings({
+            lensDistortionEnabled: true,
+            lensDistortion: 0,
+        }), "distortion")).toBe(true);
     });
 
     it("returns active effect ids in canonical order", () => {
