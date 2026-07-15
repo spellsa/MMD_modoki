@@ -2823,6 +2823,13 @@ export class FrameGraphPostEffectsController {
         if (this.fxaaTask) {
             this.fxaaTask.disabled = !settings.antialiasEnabled;
         }
+        if (this.baseOutputTexture !== null && this.outputTask !== null) {
+            this.connectPostEffectOrder(
+                this.baseOutputTexture,
+                this.outputTask,
+                resourcePlan.effectOrder,
+            );
+        }
         try {
             this.frameGraph.execute();
         } catch (err: unknown) {

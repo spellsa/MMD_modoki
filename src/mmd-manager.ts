@@ -436,7 +436,7 @@ const PCSS_CSM_CASCADE_BLEND = 0.2;
 const PCSS_CSM_LIGHT_SIZE_SCALE = 0.1;
 const PCSS_CSM_MAX_LIGHT_SIZE_UV_RATIO = 0.02;
 const PCSS_CSM_PENUMBRA_DARKNESS = 0.17;
-const FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE = 0.5;
+const FRAME_GRAPH_LUMINOUS_MASK_EXPERIMENT_SCALE = 1.0;
 const DEFAULT_CAMERA_MAX_Z = 10000;
 const VIEWPORT_CAMERA_ROTATE_SENSIBILITY = 400;
 const VIEWPORT_CAMERA_PAN_SCALE = 0.0022;
@@ -8081,6 +8081,7 @@ ${beforeFogAppendBlock}
                 samples: 1,
             },
         );
+        renderTarget.updateSamplingMode(Texture.BILINEAR_SAMPLINGMODE);
         renderTarget.activeCamera = this.camera;
         renderTarget.renderList = [];
         renderTarget.getCustomRenderList = () => this.scene.meshes;
