@@ -1032,21 +1032,10 @@ function ensureSsaoToonCompositeShaders(): void {
             uniform vec3 shadowColor;
             uniform float toonInfluence;
             uniform float enabled;
-            uniform vec2 texelSize;
 
             vec3 safeHue(vec3 color) {
                 float maxChannel = max(max(color.r, color.g), color.b);
                 return color / max(maxChannel, 0.0001);
-            }
-
-            float luminance(vec3 color) {
-                return dot(color, vec3(0.299, 0.587, 0.114));
-            }
-
-            float neighborWeight(vec3 baseColor, vec3 sampleColor) {
-                float colorDistance = distance(baseColor, sampleColor);
-                float lumaDistance = abs(luminance(baseColor) - luminance(sampleColor));
-                return (1.0 - smoothstep(0.18, 0.50, colorDistance)) * (1.0 - smoothstep(0.20, 0.55, lumaDistance));
             }
 
             void main(void) {
@@ -1078,42 +1067,15 @@ function ensureSsaoToonCompositeShaders(): void {
                 float colorValidity = smoothstep(0.12, 0.45, baseMax) * smoothstep(0.04, 0.22, baseChroma);
                 vec3 materialToonBand = mix(vec3(0.70), safeHue(baseColor) * 0.66, colorValidity);
 
-                vec2 sampleStep = texelSize * 1.5;
-                vec3 nearColor = baseColor;
-                float nearWeight = 1.0;
-                vec3 sampleColor = clamp(texture2D(originalColor, clamp(vUV + vec2(sampleStep.x, 0.0), vec2(0.0), vec2(1.0))).rgb, vec3(0.0), vec3(1.0));
-                float sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                sampleColor = clamp(texture2D(originalColor, clamp(vUV + vec2(-sampleStep.x, 0.0), vec2(0.0), vec2(1.0))).rgb, vec3(0.0), vec3(1.0));
-                sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                sampleColor = clamp(texture2D(originalColor, clamp(vUV + vec2(0.0, sampleStep.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0), vec3(1.0));
-                sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                sampleColor = clamp(texture2D(originalColor, clamp(vUV + vec2(0.0, -sampleStep.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0), vec3(1.0));
-                sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                vec3 neighborhoodColor = nearColor / max(nearWeight, 0.0001);
-                float neighborhoodMax = max(max(neighborhoodColor.r, neighborhoodColor.g), neighborhoodColor.b);
-                float neighborhoodMin = min(min(neighborhoodColor.r, neighborhoodColor.g), neighborhoodColor.b);
-                float neighborhoodChroma = neighborhoodMax - neighborhoodMin;
-                float neighborhoodLuma = luminance(neighborhoodColor);
-                float neighborhoodTone = mix(0.54, 0.84, smoothstep(0.16, 0.78, neighborhoodLuma));
-                float neighborhoodColorValidity = smoothstep(0.08, 0.30, neighborhoodMax) * smoothstep(0.025, 0.18, neighborhoodChroma);
-                vec3 neighborhoodBand = mix(vec3(neighborhoodTone), safeHue(neighborhoodColor) * neighborhoodTone, neighborhoodColorValidity);
-
                 vec3 shadowHue = safeHue(clamp(shadowColor, vec3(0.0), vec3(1.0)));
                 vec3 shadowBand = mix(vec3(0.68), shadowHue * 0.66, 0.72);
                 vec3 toonBand = mix(shadowBand, materialToonBand, clamp(toonInfluence, 0.0, 1.0) * 0.55);
-                float neighborhoodInfluence = smoothstep(0.04, 0.32, ao) * (1.0 - brightNeutralProtect * 0.55) * 0.42;
-                toonBand = mix(toonBand, neighborhoodBand, neighborhoodInfluence);
 
+                float deepAo = smoothstep(0.12, 0.46, ao) * (1.0 - brightNeutralProtect * 0.75);
                 vec3 tinted = original.rgb * mix(vec3(1.0), toonBand, vec3(clamp(ao * 1.12, 0.0, 1.0)));
                 vec3 result = mix(ssaoColor.rgb, tinted, clamp(0.82 + ao * 0.12 + brightNeutralProtect * 0.10, 0.0, 0.97));
+                vec3 selfMultiplied = tinted * mix(vec3(1.0), toonBand, vec3(clamp(deepAo * 0.95, 0.0, 1.0)));
+                result = mix(result, min(result, selfMultiplied), clamp(deepAo * 0.72, 0.0, 0.86));
                 gl_FragColor = vec4(result, ssaoColor.a);
             }
         `;
@@ -1128,21 +1090,10 @@ function ensureSsaoToonCompositeShaders(): void {
             uniform shadowColor: vec3f;
             uniform toonInfluence: f32;
             uniform enabled: f32;
-            uniform texelSize: vec2f;
 
             fn safeHue(color: vec3f) -> vec3f {
                 let maxChannel = max(max(color.r, color.g), color.b);
                 return color / max(maxChannel, 0.0001);
-            }
-
-            fn luminance(color: vec3f) -> f32 {
-                return dot(color, vec3f(0.299, 0.587, 0.114));
-            }
-
-            fn neighborWeight(baseColor: vec3f, sampleColor: vec3f) -> f32 {
-                let colorDistance = distance(baseColor, sampleColor);
-                let lumaDistance = abs(luminance(baseColor) - luminance(sampleColor));
-                return (1.0 - smoothstep(0.18, 0.50, colorDistance)) * (1.0 - smoothstep(0.20, 0.55, lumaDistance));
             }
 
             #define CUSTOM_FRAGMENT_DEFINITIONS
@@ -1176,43 +1127,16 @@ function ensureSsaoToonCompositeShaders(): void {
                 let colorValidity = smoothstep(0.12, 0.45, baseMax) * smoothstep(0.04, 0.22, baseChroma);
                 let materialToonBand = mix(vec3f(0.70), safeHue(baseColor) * 0.66, vec3f(colorValidity));
 
-                let sampleStep = uniforms.texelSize * 1.5;
-                var nearColor = baseColor;
-                var nearWeight = 1.0;
-                var sampleColor = clamp(textureSampleLevel(originalColor, originalColorSampler, clamp(input.vUV + vec2f(sampleStep.x, 0.0), vec2f(0.0), vec2f(1.0)), 0.0).rgb, vec3f(0.0), vec3f(1.0));
-                var sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                sampleColor = clamp(textureSampleLevel(originalColor, originalColorSampler, clamp(input.vUV + vec2f(-sampleStep.x, 0.0), vec2f(0.0), vec2f(1.0)), 0.0).rgb, vec3f(0.0), vec3f(1.0));
-                sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                sampleColor = clamp(textureSampleLevel(originalColor, originalColorSampler, clamp(input.vUV + vec2f(0.0, sampleStep.y), vec2f(0.0), vec2f(1.0)), 0.0).rgb, vec3f(0.0), vec3f(1.0));
-                sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                sampleColor = clamp(textureSampleLevel(originalColor, originalColorSampler, clamp(input.vUV + vec2f(0.0, -sampleStep.y), vec2f(0.0), vec2f(1.0)), 0.0).rgb, vec3f(0.0), vec3f(1.0));
-                sampleWeight = neighborWeight(baseColor, sampleColor);
-                nearColor += sampleColor * sampleWeight;
-                nearWeight += sampleWeight;
-                let neighborhoodColor = nearColor / max(nearWeight, 0.0001);
-                let neighborhoodMax = max(max(neighborhoodColor.r, neighborhoodColor.g), neighborhoodColor.b);
-                let neighborhoodMin = min(min(neighborhoodColor.r, neighborhoodColor.g), neighborhoodColor.b);
-                let neighborhoodChroma = neighborhoodMax - neighborhoodMin;
-                let neighborhoodLuma = luminance(neighborhoodColor);
-                let neighborhoodTone = mix(0.54, 0.84, smoothstep(0.16, 0.78, neighborhoodLuma));
-                let neighborhoodColorValidity = smoothstep(0.08, 0.30, neighborhoodMax) * smoothstep(0.025, 0.18, neighborhoodChroma);
-                let neighborhoodBand = mix(vec3f(neighborhoodTone), safeHue(neighborhoodColor) * neighborhoodTone, vec3f(neighborhoodColorValidity));
-
                 let shadowHue = safeHue(clamp(uniforms.shadowColor, vec3f(0.0), vec3f(1.0)));
                 let shadowBand = mix(vec3f(0.68), shadowHue * 0.66, vec3f(0.72));
                 var toonBand = mix(shadowBand, materialToonBand, vec3f(clamp(uniforms.toonInfluence, 0.0, 1.0) * 0.55));
-                let neighborhoodInfluence = smoothstep(0.04, 0.32, protectedAo) * (1.0 - brightNeutralProtect * 0.55) * 0.42;
-                toonBand = mix(toonBand, neighborhoodBand, vec3f(neighborhoodInfluence));
 
+                let deepAo = smoothstep(0.12, 0.46, protectedAo) * (1.0 - brightNeutralProtect * 0.75);
                 let tinted = original.rgb * mix(vec3f(1.0), toonBand, vec3f(clamp(protectedAo * 1.12, 0.0, 1.0)));
                 let result = mix(ssaoColor.rgb, tinted, vec3f(clamp(0.82 + protectedAo * 0.12 + brightNeutralProtect * 0.10, 0.0, 0.97)));
-                fragmentOutputs.color = vec4f(result, ssaoColor.a);
+                let selfMultiplied = tinted * mix(vec3f(1.0), toonBand, vec3f(clamp(deepAo * 0.95, 0.0, 1.0)));
+                let deepResult = mix(result, min(result, selfMultiplied), vec3f(clamp(deepAo * 0.72, 0.0, 0.86)));
+                fragmentOutputs.color = vec4f(deepResult, ssaoColor.a);
                 return fragmentOutputs;
             }
         `;
@@ -1727,15 +1651,9 @@ class FrameGraphPostEffectsSsaoToonCompositeTask extends FrameGraphPostProcessTa
                 const settings = this.getSettings();
                 const effect = this.postProcess.effect;
                 const shadowColor = settings.ssaoShadowColor;
-                const engine = this.postProcess.options.engine;
                 effect.setFloat3("shadowColor", shadowColor.r, shadowColor.g, shadowColor.b);
                 effect.setFloat("toonInfluence", settings.ssaoToonInfluence);
                 effect.setFloat("enabled", isFrameGraphPostEffectActiveInSettings(settings, "ssao") ? 1 : 0);
-                effect.setFloat2(
-                    "texelSize",
-                    1 / Math.max(1, engine.getRenderWidth()),
-                    1 / Math.max(1, engine.getRenderHeight()),
-                );
                 if (this.originalTexture !== undefined) {
                     context.bindTextureHandle(effect, "originalColor", this.originalTexture);
                 }
@@ -2026,8 +1944,8 @@ export class FrameGraphPostEffectsController {
             grainIntensity: 0,
             sharpenEdge: 0,
             ssaoEnabled: false,
-            ssaoStrength: 1,
-            ssaoRadius: 2,
+            ssaoStrength: 0.5,
+            ssaoRadius: 3,
             ssaoShadowColor: { r: 0.5, g: 0.5, b: 0.5 },
             ssaoToonInfluence: 1,
             offsetShadowEnabled: false,
@@ -2321,8 +2239,8 @@ export class FrameGraphPostEffectsController {
                 const ssaoTask = new FrameGraphSSAO2RenderingPipelineTask(
                     "frameGraphPostEffectsSSAO2",
                     frameGraph,
-                    0.75,
-                    0.75,
+                    0.5,
+                    0.5,
                 );
                 ssaoTask.sourceTexture = ssaoSourceTexture;
                 ssaoTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
@@ -2338,7 +2256,7 @@ export class FrameGraphPostEffectsController {
                     fragmentShader: "mmdFrameGraphSsaoToonComposite",
                     useShaderStore: true,
                     useAsPostProcess: true,
-                    uniforms: ["shadowColor", "toonInfluence", "enabled", "texelSize"],
+                    uniforms: ["shadowColor", "toonInfluence", "enabled"],
                     samplers: ["originalColor"],
                     name: "mmdFrameGraphSsaoToonComposite",
                     shaderLanguage: frameGraph.engine.isWebGPU ? ShaderLanguage.WGSL : ShaderLanguage.GLSL,
@@ -3200,11 +3118,11 @@ export class FrameGraphPostEffectsController {
     ): void {
         ssaoTask.ssao.samples = 16;
         ssaoTask.ssao.expensiveBlur = true;
-        ssaoTask.ssao.bilateralSamples = 16;
+        ssaoTask.ssao.bilateralSamples = 8;
         ssaoTask.ssao.bilateralSoften = 0.25;
         ssaoTask.ssao.bilateralTolerance = 0.15;
         ssaoTask.ssao.base = 0;
-        ssaoTask.ssao.totalStrength = Math.max(0, settings.ssaoStrength) * 2.2;
+        ssaoTask.ssao.totalStrength = Math.pow(Math.max(0, settings.ssaoStrength), 1.35) * 2.2;
         ssaoTask.ssao.radius = Math.max(0.01, settings.ssaoRadius);
         ssaoTask.ssao.maxZ = Math.max(50, Math.min(2000, camera.maxZ));
         ssaoTask.ssao.minZAspect = 0.2;

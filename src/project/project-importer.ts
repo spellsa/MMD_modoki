@@ -860,10 +860,10 @@ export async function importProjectState(
         : 0;
     host.postEffectSsaoStrength = typeof data.effects.ssaoStrength === "number" && Number.isFinite(data.effects.ssaoStrength)
         ? data.effects.ssaoStrength
-        : 1;
+        : 0.5;
     host.postEffectSsaoRadius = typeof data.effects.ssaoRadius === "number" && Number.isFinite(data.effects.ssaoRadius)
         ? data.effects.ssaoRadius
-        : 2;
+        : 3;
     host.postEffectSsaoFadeEnd = typeof data.effects.ssaoFadeEnd === "number" && Number.isFinite(data.effects.ssaoFadeEnd)
         ? data.effects.ssaoFadeEnd
         : 200;

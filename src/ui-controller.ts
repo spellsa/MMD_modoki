@@ -2310,6 +2310,7 @@ export class UIController {
         });
         this.actionDispatcher.register("effect.setModelEdgeWidth", (action) => {
             this.modelEdgeController?.setModelEdgeWidthPercent(action.percent);
+            this.refreshFrameGraphPostAddUi();
         });
         this.actionDispatcher.register("effect.setModelEdgeColorOverride", (action) => {
             this.mmdManager.modelEdgeColorOverrideEnabled = action.enabled;
@@ -2407,6 +2408,7 @@ export class UIController {
             this.mmdManager.postEffectSsaoStrength = action.strengthPercent / 100;
             this.mmdManager.postEffectSsaoRadius = action.radiusPercent / 100;
             this.mmdManager.postEffectSsaoDebugView = false;
+            this.modelEdgeController?.refresh();
         });
         this.actionDispatcher.register("effect.setFrameGraphSsr", (action) => {
             this.mmdManager.postEffectSsrEnabled = action.enabled;
@@ -3868,13 +3870,13 @@ export class UIController {
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">SSAO Strength</span>
-                        <input data-frame-graph-ssao="strength" type="range" class="effect-slider" min="0" max="100" value="100" step="1">
-                        <span data-frame-graph-ssao-val="strength" class="effect-value">1.00</span>
+                        <input data-frame-graph-ssao="strength" type="range" class="effect-slider" min="0" max="100" value="50" step="1">
+                        <span data-frame-graph-ssao-val="strength" class="effect-value">0.50</span>
                     </div>
                     <div class="effect-row">
                         <span class="effect-label">SSAO Radius</span>
-                        <input data-frame-graph-ssao="radius" type="range" class="effect-slider" min="1" max="100" value="100" step="1">
-                        <span data-frame-graph-ssao-val="radius" class="effect-value">1.00</span>
+                        <input data-frame-graph-ssao="radius" type="range" class="effect-slider" min="1" max="500" value="300" step="1">
+                        <span data-frame-graph-ssao-val="radius" class="effect-value">3.00</span>
                     </div>
                     <div class="effect-row effect-row-toggle">
                         <span class="effect-label">DoF</span>
@@ -4232,9 +4234,15 @@ export class UIController {
                 this.mmdManager.postEffectLutIntensity = Math.max(this.mmdManager.postEffectLutIntensity, 1);
                 break;
             case "ssao":
-                this.mmdManager.postEffectSsaoStrength = Math.max(this.mmdManager.postEffectSsaoStrength, 1);
-                this.mmdManager.postEffectSsaoRadius = Math.max(this.mmdManager.postEffectSsaoRadius, 1);
-                this.mmdManager.postEffectSsaoFadeEnd = Math.min(this.mmdManager.postEffectSsaoFadeEnd, 100);
+                this.mmdManager.postEffectSsaoStrength = this.mmdManager.postEffectSsaoStrength > 0.00001
+                    ? this.mmdManager.postEffectSsaoStrength
+                    : 0.5;
+                this.mmdManager.postEffectSsaoRadius = this.mmdManager.postEffectSsaoRadius > 0.00001
+                    ? this.mmdManager.postEffectSsaoRadius
+                    : 3;
+                this.mmdManager.postEffectSsaoFadeEnd = this.mmdManager.postEffectSsaoFadeEnd >= 4
+                    ? this.mmdManager.postEffectSsaoFadeEnd
+                    : 100;
                 this.mmdManager.postEffectSsaoDebugView = false;
                 break;
             case "offsetShadow":
@@ -4701,8 +4709,7 @@ export class UIController {
             case "ssao":
                 rows.push(
                     range("ssaoStrength", label("strength"), 0, 100, Math.round(this.mmdManager.postEffectSsaoStrength * 100), this.mmdManager.postEffectSsaoStrength.toFixed(2)),
-                    range("ssaoRadius", label("radius"), 1, 100, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
-                    range("ssaoFadeEnd", label("fadeEnd"), 4, 200, Math.round(this.mmdManager.postEffectSsaoFadeEnd), `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`),
+                    range("ssaoRadius", label("radius"), 1, 500, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
                 );
                 break;
             case "offsetShadow": {
@@ -4869,9 +4876,6 @@ export class UIController {
             case "ssaoRadius":
                 this.mmdManager.postEffectSsaoRadius = Number(rawValue) / 100;
                 break;
-            case "ssaoFadeEnd":
-                this.mmdManager.postEffectSsaoFadeEnd = Number(rawValue);
-                break;
             case "offsetShadowStrength":
                 this.mmdManager.postEffectOffsetShadowStrength = Number(rawValue) / 100;
                 break;
@@ -5002,7 +5006,6 @@ export class UIController {
                 return "lut";
             case "ssaoStrength":
             case "ssaoRadius":
-            case "ssaoFadeEnd":
                 return "ssao";
             case "offsetShadowStrength":
             case "offsetShadowOffsetX":
@@ -5120,9 +5123,6 @@ export class UIController {
                 break;
             case "ssaoRadius":
                 valueElement.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
-                break;
-            case "ssaoFadeEnd":
-                valueElement.textContent = `${Math.round(this.mmdManager.postEffectSsaoFadeEnd)}m`;
                 break;
             case "offsetShadowStrength":
                 valueElement.textContent = this.mmdManager.postEffectOffsetShadowStrength.toFixed(2);
@@ -5375,11 +5375,6 @@ export class UIController {
             return;
         }
 
-        if (this.getConfiguredPostEffectBackend() === "frameGraph") {
-            this.mmdManager.postEffectSsaoStrength = Math.min(this.mmdManager.postEffectSsaoStrength, 1);
-            this.mmdManager.postEffectSsaoRadius = Math.min(this.mmdManager.postEffectSsaoRadius, 1);
-        }
-
         const refreshValues = (): void => {
             const enabled = this.mmdManager.postEffectSsaoEnabled;
             enabledInput.checked = enabled;
@@ -5388,7 +5383,7 @@ export class UIController {
             strengthValue.textContent = enabled
                 ? this.mmdManager.postEffectSsaoStrength.toFixed(2)
                 : t("status.off");
-            radiusSlider.value = String(Math.max(1, Math.min(100, Math.round(this.mmdManager.postEffectSsaoRadius * 100))));
+            radiusSlider.value = String(Math.max(1, Math.min(500, Math.round(this.mmdManager.postEffectSsaoRadius * 100))));
             radiusValue.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
             strengthSlider.disabled = !enabled;
             radiusSlider.disabled = !enabled;

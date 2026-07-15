@@ -179,13 +179,13 @@ export function applySsaoSettings(host: SsaoHost): void {
                 host.ssaoRenderingPipeline = new SSAO2RenderingPipeline(
                     "SsaoRenderingPipeline",
                     host.scene,
-                    { ssaoRatio: 0.75, blurRatio: 0.75 },
+                    { ssaoRatio: 0.5, blurRatio: 0.5 },
                     [host.camera],
                 );
                 host.ssaoRenderingPipeline.samples = 16;
                 host.ssaoRenderingPipeline.textureSamples = 1;
                 host.ssaoRenderingPipeline.expensiveBlur = true;
-                host.ssaoRenderingPipeline.bilateralSamples = 16;
+                host.ssaoRenderingPipeline.bilateralSamples = 8;
                 host.ssaoRenderingPipeline.bilateralSoften = 0.25;
                 host.ssaoRenderingPipeline.bilateralTolerance = 0.15;
                 host.ssaoRenderingPipeline.base = 0;
@@ -198,7 +198,7 @@ export function applySsaoSettings(host: SsaoHost): void {
         }
 
         if (host.ssaoRenderingPipeline) {
-            host.ssaoRenderingPipeline.totalStrength = host.postEffectSsaoStrengthValue * 2.2;
+            host.ssaoRenderingPipeline.totalStrength = Math.pow(Math.max(0, host.postEffectSsaoStrengthValue), 1.35) * 2.2;
             host.ssaoRenderingPipeline.radius = host.postEffectSsaoRadiusValue;
             host.ssaoRenderingPipeline.maxZ = Math.max(50, Math.min(2000, host.camera.radius * 12));
             host.ssaoRenderingPipeline.minZAspect = 0.2;

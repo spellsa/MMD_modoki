@@ -1666,8 +1666,8 @@ ${beforeFogAppendBlock}
     private postEffectGrainIntensityValue = 0;
     private postEffectSharpenEdgeValue = 0;
     private postEffectSsaoEnabledValue = false;
-    private postEffectSsaoStrengthValue = 1;
-    private postEffectSsaoRadiusValue = 2;
+    private postEffectSsaoStrengthValue = 0.5;
+    private postEffectSsaoRadiusValue = 3;
     private postEffectSsaoFadeEndValue = 200;
     private postEffectSsaoDebugViewValue = false;
     private postEffectOffsetShadowEnabledValue = false;
@@ -7951,8 +7951,8 @@ ${beforeFogAppendBlock}
             ssaoEnabled: this.isFrameGraphPostEffectActive("ssao"),
             ssaoStrength: this.postEffectSsaoStrengthValue,
             ssaoRadius: this.postEffectSsaoRadiusValue,
-            ssaoShadowColor: this.getShadowColor(),
-            ssaoToonInfluence: this.toonShadowInfluenceValue,
+            ssaoShadowColor: { r: 0.5, g: 0.5, b: 0.5 },
+            ssaoToonInfluence: 1,
             offsetShadowEnabled: this.isFrameGraphPostEffectActive("offsetShadow"),
             offsetShadowStrength: this.postEffectOffsetShadowStrengthValue,
             offsetShadowOffsetX: this.postEffectOffsetShadowOffsetXValue,
@@ -8438,10 +8438,14 @@ ${beforeFogAppendBlock}
     }
 
     public setFrameGraphPostEffectStackEntryEnabled(id: FrameGraphPostEffectId, enabled: boolean): void {
+        const next = Boolean(enabled);
+        if (id === "ssao" && next && this.modelEdgeWidthValue > 0.0001) {
+            this.modelEdgeWidthValue = 0;
+            this.applyModelEdgeToAllModels();
+        }
         if (!this.getFrameGraphPostEffectStackIds().includes(id)) {
             this.setFrameGraphPostEffectStackIds(addFrameGraphPostEffectId(this.getFrameGraphPostEffectStackIds(), id));
         }
-        const next = Boolean(enabled);
         if (this.isFrameGraphPostEffectStackEnabled(id) === next) {
             return;
         }
@@ -8929,22 +8933,26 @@ ${beforeFogAppendBlock}
     }
     set postEffectSsaoEnabled(v: boolean) {
         this.postEffectSsaoEnabledValue = Boolean(v);
+        if (this.postEffectSsaoEnabledValue && this.modelEdgeWidthValue > 0.0001) {
+            this.modelEdgeWidthValue = 0;
+            this.applyModelEdgeToAllModels();
+        }
         this.applySsaoSettings();
     }
-    /** SSAO2 intensity (0.0..2.0). */
+    /** SSAO2 intensity (0.0..1.0). */
     get postEffectSsaoStrength(): number {
         return this.postEffectSsaoStrengthValue;
     }
     set postEffectSsaoStrength(v: number) {
-        this.postEffectSsaoStrengthValue = Math.max(0, Math.min(2, v));
+        this.postEffectSsaoStrengthValue = Math.max(0, Math.min(1, v));
         this.applySsaoSettings();
     }
-    /** SSAO2 sampling radius (0.01..2.0). */
+    /** SSAO2 sampling radius (0.01..5.0). */
     get postEffectSsaoRadius(): number {
         return this.postEffectSsaoRadiusValue;
     }
     set postEffectSsaoRadius(v: number) {
-        this.postEffectSsaoRadiusValue = Math.max(0.01, Math.min(2, v));
+        this.postEffectSsaoRadiusValue = Math.max(0.01, Math.min(5, v));
         this.applySsaoSettings();
     }
 
@@ -9641,6 +9649,10 @@ ${beforeFogAppendBlock}
     }
     set modelEdgeWidth(v: number) {
         this.modelEdgeWidthValue = Math.max(0, Math.min(2, v));
+        if (this.modelEdgeWidthValue > 0.0001 && this.isFrameGraphPostEffectActive("ssao")) {
+            this.frameGraphPostEffectStackEnabledValue.set("ssao", false);
+            this.refreshFrameGraphPostEffectsBackendForStackStateChange();
+        }
         this.applyModelEdgeToAllModels();
     }
 

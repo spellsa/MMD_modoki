@@ -60,7 +60,7 @@ export function ensureSimpleSsaoShader(): void {
                     float nGrad = max(max(abs(nR - nL), abs(nU - nD)), 0.00003);
                     vec2 nSlopePerPx = vec2((nR - nL) * 0.5, (nU - nD) * 0.5);
                     float resolutionScale = 1.0 / max(texel.y * 1080.0, 0.0001);
-                    float stepPx = mix(1.0, 4.6, radiusNorm) * resolutionScale;
+                    float stepPx = mix(0.8, 3.1, radiusNorm) * resolutionScale;
                     vec2 stepVec = texel * stepPx;
                     float nNear = min(min(nL, nR), min(nD, nU));
                     float nMicro = smoothstep(
@@ -101,8 +101,8 @@ export function ensureSimpleSsaoShader(): void {
 
                     float raw = occ / max(w, 0.0001);
                     float rawWide = occWide / max(wWide, 0.0001);
-                    float combined = clamp(raw * 0.28 + rawWide * 1.28 + nMicro * 0.04, 0.0, 1.0);
-                    float a = clamp(pow(combined, 1.8) * strength * 1.55, 0.0, 1.0);
+                    float combined = clamp(raw * 0.42 + rawWide * 0.72 + nMicro * 0.03, 0.0, 1.0);
+                    float a = clamp(pow(combined, 1.9) * strength * 0.85, 0.0, 0.7);
                     float distFade = 1.0 - smoothstep(worldFadeMeters.x * 0.35, worldFadeMeters.y * 0.95, cDepth);
                     a *= distFade;
                     return a;
@@ -122,6 +122,7 @@ export function ensureSimpleSsaoShader(): void {
                         gl_FragColor = vec4(fallbackColor, color.a);
                         return;
                     }
+                    float ssaoDensity = pow(max(ssaoStrength, 0.0), 1.35);
 
                     float dL = readDepthMetric(vUV - vec2(texel.x, 0.0));
                     float dR = readDepthMetric(vUV + vec2(texel.x, 0.0));
@@ -130,8 +131,8 @@ export function ensureSimpleSsaoShader(): void {
 
                     float depthGrad = max(max(abs(dR - dL), abs(dU - dD)), 0.00003);
                     vec2 depthSlopePerPx = vec2((dR - dL) * 0.5, (dU - dD) * 0.5);
-                    float radiusNorm = clamp((ssaoRadius - 0.25) / 2.1, 0.0, 1.0);
-                    float sampleRadiusPx = mix(0.85, 4.2, radiusNorm) * resolutionScale;
+                    float radiusNorm = clamp((ssaoRadius - 0.25) / 4.75, 0.0, 1.0);
+                    float sampleRadiusPx = mix(0.65, 8.5, radiusNorm) * resolutionScale;
                     vec2 baseStep = texel * sampleRadiusPx;
                     float nearDepth = min(min(dL, dR), min(dD, dU));
                     float microCavity = smoothstep(
@@ -184,14 +185,14 @@ export function ensureSimpleSsaoShader(): void {
                     float aoRaw = occlusion / max(totalWeight, 0.0001);
                     float enclosureRaw = enclosure / max(totalEnclosureWeight, 0.0001);
                     float aoDetail = clamp(
-                        pow(clamp(aoRaw * 0.95 + microCavity * 0.04, 0.0, 1.0), 1.75) * ssaoStrength * 0.05,
+                        pow(clamp(aoRaw * 1.38 + microCavity * 0.12, 0.0, 1.0), 1.35) * ssaoDensity * 0.55,
                         0.0,
-                        0.18
+                        0.48
                     );
                     float aoBroad = clamp(
-                        pow(clamp(enclosureRaw * 1.36 + aoRaw * 0.14 + microCavity * 0.03, 0.0, 1.0), 1.62) * ssaoStrength * 1.26,
+                        pow(clamp(enclosureRaw * 0.82 + aoRaw * 0.08 + microCavity * 0.02, 0.0, 1.0), 1.7) * ssaoDensity * 0.58,
                         0.0,
-                        0.98
+                        0.42
                     );
                     float aoDistanceFade = 1.0 - smoothstep(worldFadeMeters.x * 0.35, worldFadeMeters.y * 0.95, centerDepth);
                     aoDetail *= aoDistanceFade;
@@ -214,8 +215,8 @@ export function ensureSimpleSsaoShader(): void {
                     silhouetteSuppression *= silhouetteSuppression;
                     aoDetail *= detailFacing * depthEdgeSuppression * mix(1.0, 0.08, distanceSoftness);
 
-                    float blurRadiusPx = mix(3.4, 18.0, blurFactor);
-                    float blurRadiusPxWide = blurRadiusPx * mix(2.4, 4.8, blurFactor);
+                    float blurRadiusPx = mix(2.2, 10.0, blurFactor);
+                    float blurRadiusPxWide = blurRadiusPx * mix(1.8, 3.4, blurFactor);
                     float blurAo = aoBroad;
                     float blurWeight = 1.0;
                     float depthSigma = depthGrad * mix(10.0, 60.0, blurFactor) + mix(0.018, 0.42, blurFactor);
@@ -227,7 +228,7 @@ export function ensureSimpleSsaoShader(): void {
                             vec3 bPseudoNormal = pseudoNormalAt(bUv, texel);
                             float normalWeight = smoothstep(0.42, 0.995, dot(centerPseudoNormal, bPseudoNormal));
                             float depthWeight = exp(-abs(bDepth - centerDepth) / depthSigma) * normalWeight;
-                            float neighborAo = computeAoLiteAt(bUv, texel, radiusNorm, ssaoStrength);
+                            float neighborAo = computeAoLiteAt(bUv, texel, radiusNorm, ssaoDensity);
                             blurAo += neighborAo * depthWeight;
                             blurWeight += depthWeight;
                         }
@@ -238,7 +239,7 @@ export function ensureSimpleSsaoShader(): void {
                             vec3 bPseudoNormalWide = pseudoNormalAt(bUvWide, texel);
                             float normalWeightWide = smoothstep(0.36, 0.992, dot(centerPseudoNormal, bPseudoNormalWide));
                             float depthWeightWide = exp(-abs(bDepthWide - centerDepth) / (depthSigma * 1.35)) * normalWeightWide;
-                            float neighborAoWide = computeAoLiteAt(bUvWide, texel, radiusNorm, ssaoStrength);
+                            float neighborAoWide = computeAoLiteAt(bUvWide, texel, radiusNorm, ssaoDensity);
                             blurAo += neighborAoWide * depthWeightWide * 0.95;
                             blurWeight += depthWeightWide * 0.95;
                         }
@@ -246,13 +247,17 @@ export function ensureSimpleSsaoShader(): void {
                     float aoBlurred = blurAo / max(blurWeight, 0.0001);
                     aoBroad = mix(aoBroad * mix(0.9, 0.62, blurFactor), aoBlurred, mix(0.93, 0.999, blurFactor));
                     aoBroad *= mix(0.16, 1.0, silhouetteSuppression) * mix(0.86, 1.0, frontFactor);
-                    float ao = clamp(aoBroad + aoDetail * mix(0.035, 0.006, max(blurFactor, distanceSoftness)), 0.0, 0.98);
+                    float cornerCore = pow(clamp(aoRaw * 1.65 + microCavity * 0.22, 0.0, 1.0), 1.18)
+                        * detailFacing
+                        * depthEdgeSuppression
+                        * (1.0 - distanceSoftness * 0.72);
+                    float ao = clamp(aoBroad + aoDetail * mix(0.34, 0.14, max(blurFactor, distanceSoftness)) + cornerCore * ssaoDensity * 0.28, 0.0, 0.9);
                     float worldDistance = centerDepth;
                     float aoWorldOpacity = 1.0 - smoothstep(worldFadeMeters.x, worldFadeMeters.y, worldDistance);
                     ao *= aoWorldOpacity;
 
-                    float aoApplied = 1.0 - pow(1.0 - clamp(ao * 7.0, 0.0, 0.998), 1.15);
-                    float maskBlurRadiusPx = mix(1.2, 4.6, blurFactor) * mix(0.95, 1.7, farFactor);
+                    float aoApplied = 1.0 - pow(1.0 - clamp(ao * 2.85 + cornerCore * ssaoDensity * 0.44, 0.0, 0.985), 1.08);
+                    float maskBlurRadiusPx = mix(1.6, 5.2, blurFactor) * mix(0.95, 1.55, farFactor);
                     float maskBlur = aoApplied;
                     float maskBlurWeight = 1.0;
                     float maskDepthSigma = depthSigma * 0.7 + 0.0005;
@@ -264,8 +269,8 @@ export function ensureSimpleSsaoShader(): void {
                             vec3 mPseudoNormal = pseudoNormalAt(mUv, texel);
                             float mNormalWeight = smoothstep(0.48, 0.996, dot(centerPseudoNormal, mPseudoNormal));
                             float mDepthWeight = exp(-abs(mDepth - centerDepth) / maskDepthSigma) * mNormalWeight;
-                            float neighborAo = computeAoLiteAt(mUv, texel, radiusNorm, ssaoStrength);
-                            float neighborApplied = 1.0 - pow(1.0 - clamp(neighborAo * 4.2, 0.0, 0.992), 1.05);
+                            float neighborAo = computeAoLiteAt(mUv, texel, radiusNorm, ssaoDensity);
+                            float neighborApplied = 1.0 - pow(1.0 - clamp(neighborAo * 2.45, 0.0, 0.93), 1.04);
                             neighborApplied = mix(aoApplied, neighborApplied, 0.14);
                             maskBlur += neighborApplied * mDepthWeight;
                             maskBlurWeight += mDepthWeight;
@@ -283,8 +288,8 @@ export function ensureSimpleSsaoShader(): void {
                         float nDepth = readDepthMetric(nUv);
                         if (nDepth > 0.00001) {
                             float nDepthWeight = exp(-abs(nDepth - centerDepth) / (maskDepthSigma * 0.85 + 0.0002));
-                            float nAo = computeAoLiteAt(nUv, texel, radiusNorm, ssaoStrength);
-                            float nApplied = 1.0 - pow(1.0 - clamp(nAo * 4.2, 0.0, 0.992), 1.05);
+                            float nAo = computeAoLiteAt(nUv, texel, radiusNorm, ssaoDensity);
+                            float nApplied = 1.0 - pow(1.0 - clamp(nAo * 2.45, 0.0, 0.93), 1.04);
                             nApplied = mix(aoApplied, nApplied, 0.12) * nDepthWeight + aoApplied * (1.0 - nDepthWeight);
                             aoAppliedMin = min(aoAppliedMin, nApplied);
                             aoAppliedMax = max(aoAppliedMax, nApplied);
@@ -375,12 +380,12 @@ export function ensureSimpleSsaoShader(): void {
                     let nGrad = max(max(abs(nR - nL), abs(nU - nD)), 0.00003);
                     let nSlopePerPx = vec2f((nR - nL) * 0.5, (nU - nD) * 0.5);
                     let resolutionScale = 1.0 / max(texel.y * 1080.0, 0.0001);
-                    let stepPx = mix(0.8, 3.0, radiusNorm) * resolutionScale;
+                    let stepPx = mix(0.8, 3.1, radiusNorm) * resolutionScale;
                     let stepVec = texel * stepPx;
                     let nNear = min(min(nL, nR), min(nD, nU));
                     let nMicro = smoothstep(
-                        nGrad * 0.14 + 0.00004,
-                        nGrad * 1.35 + 0.00045,
+                        nGrad * 0.06 + 0.00001,
+                        nGrad * 0.95 + 0.00025,
                         cDepth - nNear
                     );
 
@@ -399,12 +404,12 @@ export function ensureSimpleSsaoShader(): void {
                         let expectedDepth = cDepth + dot(nSlopePerPx, dir * stepPx);
                         let planeDelta = expectedDepth - sd;
                         let gradientAllowance = nGrad * max(1.0, stepPx);
-                        let lo = gradientAllowance * 0.2 + 0.00004;
-                        let mid = gradientAllowance * 1.45 + 0.00022;
-                        let hi = gradientAllowance * 3.25 + 0.00068;
+                        let lo = gradientAllowance * 0.08 + 0.00001;
+                        let mid = gradientAllowance * 0.72 + 0.00012;
+                        let hi = gradientAllowance * 2.0 + 0.00035;
                         let pos = smoothstep(lo, mid, planeDelta);
                         let shallow = 1.0 - smoothstep(mid, hi, planeDelta);
-                        let reject = 1.0 - smoothstep(hi * 1.15, hi * 2.8, abs(planeDelta));
+                        let reject = 1.0 - smoothstep(hi * 1.6, hi * 4.5, abs(planeDelta));
                         let wide = smoothstep(lo * 0.55, mid * 1.35, planeDelta)
                             * (1.0 - smoothstep(hi * 1.8, hi * 6.5, planeDelta))
                             * (1.0 - smoothstep(hi * 3.5, hi * 7.5, abs(planeDelta)));
@@ -416,8 +421,8 @@ export function ensureSimpleSsaoShader(): void {
 
                     let raw = occ / max(w, 0.0001);
                     let rawWide = occWide / max(wWide, 0.0001);
-                    let combined = clamp(raw * 0.28 + rawWide * 1.28 + nMicro * 0.04, 0.0, 1.0);
-                    var a = clamp(pow(combined, 1.8) * strength * 1.55, 0.0, 1.0);
+                    let combined = clamp(raw * 0.42 + rawWide * 0.72 + nMicro * 0.03, 0.0, 1.0);
+                    var a = clamp(pow(combined, 1.9) * strength * 0.85, 0.0, 0.7);
                     let distFade = 1.0 - smoothstep(uniforms.worldFadeMeters.x * 0.35, uniforms.worldFadeMeters.y * 0.95, cDepth);
                     a *= distFade;
                     return a;
@@ -438,6 +443,7 @@ export function ensureSimpleSsaoShader(): void {
                         fragmentOutputs.color = vec4f(mix(color.rgb, vec3f(1.0), debugView), color.a);
                         return fragmentOutputs;
                     }
+                    let ssaoDensity = pow(max(uniforms.ssaoStrength, 0.0), 1.35);
 
                     let dL = readDepthMetric(input.vUV - vec2f(texel.x, 0.0));
                     let dR = readDepthMetric(input.vUV + vec2f(texel.x, 0.0));
@@ -446,8 +452,8 @@ export function ensureSimpleSsaoShader(): void {
 
                     let depthGrad = max(max(abs(dR - dL), abs(dU - dD)), 0.00003);
                     let depthSlopePerPx = vec2f((dR - dL) * 0.5, (dU - dD) * 0.5);
-                    let radiusNorm = clamp((uniforms.ssaoRadius - 0.25) / 2.1, 0.0, 1.0);
-                    let sampleRadiusPx = mix(0.85, 4.2, radiusNorm) * resolutionScale;
+                    let radiusNorm = clamp((uniforms.ssaoRadius - 0.25) / 4.75, 0.0, 1.0);
+                    let sampleRadiusPx = mix(0.65, 8.5, radiusNorm) * resolutionScale;
                     let baseStep = texel * sampleRadiusPx;
                     let nearDepth = min(min(dL, dR), min(dD, dU));
                     let microCavity = smoothstep(
@@ -500,14 +506,14 @@ export function ensureSimpleSsaoShader(): void {
                     let aoRaw = occlusion / max(totalWeight, 0.0001);
                     let enclosureRaw = enclosure / max(totalEnclosureWeight, 0.0001);
                     var aoDetail = clamp(
-                        pow(clamp(aoRaw * 0.95 + microCavity * 0.04, 0.0, 1.0), 1.75) * uniforms.ssaoStrength * 0.05,
+                        pow(clamp(aoRaw * 1.38 + microCavity * 0.12, 0.0, 1.0), 1.35) * ssaoDensity * 0.55,
                         0.0,
-                        0.18
+                        0.48
                     );
                     var aoBroad = clamp(
-                        pow(clamp(enclosureRaw * 1.36 + aoRaw * 0.14 + microCavity * 0.03, 0.0, 1.0), 1.62) * uniforms.ssaoStrength * 1.26,
+                        pow(clamp(enclosureRaw * 0.82 + aoRaw * 0.08 + microCavity * 0.02, 0.0, 1.0), 1.7) * ssaoDensity * 0.58,
                         0.0,
-                        0.98
+                        0.42
                     );
                     let aoDistanceFade = 1.0 - smoothstep(uniforms.worldFadeMeters.x * 0.35, uniforms.worldFadeMeters.y * 0.95, centerDepth);
                     aoDetail *= aoDistanceFade;
@@ -530,8 +536,8 @@ export function ensureSimpleSsaoShader(): void {
                     silhouetteSuppression = silhouetteSuppression * silhouetteSuppression;
                     aoDetail *= detailFacing * depthEdgeSuppression * mix(1.0, 0.08, distanceSoftness);
 
-                    let blurRadiusPx = mix(3.4, 18.0, blurFactor);
-                    let blurRadiusPxWide = blurRadiusPx * mix(2.4, 4.8, blurFactor);
+                    let blurRadiusPx = mix(2.2, 10.0, blurFactor);
+                    let blurRadiusPxWide = blurRadiusPx * mix(1.8, 3.4, blurFactor);
                     var blurAo = aoBroad;
                     var blurWeight = 1.0;
                     let depthSigma = depthGrad * mix(10.0, 60.0, blurFactor) + mix(0.018, 0.42, blurFactor);
@@ -543,7 +549,7 @@ export function ensureSimpleSsaoShader(): void {
                             let bPseudoNormal = pseudoNormalAt(bUv, texel);
                             let normalWeight = smoothstep(0.42, 0.995, dot(centerPseudoNormal, bPseudoNormal));
                             let depthWeight = exp(-abs(bDepth - centerDepth) / depthSigma) * normalWeight;
-                            let neighborAo = computeAoLiteAt(bUv, texel, radiusNorm, uniforms.ssaoStrength);
+                            let neighborAo = computeAoLiteAt(bUv, texel, radiusNorm, ssaoDensity);
                             blurAo += neighborAo * depthWeight;
                             blurWeight += depthWeight;
                         }
@@ -554,7 +560,7 @@ export function ensureSimpleSsaoShader(): void {
                             let bPseudoNormalWide = pseudoNormalAt(bUvWide, texel);
                             let normalWeightWide = smoothstep(0.36, 0.992, dot(centerPseudoNormal, bPseudoNormalWide));
                             let depthWeightWide = exp(-abs(bDepthWide - centerDepth) / (depthSigma * 1.35)) * normalWeightWide;
-                            let neighborAoWide = computeAoLiteAt(bUvWide, texel, radiusNorm, uniforms.ssaoStrength);
+                            let neighborAoWide = computeAoLiteAt(bUvWide, texel, radiusNorm, ssaoDensity);
                             blurAo += neighborAoWide * depthWeightWide * 0.95;
                             blurWeight += depthWeightWide * 0.95;
                         }
@@ -562,13 +568,17 @@ export function ensureSimpleSsaoShader(): void {
                     let aoBlurred = blurAo / max(blurWeight, 0.0001);
                     aoBroad = mix(aoBroad * mix(0.9, 0.62, blurFactor), aoBlurred, mix(0.93, 0.999, blurFactor));
                     aoBroad *= mix(0.16, 1.0, silhouetteSuppression) * mix(0.86, 1.0, frontFactor);
-                    var ao = clamp(aoBroad + aoDetail * mix(0.035, 0.006, max(blurFactor, distanceSoftness)), 0.0, 0.98);
+                    let cornerCore = pow(clamp(aoRaw * 1.65 + microCavity * 0.22, 0.0, 1.0), 1.18)
+                        * detailFacing
+                        * depthEdgeSuppression
+                        * (1.0 - distanceSoftness * 0.72);
+                    var ao = clamp(aoBroad + aoDetail * mix(0.34, 0.14, max(blurFactor, distanceSoftness)) + cornerCore * ssaoDensity * 0.28, 0.0, 0.9);
                     let worldDistance = centerDepth;
                     let aoWorldOpacity = 1.0 - smoothstep(uniforms.worldFadeMeters.x, uniforms.worldFadeMeters.y, worldDistance);
                     ao *= aoWorldOpacity;
 
-                    var aoApplied = 1.0 - pow(1.0 - clamp(ao * 7.0, 0.0, 0.998), 1.15);
-                    let maskBlurRadiusPx = mix(1.2, 4.6, blurFactor) * mix(0.95, 1.7, farFactor);
+                    var aoApplied = 1.0 - pow(1.0 - clamp(ao * 2.85 + cornerCore * ssaoDensity * 0.44, 0.0, 0.985), 1.08);
+                    let maskBlurRadiusPx = mix(1.6, 5.2, blurFactor) * mix(0.95, 1.55, farFactor);
                     var maskBlur = aoApplied;
                     var maskBlurWeight = 1.0;
                     let maskDepthSigma = depthSigma * 0.7 + 0.0005;
@@ -580,8 +590,8 @@ export function ensureSimpleSsaoShader(): void {
                             let mPseudoNormal = pseudoNormalAt(mUv, texel);
                             let mNormalWeight = smoothstep(0.48, 0.996, dot(centerPseudoNormal, mPseudoNormal));
                             let mDepthWeight = exp(-abs(mDepth - centerDepth) / maskDepthSigma) * mNormalWeight;
-                            let neighborAo = computeAoLiteAt(mUv, texel, radiusNorm, uniforms.ssaoStrength);
-                            var neighborApplied = 1.0 - pow(1.0 - clamp(neighborAo * 4.2, 0.0, 0.992), 1.05);
+                            let neighborAo = computeAoLiteAt(mUv, texel, radiusNorm, ssaoDensity);
+                            var neighborApplied = 1.0 - pow(1.0 - clamp(neighborAo * 2.45, 0.0, 0.93), 1.04);
                             neighborApplied = mix(aoApplied, neighborApplied, 0.14);
                             maskBlur += neighborApplied * mDepthWeight;
                             maskBlurWeight += mDepthWeight;
@@ -599,8 +609,8 @@ export function ensureSimpleSsaoShader(): void {
                         let nDepth = readDepthMetric(nUv);
                         if (nDepth > 0.00001) {
                             let nDepthWeight = exp(-abs(nDepth - centerDepth) / (maskDepthSigma * 0.85 + 0.0002));
-                            let nAo = computeAoLiteAt(nUv, texel, radiusNorm, uniforms.ssaoStrength);
-                            var nApplied = 1.0 - pow(1.0 - clamp(nAo * 4.2, 0.0, 0.992), 1.05);
+                            let nAo = computeAoLiteAt(nUv, texel, radiusNorm, ssaoDensity);
+                            var nApplied = 1.0 - pow(1.0 - clamp(nAo * 2.45, 0.0, 0.93), 1.04);
                             nApplied = mix(aoApplied, nApplied, 0.12) * nDepthWeight + aoApplied * (1.0 - nDepthWeight);
                             aoAppliedMin = min(aoAppliedMin, nApplied);
                             aoAppliedMax = max(aoAppliedMax, nApplied);
