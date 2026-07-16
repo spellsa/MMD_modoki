@@ -24,6 +24,7 @@ export type CameraPanelControllerDeps = {
 };
 
 const CAMERA_EXTERNAL_PARENT_DEFAULT_BONE_CANDIDATES = ["頭", "head", "Head"];
+const CAMERA_EXTERNAL_PARENT_UI_ENABLED = false;
 
 function normalizeBoneNameForDefault(name: string): string {
     return name.trim().replace(/\s+/g, "").toLowerCase();
@@ -128,6 +129,15 @@ export class CameraPanelController {
         const boneSelect = this.elements.parentBoneSelect;
         const registerButton = this.elements.externalParentRegisterButton;
         if (!container || !parentSelect || !boneSelect || !registerButton) return;
+
+        if (!CAMERA_EXTERNAL_PARENT_UI_ENABLED) {
+            // v0.2.1: camera external parent behavior is still under investigation, so keep its UI hidden.
+            container.hidden = true;
+            parentSelect.disabled = true;
+            boneSelect.disabled = true;
+            registerButton.disabled = true;
+            return;
+        }
 
         const visible = this.mmdManager.getTimelineTarget() === "camera";
         container.hidden = !visible;
