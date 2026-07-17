@@ -132,8 +132,11 @@ export class WebmExportDialogController implements PopupContentController {
             this.output.setIncludeAudio(this.includeAudioInput?.checked ?? false);
         });
         this.usePlaybackRangeInput?.addEventListener("change", () => {
-            this.output.setUsePlaybackRange(this.usePlaybackRangeInput?.checked ?? false);
-            this.syncFrameRangeEnabledState();
+            const usePlaybackRange = this.usePlaybackRangeInput?.checked ?? false;
+            this.output.setUsePlaybackRange(usePlaybackRange);
+            if (usePlaybackRange) {
+                this.syncFrameRangeFromPlaybackRange();
+            }
         });
         if (this.startFrameInput) {
             installEnterCommitNumberInput(this.startFrameInput, {
@@ -158,7 +161,6 @@ export class WebmExportDialogController implements PopupContentController {
     }
 
     private createFrameRangeField(): HTMLElement {
-        this.syncFrameRangeEnabledState();
         return createPopupFormField(
             t("dialog.webmExport.frameRange"),
             createPopupFormInline(this.startFrameInput, "-", this.endFrameInput),
@@ -217,10 +219,10 @@ export class WebmExportDialogController implements PopupContentController {
         if (this.endFrameInput) this.endFrameInput.value = String(state.endFrame);
     }
 
-    private syncFrameRangeEnabledState(): void {
-        const enabled = this.usePlaybackRangeInput?.checked ?? false;
-        if (this.startFrameInput) this.startFrameInput.disabled = !enabled;
-        if (this.endFrameInput) this.endFrameInput.disabled = !enabled;
+    private syncFrameRangeFromPlaybackRange(): void {
+        const state = this.output.syncPlaybackRange();
+        if (this.startFrameInput) this.startFrameInput.value = String(state.startFrame);
+        if (this.endFrameInput) this.endFrameInput.value = String(state.endFrame);
     }
 
     private syncAllToOutputState(): void {

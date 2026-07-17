@@ -51,6 +51,7 @@ export type WebmExportSettingsAdapter = {
     setFps: (value: number) => void;
     setIncludeAudio: (value: boolean) => void;
     setUsePlaybackRange: (value: boolean) => void;
+    syncPlaybackRange: () => OutputFormState;
     setStartFrame: (value: number) => void;
     setEndFrame: (value: number) => void;
     setCaptureMode: (value: WebmCaptureMode) => void;
@@ -180,6 +181,11 @@ export class ExportUiController {
     private isSyncingOutputSettings = false;
     private isSyncingFrameRange = false;
     private isFrameRangeCustomized = false;
+    private isPlaybackRangeCustomized = false;
+    private playbackRangeState = {
+        startFrame: 0,
+        endFrame: 0,
+    };
     private outputState: OutputFormState = {
         aspectPreset: "16:9",
         sizePreset: "1920",
@@ -241,7 +247,7 @@ export class ExportUiController {
 
     public exportProjectState(): ProjectOutputState {
         const outputSettings = this.getOutputSettings();
-        const playbackFrameRange = this.getPlaybackFrameRange();
+        const outputFrameRange = this.getOutputFrameRange();
 
         return {
             aspectPreset: this.outputState.aspectPreset,
@@ -255,8 +261,8 @@ export class ExportUiController {
             webmCodec: this.getWebmOutputOptions().preferredVideoCodec,
             webmCaptureMode: FIXED_WEBM_CAPTURE_MODE,
             usePlaybackRange: this.outputState.usePlaybackRange,
-            startFrame: playbackFrameRange.startFrame,
-            endFrame: playbackFrameRange.endFrame,
+            startFrame: outputFrameRange.startFrame,
+            endFrame: outputFrameRange.endFrame,
             frameStartEnabled: Boolean(this.elements.playbackFrameStartToggleInput?.checked),
             frameStopEnabled: Boolean(this.elements.playbackFrameStopToggleInput?.checked),
         };
@@ -292,7 +298,9 @@ export class ExportUiController {
         this.outputState.captureMode = FIXED_WEBM_CAPTURE_MODE;
         if (Number.isFinite(state.startFrame) && Number.isFinite(state.endFrame)) {
             this.isFrameRangeCustomized = true;
+            this.isPlaybackRangeCustomized = true;
             this.setOutputFrameRangeValues(state.startFrame ?? 0, state.endFrame ?? 0);
+            this.setPlaybackFrameRangeValues(state.startFrame ?? 0, state.endFrame ?? 0);
         } else {
             this.isFrameRangeCustomized = false;
             this.syncFrameRangeFromTimeline(true);
@@ -314,9 +322,12 @@ export class ExportUiController {
     }
 
     public syncFrameRangeFromTimeline(force = false): void {
+        const maxFrame = this.getMaxOutputFrame();
+        if (force || !this.isPlaybackRangeCustomized) {
+            this.setPlaybackFrameRangeValues(0, maxFrame);
+        }
         if (!force && this.isFrameRangeCustomized) return;
 
-        const maxFrame = this.getMaxOutputFrame();
         this.setOutputFrameRangeValues(0, maxFrame);
     }
 
@@ -654,12 +665,13 @@ export class ExportUiController {
     }
 
     public getOutputFrameRange(): { startFrame: number; endFrame: number } {
-        if (!this.outputState.usePlaybackRange) {
-            const maxFrame = this.getMaxOutputFrame();
-            return { startFrame: 0, endFrame: maxFrame };
+        const maxFrame = this.getMaxOutputFrame();
+        const startFrame = Math.max(0, Math.min(maxFrame, Math.floor(this.outputState.startFrame)));
+        const endFrame = Math.max(startFrame, Math.min(maxFrame, Math.floor(this.outputState.endFrame)));
+        if (startFrame !== this.outputState.startFrame || endFrame !== this.outputState.endFrame) {
+            this.setOutputFrameRangeValues(startFrame, endFrame);
         }
-
-        return this.getPlaybackFrameRange();
+        return { startFrame, endFrame };
     }
 
     public isUsingPlaybackRangeForOutput(): boolean {
@@ -668,16 +680,11 @@ export class ExportUiController {
 
     public getPlaybackFrameRange(): { startFrame: number; endFrame: number } {
         const maxFrame = this.getMaxOutputFrame();
-        const startRaw = Number.parseInt(this.elements.outputStartFrameInput?.value ?? String(this.outputState.startFrame), 10);
-        const endRaw = Number.parseInt(this.elements.outputEndFrameInput?.value ?? String(this.outputState.endFrame), 10);
-
-        let startFrame = Number.isFinite(startRaw) ? Math.floor(startRaw) : 0;
-        let endFrame = Number.isFinite(endRaw) ? Math.floor(endRaw) : maxFrame;
-
-        startFrame = Math.max(0, Math.min(maxFrame, startFrame));
-        endFrame = Math.max(startFrame, Math.min(maxFrame, endFrame));
-
-        this.setOutputFrameRangeValues(startFrame, endFrame);
+        const startFrame = Math.max(0, Math.min(maxFrame, Math.floor(this.playbackRangeState.startFrame)));
+        const endFrame = Math.max(startFrame, Math.min(maxFrame, Math.floor(this.playbackRangeState.endFrame)));
+        if (startFrame !== this.playbackRangeState.startFrame || endFrame !== this.playbackRangeState.endFrame) {
+            this.setPlaybackFrameRangeValues(startFrame, endFrame);
+        }
         return { startFrame, endFrame };
     }
 
@@ -693,8 +700,12 @@ export class ExportUiController {
         const current = this.getPlaybackFrameRange();
         const startFrame = boundary === "start" ? frame : current.startFrame;
         const endFrame = boundary === "end" ? frame : current.endFrame;
-        this.setOutputFrameRangeValues(startFrame, endFrame);
-        this.markOutputFrameRangeCustomized();
+        this.setPlaybackFrameRangeValues(startFrame, endFrame);
+        this.isPlaybackRangeCustomized = true;
+        if (this.outputState.usePlaybackRange) {
+            this.setOutputFrameRangeValues(startFrame, endFrame);
+            this.markOutputFrameRangeCustomized();
+        }
     }
 
     public setPlaybackFrameToggle(kind: "start" | "stop", enabled: boolean): void {
@@ -707,7 +718,7 @@ export class ExportUiController {
     }
 
     public getOutputFormState(): OutputFormState {
-        this.getPlaybackFrameRange();
+        this.getOutputFrameRange();
         return { ...this.outputState };
     }
 
@@ -734,6 +745,12 @@ export class ExportUiController {
             },
             setUsePlaybackRange: (value) => {
                 this.outputState.usePlaybackRange = value;
+            },
+            syncPlaybackRange: () => {
+                const range = this.getPlaybackFrameRange();
+                this.setOutputFrameRangeValues(range.startFrame, range.endFrame);
+                this.markOutputFrameRangeCustomized();
+                return this.getOutputFormState();
             },
             setStartFrame: (value) => {
                 this.outputState.startFrame = this.parseOutputFrameDraft(value, 0);
@@ -855,6 +872,16 @@ export class ExportUiController {
         if (this.elements.outputStartFrameInput) this.elements.outputStartFrameInput.value = String(normalizedStart);
         if (this.elements.outputEndFrameInput) this.elements.outputEndFrameInput.value = String(normalizedEnd);
         this.isSyncingFrameRange = false;
+    }
+
+    private setPlaybackFrameRangeValues(startFrame: number, endFrame: number): void {
+        const maxFrame = this.getMaxOutputFrame();
+        const normalizedStart = Math.max(0, Math.min(maxFrame, Math.floor(startFrame)));
+        const normalizedEnd = Math.max(normalizedStart, Math.min(maxFrame, Math.floor(endFrame)));
+        this.playbackRangeState = {
+            startFrame: normalizedStart,
+            endFrame: normalizedEnd,
+        };
     }
 
     private clampOutputWidth(value: number): number {
