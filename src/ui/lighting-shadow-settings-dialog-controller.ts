@@ -87,31 +87,6 @@ export class LightingShadowSettingsDialogController implements PopupContentContr
         });
         grid.appendChild(createPopupFormField(t("label.shadowQuality"), quality));
 
-        const penumbra = document.createElement("select");
-        penumbra.className = "popup-form-control";
-        [
-            { value: "0", label: t("option.off") },
-            { value: "1", label: t("option.on") },
-        ].forEach((entry) => {
-            const option = document.createElement("option");
-            option.value = entry.value;
-            option.textContent = entry.label;
-            penumbra.appendChild(option);
-        });
-        penumbra.value = this.mmdManager.shadowPenumbraEnabled ? "1" : "0";
-        penumbra.addEventListener("change", () => {
-            this.dispatchAction({ type: "effect.setShadowPenumbra", source: "menu", enabled: penumbra.value === "1" });
-            penumbra.value = this.mmdManager.shadowPenumbraEnabled ? "1" : "0";
-            this.refreshUi();
-        });
-        grid.appendChild(createPopupFormField(t("label.shadowPenumbra"), penumbra));
-
-        this.appendRange(grid, t("label.shadowPenumbraSize"), 1, 20, 1, this.mmdManager.shadowPenumbraSize * 100, (value) => (value / 100).toFixed(2), (value) => {
-            this.dispatchAction({ type: "effect.setShadowPenumbraSize", source: "menu", value: value / 100 });
-            this.refreshUi();
-            return this.mmdManager.shadowPenumbraSize.toFixed(2);
-        });
-
         this.appendRange(grid, t("label.shadowDarkness"), 0, 100, 1, this.mmdManager.shadowDarkness * 100, (value) => (value / 100).toFixed(2), (value) => {
             this.dispatchAction({ type: "effect.setShadowDarkness", source: "menu", value: value / 100 });
             this.refreshUi();

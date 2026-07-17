@@ -319,8 +319,17 @@ export class ShaderPanelController {
         if (!this.elements.modelSelect) return;
         const state = this.getInfoModelSelectState();
         this.elements.modelSelect.innerHTML = state.innerHTML;
-        this.elements.modelSelect.value = state.value;
-        this.elements.modelSelect.disabled = state.disabled;
+        for (const option of Array.from(this.elements.modelSelect.options)) {
+            if (option.value === CAMERA_SELECT_VALUE) {
+                option.remove();
+            }
+        }
+        const hasModelOption = this.elements.modelSelect.options.length > 0;
+        const hasStateValue = Array.from(this.elements.modelSelect.options).some((option) => option.value === state.value);
+        this.elements.modelSelect.value = hasStateValue
+            ? state.value
+            : (this.elements.modelSelect.options[0]?.value ?? "");
+        this.elements.modelSelect.disabled = state.disabled || !hasModelOption;
     }
 
     public getExternalWgslToonAsset(): { path: string | null; text: string | null } {
