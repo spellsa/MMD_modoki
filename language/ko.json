@@ -202,7 +202,7 @@
     "button.rigidBodies.title.on":  "전체 모델 강체 표시: ON (클릭하여 OFF)",
     "button.rigidBodies.title.off":  "전체 모델 강체 표시: OFF (클릭하여 ON)",
     "button.rigidBodies.title.unavailable":  "전체 모델 강체 표시: 사용할 수 없음",
-    "label.shadowMaxZ":  "그림자 거리",
+    "label.shadowMaxZ":  "그림자 범위",
     "label.shadowMode":  "그림자 방식",
     "button.applyAllMaterials":  "전체 재질에 할당",
     "button.resetAllMaterials":  "전체 재질을 표준화",

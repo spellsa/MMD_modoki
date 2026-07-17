@@ -59,23 +59,40 @@ describe("light direction serialization", () => {
 });
 
 describe("shadow projection range", () => {
-    it("keeps standard shadow frustum size independent from shadowMaxZ", () => {
+    it("expands standard shadow frustum from shadowMaxZ", () => {
         const host = createHost();
 
         setShadowFrustumSize(host, 220);
         setShadowMaxZ(host, 4800);
 
-        expect(host.dirLight.shadowFrustumSize).toBe(220);
+        expect(host.dirLight.shadowFrustumSize).toBe(1056);
         expect(host.dirLight.shadowMaxZ).toBe(4800);
     });
 
-    it("clamps aerial shadowMaxZ without expanding standard shadow frustum", () => {
+    it("clamps aerial shadowMaxZ and derived standard shadow frustum", () => {
         const host = createHost();
 
         setShadowMaxZ(host, 100000);
 
-        expect(host.dirLight.shadowFrustumSize).toBe(220);
+        expect(host.dirLight.shadowFrustumSize).toBe(2200);
         expect(host.dirLight.shadowMaxZ).toBe(10000);
+    });
+
+    it("keeps cascaded shadow frustum fixed while updating shadowMaxZ", () => {
+        const csmShadowGenerator = {
+            shadowMaxZ: 1000,
+        };
+        Object.setPrototypeOf(csmShadowGenerator, CascadedShadowGenerator.prototype);
+        const host = {
+            ...createHost(),
+            shadowGenerator: csmShadowGenerator,
+        };
+
+        setShadowMaxZ(host, 4800);
+
+        expect(host.dirLight.shadowFrustumSize).toBe(960);
+        expect(host.dirLight.shadowMaxZ).toBe(4800);
+        expect(host.shadowGenerator.shadowMaxZ).toBe(4800);
     });
 });
 

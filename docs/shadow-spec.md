@@ -135,7 +135,7 @@ PMX の材質フラグには、影に関するビットがあります。
 投影範囲の考え方:
 
 - 通常 `ShadowGenerator`:
-  - `dirLight.shadowFrustumSize = shadowFrustumSize`
+  - `dirLight.shadowFrustumSize = clamp(shadowMaxZ * 0.22)`
   - `dirLight.shadowMinZ = 1`
   - `dirLight.shadowMaxZ = shadowMaxZ`
 - `CascadedShadowGenerator`:
@@ -147,10 +147,11 @@ PMX の材質フラグには、影に関するビットがあります。
 補足:
 
 - 近景キャラと遠景背景で必要な影密度が異なるため、現行既定は CSM です。半透明影の見た目が崩れる場合の比較用として、通常 `ShadowGenerator` も残します。
-- 通常 `ShadowGenerator` では、`shadowFrustumSize` が投影幅、`shadowMaxZ` が深度方向の描画距離です。`shadowMaxZ` を投影幅に流用すると近景モデルの shadow map 密度が大きく落ちるため、両者は分離します。
+- 通常 `ShadowGenerator` では、表示中の `影描画範囲` スライダーが `shadowMaxZ` と派生 `shadowFrustumSize` の両方に効きます。既定の `1000 -> 220` を基準に、`shadowFrustumSize = clamp(shadowMaxZ * 0.22)` として投影幅も広げます。
 - ただし `CascadedShadowGenerator` 使用時は、現行仕様では `影範囲` フェーダーを無視します。
-- `shadowFrustumSize` は `影範囲` として UI に表示します。近景キャラの影を優先する場合は小さく、広いステージの落ち影を出す場合は大きくします。
+- hidden の `shadowFrustumSize` は旧 project / 内部互換用に残します。下パネルの通常操作では `影描画範囲` を使います。
 - `shadowMaxZ` を遠くしすぎると、近景の自己影や床影に使える精度が薄まります。
+- 単一 shadow map では範囲拡大と近景密度に限界があるため、広いステージでは CSM 推奨のままです。
 - 描画限界まで影を出すより、「演出上ほしい距離まで」に絞る方が見た目は安定しやすいです。
 
 ## 2026-05 半透明影の調整メモ
@@ -327,9 +328,9 @@ UI:
 - その代わり、近景の自己影や床影に割ける精度は落ちる
 - そのため、描画限界よりも「演出上必要な距離」を基準に調整するのが自然
 
-既定値は `1000` とし、影欄の `影描画距離` で調整できるようにしています。
+既定値は `1000` とし、影欄の `影描画範囲` で調整できるようにしています。
 Babylon.js 公式 CSM ドキュメントでは、camera の `maxZ` が大きすぎると CSM の cascade 分割が粗くなり shadow quality が落ちると説明されています。
-MMD_modoki では遠方ステージ表示との両立のため camera `maxZ` は `10000`、影描画距離の UI 上限も `10000` にします。
+MMD_modoki では遠方ステージ表示との両立のため camera `maxZ` は `10000`、影描画範囲の UI 上限も `10000` にします。
 新規既定の `shadowMaxZ = 1000` は、この far plane 全体を使い切らず、近景キャラと中距離ステージの影密度を優先するための値です。
 
 ## UI との関係
@@ -338,14 +339,14 @@ MMD_modoki では遠方ステージ表示との両立のため camera `maxZ` は
 
 - `index.html`
   - `#light-shadow`（影の薄さ、現状は非表示）
-  - `#light-shadow-frustum-size`（影範囲）
-  - `#light-shadow-max-z`（影描画距離）
+  - `#light-shadow-frustum-size`（影範囲、hidden / 旧 project 互換）
+  - `#light-shadow-max-z`（影描画範囲）
   - `#light-shadow-bias`（現状は非表示）
   - `#light-shadow-normal-bias`（現状は非表示）
 - `src/ui-controller.ts`
   - 起動時に `setShadowEnabled(true)` を適用（UI上は常時ON）
-  - `shadowFrustumSize` の更新
-  - `shadowMaxZ` の更新
+  - `shadowFrustumSize` の更新（hidden / 旧 project 互換）
+  - `shadowMaxZ` の更新（通常影では派生 `shadowFrustumSize` にも反映）
   - `shadowBias` / `shadowNormalBias` は内部値として保持
 - 情報欄
   - 選択中モデルごとに `影` チェックを持つ
@@ -456,7 +457,7 @@ PMX ステージで標準床より半影が硬く見える場合は、shadow map
 - 影方式: `cascaded`
 - 影の薄さ: `0.2`（Babylon.js `shadowGenerator.darkness`）
 - 影範囲: `220`
-- 影描画距離: `1000`
+- 影描画範囲: `1000`
 - 影ぼかし: `0`（UI非表示、通常 `ShadowGenerator` 用の互換値）
 - 半影: `OFF`
 - 半影サイズ: `0.08`（実験 ON 時の初期値）

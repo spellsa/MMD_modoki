@@ -202,7 +202,7 @@
     "button.rigidBodies.title.on":  "全模型刚体显示: ON（点击切到 OFF）",
     "button.rigidBodies.title.off":  "全模型刚体显示: OFF（点击切到 ON）",
     "button.rigidBodies.title.unavailable":  "全模型刚体显示: 不可用",
-    "label.shadowMaxZ":  "阴影距离",
+    "label.shadowMaxZ":  "阴影范围",
     "label.shadowMode":  "阴影模式",
     "button.applyAllMaterials":  "分配给全部材质",
     "button.resetAllMaterials":  "将全部材质恢复标准",

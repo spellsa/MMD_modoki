@@ -138,6 +138,7 @@ const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const MAX_SHADOW_MAX_Z = 10000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
 const DEFAULT_CSM_LIGHT_DISTANCE = 220;
+const STANDARD_SHADOW_FRUSTUM_SCALE_FROM_MAX_Z = 0.22;
 const DEFAULT_CSM_CASCADE_COUNT = 3;
 const DEFAULT_CSM_LAMBDA = 0.9;
 const DEFAULT_CSM_CASCADE_BLEND = 0.1;
@@ -147,6 +148,10 @@ const PCSS_CSM_CASCADE_BLEND = 0.2;
 const PCSS_CSM_LIGHT_SIZE_SCALE = 0.1;
 const PCSS_CSM_MAX_LIGHT_SIZE_UV_RATIO = 0.02;
 const PCSS_CSM_PENUMBRA_DARKNESS = 0.17;
+
+function getStandardShadowFrustumSize(host: LightShadowHost): number {
+    return clampShadowFrustumSize(clampShadowMaxZ(host.shadowMaxZValue) * STANDARD_SHADOW_FRUSTUM_SCALE_FROM_MAX_Z);
+}
 
 function applyShadowBiasSettings(host: LightShadowHost): void {
     if (!host.shadowGenerator) return;
@@ -645,7 +650,7 @@ export function applyShadowFrustumSize(host: LightShadowHost): void {
     const shadowMaxZ = clampShadowMaxZ(host.shadowMaxZValue);
     host.dirLight.shadowFrustumSize = csmEnabled
         ? DEFAULT_CSM_FRUSTUM_SIZE
-        : clampShadowFrustumSize(host.shadowFrustumSizeValue);
+        : getStandardShadowFrustumSize(host);
     host.dirLight.shadowMinZ = 1;
     host.dirLight.shadowMaxZ = shadowMaxZ;
     if (csmEnabled) {
@@ -681,7 +686,7 @@ export function setLightDirection(host: LightShadowHost, x: number, y: number, z
     host.dirLight.direction = direction;
     const dist = host.shadowGenerator instanceof CascadedShadowGenerator
         ? DEFAULT_CSM_LIGHT_DISTANCE
-        : Math.max(90, clampShadowFrustumSize(host.shadowFrustumSizeValue));
+        : Math.max(90, getStandardShadowFrustumSize(host));
     host.dirLight.position = new Vector3(
         -direction.x * dist,
         Math.abs(direction.y) * dist + 5,
