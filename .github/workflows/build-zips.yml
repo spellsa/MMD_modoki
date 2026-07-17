@@ -96,8 +96,14 @@ jobs:
           if [ -n "${FORGE_ARCH}" ]; then
             PACKAGE_DIR="$PACKAGE_DIR/${FORGE_ARCH}"
           fi
-          shopt -s nullglob globstar
-          packages=("$PACKAGE_DIR"/**/*."$RELEASE_EXT")
+          if [ ! -d "$PACKAGE_DIR" ]; then
+            echo "Package directory not found: $PACKAGE_DIR"
+            exit 1
+          fi
+          packages=()
+          while IFS= read -r -d '' package; do
+            packages+=("$package")
+          done < <(find "$PACKAGE_DIR" -type f -name "*.${RELEASE_EXT}" -print0)
           if [ "${#packages[@]}" -ne 1 ]; then
             echo "Expected exactly one .$RELEASE_EXT file under $PACKAGE_DIR, found:"
             printf '  %s\n' "${packages[@]}"
