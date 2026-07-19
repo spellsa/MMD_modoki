@@ -34,6 +34,9 @@ function createActivationSettings(
         offsetHighlightStrength: 0.55,
         ssrEnabled: false,
         ssrStrength: 0.3,
+        ssgiEnabled: false,
+        ssgiStrength: 0.3,
+        ssgiSampleRadius: 64,
         ...overrides,
     };
 }
@@ -59,6 +62,7 @@ describe("frame graph post effect stack helpers", () => {
     });
 
     it("inserts new ids by canonical order", () => {
+        expect(addFrameGraphPostEffectId(["ssr", "ssao"], "ssgi")).toEqual(["ssr", "ssgi", "ssao"]);
         expect(addFrameGraphPostEffectId(["ssao", "lut"], "bloom")).toEqual(["ssao", "bloom", "lut"]);
         expect(addFrameGraphPostEffectId(["dof", "bloom"], "luminous")).toEqual(["dof", "luminous", "bloom"]);
         expect(addFrameGraphPostEffectId(["ssao", "bloom"], "distortion")).toEqual(["ssao", "bloom", "distortion"]);
@@ -84,6 +88,8 @@ describe("frame graph post effect stack helpers", () => {
             ssaoStrength: 0,
             ssrEnabled: true,
             ssrStrength: 0.2,
+            ssgiEnabled: true,
+            ssgiStrength: 0,
             vignetteEnabled: true,
             vignetteWeight: 0,
             edgeBlurStrength: 0.25,
@@ -94,6 +100,7 @@ describe("frame graph post effect stack helpers", () => {
         expect(isFrameGraphPostEffectActiveInSettings(settings, "dof")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "luminous")).toBe(false);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "ssao")).toBe(false);
+        expect(isFrameGraphPostEffectActiveInSettings(settings, "ssgi")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "offsetShadow")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "offsetHighlight")).toBe(true);
         expect(isFrameGraphPostEffectActiveInSettings(settings, "edgeBlur")).toBe(true);
@@ -115,8 +122,9 @@ describe("frame graph post effect stack helpers", () => {
             offsetHighlightEnabled: true,
             ssrEnabled: true,
             ssrStrength: 0.4,
+            ssgiEnabled: true,
             lutEnabled: true,
-        }))).toEqual(["ssr", "offsetShadow", "offsetHighlight", "bloom", "lut", "grain"]);
+        }))).toEqual(["ssr", "ssgi", "offsetShadow", "offsetHighlight", "bloom", "lut", "grain"]);
     });
 });
 

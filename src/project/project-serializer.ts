@@ -6,6 +6,7 @@ import type {
     ProjectMotionImport,
     ProjectSerializedCameraExternalParentTrack,
     ProjectSerializedAccessoryTransformTrack,
+    SsgiBlendMode,
 } from "../types";
 import type { FrameGraphPostEffectStackEntry } from "../shared/frame-graph-post-effect-stack";
 import { serializeCameraTrack, serializeModelAnimation } from "./project-codec";
@@ -161,6 +162,9 @@ type ProjectExportHost = {
     postEffectSsrEnabled: boolean;
     postEffectSsrStrength: number;
     postEffectSsrStep: number;
+    postEffectSsgiStrength: number;
+    postEffectSsgiSampleRadius: number;
+    postEffectSsgiBlendMode: SsgiBlendMode;
     postEffectVlsEnabled: boolean;
     postEffectVlsExposure: number;
     postEffectVlsDecay: number;
@@ -456,6 +460,9 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             ssrEnabled: host.postEffectSsrEnabled,
             ssrStrength: host.postEffectSsrStrength,
             ssrStep: host.postEffectSsrStep,
+            ssgiStrength: host.postEffectSsgiStrength,
+            ssgiSampleRadius: host.postEffectSsgiSampleRadius,
+            ssgiBlendMode: "softLight",
             vlsEnabled: host.postEffectVlsEnabled,
             vlsExposure: host.postEffectVlsExposure,
             vlsDecay: host.postEffectVlsDecay,

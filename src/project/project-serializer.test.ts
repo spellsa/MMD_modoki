@@ -171,6 +171,9 @@ function createHost() {
         postEffectSsrEnabled: false,
         postEffectSsrStrength: 0.3,
         postEffectSsrStep: 4,
+        postEffectSsgiStrength: 0.3,
+        postEffectSsgiSampleRadius: 64,
+        postEffectSsgiBlendMode: "softLight" as const,
         postEffectVlsEnabled: false,
         postEffectVlsExposure: 0.3,
         postEffectVlsDecay: 0.95,
@@ -192,6 +195,21 @@ function createHost() {
 }
 
 describe("exportProjectState", () => {
+    it("writes SSGI tuning independently from the stack enabled state", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            postEffectSsgiStrength: 0.65,
+            postEffectSsgiSampleRadius: 48,
+            postEffectSsgiBlendMode: "overlay",
+            getFrameGraphPostEffectStackEntries: () => [{ id: "ssgi", enabled: false }],
+        });
+
+        expect(project.effects.ssgiStrength).toBe(0.65);
+        expect(project.effects.ssgiSampleRadius).toBe(48);
+        expect(project.effects.ssgiBlendMode).toBe("softLight");
+        expect(project.effects.frameGraphPostStack).toEqual([{ id: "ssgi", enabled: false }]);
+    });
+
     it("writes light direction as x/y/z instead of Babylon backing fields", () => {
         const project = exportProjectState(createHost());
 

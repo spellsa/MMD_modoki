@@ -64,6 +64,7 @@ import type {
     ProjectModelMaterialShaderState,
     KeyframeTrack,
     MirroringFloorShape,
+    SsgiBlendMode,
     WebmInitialPhysicsState,
 } from "./types";
 import type { IMmdBindableCameraAnimation } from "babylon-mmd/esm/Runtime/Animation/IMmdBindableAnimation";
@@ -1720,6 +1721,8 @@ ${beforeFogAppendBlock}
     private postEffectSsrEnabledValue = false;
     private postEffectSsrStrengthValue = 0.3;
     private postEffectSsrStepValue = 4;
+    private postEffectSsgiStrengthValue = 0.3;
+    private postEffectSsgiSampleRadiusValue = 64;
     private postEffectVlsEnabledValue = false;
     private postEffectVlsExposureValue = 0.3;
     private postEffectVlsDecayValue = 0.95;
@@ -1734,6 +1737,7 @@ ${beforeFogAppendBlock}
     private postEffectFogColorValue = new Color3(0.04, 0.04, 0.06);
     private frameGraphPostEffectStackIdsValue: FrameGraphPostEffectId[] = [];
     private frameGraphPostEffectStackEnabledValue = new Map<FrameGraphPostEffectId, boolean>();
+    private frameGraphPostEffectStackInitializedValue = false;
     private antialiasEnabledValue = true;
     private postEffectFarDofStrengthValue = 0;
     private readonly farDofEnabled = false;
@@ -1754,6 +1758,7 @@ ${beforeFogAppendBlock}
     private frameGraphPostEffectsLuminousMaskMaterial: StandardMaterial | null = null;
     private frameGraphPostEffectsLuminousMaskRenderedSubMeshCount = 0;
     private frameGraphPostEffectsLuminousMaskZeroWarningEmitted = false;
+    private frameGraphPostEffectsSsgiUnsupportedWarningEmitted = false;
     private originFogPostProcess: PostProcess | null = null;
     private finalAntialiasPostProcess: FxaaPostProcess | null = null;
     private finalLensDistortionPostProcess: PostProcess | null = null;
@@ -7257,6 +7262,9 @@ ${beforeFogAppendBlock}
 
     private clearProjectForImport(): void {
         this.pause();
+        this.frameGraphPostEffectStackIdsValue = [];
+        this.frameGraphPostEffectStackEnabledValue.clear();
+        this.frameGraphPostEffectStackInitializedValue = false;
         (this as unknown as { clearAccessories?: () => void }).clearAccessories?.();
         this.clearBackgroundMedia();
 
@@ -7853,6 +7861,23 @@ ${beforeFogAppendBlock}
             return;
         }
 
+        const ssgiRequested = this.isFrameGraphPostEffectActive("ssgi");
+        const ssgiSupported = this.isWebGpuEngine() && this.engine.getCaps().supportComputeShaders;
+        if (
+            ssgiRequested
+            && !ssgiSupported
+            && !this.frameGraphPostEffectsSsgiUnsupportedWarningEmitted
+        ) {
+            this.frameGraphPostEffectsSsgiUnsupportedWarningEmitted = true;
+            const message = "GI (experimental) requires WebGPU compute shaders and is disabled on this renderer.";
+            logWarn("render", "frame graph SSGI disabled on unsupported renderer", {
+                engine: this.getEngineType(),
+                requested: true,
+                supportComputeShaders: this.engine.getCaps().supportComputeShaders,
+            });
+            this.addRuntimeDiagnostic(message);
+        }
+
         this.frameGraphPostEffectsController = new FrameGraphPostEffectsController((warning) => {
             logWarn("render", "frame graph post effect backend requested but not active", {
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
@@ -7866,6 +7891,13 @@ ${beforeFogAppendBlock}
             this.disposeFrameGraphPostEffectsLuminousMaskTarget();
             this.postEffectBackend = "classic";
         }, (info) => {
+            if (info.event === "ssgi-ready") {
+                logInfo("render", "frame graph SSGI task active", {
+                    ...info.details,
+                    storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
+                });
+                return;
+            }
             logDebugIfEnabled("postfx", "render", "frame graph post effect backend", {
                 event: info.event,
                 storageKey: POST_EFFECT_BACKEND_STORAGE_KEY,
@@ -7980,6 +8012,12 @@ ${beforeFogAppendBlock}
             ssrEnabled: this.isFrameGraphPostEffectActive("ssr"),
             ssrStrength: this.postEffectSsrStrengthValue,
             ssrStep: this.postEffectSsrStepValue,
+            ssgiEnabled: this.isFrameGraphPostEffectActive("ssgi")
+                && this.isWebGpuEngine()
+                && this.engine.getCaps().supportComputeShaders,
+            ssgiStrength: this.postEffectSsgiStrengthValue,
+            ssgiSampleRadius: this.postEffectSsgiSampleRadiusValue,
+            ssgiBlendMode: "softLight",
             lutEnabled: this.isFrameGraphPostEffectActive("lut") && isLutSourceReadyImpl(this),
             lutIntensity: this.postEffectLutIntensityValue,
             lutRuntimeText: this.getFrameGraphPostEffectLutRuntimeText(),
@@ -8370,12 +8408,15 @@ ${beforeFogAppendBlock}
     public getFrameGraphPostEffectStackIds(): readonly FrameGraphPostEffectId[] {
         return normalizeFrameGraphPostEffectIds(
             this.frameGraphPostEffectStackIdsValue,
-            this.getParameterActiveFrameGraphPostEffectIds(),
+            this.frameGraphPostEffectStackInitializedValue
+                ? []
+                : this.getParameterActiveFrameGraphPostEffectIds(),
         );
     }
 
     public setFrameGraphPostEffectStackIds(ids: readonly FrameGraphPostEffectId[]): void {
         const normalized = normalizeFrameGraphPostEffectIds(ids);
+        this.frameGraphPostEffectStackInitializedValue = true;
         if (this.areFrameGraphPostEffectIdsEqual(this.frameGraphPostEffectStackIdsValue, normalized)) {
             return;
         }
@@ -8396,6 +8437,7 @@ ${beforeFogAppendBlock}
 
     public setFrameGraphPostEffectStackEntries(entries: readonly FrameGraphPostEffectStackEntry[]): void {
         const normalized = normalizeFrameGraphPostEffectIds(entries.map((entry) => entry.id));
+        this.frameGraphPostEffectStackInitializedValue = true;
         const enabledById = new Map<FrameGraphPostEffectId, boolean>();
         for (const entry of entries) {
             if (normalized.includes(entry.id) && !enabledById.has(entry.id)) {
@@ -8464,6 +8506,8 @@ ${beforeFogAppendBlock}
         switch (id) {
             case "ssr":
                 return this.postEffectSsrEnabledValue;
+            case "ssgi":
+                return false;
             case "ssao":
                 return this.postEffectSsaoEnabledValue;
             case "offsetShadow":
@@ -9401,6 +9445,36 @@ ${beforeFogAppendBlock}
     }
     set postEffectSsrStep(v: number) {
         setPostEffectSsrStepImpl(this, v);
+    }
+
+    /** Single-frame SSGI contribution strength (0..1). */
+    get postEffectSsgiStrength(): number {
+        return this.postEffectSsgiStrengthValue;
+    }
+    set postEffectSsgiStrength(v: number) {
+        const value = Number(v);
+        this.postEffectSsgiStrengthValue = Number.isFinite(value)
+            ? Math.max(0, Math.min(1, value))
+            : 0.3;
+    }
+
+    /** Single-frame SSGI sample radius in full-resolution pixels (1..256). */
+    get postEffectSsgiSampleRadius(): number {
+        return this.postEffectSsgiSampleRadiusValue;
+    }
+    set postEffectSsgiSampleRadius(v: number) {
+        const value = Number(v);
+        this.postEffectSsgiSampleRadiusValue = Number.isFinite(value)
+            ? Math.max(1, Math.min(256, value))
+            : 64;
+    }
+
+    /** Single-frame SSGI composite is fixed to Soft Light. */
+    get postEffectSsgiBlendMode(): SsgiBlendMode {
+        return "softLight";
+    }
+    set postEffectSsgiBlendMode(_v: SsgiBlendMode) {
+        // Retain the project-host property while older saved mode values are ignored.
     }
 
     /** Volumetric light enabled state. */

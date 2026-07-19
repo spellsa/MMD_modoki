@@ -225,6 +225,12 @@ const FRAME_GRAPH_POST_ADD_EFFECTS: readonly FrameGraphPostAddEffect[] = [
         setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssr", active); },
     },
     {
+        id: "ssgi",
+        labelKey: "effect.frameGraphPost.effects.ssgi",
+        isActive: (manager) => manager.isFrameGraphPostEffectActive("ssgi"),
+        setActive: (manager, active) => { manager.setFrameGraphPostEffectStackEntryEnabled("ssgi", active); },
+    },
+    {
         id: "ssao",
         labelKey: "effect.frameGraphPost.effects.ssao",
         isActive: (manager) => manager.isFrameGraphPostEffectActive("ssao"),
@@ -4144,6 +4150,13 @@ export class UIController {
             if (actionButton) {
                 const action = actionButton.dataset.effectStackAction ?? "";
                 void this.applyFrameGraphPostStackAction(action);
+                return;
+            }
+
+            const removeButton = target?.closest<HTMLButtonElement>("[data-effect-stack-remove]") ?? null;
+            const removeEffectId = removeButton?.dataset.effectStackRemove ?? "";
+            if (removeButton && this.isFrameGraphPostAddEffectId(removeEffectId)) {
+                this.removeFrameGraphPostEffect(removeEffectId);
             }
         });
 
@@ -4287,6 +4300,8 @@ export class UIController {
                 this.mmdManager.postEffectSsrStrength = Math.max(this.mmdManager.postEffectSsrStrength, 1);
                 this.mmdManager.postEffectSsrStep = Math.max(this.mmdManager.postEffectSsrStep, 4);
                 break;
+            case "ssgi":
+                break;
             case "vignette":
                 this.mmdManager.postEffectVignetteWeight = Math.max(this.mmdManager.postEffectVignetteWeight, 2);
                 break;
@@ -4343,6 +4358,8 @@ export class UIController {
             case "ssr":
                 this.mmdManager.postEffectSsrEnabled = true;
                 break;
+            case "ssgi":
+                break;
             case "vignette":
                 this.mmdManager.postEffectVignetteEnabled = true;
                 break;
@@ -4367,6 +4384,23 @@ export class UIController {
         this.expandedFrameGraphPostEffectId = effectId;
         this.refreshFrameGraphPostAddUi();
         this.showToast(t("effect.frameGraphPost.effectAdded", { name: this.getFrameGraphPostEffectLabel(effectId) }), "success");
+    }
+
+    private removeFrameGraphPostEffect(effectId: FrameGraphPostAddEffectId): void {
+        const currentStackIds = [...this.mmdManager.getFrameGraphPostEffectStackIds()];
+        if (!currentStackIds.includes(effectId)) {
+            return;
+        }
+        this.mmdManager.setFrameGraphPostEffectStackIds(
+            currentStackIds.filter((id) => id !== effectId),
+        );
+        if (this.expandedFrameGraphPostEffectId === effectId) {
+            this.expandedFrameGraphPostEffectId = null;
+        }
+        this.refreshFrameGraphPostAddUi();
+        this.showToast(t("effect.frameGraphPost.effectRemoved", {
+            name: this.getFrameGraphPostEffectLabel(effectId),
+        }), "success");
     }
 
     private setFrameGraphPostEffectEnabled(effectId: FrameGraphPostAddEffectId, enabled: boolean): void {
@@ -4727,6 +4761,12 @@ export class UIController {
                     range("ssaoRadius", label("radius"), 1, 500, Math.round(this.mmdManager.postEffectSsaoRadius * 100), this.mmdManager.postEffectSsaoRadius.toFixed(2)),
                 );
                 break;
+            case "ssgi":
+                rows.push(
+                    range("ssgiStrength", label("strength"), 0, 100, Math.round(this.mmdManager.postEffectSsgiStrength * 100), this.mmdManager.postEffectSsgiStrength.toFixed(2)),
+                    range("ssgiSampleRadius", label("radius"), 1, 256, Math.round(this.mmdManager.postEffectSsgiSampleRadius), `${Math.round(this.mmdManager.postEffectSsgiSampleRadius)}px`),
+                );
+                break;
             case "offsetShadow": {
                 const offsetShadowColor = this.toEffectStackHexColor(this.mmdManager.getPostEffectOffsetShadowColor());
                 rows.push(
@@ -4781,6 +4821,11 @@ export class UIController {
         return `
             <div class="effect-layer-detail-controls">
                 ${rows.join("")}
+                <div class="effect-layer-control-row">
+                    <span class="effect-layer-control-label"></span>
+                    <button class="effect-layer-control-button" type="button" data-effect-stack-remove="${effect.id}">${this.escapeEffectStackHtml(t("effect.frameGraphPost.remove"))}</button>
+                    <span class="effect-layer-control-value"></span>
+                </div>
             </div>
         `;
     }
@@ -4890,6 +4935,12 @@ export class UIController {
                 break;
             case "ssaoRadius":
                 this.mmdManager.postEffectSsaoRadius = Number(rawValue) / 100;
+                break;
+            case "ssgiStrength":
+                this.mmdManager.postEffectSsgiStrength = Number(rawValue) / 100;
+                break;
+            case "ssgiSampleRadius":
+                this.mmdManager.postEffectSsgiSampleRadius = Number(rawValue);
                 break;
             case "offsetShadowStrength":
                 this.mmdManager.postEffectOffsetShadowStrength = Number(rawValue) / 100;
@@ -5022,6 +5073,9 @@ export class UIController {
             case "ssaoStrength":
             case "ssaoRadius":
                 return "ssao";
+            case "ssgiStrength":
+            case "ssgiSampleRadius":
+                return "ssgi";
             case "offsetShadowStrength":
             case "offsetShadowOffsetX":
             case "offsetShadowOffsetY":
@@ -5138,6 +5192,12 @@ export class UIController {
                 break;
             case "ssaoRadius":
                 valueElement.textContent = this.mmdManager.postEffectSsaoRadius.toFixed(2);
+                break;
+            case "ssgiStrength":
+                valueElement.textContent = this.mmdManager.postEffectSsgiStrength.toFixed(2);
+                break;
+            case "ssgiSampleRadius":
+                valueElement.textContent = `${Math.round(this.mmdManager.postEffectSsgiSampleRadius)}px`;
                 break;
             case "offsetShadowStrength":
                 valueElement.textContent = this.mmdManager.postEffectOffsetShadowStrength.toFixed(2);

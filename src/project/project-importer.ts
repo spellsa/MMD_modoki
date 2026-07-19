@@ -6,6 +6,7 @@ import type {
     ProjectSerializedAccessoryTransformTrack,
     ProjectSerializedCameraExternalParentTrack,
     ProjectSerializedModelAnimation,
+    SsgiBlendMode,
 } from "../types";
 import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { createCameraAnimationFromTrack, deserializeCameraTrack, deserializeModelAnimation } from "./project-codec";
@@ -208,6 +209,9 @@ type ProjectImportHost = {
     postEffectSsrEnabled: boolean;
     postEffectSsrStrength: number;
     postEffectSsrStep: number;
+    postEffectSsgiStrength: number;
+    postEffectSsgiSampleRadius: number;
+    postEffectSsgiBlendMode: SsgiBlendMode;
     postEffectVlsEnabled: boolean;
     postEffectVlsExposure: number;
     postEffectVlsDecay: number;
@@ -1004,6 +1008,15 @@ export async function importProjectState(
     host.postEffectSsrStep = typeof data.effects.ssrStep === "number" && Number.isFinite(data.effects.ssrStep)
         ? data.effects.ssrStep
         : 4;
+    host.postEffectSsgiStrength = Math.max(0, Math.min(
+        1,
+        readFiniteNumber(data.effects.ssgiStrength, 0.3),
+    ));
+    host.postEffectSsgiSampleRadius = Math.max(1, Math.min(
+        256,
+        readFiniteNumber(data.effects.ssgiSampleRadius, 64),
+    ));
+    host.postEffectSsgiBlendMode = "softLight";
     host.postEffectVlsEnabled = typeof data.effects.vlsEnabled === "boolean"
         ? data.effects.vlsEnabled
         : false;

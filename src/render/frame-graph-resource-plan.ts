@@ -83,6 +83,11 @@ export function buildFrameGraphResourcePlan(
         addConsumer(consumersByKey, "reflectivity", "ssr");
     }
 
+    if (activeEffects.includes("ssgi")) {
+        addConsumer(consumersByKey, "viewDepth", "ssgi");
+        addConsumer(consumersByKey, "viewNormal", "ssgi");
+    }
+
     if (activeEffects.includes("ssao")) {
         addConsumer(consumersByKey, "viewDepth", "ssao");
         addConsumer(consumersByKey, "viewNormal", "ssao");

@@ -70,6 +70,7 @@ export interface ElectronAPI {
 }
 
 export type UiLocale = "ja" | "en" | "zh-Hant" | "zh-Hans" | "ko";
+export type SsgiBlendMode = "additive" | "softLight" | "overlay";
 
 export type AppLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -434,6 +435,9 @@ export interface ProjectEffectState {
     ssrEnabled?: boolean;
     ssrStrength?: number;
     ssrStep?: number;
+    ssgiStrength?: number;
+    ssgiSampleRadius?: number;
+    ssgiBlendMode?: SsgiBlendMode;
     vlsEnabled?: boolean;
     vlsExposure?: number;
     vlsDecay?: number;

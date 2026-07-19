@@ -32,6 +32,7 @@ import { ThinSharpenPostProcess } from "@babylonjs/core/PostProcesses/thinSharpe
 import { ThinBlurPostProcess } from "@babylonjs/core/PostProcesses/thinBlurPostProcess";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
+import type { SsgiBlendMode } from "../types";
 import { createLutAtlasTextureFrom3dlText } from "./lut-atlas-texture";
 import {
     FRAME_GRAPH_POST_EFFECT_IDS,
@@ -44,6 +45,17 @@ import {
     type FrameGraphResourcePlan,
     type FrameGraphSharedResourceKey,
 } from "./frame-graph-resource-plan";
+import {
+    FrameGraphPostEffectsSsgiCompositeTask,
+    FrameGraphPostEffectsSsgiDenoiseTask,
+    FrameGraphPostEffectsSsgiGatherTask,
+} from "./frame-graph-ssgi-task";
+import {
+    ensureFrameGraphSsgiShaders,
+    FRAME_GRAPH_SSGI_METHOD_NAME,
+} from "./frame-graph-ssgi-shaders";
+
+const SSGI_DENOISE_STEP_WIDTHS = [1, 2, 4] as const;
 
 export type FrameGraphPostEffectsWarning = {
     message: string;
@@ -53,7 +65,8 @@ export type FrameGraphPostEffectsWarning = {
 
 export type FrameGraphPostEffectsInfo = {
     message: string;
-    event: "activated" | "ready";
+    event: "activated" | "ready" | "ssgi-ready";
+    details?: Record<string, unknown>;
 };
 
 type EffectWrapperReadyLike = {
@@ -88,6 +101,9 @@ export type FrameGraphPostEffectsDiagnosticsSnapshot = {
         imageProcessing: boolean;
         geometryRenderer: boolean;
         ssr: boolean;
+        ssgiGather: boolean;
+        ssgiDenoise: boolean;
+        ssgiComposite: boolean;
         ssao: boolean;
         ssaoToonComposite: boolean;
         offsetShadow: boolean;
@@ -113,6 +129,8 @@ export type FrameGraphPostEffectsDiagnosticsSnapshot = {
         viewDepth: boolean;
         viewNormal: boolean;
         reflectivity: boolean;
+        ssgiHalfResolution: boolean;
+        ssgiDenoisedHalfResolution: boolean;
         depthOfField: boolean;
         luminousExtract: boolean;
         luminousCoreBlur: boolean;
@@ -187,6 +205,10 @@ export type FrameGraphPostEffectsSettings = {
     ssrEnabled: boolean;
     ssrStrength: number;
     ssrStep: number;
+    ssgiEnabled: boolean;
+    ssgiStrength: number;
+    ssgiSampleRadius: number;
+    ssgiBlendMode: SsgiBlendMode;
     lutEnabled: boolean;
     lutIntensity: number;
     lutRuntimeText: string | null;
@@ -1865,6 +1887,10 @@ export class FrameGraphPostEffectsController {
     private imageProcessingTask: FrameGraphImageProcessingTask | null = null;
     private geometryRendererTask: FrameGraphGeometryRendererTask | null = null;
     private resourcePlan: FrameGraphResourcePlan | null = null;
+    private ssgiGatherTask: FrameGraphPostEffectsSsgiGatherTask | null = null;
+    private readonly ssgiDenoiseTasks: FrameGraphPostEffectsSsgiDenoiseTask[] = [];
+    private ssgiCompositeEffect: EffectWrapper | null = null;
+    private ssgiCompositeTask: FrameGraphPostEffectsSsgiCompositeTask | null = null;
     private ssaoTask: FrameGraphSSAO2RenderingPipelineTask | null = null;
     private ssaoToonCompositeEffect: EffectWrapper | null = null;
     private ssaoToonCompositeTask: FrameGraphPostEffectsSsaoToonCompositeTask | null = null;
@@ -1976,6 +2002,10 @@ export class FrameGraphPostEffectsController {
             ssrEnabled: false,
             ssrStrength: 0.3,
             ssrStep: 4,
+            ssgiEnabled: false,
+            ssgiStrength: 0.3,
+            ssgiSampleRadius: 64,
+            ssgiBlendMode: "softLight",
             lutEnabled: false,
             lutIntensity: 1,
             lutRuntimeText: null,
@@ -2029,6 +2059,9 @@ export class FrameGraphPostEffectsController {
                 imageProcessing: this.imageProcessingTask !== null,
                 geometryRenderer: this.geometryRendererTask !== null,
                 ssr: this.ssrTask !== null,
+                ssgiGather: this.ssgiGatherTask !== null,
+                ssgiDenoise: this.ssgiDenoiseTasks.length === SSGI_DENOISE_STEP_WIDTHS.length,
+                ssgiComposite: this.ssgiCompositeTask !== null,
                 ssao: this.ssaoTask !== null,
                 ssaoToonComposite: this.ssaoToonCompositeTask !== null,
                 offsetShadow: this.offsetShadowTask !== null,
@@ -2056,6 +2089,9 @@ export class FrameGraphPostEffectsController {
                 viewDepth: this.geometryRendererTask !== null,
                 viewNormal: this.geometryRendererTask !== null,
                 reflectivity: this.geometryRendererTask !== null && this.ssrTask !== null,
+                ssgiHalfResolution: this.ssgiGatherTask !== null,
+                ssgiDenoisedHalfResolution:
+                    this.ssgiDenoiseTasks.length === SSGI_DENOISE_STEP_WIDTHS.length,
                 depthOfField: this.depthOfFieldTask !== null,
                 luminousExtract: this.luminousExtractTask !== null,
                 luminousCoreBlur: this.luminousCoreBlurVerticalTask !== null,
@@ -2097,6 +2133,7 @@ export class FrameGraphPostEffectsController {
         ensureSsaoToonCompositeShaders();
         ensureVignetteEdgeBlurShaders();
         ensureLensDistortionShaders();
+        ensureFrameGraphSsgiShaders();
 
         const frameGraph = new FrameGraph(scene, false);
         frameGraph.name = "MMD modoki post effects";
@@ -2235,6 +2272,80 @@ export class FrameGraphPostEffectsController {
                 this.ssrTask = ssrTask;
                 ssaoSourceTexture = ssrTask.outputTexture;
                 dofSourceTexture = ssrTask.outputTexture;
+            }
+
+            const ssgiSupported = frameGraph.engine.isWebGPU
+                && frameGraph.engine.getCaps().supportComputeShaders;
+            if (this.isPostEffectActive(initialSettings, "ssgi") && ssgiSupported) {
+                const getSsgiSettings = () => {
+                    const settings = this.getSettings();
+                    return {
+                        strength: settings.ssgiStrength,
+                        sampleRadius: settings.ssgiSampleRadius,
+                        blendMode: settings.ssgiBlendMode,
+                    };
+                };
+                const ssgiGatherTask = new FrameGraphPostEffectsSsgiGatherTask(
+                    "frameGraphPostEffectsSsgiGather",
+                    frameGraph,
+                    sourceTextureSize.width,
+                    sourceTextureSize.height,
+                    camera,
+                    getSsgiSettings,
+                );
+                ssgiGatherTask.sourceTexture = ssaoSourceTexture;
+                ssgiGatherTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+                ssgiGatherTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+                ssgiGatherTask.disabled = false;
+                frameGraph.addTask(ssgiGatherTask);
+                this.ssgiGatherTask = ssgiGatherTask;
+
+                let denoisedSsgiTexture = ssgiGatherTask.outputTexture;
+                for (const [passIndex, stepWidth] of SSGI_DENOISE_STEP_WIDTHS.entries()) {
+                    const denoiseTask = new FrameGraphPostEffectsSsgiDenoiseTask(
+                        `frameGraphPostEffectsSsgiDenoise${passIndex + 1}`,
+                        frameGraph,
+                        sourceTextureSize.width,
+                        sourceTextureSize.height,
+                        ssgiGatherTask.outputWidth,
+                        ssgiGatherTask.outputHeight,
+                        stepWidth,
+                    );
+                    denoiseTask.sourceTexture = denoisedSsgiTexture;
+                    denoiseTask.sceneColorTexture = ssaoSourceTexture;
+                    denoiseTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+                    denoiseTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+                    denoiseTask.disabled = false;
+                    frameGraph.addTask(denoiseTask);
+                    this.ssgiDenoiseTasks.push(denoiseTask);
+                    denoisedSsgiTexture = denoiseTask.outputTexture;
+                }
+
+                this.ssgiCompositeEffect = new EffectWrapper({
+                    engine: frameGraph.engine,
+                    fragmentShader: "mmdFrameGraphSsgiComposite",
+                    useShaderStore: true,
+                    useAsPostProcess: true,
+                    uniforms: ["strength", "blendMode"],
+                    samplers: ["ssgiTexture", "viewDepthTexture", "viewNormalTexture"],
+                    name: "mmdFrameGraphSsgiComposite",
+                    shaderLanguage: ShaderLanguage.WGSL,
+                });
+                const ssgiCompositeTask = new FrameGraphPostEffectsSsgiCompositeTask(
+                    "frameGraphPostEffectsSsgiComposite",
+                    frameGraph,
+                    this.ssgiCompositeEffect,
+                    getSsgiSettings,
+                );
+                ssgiCompositeTask.sourceTexture = ssaoSourceTexture;
+                ssgiCompositeTask.ssgiTexture = denoisedSsgiTexture;
+                ssgiCompositeTask.depthTexture = geometryRendererTask.geometryViewDepthTexture;
+                ssgiCompositeTask.normalTexture = geometryRendererTask.geometryViewNormalTexture;
+                ssgiCompositeTask.disabled = false;
+                frameGraph.addTask(ssgiCompositeTask);
+                this.ssgiCompositeTask = ssgiCompositeTask;
+                ssaoSourceTexture = ssgiCompositeTask.outputTexture;
+                dofSourceTexture = ssgiCompositeTask.outputTexture;
             }
 
             if (this.isPostEffectActive(initialSettings, "ssao")) {
@@ -2694,11 +2805,32 @@ export class FrameGraphPostEffectsController {
         this.activeScene = scene;
         this.active = true;
         this.onInfo?.({
-            message: "Frame Graph post effects backend active (image processing + SSAO2 + DoF + Luminous + Bloom + LUT + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
+            message: "Frame Graph post effects backend active (image processing + SSGI + SSAO2 + DoF + Luminous + Bloom + LUT + color correction + Sharpen + Grain + Chromatic Aberration + Vignette + EdgeBlur + Lens Distortion + FXAA).",
             event: "activated",
         });
         void this.frameGraph.buildAsync().then(() => {
             this.ready = true;
+            if (this.ssgiGatherTask) {
+                const report = this.ssgiGatherTask.getResolutionReport();
+                this.onInfo?.({
+                    message: "Frame Graph SSGI task ready.",
+                    event: "ssgi-ready",
+                    details: {
+                        method: FRAME_GRAPH_SSGI_METHOD_NAME,
+                        blendMode: this.getSettings().ssgiBlendMode,
+                        resolution: report.output,
+                        inputs: report.inputs,
+                        inputsResolved: report.resolved,
+                        denoiser: {
+                            method: "spatial-a-trous",
+                            passes: this.ssgiDenoiseTasks.length,
+                            stepWidths: [...SSGI_DENOISE_STEP_WIDTHS],
+                            guides: ["sceneColor", "viewDepth", "viewNormal"],
+                            history: false,
+                        },
+                    },
+                });
+            }
             this.onInfo?.({
                 message: "Frame Graph post effects backend ready.",
                 event: "ready",
@@ -2776,6 +2908,16 @@ export class FrameGraphPostEffectsController {
         if (this.ssrTask) {
             this.ssrTask.disabled = !this.isPostEffectActive(settings, "ssr");
             this.applySsrSettings(this.ssrTask, settings);
+        }
+        const ssgiDisabled = !this.isPostEffectActive(settings, "ssgi");
+        if (this.ssgiGatherTask) {
+            this.ssgiGatherTask.disabled = ssgiDisabled;
+        }
+        for (const denoiseTask of this.ssgiDenoiseTasks) {
+            denoiseTask.disabled = ssgiDisabled;
+        }
+        if (this.ssgiCompositeTask) {
+            this.ssgiCompositeTask.disabled = ssgiDisabled;
         }
         if (this.ssaoTask) {
             this.ssaoTask.disabled = !this.isPostEffectActive(settings, "ssao");
@@ -2876,6 +3018,28 @@ export class FrameGraphPostEffectsController {
                         this.ssrTask.sourceTexture = currentTexture;
                         currentTexture = this.ssrTask.outputTexture;
                         this.connectedOrder.push("ssr");
+                    }
+                    break;
+                case "ssgi":
+                    if (
+                        this.ssgiGatherTask
+                        && !this.ssgiGatherTask.disabled
+                        && this.ssgiDenoiseTasks.length === SSGI_DENOISE_STEP_WIDTHS.length
+                        && this.ssgiDenoiseTasks.every((task) => !task.disabled)
+                        && this.ssgiCompositeTask
+                        && !this.ssgiCompositeTask.disabled
+                    ) {
+                        this.ssgiGatherTask.sourceTexture = currentTexture;
+                        this.ssgiCompositeTask.sourceTexture = currentTexture;
+                        let denoisedSsgiTexture = this.ssgiGatherTask.outputTexture;
+                        for (const denoiseTask of this.ssgiDenoiseTasks) {
+                            denoiseTask.sourceTexture = denoisedSsgiTexture;
+                            denoiseTask.sceneColorTexture = currentTexture;
+                            denoisedSsgiTexture = denoiseTask.outputTexture;
+                        }
+                        this.ssgiCompositeTask.ssgiTexture = denoisedSsgiTexture;
+                        currentTexture = this.ssgiCompositeTask.outputTexture;
+                        this.connectedOrder.push("ssgi");
                     }
                     break;
                 case "ssao":
@@ -2992,6 +3156,15 @@ export class FrameGraphPostEffectsController {
         this.imageProcessingTask = null;
         this.geometryRendererTask = null;
         this.resourcePlan = null;
+        this.ssgiGatherTask?.dispose();
+        this.ssgiGatherTask = null;
+        for (const denoiseTask of this.ssgiDenoiseTasks) {
+            denoiseTask.dispose();
+        }
+        this.ssgiDenoiseTasks.length = 0;
+        this.ssgiCompositeEffect?.dispose();
+        this.ssgiCompositeEffect = null;
+        this.ssgiCompositeTask = null;
         this.ssrTask?.dispose();
         this.ssrTask = null;
         this.ssaoTask?.dispose();

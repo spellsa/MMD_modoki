@@ -139,6 +139,8 @@ function createHost() {
         postEffectOffsetHighlightDepthScale: 1,
         setPostEffectOffsetHighlightColor: vi.fn(),
         postEffectOffsetHighlightDebugView: false,
+        postEffectSsgiStrength: 0.3,
+        postEffectSsgiSampleRadius: 64,
         setPostEffectExternalLut: vi.fn(),
         setExternalWgslToonShader: vi.fn(),
         setPostEffectFogColor: vi.fn(),
@@ -159,6 +161,36 @@ function createHost() {
 }
 
 describe("importProjectState", () => {
+    it("restores SSGI tuning with fixed Soft Light blending", async () => {
+        const host = createHost();
+        const project = createProject({
+            effects: {
+                ...createProject().effects,
+                ssgiStrength: 1.4,
+                ssgiSampleRadius: 400,
+                ssgiBlendMode: "overlay",
+                frameGraphPostStack: [{ id: "ssgi", enabled: false }],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.postEffectSsgiStrength).toBe(1);
+        expect(host.postEffectSsgiSampleRadius).toBe(256);
+        expect(host.postEffectSsgiBlendMode).toBe("softLight");
+        expect(host.setFrameGraphPostEffectStackEntries).toHaveBeenCalledWith([
+            { id: "ssgi", enabled: false },
+        ]);
+    });
+
+    it("uses Soft Light for projects saved before blend modes", async () => {
+        const host = createHost();
+
+        await importProjectState(host, createProject());
+
+        expect(host.postEffectSsgiBlendMode).toBe("softLight");
+    });
+
     it("restores saved SSAO effect values", async () => {
         const host = createHost();
         const project = createProject({

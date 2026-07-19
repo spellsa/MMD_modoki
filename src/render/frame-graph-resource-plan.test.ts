@@ -30,6 +30,9 @@ function createSettings(
         offsetHighlightStrength: 0.55,
         ssrEnabled: false,
         ssrStrength: 0.3,
+        ssgiEnabled: false,
+        ssgiStrength: 0.3,
+        ssgiSampleRadius: 64,
         antialiasEnabled: true,
         ...overrides,
     };
@@ -83,6 +86,68 @@ describe("buildFrameGraphResourcePlan", () => {
             producer: "geometryRenderer",
             resolution: "full",
         });
+    });
+
+    it("uses scene color, view depth, and view normal for single-frame SSGI even at zero strength", () => {
+        const plan = buildFrameGraphResourcePlan(createSettings({
+            ssgiEnabled: true,
+            ssgiStrength: 0,
+        }), ["ssgi"]);
+
+        expect(plan.activeEffects).toEqual(["ssgi"]);
+        expect(plan.requirementKeys).toEqual(["sceneColor", "viewDepth", "viewNormal"]);
+        expect(plan.needsGeometryRenderer).toBe(true);
+        expect(plan.requirements).toContainEqual({
+            key: "viewDepth",
+            consumers: ["ssgi"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+        expect(plan.requirements).toContainEqual({
+            key: "viewNormal",
+            consumers: ["ssgi"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+    });
+
+    it("shares geometry resources between SSGI, SSAO, and SSR", () => {
+        const plan = buildFrameGraphResourcePlan(createSettings({
+            ssgiEnabled: true,
+            ssaoEnabled: true,
+            ssrEnabled: true,
+        }), ["ssao", "ssgi", "ssr"]);
+
+        expect(plan.activeEffects).toEqual(["ssr", "ssgi", "ssao"]);
+        expect(plan.requirements).toContainEqual({
+            key: "viewDepth",
+            consumers: ["ssr", "ssgi", "ssao"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+        expect(plan.requirements).toContainEqual({
+            key: "viewNormal",
+            consumers: ["ssr", "ssgi", "ssao"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+        expect(plan.requirements).toContainEqual({
+            key: "reflectivity",
+            consumers: ["ssr"],
+            producer: "geometryRenderer",
+            resolution: "full",
+        });
+    });
+
+    it("does not request SSGI resources when the stack entry is disabled", () => {
+        const plan = buildFrameGraphResourcePlan(createSettings({
+            ssgiEnabled: false,
+            ssgiStrength: 0.3,
+        }), ["ssgi"]);
+
+        expect(plan.activeEffects).toEqual([]);
+        expect(plan.requirementKeys).toEqual([]);
+        expect(plan.needsGeometryRenderer).toBe(false);
     });
 
     it("uses geometry depth for Offset Shadow", () => {
