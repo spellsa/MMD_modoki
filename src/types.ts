@@ -325,6 +325,7 @@ export interface ProjectLightingState {
 export interface ProjectViewportState {
     groundVisible: boolean;
     skydomeVisible: boolean;
+    skydomeBackground?: import("./shared/skydome-background-style").SkydomeBackgroundStyle;
     antialiasEnabled: boolean;
     mirroringFloorEnabled?: boolean;
     mirroringFloorShape?: MirroringFloorShape;

@@ -22,6 +22,7 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Layer } from "@babylonjs/core/Layers/layer";
 import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { BackgroundMaterial } from "@babylonjs/core/Materials/Background/backgroundMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { MirrorTexture } from "@babylonjs/core/Materials/Textures/mirrorTexture";
@@ -71,6 +72,12 @@ import type { IMmdBindableCameraAnimation } from "babylon-mmd/esm/Runtime/Animat
 import type { IMmdRuntimeBone } from "babylon-mmd/esm/Runtime/IMmdRuntimeBone";
 import { exportProjectState as exportProjectStateImpl } from "./project/project-serializer";
 import { importProjectState as importProjectStateImpl } from "./project/project-importer";
+import {
+    colorToHex,
+    DEFAULT_SKYDOME_BACKGROUND_STYLE,
+    normalizeSkydomeBackgroundStyle,
+    type SkydomeBackgroundStyle,
+} from "./shared/skydome-background-style";
 import {
     loadCameraVMD as loadCameraVMDImpl,
     loadMP3 as loadMP3Impl,
@@ -1504,6 +1511,10 @@ ${beforeFogAppendBlock}
     private mirroringFloorHeightValue = 0;
     private mirroringFloorResolutionValue = 1024;
     private skydome: Mesh | null = null;
+    private skydomeMaterial: BackgroundMaterial | null = null;
+    private skydomeGradientTexture: DynamicTexture | null = null;
+    private skydomeVisibleValue = true;
+    private skydomeBackgroundStyleValue = normalizeSkydomeBackgroundStyle(DEFAULT_SKYDOME_BACKGROUND_STYLE);
     private backgroundImageLayer: Layer | null = null;
     private backgroundImagePath: string | null = null;
     private backgroundVideoLayer: Layer | null = null;
@@ -1514,7 +1525,6 @@ ${beforeFogAppendBlock}
     private backgroundMediaVisible = true;
     private backgroundVideoLastSyncedTime = Number.NaN;
     private backgroundVideoLastDrawnTime = Number.NaN;
-    private readonly defaultClearColor = new Color4(0.94, 0.94, 0.94, 1);
     private readonly blackClearColor = new Color4(0, 0, 0, 1);
     private backgroundBlackEnabled = false;
     private audioPlayer: StreamAudioPlayer | null = null;
@@ -3877,9 +3887,12 @@ ${beforeFogAppendBlock}
 
     public setBackgroundBlack(enabled: boolean): void {
         this.backgroundBlackEnabled = Boolean(enabled);
-        this.scene.clearColor = this.backgroundBlackEnabled
-            ? this.blackClearColor.clone()
-            : this.defaultClearColor.clone();
+        if (this.backgroundBlackEnabled) {
+            this.scene.clearColor = this.blackClearColor.clone();
+        } else {
+            this.applySkydomeBackgroundStyle();
+        }
+        this.syncSkydomeVisibility();
     }
 
     public toggleBackgroundBlack(): boolean {
@@ -3966,7 +3979,20 @@ ${beforeFogAppendBlock}
     }
 
     public isSkydomeVisible(): boolean {
-        return this.skydome?.isEnabled() ?? false;
+        return this.skydomeVisibleValue;
+    }
+
+    public getSkydomeBackgroundStyle(): SkydomeBackgroundStyle {
+        return normalizeSkydomeBackgroundStyle(this.skydomeBackgroundStyleValue);
+    }
+
+    public setSkydomeBackgroundStyle(style: SkydomeBackgroundStyle): void {
+        this.skydomeBackgroundStyleValue = normalizeSkydomeBackgroundStyle(style);
+        this.applySkydomeBackgroundStyle();
+    }
+
+    public resetSkydomeBackgroundStyle(): void {
+        this.setSkydomeBackgroundStyle(normalizeSkydomeBackgroundStyle(DEFAULT_SKYDOME_BACKGROUND_STYLE));
     }
 
     public getBackgroundImagePath(): string | null {
@@ -3994,14 +4020,70 @@ ${beforeFogAppendBlock}
     }
 
     public setSkydomeVisible(visible: boolean): void {
-        if (!this.skydome) return;
-        this.skydome.setEnabled(visible);
+        this.skydomeVisibleValue = Boolean(visible);
+        this.syncSkydomeVisibility();
     }
 
     public toggleSkydomeVisible(): boolean {
         const next = !this.isSkydomeVisible();
         this.setSkydomeVisible(next);
         return next;
+    }
+
+    private syncSkydomeVisibility(): void {
+        this.skydome?.setEnabled(this.skydomeVisibleValue && !this.backgroundBlackEnabled);
+    }
+
+    private applySkydomeBackgroundStyle(): void {
+        const style = this.skydomeBackgroundStyleValue;
+        const brightness = style.brightness;
+        const clearColor = style.mode === "gradient" ? style.bottomColor : style.topColor;
+        if (!this.backgroundBlackEnabled) {
+            this.scene.clearColor = new Color4(
+                clearColor.r * brightness,
+                clearColor.g * brightness,
+                clearColor.b * brightness,
+                1,
+            );
+        }
+
+        const material = this.skydomeMaterial;
+        if (!material) return;
+
+        material.primaryColor = new Color3(brightness, brightness, brightness);
+        if (style.mode === "solid") {
+            material.diffuseTexture = null;
+            material.primaryColor = new Color3(
+                style.topColor.r * brightness,
+                style.topColor.g * brightness,
+                style.topColor.b * brightness,
+            );
+            return;
+        }
+
+        if (!this.skydomeGradientTexture) {
+            this.skydomeGradientTexture = new DynamicTexture(
+                "skydomeGradientTexture",
+                { width: 4, height: 256 },
+                this.scene,
+                false,
+                Texture.BILINEAR_SAMPLINGMODE,
+            );
+            this.skydomeGradientTexture.wrapU = Texture.CLAMP_ADDRESSMODE;
+            this.skydomeGradientTexture.wrapV = Texture.CLAMP_ADDRESSMODE;
+            this.skydomeGradientTexture.gammaSpace = true;
+        }
+
+        const context = this.skydomeGradientTexture.getContext();
+        const gradient = context.createLinearGradient(0, 0, 0, 256);
+        gradient.addColorStop(0, colorToHex(style.topColor));
+        gradient.addColorStop(1, colorToHex(style.bottomColor));
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, 4, 256);
+        // Babylon sphere UVs use V=0 at the top. Keep the canvas orientation so
+        // the popup's top/bottom color labels match the rendered skydome.
+        this.skydomeGradientTexture.update(false);
+        material.diffuseTexture = this.skydomeGradientTexture;
     }
 
     public setBackgroundMediaVisible(visible: boolean): boolean {
@@ -4697,7 +4779,7 @@ ${beforeFogAppendBlock}
                 storageKey: MmdManager.FRAME_PERFORMANCE_LOG_STORAGE_KEY,
             });
         }
-        this.scene.clearColor = this.defaultClearColor.clone();
+        this.applySkydomeBackgroundStyle();
         this.scene.ambientColor = new Color3(0.5, 0.5, 0.5);
         this.scene.imageProcessingConfiguration.isEnabled = true;
         this.scene.imageProcessingConfiguration.applyByPostProcess = false;
@@ -4832,19 +4914,20 @@ ${beforeFogAppendBlock}
             segments: 24,
             updatable: false,
         }, this.scene);
-        const skydomeMat = new StandardMaterial("skydomeMat", this.scene);
-        const skydomeColor = new Color3(0.94, 0.94, 0.94);
-        skydomeMat.diffuseColor = skydomeColor;
-        skydomeMat.emissiveColor = skydomeColor;
-        skydomeMat.specularColor = new Color3(0, 0, 0);
-        skydomeMat.disableLighting = true;
+        const skydomeMat = new BackgroundMaterial("skydomeMat", this.scene);
         skydomeMat.backFaceCulling = false;
         skydomeMat.disableDepthWrite = true;
         skydomeMat.useLogarithmicDepth = false;
+        skydomeMat.useRGBColor = false;
+        skydomeMat.enableNoise = true;
+        skydomeMat.maxSimultaneousLights = 0;
+        this.skydomeMaterial = skydomeMat;
         this.skydome.material = skydomeMat;
         this.skydome.infiniteDistance = true;
         this.skydome.isPickable = false;
         this.skydome.receiveShadows = false;
+        this.applySkydomeBackgroundStyle();
+        this.syncSkydomeVisibility();
         refreshMeshBoundingInfoForRenderStability(this.skydome);
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
@@ -12131,6 +12214,14 @@ ${beforeFogAppendBlock}
         if (this.contactShadowBlobTexture) {
             this.contactShadowBlobTexture.dispose();
             this.contactShadowBlobTexture = null;
+        }
+        if (this.skydomeGradientTexture) {
+            this.skydomeGradientTexture.dispose();
+            this.skydomeGradientTexture = null;
+        }
+        if (this.skydomeMaterial) {
+            this.skydomeMaterial.dispose();
+            this.skydomeMaterial = null;
         }
         if (this.skydome) {
             this.skydome.dispose();

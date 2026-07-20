@@ -9,6 +9,10 @@ import type {
     SsgiBlendMode,
 } from "../types";
 import type { FrameGraphPostEffectStackEntry } from "../shared/frame-graph-post-effect-stack";
+import {
+    normalizeSkydomeBackgroundStyle,
+    type SkydomeBackgroundStyle,
+} from "../shared/skydome-background-style";
 import { serializeCameraTrack, serializeModelAnimation } from "./project-codec";
 
 type ProjectExportAccessory = {
@@ -206,6 +210,7 @@ type ProjectExportHost = {
     getDofFocusTargetBoneName?: () => string | null;
     getBackgroundImagePath: () => string | null;
     getBackgroundVideoPath: () => string | null;
+    getSkydomeBackgroundStyle?: () => SkydomeBackgroundStyle;
     getExternalWgslToonShaderPath: () => string | null;
     getPostEffectFogColor: () => { r: number; g: number; b: number };
     getFrameGraphPostEffectStackEntries?: () => FrameGraphPostEffectStackEntry[];
@@ -354,6 +359,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
         viewport: {
             groundVisible: host.isGroundVisible(),
             skydomeVisible: host.isSkydomeVisible(),
+            skydomeBackground: normalizeSkydomeBackgroundStyle(host.getSkydomeBackgroundStyle?.()),
             antialiasEnabled: host.antialiasEnabled,
             mirroringFloorEnabled: host.mirroringFloorEnabled,
             mirroringFloorShape: host.mirroringFloorShape,

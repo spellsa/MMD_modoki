@@ -64,6 +64,12 @@ function createHost() {
         occlusionShadowEdgeSoftness: 0.01,
         isGroundVisible: (): boolean => true,
         isSkydomeVisible: (): boolean => true,
+        getSkydomeBackgroundStyle: () => ({
+            mode: "solid" as const,
+            topColor: { r: 200 / 255, g: 200 / 255, b: 200 / 255 },
+            bottomColor: { r: 200 / 255, g: 200 / 255, b: 200 / 255 },
+            brightness: 1,
+        }),
         antialiasEnabled: true,
         mirroringFloorEnabled: true,
         mirroringFloorShape: "square" as const,
@@ -247,6 +253,25 @@ describe("exportProjectState", () => {
         expect(project.viewport.mirroringFloorSize).toBe(60);
         expect(project.viewport.mirroringFloorHeight).toBe(0.02);
         expect(project.viewport.mirroringFloorResolution).toBe(1024);
+    });
+
+    it("writes skydome background style", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            getSkydomeBackgroundStyle: () => ({
+                mode: "solid" as const,
+                topColor: { r: 0.1, g: 0.2, b: 0.3 },
+                bottomColor: { r: 0.4, g: 0.5, b: 0.6 },
+                brightness: 1.35,
+            }),
+        });
+
+        expect(project.viewport.skydomeBackground).toEqual({
+            mode: "solid",
+            topColor: { r: 0.1, g: 0.2, b: 0.3 },
+            bottomColor: { r: 0.4, g: 0.5, b: 0.6 },
+            brightness: 1.35,
+        });
     });
 
     it("writes physics floor collision setting", () => {

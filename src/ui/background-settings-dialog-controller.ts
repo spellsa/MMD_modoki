@@ -1,11 +1,11 @@
 import type { MmdManager } from "../mmd-manager";
 import { t } from "../i18n";
-import type { EditorAction } from "../actions/types";
 import type { PopupContentController } from "./popup-dialog-controller";
+import { colorToHex, hexToColor } from "../shared/skydome-background-style";
 import {
     createPopupFormButton,
-    createPopupFormButtonRow,
     createPopupFormField,
+    createPopupFormRange,
     createPopupFormValueText,
 } from "./popup-form-helpers";
 
@@ -13,43 +13,16 @@ type ToastType = "success" | "error" | "info";
 
 export type BackgroundSettingsDialogControllerDeps = {
     mmdManager: MmdManager;
-    dispatchAction: (action: EditorAction) => boolean;
-    setStatus: (text: string, loading?: boolean) => void;
     showToast: (message: string, type?: ToastType) => void;
-    refreshUi: () => void;
 };
-
-function getBaseNameForRenderer(filePath: string | null): string {
-    if (!filePath) return "-";
-    const normalized = filePath.replace(/[\\/]+$/, "");
-    const index = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
-    return index < 0 ? normalized : normalized.slice(index + 1);
-}
-
-function createCheckbox(checked: boolean): HTMLInputElement {
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.className = "popup-form-checkbox";
-    input.checked = checked;
-    return input;
-}
 
 export class BackgroundSettingsDialogController implements PopupContentController {
     private readonly mmdManager: MmdManager;
-    private readonly dispatchAction: (action: EditorAction) => boolean;
-    private readonly setStatus: (text: string, loading?: boolean) => void;
     private readonly showToast: (message: string, type?: ToastType) => void;
-    private readonly refreshUi: () => void;
-
-    private imagePathValue: HTMLElement | null = null;
-    private videoPathValue: HTMLElement | null = null;
 
     constructor(deps: BackgroundSettingsDialogControllerDeps) {
         this.mmdManager = deps.mmdManager;
-        this.dispatchAction = deps.dispatchAction;
-        this.setStatus = deps.setStatus;
         this.showToast = deps.showToast;
-        this.refreshUi = deps.refreshUi;
     }
 
     public mount(container: HTMLElement): void {
@@ -60,100 +33,77 @@ export class BackgroundSettingsDialogController implements PopupContentControlle
         grid.className = "popup-form-grid";
         form.appendChild(grid);
 
-        const mediaVisible = createCheckbox(this.mmdManager.isBackgroundMediaVisible());
-        mediaVisible.disabled = !this.mmdManager.hasBackgroundMedia();
-        mediaVisible.addEventListener("change", () => {
-            this.dispatchAction({ type: "viewport.toggleBackgroundMedia", source: "menu" });
-            this.refreshUi();
-            this.refreshPaths();
-            mediaVisible.checked = this.mmdManager.isBackgroundMediaVisible();
-            mediaVisible.disabled = !this.mmdManager.hasBackgroundMedia();
+        const backgroundStyle = this.mmdManager.getSkydomeBackgroundStyle();
+        const styleMode = document.createElement("select");
+        styleMode.className = "popup-form-control";
+        for (const [value, label] of [
+            ["gradient", t("dialog.background.style.gradient")],
+            ["solid", t("dialog.background.style.solid")],
+        ] as const) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            styleMode.appendChild(option);
+        }
+        styleMode.value = backgroundStyle.mode;
+        grid.appendChild(createPopupFormField(t("dialog.background.style"), styleMode));
+
+        const topColor = document.createElement("input");
+        topColor.type = "color";
+        topColor.className = "popup-form-control popup-form-color";
+        topColor.value = colorToHex(backgroundStyle.topColor);
+        grid.appendChild(createPopupFormField(t("dialog.background.topColor"), topColor));
+
+        const bottomColor = document.createElement("input");
+        bottomColor.type = "color";
+        bottomColor.className = "popup-form-control popup-form-color";
+        bottomColor.value = colorToHex(backgroundStyle.bottomColor);
+        grid.appendChild(createPopupFormField(t("dialog.background.bottomColor"), bottomColor));
+
+        const brightness = document.createElement("input");
+        brightness.type = "range";
+        brightness.className = "popup-form-control popup-form-range";
+        brightness.min = "25";
+        brightness.max = "200";
+        brightness.step = "5";
+        brightness.value = String(Math.round(backgroundStyle.brightness * 100));
+        const brightnessValue = createPopupFormValueText(`${brightness.value}%`);
+        grid.appendChild(createPopupFormField(
+            t("dialog.background.brightness"),
+            createPopupFormRange(brightness, brightnessValue),
+        ));
+
+        const applyStyle = (): void => {
+            const previous = this.mmdManager.getSkydomeBackgroundStyle();
+            this.mmdManager.setSkydomeBackgroundStyle({
+                mode: styleMode.value === "solid" ? "solid" : "gradient",
+                topColor: hexToColor(topColor.value) ?? previous.topColor,
+                bottomColor: hexToColor(bottomColor.value) ?? previous.bottomColor,
+                brightness: Number(brightness.value) / 100,
+            });
+            bottomColor.disabled = styleMode.value === "solid";
+            brightnessValue.textContent = `${brightness.value}%`;
+        };
+        styleMode.addEventListener("change", applyStyle);
+        topColor.addEventListener("input", applyStyle);
+        bottomColor.addEventListener("input", applyStyle);
+        brightness.addEventListener("input", applyStyle);
+        bottomColor.disabled = styleMode.value === "solid";
+
+        const resetStyle = createPopupFormButton(t("dialog.background.resetStyle"), "secondary");
+        resetStyle.addEventListener("click", () => {
+            this.mmdManager.resetSkydomeBackgroundStyle();
+            const restored = this.mmdManager.getSkydomeBackgroundStyle();
+            styleMode.value = restored.mode;
+            topColor.value = colorToHex(restored.topColor);
+            bottomColor.value = colorToHex(restored.bottomColor);
+            brightness.value = String(Math.round(restored.brightness * 100));
+            bottomColor.disabled = restored.mode === "solid";
+            brightnessValue.textContent = `${brightness.value}%`;
+            this.showToast(t("dialog.background.styleReset"), "info");
         });
-        grid.appendChild(createPopupFormField(t("dialog.background.mediaVisible"), mediaVisible));
-
-        const blackBackground = createCheckbox(this.mmdManager.isBackgroundBlack());
-        blackBackground.addEventListener("change", () => {
-            this.dispatchAction({ type: "viewport.toggleBackgroundBlack", source: "menu" });
-            blackBackground.checked = this.mmdManager.isBackgroundBlack();
-        });
-        grid.appendChild(createPopupFormField(t("dialog.background.black"), blackBackground));
-
-        this.imagePathValue = createPopupFormValueText(getBaseNameForRenderer(this.mmdManager.getBackgroundImagePath()));
-        grid.appendChild(createPopupFormField(t("dialog.background.currentImage"), this.imagePathValue, "div"));
-
-        const loadImage = createPopupFormButton(t("dialog.background.loadImage"), "secondary");
-        loadImage.addEventListener("click", () => void this.loadBackgroundImage(mediaVisible));
-        grid.appendChild(createPopupFormField("", loadImage, "div"));
-
-        this.videoPathValue = createPopupFormValueText(getBaseNameForRenderer(this.mmdManager.getBackgroundVideoPath()));
-        grid.appendChild(createPopupFormField(t("dialog.background.currentVideo"), this.videoPathValue, "div"));
-
-        const loadVideo = createPopupFormButton(t("dialog.background.loadVideo"), "secondary");
-        const clearMedia = createPopupFormButton(t("dialog.background.clearMedia"), "secondary");
-        loadVideo.addEventListener("click", () => void this.loadBackgroundVideo(mediaVisible));
-        clearMedia.addEventListener("click", () => {
-            this.mmdManager.clearBackgroundMedia();
-            this.refreshUi();
-            this.refreshPaths();
-            mediaVisible.checked = this.mmdManager.isBackgroundMediaVisible();
-            mediaVisible.disabled = !this.mmdManager.hasBackgroundMedia();
-            this.showToast(t("dialog.background.mediaCleared"), "info");
-        });
-        grid.appendChild(createPopupFormField("", createPopupFormButtonRow([loadVideo, clearMedia]), "div"));
+        grid.appendChild(createPopupFormField("", resetStyle, "div"));
 
         container.appendChild(form);
-    }
-
-    private refreshPaths(): void {
-        if (this.imagePathValue) {
-            this.imagePathValue.textContent = getBaseNameForRenderer(this.mmdManager.getBackgroundImagePath());
-        }
-        if (this.videoPathValue) {
-            this.videoPathValue.textContent = getBaseNameForRenderer(this.mmdManager.getBackgroundVideoPath());
-        }
-    }
-
-    private async loadBackgroundImage(mediaVisible: HTMLInputElement): Promise<void> {
-        const filePath = await window.electronAPI.openFileDialog([
-            { name: "Image", extensions: ["png", "jpg", "jpeg", "bmp", "webp"] },
-            { name: "All files", extensions: ["*"] },
-        ]);
-        if (!filePath) return;
-        this.setStatus("Loading background image...", true);
-        try {
-            await this.mmdManager.setBackgroundImageFromPath(filePath);
-            this.setStatus("Background image loaded", false);
-            this.showToast(`${t("toast.backgroundImage.loaded")}: ${getBaseNameForRenderer(filePath)}`, "success");
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.setStatus("Background image load failed", false);
-            this.showToast(`${t("toast.backgroundImage.failed")}: ${message}`, "error");
-        }
-        this.refreshUi();
-        this.refreshPaths();
-        mediaVisible.checked = this.mmdManager.isBackgroundMediaVisible();
-        mediaVisible.disabled = !this.mmdManager.hasBackgroundMedia();
-    }
-
-    private async loadBackgroundVideo(mediaVisible: HTMLInputElement): Promise<void> {
-        const filePath = await window.electronAPI.openFileDialog([
-            { name: "Video", extensions: ["webm", "mp4", "avi"] },
-            { name: "All files", extensions: ["*"] },
-        ]);
-        if (!filePath) return;
-        this.setStatus("Loading background video...", true);
-        try {
-            await this.mmdManager.setBackgroundVideoFromPath(filePath);
-            this.setStatus("Background video loaded", false);
-            this.showToast(`${t("toast.backgroundVideo.loaded")}: ${getBaseNameForRenderer(filePath)}`, "success");
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.setStatus("Background video load failed", false);
-            this.showToast(`${t("toast.backgroundVideo.failed")}: ${message}`, "error");
-        }
-        this.refreshUi();
-        this.refreshPaths();
-        mediaVisible.checked = this.mmdManager.isBackgroundMediaVisible();
-        mediaVisible.disabled = !this.mmdManager.hasBackgroundMedia();
     }
 }

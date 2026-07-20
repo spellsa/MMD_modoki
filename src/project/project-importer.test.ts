@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { importProjectState } from "./project-importer";
 import type { MmdModokiProjectFileV1 } from "../types";
+import { DEFAULT_SKYDOME_BACKGROUND_STYLE } from "../shared/skydome-background-style";
 
 function createProject(overrides: Partial<MmdModokiProjectFileV1> = {}): MmdModokiProjectFileV1 {
     return {
@@ -82,6 +83,7 @@ function createHost() {
         applyImportedMaterialShaderStates: vi.fn(),
         setGroundVisible: vi.fn(),
         setSkydomeVisible: vi.fn(),
+        setSkydomeBackgroundStyle: vi.fn(),
         clearBackgroundMedia: vi.fn(),
         setBackgroundVideoFromPath: vi.fn(),
         setBackgroundImageFromPath: vi.fn(),
@@ -415,6 +417,34 @@ describe("importProjectState", () => {
         expect(host.mirroringFloorSize).toBe(100);
         expect(host.mirroringFloorHeight).toBe(0);
         expect(host.mirroringFloorResolution).toBe(1024);
+    });
+
+    it("restores skydome background style and uses the light-gray default for legacy projects", async () => {
+        const host = createHost();
+        const project = createProject({
+            viewport: {
+                ...createProject().viewport,
+                skydomeBackground: {
+                    mode: "solid",
+                    topColor: { r: 0.1, g: 0.2, b: 0.3 },
+                    bottomColor: { r: 0.4, g: 0.5, b: 0.6 },
+                    brightness: 1.4,
+                },
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.setSkydomeBackgroundStyle).toHaveBeenCalledWith({
+            mode: "solid",
+            topColor: { r: 0.1, g: 0.2, b: 0.3 },
+            bottomColor: { r: 0.4, g: 0.5, b: 0.6 },
+            brightness: 1.4,
+        });
+
+        const legacyHost = createHost();
+        await importProjectState(legacyHost, createProject());
+        expect(legacyHost.setSkydomeBackgroundStyle).toHaveBeenCalledWith(DEFAULT_SKYDOME_BACKGROUND_STYLE);
     });
 
     it("restores embedded camera animation through the runtime camera path", async () => {

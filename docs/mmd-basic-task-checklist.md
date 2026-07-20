@@ -51,6 +51,7 @@
 - [x] PNG 出力
 - [x] WebM 出力
 - [x] UI 非表示モード
+- [x] デフォルト空を `BackgroundMaterial` 化し、単色 / studio gradient・色・明るさ・保存復元に対応
 - [x] 背景画像インポート
 - [x] 背景動画インポート
 

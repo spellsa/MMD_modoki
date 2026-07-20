@@ -15,6 +15,10 @@ import {
     type FrameGraphPostEffectId,
     type FrameGraphPostEffectStackEntry,
 } from "../shared/frame-graph-post-effect-stack";
+import {
+    normalizeSkydomeBackgroundStyle,
+    type SkydomeBackgroundStyle,
+} from "../shared/skydome-background-style";
 
 type ProjectImportRuntimeModel = {
     createRuntimeAnimation(animation: object): unknown;
@@ -72,6 +76,7 @@ type ProjectImportHost = {
     setCameraExternalParentKeyframes?: (track: ProjectSerializedCameraExternalParentTrack | null) => boolean;
     setGroundVisible(visible: boolean): void;
     setSkydomeVisible(visible: boolean): void;
+    setSkydomeBackgroundStyle?: (style: SkydomeBackgroundStyle) => void;
     antialiasEnabled: boolean;
     mirroringFloorReflectance: number;
     mirroringFloorShape: "square" | "circle";
@@ -621,6 +626,7 @@ export async function importProjectState(
     }
 
     host.setGroundVisible(Boolean(data.viewport.groundVisible));
+    host.setSkydomeBackgroundStyle?.(normalizeSkydomeBackgroundStyle(data.viewport.skydomeBackground));
     host.setSkydomeVisible(Boolean(data.viewport.skydomeVisible));
     host.antialiasEnabled = Boolean(data.viewport.antialiasEnabled);
     host.mirroringFloorReflectance = typeof data.viewport.mirroringFloorReflectance === "number" && Number.isFinite(data.viewport.mirroringFloorReflectance)

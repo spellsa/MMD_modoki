@@ -155,6 +155,7 @@
 - [LUT cube implementation note](./lut-cube-implementation-note.md)
 - [外部 WGSL shader loading concept](./external-wgsl-shader-loading-concept-2026-06-12.md)
 - [床・背景・巨大平面の描画安定化調査](./floor-render-stability-investigation-2026-06-26.md)
+- [デフォルト空 / HDRI / BackgroundMaterial 調査メモ 2026-07-20](./default-sky-hdri-background-material-investigation-2026-07-20.md)
 
 ## Frame Graph / PostFX
 

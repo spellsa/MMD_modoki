@@ -588,13 +588,7 @@ export class AppMenuController {
             restoreFocusTo: invoker,
             content: new BackgroundSettingsDialogController({
                 mmdManager: this.mmdManager,
-                dispatchAction: (action) => this.dispatchAction(action),
-                setStatus: this.setStatus,
                 showToast: this.showToast,
-                refreshUi: () => {
-                    this.refreshEnvironmentUi();
-                    this.refreshCameraUi();
-                },
             }),
         });
     }

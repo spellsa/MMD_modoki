@@ -618,6 +618,20 @@ select.popup-form-control {
   padding: 0 8px;
 }
 
+.popup-form-color {
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.popup-form-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.popup-form-color::-webkit-color-swatch {
+  border: 0;
+  border-radius: 2px;
+}
+
 .popup-form-range-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 58px;
