@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import {
+    applyImportedMaterialShaderStates,
     getFrameGraphLuminousMaskMaterialState,
+    getSerializedMaterialShaderStates,
     setExternalWgslToonShader,
     syncLuminousGlowLayer,
     setWgslMaterialShaderPreset,
@@ -97,6 +99,52 @@ function createHost() {
 }
 
 describe("material shader preset restore", () => {
+    it("persists and restores per-material PBR Skin assignments", () => {
+        const host = createHost();
+        const pbrMaterial = {
+            subSurface: {
+                isTranslucencyEnabled: false,
+                isScatteringEnabled: false,
+                translucencyIntensity: 0,
+                useAlbedoToTintTranslucency: false,
+                tintColor: Color3.White(),
+                translucencyColor: null,
+                translucencyColorTexture: null,
+                scatteringDiffusionProfile: null as Color3 | null,
+            },
+            ambientColor: new Color3(0.2, 0.1, 0.1),
+            roughness: 0.4,
+            specularIntensity: 1,
+            markAsDirty: vi.fn(),
+        };
+        host.sceneModels[0].materialPipeline = "pbr-standard";
+        host.sceneModels[0].pbrMaterialPreset = "pbr-standard";
+        host.sceneModels[0].materials = [{
+            key: "0:face",
+            material: pbrMaterial,
+        }];
+        const warnings: string[] = [];
+
+        applyImportedMaterialShaderStates(
+            host,
+            0,
+            [{ materialKey: "0:face", presetId: "pbr-skin" }],
+            warnings,
+            "C:/models/pbr.pmx",
+        );
+
+        expect(warnings).toEqual([]);
+        expect(pbrMaterial.subSurface.isScatteringEnabled).toBe(true);
+        expect(pbrMaterial.subSurface.isTranslucencyEnabled).toBe(false);
+        expect(pbrMaterial.subSurface.scatteringDiffusionProfile?.r).toBe(1);
+        expect(pbrMaterial.subSurface.scatteringDiffusionProfile?.g).toBe(0.16);
+        expect(pbrMaterial.subSurface.scatteringDiffusionProfile?.b).toBe(0.08);
+        expect(getSerializedMaterialShaderStates(host, host.sceneModels[0])).toEqual([{
+            materialKey: "0:face",
+            presetId: "pbr-skin",
+        }]);
+    });
+
     it("keeps preset fragment override when clearing global external wgsl override", () => {
         const host = createHost();
 

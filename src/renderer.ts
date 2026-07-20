@@ -52,7 +52,11 @@ function waitAnimationFrames(frameCount: number): Promise<void> {
   });
 }
 
-async function runSmokeLuminousScenario(mmdManager: MmdManager, modelPath: string): Promise<AppLogData> {
+async function runSmokeLuminousScenario(
+  mmdManager: MmdManager,
+  modelPath: string,
+  pbrMmdLike: boolean,
+): Promise<AppLogData> {
   const beforeBackend = mmdManager.getPostEffectBackend();
   const modelInfo = await mmdManager.loadPMX(modelPath);
   if (!modelInfo) {
@@ -63,6 +67,55 @@ async function runSmokeLuminousScenario(mmdManager: MmdManager, modelPath: strin
   const modelState = shaderStates.find((model) => model.modelPath === modelPath) ?? shaderStates.at(-1);
   if (!modelState) {
     throw new Error("Smoke model shader state was not found");
+  }
+
+  if (pbrMmdLike) {
+    await waitAnimationFrames(12);
+    const initialScattering = mmdManager.getPbrMmdLikeScatteringDiagnostics();
+    mmdManager.setPbrMaterialPreset("pbr-standard");
+    await waitAnimationFrames(6);
+    const standard = mmdManager.getPbrMmdLikeScatteringDiagnostics();
+    if (standard.materialCount !== 0 || standard.configurationEnabled) {
+      throw new Error(`PBR Standard did not disable MMD Like scattering: ${JSON.stringify(standard)}`);
+    }
+    mmdManager.setPbrMaterialPreset("pbr-mmd-like");
+    await waitAnimationFrames(12);
+    const mmdLike = mmdManager.getPbrMmdLikeScatteringDiagnostics();
+    if (
+      mmdLike.materialCount === 0
+      || !mmdLike.configurationEnabled
+      || !mmdLike.prePassEnabled
+    ) {
+      throw new Error(`PBR MMD Like scattering was not activated: ${JSON.stringify(mmdLike)}`);
+    }
+    const skinMaterialKey = modelState.materials[0]?.key ?? null;
+    if (!skinMaterialKey || !mmdManager.setPbrMaterialShaderPreset(
+      modelState.modelIndex,
+      skinMaterialKey,
+      "pbr-skin",
+    )) {
+      throw new Error("PBR Skin could not be assigned for the scattering smoke scenario");
+    }
+    await waitAnimationFrames(12);
+    const scattering = mmdManager.getPbrMmdLikeScatteringDiagnostics();
+    if (
+      scattering.materialCount === 0
+      || !scattering.configurationEnabled
+      || !scattering.prePassEnabled
+    ) {
+      throw new Error(`PBR Skin scattering was not activated: ${JSON.stringify(scattering)}`);
+    }
+    return {
+      kind: "pbrSkinScattering",
+      modelName: modelInfo.name,
+      materialCount: modelState.materials.length,
+      beforeBackend,
+      afterBackend: mmdManager.getPostEffectBackend(),
+      initialMaterialCount: initialScattering.materialCount,
+      standardMaterialCount: standard.materialCount,
+      mmdLikeMaterialCount: mmdLike.materialCount,
+      ...scattering,
+    };
   }
 
   mmdManager.setWgslMaterialShaderPreset(modelState.modelIndex, null, "wgsl-autoluminous");
@@ -179,6 +232,9 @@ async function initializeApp(): Promise<void> {
   const searchParams = new URLSearchParams(window.location.search);
   const mode = searchParams.get("mode");
   const smokeModelPath = searchParams.get("smokeModelPath");
+  const smokePbrMmdLike = searchParams.get("smokePbrMmdLike") === "1";
+  const smokeRenderStabilityDiagnostics =
+    searchParams.get("smokeRenderStabilityDiagnostics") === "1";
   logInfo("renderer", "initialize app", { mode: mode ?? "editor" });
   if (mode === "exporter") {
     await initializePngSequenceExporter(searchParams);
@@ -189,6 +245,13 @@ async function initializeApp(): Promise<void> {
     return;
   }
   enhanceBottomPanelControls(document);
+  if (smokeRenderStabilityDiagnostics) {
+    try {
+      localStorage.setItem("mmd_modoki.debug.renderStability", "1");
+    } catch {
+      // Smoke can continue and report renderer health if storage is unavailable.
+    }
+  }
   if (smokeModelPath) {
     try {
       localStorage.setItem(POST_EFFECT_BACKEND_STORAGE_KEY, "frameGraph");
@@ -206,6 +269,24 @@ async function initializeApp(): Promise<void> {
 
   try {
     const mmdManager = await MmdManager.create(canvas);
+    if (smokePbrMmdLike) {
+      mmdManager.setMmdMaterialPipelinePreset("pbr-standard");
+      mmdManager.setPbrMaterialPreset("pbr-mmd-like");
+    }
+    let smokeWebGpuFailureReported = false;
+    if (smokeRenderStabilityDiagnostics) {
+      const reportWebGpuFailure = (message: string): void => {
+        if (smokeWebGpuFailureReported) return;
+        smokeWebGpuFailureReported = true;
+        reportSmokeRendererFailure("WebGPU validation error", { message });
+      };
+      mmdManager.onWebGpuValidationError = reportWebGpuFailure;
+      const existingDiagnostics = mmdManager.getWebGpuValidationDiagnostics();
+      if (existingDiagnostics.count > 0) {
+        reportWebGpuFailure(existingDiagnostics.messages[0] ?? "Unknown WebGPU validation error");
+        return;
+      }
+    }
     await mmdManager.waitForPhysicsInitialization();
     window.mmdModokiDiagnostics = {
       dumpPerformanceSnapshot: () => mmdManager.dumpPerformanceSnapshot(),
@@ -232,8 +313,34 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
+    if (smokeRenderStabilityDiagnostics) {
+      const diagnostics = mmdManager.getWebGpuValidationDiagnostics();
+      if (diagnostics.count > 0) {
+        if (!smokeWebGpuFailureReported) {
+          smokeWebGpuFailureReported = true;
+          reportSmokeRendererFailure("WebGPU validation error", {
+            count: diagnostics.count,
+            messages: diagnostics.messages,
+          });
+        }
+        return;
+      }
+      const environmentLightingWasEnabled = mmdManager.isEnvironmentLightingEnabled();
+      mmdManager.setEnvironmentLightingEnabled(true);
+      const environmentDiagnostics = mmdManager.getEnvironmentLightingDiagnostics();
+      mmdManager.setEnvironmentLightingEnabled(environmentLightingWasEnabled);
+      if (
+        !environmentDiagnostics.textureReady
+        || !environmentDiagnostics.hasSphericalPolynomial
+      ) {
+        reportSmokeRendererFailure("Environment lighting is not PBR-ready", {
+          environmentDiagnostics,
+        });
+        return;
+      }
+    }
     const scenario = smokeModelPath
-      ? await runSmokeLuminousScenario(mmdManager, smokeModelPath)
+      ? await runSmokeLuminousScenario(mmdManager, smokeModelPath, smokePbrMmdLike)
       : undefined;
     reportSmokeRendererReady({
       engine,

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     getSerializedLightDirection,
+    MAX_DIRECTIONAL_LIGHT_INTENSITY,
+    setLightColor,
+    setLightIntensity,
     setShadowBlurKernel,
     setShadowFilteringQuality,
     setShadowFrustumSize,
@@ -11,6 +14,7 @@ import {
     setShadowMaxZ,
     setTransparentShadowEnabled,
 } from "./light-shadow-controller";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { ShadowGenerator } from "@babylonjs/core/Lights/Shadows/shadowGenerator";
 import { CascadedShadowGenerator } from "@babylonjs/core/Lights/Shadows/cascadedShadowGenerator";
 
@@ -93,6 +97,45 @@ describe("shadow projection range", () => {
         expect(host.dirLight.shadowFrustumSize).toBe(960);
         expect(host.dirLight.shadowMaxZ).toBe(4800);
         expect(host.shadowGenerator.shadowMaxZ).toBe(4800);
+    });
+});
+
+describe("directional light intensity", () => {
+    it("allows a stronger PBR key light while keeping a finite upper bound", () => {
+        const host = createHost();
+
+        setLightIntensity(host, 3.25);
+        expect(host.dirLight.intensity).toBe(3.25);
+
+        setLightIntensity(host, 100);
+        expect(host.dirLight.intensity).toBe(MAX_DIRECTIONAL_LIGHT_INTENSITY);
+
+        setLightIntensity(host, -1);
+        expect(host.dirLight.intensity).toBe(0);
+    });
+
+    it("keeps RGB light color boost above 100 percent", () => {
+        const host = {
+            ...createHost(),
+            dirLight: {
+                ...createHost().dirLight,
+                diffuse: Color3.White(),
+                specular: Color3.Black(),
+            },
+            hemiLight: {
+                groundColor: Color3.Black(),
+            },
+            lightColorTemperatureKelvin: 6500,
+            lightColorScaleValue: Color3.White(),
+            shadowGroundColorValue: new Color3(0.5, 0.5, 0.5),
+            sceneModels: [],
+        };
+
+        setLightColor(host, 2, 1.5, 1);
+
+        expect(host.dirLight.diffuse.r).toBeCloseTo(2);
+        expect(host.dirLight.diffuse.g).toBeGreaterThan(1);
+        expect(host.dirLight.diffuse.b).toBeLessThanOrEqual(1);
     });
 });
 

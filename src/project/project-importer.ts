@@ -19,6 +19,12 @@ import {
     normalizeSkydomeBackgroundStyle,
     type SkydomeBackgroundStyle,
 } from "../shared/skydome-background-style";
+import {
+    normalizeMmdMaterialPipelinePreset,
+    normalizePbrMaterialPreset,
+    type MmdMaterialPipelinePreset,
+    type PbrMaterialPreset,
+} from "../shared/mmd-material-pipeline";
 
 type ProjectImportRuntimeModel = {
     createRuntimeAnimation(animation: object): unknown;
@@ -36,7 +42,11 @@ type ProjectImportHost = {
     modelSourceAnimationsByModel: WeakMap<ProjectImportRuntimeModel, object>;
     modelKeyframeTracksByModel: WeakMap<ProjectImportRuntimeModel, Map<string, Uint32Array>>;
     clearProjectForImport(): void;
-    loadPMX(path: string): Promise<{ name: string } | null>;
+    loadPMX(
+        path: string,
+        materialPipeline?: MmdMaterialPipelinePreset,
+        pbrMaterialPreset?: PbrMaterialPreset,
+    ): Promise<{ name: string } | null>;
     loadVMD(path: string): Promise<unknown>;
     loadVPD(path: string): Promise<unknown>;
     loadCameraVMD(path: string): Promise<boolean>;
@@ -116,6 +126,8 @@ type ProjectImportHost = {
     iblShadowOpacity: number;
     iblShadowDistanceScale: number;
     iblShadowsEnabled: boolean;
+    environmentLightingEnabled: boolean;
+    environmentLightingIntensity: number;
     characterContactShadowOpacity: number;
     characterContactShadowScale: number;
     characterContactShadowEnabled: boolean;
@@ -340,7 +352,11 @@ export async function importProjectState(
     }
 
     for (const modelState of data.scene.models) {
-        const modelInfo = await host.loadPMX(modelState.path);
+        const modelInfo = await host.loadPMX(
+            modelState.path,
+            normalizeMmdMaterialPipelinePreset(modelState.materialPipeline),
+            normalizePbrMaterialPreset(modelState.pbrMaterialPreset),
+        );
         if (!modelInfo) {
             warnings.push(`Model load failed: ${modelState.path}`);
             continue;
@@ -743,6 +759,13 @@ export async function importProjectState(
     host.iblShadowsEnabled = typeof data.lighting.iblShadowsEnabled === "boolean"
         ? data.lighting.iblShadowsEnabled
         : false;
+    host.environmentLightingEnabled = typeof data.lighting.environmentLightingEnabled === "boolean"
+        ? data.lighting.environmentLightingEnabled
+        : false;
+    host.environmentLightingIntensity = typeof data.lighting.environmentLightingIntensity === "number"
+        && Number.isFinite(data.lighting.environmentLightingIntensity)
+        ? data.lighting.environmentLightingIntensity
+        : 1;
     host.characterContactShadowOpacity = typeof data.lighting.characterContactShadowOpacity === "number" && Number.isFinite(data.lighting.characterContactShadowOpacity)
         ? data.lighting.characterContactShadowOpacity
         : 0.5;

@@ -118,3 +118,27 @@ Bullet backend の初期化に失敗し、Ammo fallback で起動しています
 FrameGraph backend 有効時に、PostFX が無効でも `scene.imageProcessingConfiguration.applyByPostProcess` が残ると発生することがあります。
 
 詳しくは [FrameGraph ImageProcessing 初期化順 再発防止メモ](./framegraph-image-processing-init-regression-2026-06-17.md) を参照してください。
+
+## 起動直後から背景が黒く WebGPU の Invalid RenderPipeline が連続する
+
+### 症状
+
+- デフォルト空が描画されず、viewport が黒い
+- DevTools に `Invalid RenderPipeline` / `Invalid CommandBuffer` がフレームごとに出る
+- pipeline 名に `samples4` が含まれる
+
+### 確認順
+
+`samples4` は結果として表示される pipeline 名であり、MSAA 不整合とは限らない。
+最初の `Error while parsing WGSL` または `Invalid ShaderModule` までログをさかのぼる。
+
+2026-07-20 には次の2経路を確認した。
+
+- `renderStability` 診断から `BackgroundMaterial.isReadyForSubMesh()` を手動実行していた。
+- 通常描画でも、Vite 開発サーバー上の WGSL shader 動的 import が HTML fallback を返し、
+  background vertex shader だけが未登録になる場合があった。
+
+診断は既に生成済みの `SubMesh.effect` 状態だけを参照する。また、WebGPU で常用する
+`background.vertex` / `background.fragment` は静的 import で `ShaderStore` へ事前登録する。
+検知は Electron の `console-message` だけに依存せず、`GPUDevice` の
+`uncapturederror` を直接監視する。

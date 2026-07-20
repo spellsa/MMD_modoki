@@ -32,6 +32,17 @@ import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import type { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import type { ProjectModelMaterialShaderState } from "../types";
+import {
+    DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
+    DEFAULT_PBR_MATERIAL_PRESET,
+    type MmdMaterialPipelinePreset,
+    type PbrMaterialPreset,
+    type PbrMaterialShaderPreset,
+} from "../shared/mmd-material-pipeline";
+import {
+    applyPbrMaterialShaderPreset,
+    getPbrMaterialShaderPreset,
+} from "../render/pbr-mmd-like-toon-settings";
 
 export type WgslMaterialShaderPresetId =
     | "wgsl-mmd-standard"
@@ -82,6 +93,8 @@ type MaterialShaderSceneModel = {
     info: { name: string; path: string };
     model: MaterialShaderModel;
     mesh: MaterialShaderMesh;
+    materialPipeline?: MmdMaterialPipelinePreset;
+    pbrMaterialPreset?: PbrMaterialPreset;
     materials: Array<{
         key: string;
         name: string;
@@ -1896,7 +1909,7 @@ export function setExternalWgslToonShaderForModel(
     if (!isWgslMaterialShaderAssignmentAvailable(host)) return false;
 
     const entry = host.sceneModels[modelIndex];
-    if (!entry) return false;
+    if (!entry || entry.materialPipeline === "pbr-standard") return false;
 
     const targets = materialKey === null
         ? entry.materials
@@ -1936,7 +1949,7 @@ export function setWgslMaterialShaderPreset(
     if (!getPresetCatalog(host).some((item) => item.id === presetId)) return false;
 
     const entry = host.sceneModels[modelIndex];
-    if (!entry) return false;
+    if (!entry || entry.materialPipeline === "pbr-standard") return false;
 
     const targets = materialKey === null
         ? entry.materials
@@ -2022,10 +2035,13 @@ export function getWgslModelShaderStates(host: MaterialShaderHost): Array<{
     modelName: string;
     modelPath: string;
     active: boolean;
+    materialPipeline: MmdMaterialPipelinePreset;
+    pbrMaterialPreset: PbrMaterialPreset;
     materials: Array<{
         key: string;
         name: string;
         presetId: WgslMaterialShaderPresetId;
+        pbrPresetId: PbrMaterialShaderPreset;
         externalWgslPath: string | null;
         visible: boolean;
     }>;
@@ -2035,10 +2051,13 @@ export function getWgslModelShaderStates(host: MaterialShaderHost): Array<{
         modelName: entry.info.name,
         modelPath: entry.info.path,
         active: entry.model === host.currentModel,
-        materials: entry.materials.map((material: MaterialShaderMaterial) => ({
+        materialPipeline: entry.materialPipeline ?? DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
+        pbrMaterialPreset: entry.pbrMaterialPreset ?? DEFAULT_PBR_MATERIAL_PRESET,
+        materials: entry.materials.map((material) => ({
             key: material.key,
             name: material.name,
             presetId: getWgslMaterialShaderPresetForMaterial(host, material.material),
+            pbrPresetId: getPbrMaterialShaderPreset(material.material),
             externalWgslPath: getExternalWgslToonShaderPathForMaterial(host, material.material),
             visible: host.isMaterialVisible?.(material.material) !== false,
         })),
@@ -2046,6 +2065,14 @@ export function getWgslModelShaderStates(host: MaterialShaderHost): Array<{
 }
 
 export function getSerializedMaterialShaderStates(host: MaterialShaderHost, entry: MaterialShaderSceneModel): ProjectModelMaterialShaderState[] {
+    if (entry.materialPipeline === "pbr-standard") {
+        return entry.materials.flatMap((material) => {
+            const presetId = getPbrMaterialShaderPreset(material.material);
+            return presetId === "pbr-base"
+                ? []
+                : [{ materialKey: material.key, presetId }];
+        });
+    }
     const states: ProjectModelMaterialShaderState[] = [];
     for (const material of entry.materials) {
         const presetId = getWgslMaterialShaderPresetForMaterial(host, material.material);
@@ -2070,6 +2097,29 @@ export function applyImportedMaterialShaderStates(
 
     const entry = host.sceneModels[modelIndex];
     if (!entry) return;
+
+    if (entry.materialPipeline === "pbr-standard") {
+        for (const state of states) {
+            if (!state || typeof state.materialKey !== "string" || typeof state.presetId !== "string") {
+                warnings.push("Invalid PBR material shader assignment: " + modelPath);
+                continue;
+            }
+            if (state.presetId !== "pbr-skin") {
+                warnings.push("Unknown PBR shader preset '" + state.presetId + "' for " + modelPath);
+                continue;
+            }
+            const target = entry.materials.find((material) => material.key === state.materialKey);
+            if (!target || !applyPbrMaterialShaderPreset(
+                target.material,
+                entry.pbrMaterialPreset ?? DEFAULT_PBR_MATERIAL_PRESET,
+                state.presetId,
+            )) {
+                warnings.push("PBR material shader target not found: " + state.materialKey + " (" + modelPath + ")");
+            }
+        }
+        host.onMaterialShaderStateChanged?.();
+        return;
+    }
 
     for (const state of states) {
         if (!state || typeof state.materialKey !== "string" || typeof state.presetId !== "string") {

@@ -602,6 +602,35 @@
 
           <section class="effect-panel-view" data-effect-tab-view="materials" hidden>
             <div class="shader-panel-row">
+              <span class="info-label" data-i18n="shader.pipeline.label">モード</span>
+              <select id="shader-material-pipeline-select" class="panel-select">
+                <option value="mmd-standard" data-i18n="shader.pipeline.mmdMode">MMDモード</option>
+                <option value="pbr-standard" data-i18n="shader.pipeline.pbrMode">PBRモード</option>
+              </select>
+            </div>
+            <div class="shader-panel-row">
+              <span class="info-label" data-i18n="shader.pbrPreset.label">PBR種類</span>
+              <select id="shader-pbr-preset-select" class="panel-select" disabled>
+                <option value="pbr-standard" data-i18n="shader.pbrPreset.standard">PBR Standard（babylon-mmd）</option>
+                <option value="pbr-mmd-like" data-i18n="shader.pbrPreset.mmdLike">PBR MMD Like（MMD_modoki）</option>
+              </select>
+            </div>
+            <div class="shader-panel-row">
+              <span class="info-label">IBL</span>
+              <label class="shader-panel-checkbox-label">
+                <input id="shader-ibl-lighting-toggle" type="checkbox">
+                <span data-i18n="shader.iblLighting">環境ライティング</span>
+              </label>
+            </div>
+            <div class="shader-panel-row">
+              <span class="info-label" data-i18n="shader.iblIntensity">環境光強度</span>
+              <div class="shader-panel-range">
+                <input id="shader-ibl-lighting-intensity" class="light-slider" type="range" min="0" max="400" value="100" step="1">
+                <span id="shader-ibl-lighting-intensity-value" class="light-value">1.0</span>
+              </div>
+            </div>
+            <div class="shader-panel-note" data-i18n="shader.pipeline.note">モードは次回読込へ、PBR種類は読込済みPBRモデルにも即時適用されます。</div>
+            <div class="shader-panel-row">
               <span class="info-label" data-i18n="label.target">対象</span>
               <select id="shader-model-select" class="panel-select" disabled>
                 <option value="">-</option>
@@ -998,7 +1027,7 @@
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowStrength">照度</span>
-              <input type="range" id="light-intensity" class="light-slider" min="0" max="200" value="100" step="1">
+              <input type="range" id="light-intensity" class="light-slider" min="0" max="400" value="100" step="1">
               <span id="light-intensity-val" class="light-value">1.0</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>

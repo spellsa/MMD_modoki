@@ -134,6 +134,7 @@ function clampShadowPenumbraSize(v: number): number {
 }
 
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
+export const MAX_DIRECTIONAL_LIGHT_INTENSITY = 4;
 const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const MAX_SHADOW_MAX_Z = 10000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;
@@ -324,7 +325,11 @@ export function getLightIntensity(host: LightShadowHost): number {
 
 export function setLightIntensity(host: LightShadowHost, v: number): void {
     if (!host.dirLight) return;
-    host.dirLight.intensity = Math.max(0, Math.min(2, v));
+    const next = Number.isFinite(v) ? v : 1;
+    host.dirLight.intensity = Math.max(
+        0,
+        Math.min(MAX_DIRECTIONAL_LIGHT_INTENSITY, next),
+    );
 }
 
 export function getAmbientIntensity(host: LightShadowHost): number {
@@ -733,15 +738,15 @@ export function applyLightColorTemperature(host: LightShadowHost): void {
     if (!host.dirLight || !host.hemiLight) return;
 
     const color = kelvinToColor(host.lightColorTemperatureKelvin);
-    const clampedLightScale = new Color3(
-        Math.min(1, host.lightColorScaleValue.r),
-        Math.min(1, host.lightColorScaleValue.g),
-        Math.min(1, host.lightColorScaleValue.b),
+    const lightScale = new Color3(
+        clampLightColorScale(host.lightColorScaleValue.r),
+        clampLightColorScale(host.lightColorScaleValue.g),
+        clampLightColorScale(host.lightColorScaleValue.b),
     );
     const scaled = new Color3(
-        color.r * clampedLightScale.r,
-        color.g * clampedLightScale.g,
-        color.b * clampedLightScale.b,
+        color.r * lightScale.r,
+        color.g * lightScale.g,
+        color.b * lightScale.b,
     );
 
     host.dirLight.diffuse = scaled.clone();

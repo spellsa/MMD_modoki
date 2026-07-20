@@ -30,6 +30,9 @@ if (started) {
 
 const isDev = Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL);
 const isSmokeMode = process.env.MMD_MODOKI_SMOKE === '1';
+if (isSmokeMode && process.env.MMD_MODOKI_SMOKE_USER_DATA_PATH) {
+  app.setPath('userData', process.env.MMD_MODOKI_SMOKE_USER_DATA_PATH);
+}
 if (isDev) {
   // Keep local file loading behavior while hiding noisy Electron dev warnings.
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
@@ -187,7 +190,14 @@ const SMOKE_TEST_SCREENSHOT_DELAY_MS = Math.max(
   0,
   Number.parseInt(process.env.MMD_MODOKI_SMOKE_SCREENSHOT_DELAY_MS ?? '500', 10) || 0,
 );
+const SMOKE_TEST_STABILITY_MS = Math.max(
+  0,
+  Number.parseInt(process.env.MMD_MODOKI_SMOKE_STABILITY_MS ?? '3000', 10) || 0,
+);
 const SMOKE_TEST_MODEL_PATH = process.env.MMD_MODOKI_SMOKE_MODEL_PATH ?? null;
+const SMOKE_TEST_RENDER_STABILITY_DIAGNOSTICS =
+  process.env.MMD_MODOKI_SMOKE_RENDER_STABILITY_DIAGNOSTICS !== '0';
+const SMOKE_TEST_PBR_MMD_LIKE = process.env.MMD_MODOKI_SMOKE_PBR_MMD_LIKE === '1';
 
 const pngSequenceExportJobMap = new Map<string, PngSequenceExportRequest>();
 const pngSequenceExportActiveCountByOwner = new Map<number, number>();
@@ -667,12 +677,13 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
 
   let finished = false;
   let didFinishLoad = false;
-  let removeSmokeIpcListeners = (): void => undefined;
+  const webGpuValidationMessages: string[] = [];
+  let removeSmokeListeners = (): void => undefined;
   const complete = (success: boolean, reason: string, data?: AppLogData): void => {
     if (finished) return;
     finished = true;
     clearTimeout(timeoutId);
-    removeSmokeIpcListeners();
+    removeSmokeListeners();
     finishSmokeTest(success, reason, data);
   };
 
@@ -686,10 +697,12 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
 
   writeAppLog('info', 'main', 'smoke test enabled', {
     timeoutMs: SMOKE_TEST_TIMEOUT_MS,
+    stabilityMs: SMOKE_TEST_STABILITY_MS,
     requireWebGpu: SMOKE_TEST_REQUIRE_WEBGPU,
+    renderStabilityDiagnostics: SMOKE_TEST_RENDER_STABILITY_DIAGNOSTICS,
     webContentsId: mainWindow.webContents.id,
   });
-  console.log(`[smoke] waiting for renderer runtime (${SMOKE_TEST_TIMEOUT_MS}ms timeout, requireWebGPU=${SMOKE_TEST_REQUIRE_WEBGPU})`);
+  console.log(`[smoke] waiting for renderer runtime (${SMOKE_TEST_TIMEOUT_MS}ms timeout, stability=${SMOKE_TEST_STABILITY_MS}ms, requireWebGPU=${SMOKE_TEST_REQUIRE_WEBGPU})`);
 
   loadPromise.catch((err: unknown) => {
     complete(false, 'loadEditorWindow rejected', createLogErrorData(err));
@@ -727,6 +740,19 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
     });
   });
 
+  const onConsoleMessage = (
+    details: Electron.Event<Electron.WebContentsConsoleMessageEventParams>,
+  ): void => {
+    const message = details.message;
+    if (!/(?:Invalid (?:ShaderModule|RenderPipeline|CommandBuffer)|Error while parsing WGSL)/i.test(message)) {
+      return;
+    }
+    if (webGpuValidationMessages.length < 12) {
+      webGpuValidationMessages.push(message);
+    }
+  };
+  mainWindow.webContents.on('console-message', onConsoleMessage);
+
   const onRendererReady = (event: IpcMainEvent, payload: SmokeRendererReadyPayload): void => {
     if (event.sender.id !== mainWindow.webContents.id) return;
     const engine = typeof payload?.engine === 'string' ? payload.engine : 'unknown';
@@ -750,12 +776,31 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
       physicsBackend,
       crossOriginIsolated,
       sharedArrayBufferAvailable,
+      stabilityMs: SMOKE_TEST_STABILITY_MS,
       scenario: payload?.scenario,
       webContentsId: mainWindow.webContents.id,
     };
-    void captureSmokeScreenshot(mainWindow, successData).then((data) => {
-      complete(true, 'renderer runtime initialized', data);
-    });
+    void (async () => {
+      if (SMOKE_TEST_STABILITY_MS > 0) {
+        console.log(`[smoke] renderer ready; monitoring stability for ${SMOKE_TEST_STABILITY_MS}ms`);
+        await wait(SMOKE_TEST_STABILITY_MS);
+      }
+      if (finished) return;
+      if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+        complete(false, 'main window was destroyed during stability monitoring', successData);
+        return;
+      }
+      if (webGpuValidationMessages.length > 0) {
+        complete(false, 'WebGPU validation errors were logged during stability monitoring', {
+          ...successData,
+          webGpuValidationMessages,
+        });
+        return;
+      }
+      const data = await captureSmokeScreenshot(mainWindow, successData);
+      if (finished) return;
+      complete(true, 'renderer runtime initialized and remained stable', data);
+    })();
   };
 
   const onRendererFailure = (event: IpcMainEvent, payload: SmokeRendererFailurePayload): void => {
@@ -769,9 +814,12 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
 
   ipcMain.on('smoke:rendererReady', onRendererReady);
   ipcMain.on('smoke:rendererFailure', onRendererFailure);
-  removeSmokeIpcListeners = () => {
+  removeSmokeListeners = () => {
     ipcMain.removeListener('smoke:rendererReady', onRendererReady);
     ipcMain.removeListener('smoke:rendererFailure', onRendererFailure);
+    if (!mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.removeListener('console-message', onConsoleMessage);
+    }
   };
 };
 
@@ -801,8 +849,12 @@ const createWindow = () => {
   });
 
   // Load the app
-  const smokeQuery = isSmokeMode && SMOKE_TEST_MODEL_PATH
-    ? { smokeModelPath: SMOKE_TEST_MODEL_PATH }
+  const smokeQuery = isSmokeMode
+    ? {
+        ...(SMOKE_TEST_MODEL_PATH ? { smokeModelPath: SMOKE_TEST_MODEL_PATH } : {}),
+        ...(SMOKE_TEST_RENDER_STABILITY_DIAGNOSTICS ? { smokeRenderStabilityDiagnostics: '1' } : {}),
+        ...(SMOKE_TEST_PBR_MMD_LIKE ? { smokePbrMmdLike: '1' } : {}),
+      }
     : undefined;
   const loadPromise = loadEditorWindow(mainWindow, smokeQuery);
   setupSmokeTestLifecycle(mainWindow, loadPromise);

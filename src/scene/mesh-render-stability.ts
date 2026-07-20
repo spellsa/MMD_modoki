@@ -26,6 +26,14 @@ export type LargeThinMeshClassification = {
     isLowPoly: boolean;
 };
 
+type ExistingEffectLike = {
+    isReady?: () => unknown;
+};
+
+type ExistingSubMeshEffectLike = {
+    effect?: unknown;
+};
+
 const DEFAULT_PLANE_NAME_HINTS = [
     "floor",
     "ground",
@@ -120,6 +128,33 @@ export function stabilizeLargeThinLoadedMesh(
 
     mesh.alwaysSelectAsActiveMesh = true;
     return true;
+}
+
+/**
+ * Reads the state of an effect that Babylon has already compiled.
+ *
+ * Diagnostics must not call Material.isReadyForSubMesh() directly: that method
+ * can start shader compilation with an incomplete render context and poison the
+ * WebGPU pipeline used by subsequent frames.
+ */
+export function readExistingSubMeshEffectReadiness(subMesh: unknown): boolean | null {
+    if (!subMesh || typeof subMesh !== "object") return null;
+
+    let effect: unknown;
+    try {
+        effect = (subMesh as ExistingSubMeshEffectLike).effect;
+    } catch {
+        return false;
+    }
+    if (!effect || typeof effect !== "object") return null;
+
+    const effectLike = effect as ExistingEffectLike;
+    if (typeof effectLike.isReady !== "function") return null;
+    try {
+        return effectLike.isReady() === true;
+    } catch {
+        return false;
+    }
 }
 
 function applyMaterialZOffset(

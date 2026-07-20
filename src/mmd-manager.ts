@@ -79,6 +79,16 @@ import {
     type SkydomeBackgroundStyle,
 } from "./shared/skydome-background-style";
 import {
+    DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
+    DEFAULT_PBR_MATERIAL_PRESET,
+    normalizeMmdMaterialPipelinePreset,
+    normalizePbrMaterialPreset,
+    normalizePbrMaterialShaderPreset,
+    type MmdMaterialPipelinePreset,
+    type PbrMaterialPreset,
+    type PbrMaterialShaderPreset,
+} from "./shared/mmd-material-pipeline";
+import {
     loadCameraVMD as loadCameraVMDImpl,
     loadMP3 as loadMP3Impl,
     loadVMD as loadVMDImpl,
@@ -86,6 +96,10 @@ import {
 } from "./assets/motion-asset-service";
 import { isDebugLogEnabled, logDebugIfEnabled, logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
+import {
+    applyPbrMaterialShaderPreset,
+    getPbrMaterialShaderPreset,
+} from "./render/pbr-mmd-like-toon-settings";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
     getExternalWgslToonShaderPath as getExternalWgslToonShaderPathImpl,
@@ -264,6 +278,7 @@ import {
     getTransparentShadowEnabled as getTransparentShadowEnabledImpl,
     setLightColor as setLightColorImpl,
     setLightDirection as setLightDirectionImpl,
+    setLightIntensity as setLightIntensityImpl,
     setShadowColor as setShadowColorImpl,
     setShadowEnabled as setShadowEnabledImpl,
     setShadowBias as setShadowBiasImpl,
@@ -277,6 +292,7 @@ import {
     setTransparentShadowEnabled as setTransparentShadowEnabledImpl,
 } from "./scene/light-shadow-controller";
 import {
+    readExistingSubMeshEffectReadiness,
     refreshMeshBoundingInfoForRenderStability,
     stabilizeAppGeneratedPlanarMesh,
 } from "./scene/mesh-render-stability";
@@ -290,6 +306,7 @@ import {
     isBmpTexturePath,
 } from "./scene/bmp-texture-compat";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
+import { createConstantEnvironmentSphericalPolynomial } from "./render/environment-lighting";
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
     applyTimelineKeyframePayload as applyTimelineKeyframePayloadImpl,
@@ -568,13 +585,24 @@ import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeCameraAnimation";
 import "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmRuntimeModelAnimation";
 import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader";
 import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
+import "./render/standard-material-sss-prepass-fix";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/core/Rendering/prePassRendererSceneComponent";
 import "@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture";
 import "@babylonjs/core/Engines/Extensions/engine.rawTexture";
 import "@babylonjs/core/Engines/WebGPU/Extensions/engine.rawTexture";
+import "@babylonjs/core/Materials/Textures/baseTexture.polynomial";
+import "@babylonjs/core/ShadersWGSL/background.vertex";
+import "@babylonjs/core/ShadersWGSL/background.fragment";
 import "@babylonjs/core/ShadersWGSL/default.vertex";
 import "@babylonjs/core/ShadersWGSL/default.fragment";
+// HDRCubeTexture prefiltering loads these dynamically in Babylon.js. Register
+// both backends eagerly because the Electron/Vite dev server can otherwise
+// resolve the shader fallback request to index.html before that import settles.
+import "@babylonjs/core/Shaders/hdrFiltering.vertex";
+import "@babylonjs/core/Shaders/hdrFiltering.fragment";
+import "@babylonjs/core/ShadersWGSL/hdrFiltering.vertex";
+import "@babylonjs/core/ShadersWGSL/hdrFiltering.fragment";
 import "@babylonjs/core/ShadersWGSL/postprocess.vertex";
 import "@babylonjs/core/ShadersWGSL/imageProcessing.fragment";
 import "@babylonjs/core/ShadersWGSL/rgbdDecode.fragment";
@@ -649,7 +677,7 @@ import twgslJsUrl from "@babylonjs/core/assets/twgsl/twgsl.js?url";
 // eslint-disable-next-line import/no-unresolved
 import twgslWasmUrl from "@babylonjs/core/assets/twgsl/twgsl.wasm?url";
 // eslint-disable-next-line import/no-unresolved
-import iblShadowTestEnvironmentUrl from "./assets/ibl-shadows/white.hdr?url";
+import bundledEnvironmentTextureUrl from "./assets/ibl-shadows/white.hdr?url";
 // eslint-disable-next-line import/no-unresolved
 import blobShadowTextureUrl from "./assets/blob-shadows/BlobShadow.png?url";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
@@ -708,6 +736,7 @@ export interface WgslMaterialShaderInfo {
     key: string;
     name: string;
     presetId: WgslMaterialShaderPresetId;
+    pbrPresetId: PbrMaterialShaderPreset;
     externalWgslPath: string | null;
     visible: boolean;
 }
@@ -717,6 +746,8 @@ export interface WgslModelShaderInfo {
     modelName: string;
     modelPath: string;
     active: boolean;
+    materialPipeline: MmdMaterialPipelinePreset;
+    pbrMaterialPreset: PbrMaterialPreset;
     materials: WgslMaterialShaderInfo[];
 }
 
@@ -775,6 +806,8 @@ type SceneModelEntry = {
     shadowCasterMeshes: Mesh[];
     contactShadowMesh: Mesh | null;
     castShadow: boolean;
+    materialPipeline: MmdMaterialPipelinePreset;
+    pbrMaterialPreset: PbrMaterialPreset;
 };
 
 type CameraExternalParentKeyframe = {
@@ -830,6 +863,11 @@ export class MmdManager {
     private static readonly FRAME_PERFORMANCE_LOG_STORAGE_KEY = "mmd_modoki.framePerfLog";
     private static readonly FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY = "mmd_modoki.debug.forceModelDebugMaterial";
     private static readonly ALPHA_TEXTURE_DEBUG_STORAGE_KEY = "mmd_modoki.debug.alphaTextureView";
+    private static readonly MMD_MATERIAL_PIPELINE_STORAGE_KEY = "mmd_modoki.materialPipeline";
+    private static readonly PBR_MATERIAL_PRESET_STORAGE_KEY = "mmd_modoki.pbrMaterialPreset";
+    private static readonly ENVIRONMENT_LIGHTING_STORAGE_KEY = "mmd_modoki.environmentLighting";
+    private static readonly ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY = "mmd_modoki.environmentLightingIntensity";
+    private static readonly MAX_ENVIRONMENT_LIGHTING_INTENSITY = 4;
     private static readonly FRAME_PERFORMANCE_LOG_INTERVAL_MS = 10_000;
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
@@ -1455,6 +1493,10 @@ ${beforeFogAppendBlock}
     private readonly runtimeDiagnostics = new Set<string>();
     private readonly webGpuTextureMipmapDecisionCache = new Map<string, Promise<boolean>>();
     private readonly webGpuTextureFallbackCache = new Map<string, Promise<Texture | null>>();
+    private readonly webGpuConfiguredMmdTextureLoaders = new WeakSet<object>();
+    private webGpuValidationErrorCount = 0;
+    private readonly webGpuValidationErrorMessages: string[] = [];
+    private disposeWebGpuValidationMonitor: (() => void) | null = null;
     private scene: Scene;
     private readonly framePerformanceLogMode = MmdManager.readPerformanceLogModeLocalStorage();
     private readonly framePerformanceLogEnabled = this.framePerformanceLogMode !== "off";
@@ -1473,6 +1515,8 @@ ${beforeFogAppendBlock}
     private currentModel: RuntimeModel | null = null;
     private activeModelInfo: ModelInfo | null = null;
     private sceneModels: SceneModelEntry[] = [];
+    private mmdMaterialPipelinePresetValue = MmdManager.readMmdMaterialPipelinePresetLocalStorage();
+    private pbrMaterialPresetValue = MmdManager.readPbrMaterialPresetLocalStorage();
     private _isPlaying = false;
     private _currentFrame = 0;
     private _totalFrames = 300;
@@ -1536,10 +1580,16 @@ ${beforeFogAppendBlock}
     private shadowSceneContentRefreshScheduled = false;
     private iblShadowsPipeline: IblShadowsRenderPipeline | null = null;
     private iblFallbackEnvironmentTexture: RawCubeTexture | null = null;
-    private iblTestEnvironmentTexture: HDRCubeTexture | null = null;
+    private environmentLightingSuppressedTexture: BaseTexture | null = null;
+    private bundledEnvironmentTexture: HDRCubeTexture | null = null;
     private iblWebGpuCdfFallbackTexture: RawTexture | null = null;
     private iblWebGpuSuppressedEnvironmentTexture: BaseTexture | null = null;
     private iblShadowDebugPassSignature = "";
+    private environmentLightingEnabledValue = MmdManager.readBooleanLocalStorage(
+        MmdManager.ENVIRONMENT_LIGHTING_STORAGE_KEY,
+        false,
+    );
+    private environmentLightingIntensityValue = MmdManager.readEnvironmentLightingIntensityLocalStorage();
     private contactShadowTexture: DynamicTexture | null = null;
     private contactShadowBlobTexture: Texture | null = null;
     private contactShadowMaterial: StandardMaterial | null = null;
@@ -2148,6 +2198,7 @@ ${beforeFogAppendBlock}
     public onCameraMotionLoaded: ((info: MotionInfo) => void) | null = null;
     public onKeyframesLoaded: ((tracks: KeyframeTrack[]) => void) | null = null;
     public onError: ((message: string) => void) | null = null;
+    public onWebGpuValidationError: ((message: string) => void) | null = null;
     public onAudioLoaded: ((name: string) => void) | null = null;
     public onPhysicsStateChanged: ((enabled: boolean, available: boolean) => void) | null = null;
     public onBoneVisualizerBonePicked: ((pick: { boneName: string; additive: boolean }) => void) | null = null;
@@ -2243,6 +2294,147 @@ ${beforeFogAppendBlock}
         return getWgslMaterialShaderPresetsImpl(this) as readonly WgslMaterialShaderPresetInfo[];
     }
 
+    public getMmdMaterialPipelinePreset(): MmdMaterialPipelinePreset {
+        return this.mmdMaterialPipelinePresetValue;
+    }
+
+    public setMmdMaterialPipelinePreset(value: unknown): MmdMaterialPipelinePreset {
+        const next = normalizeMmdMaterialPipelinePreset(value);
+        this.mmdMaterialPipelinePresetValue = next;
+        MmdManager.writeStringLocalStorage(MmdManager.MMD_MATERIAL_PIPELINE_STORAGE_KEY, next);
+        return next;
+    }
+
+    public getPbrMaterialPreset(): PbrMaterialPreset {
+        return this.pbrMaterialPresetValue;
+    }
+
+    public setPbrMaterialPreset(value: unknown): PbrMaterialPreset {
+        const next = normalizePbrMaterialPreset(value);
+        this.pbrMaterialPresetValue = next;
+        MmdManager.writeStringLocalStorage(MmdManager.PBR_MATERIAL_PRESET_STORAGE_KEY, next);
+
+        let appliedModelCount = 0;
+        let appliedMaterialCount = 0;
+        for (const entry of this.sceneModels) {
+            if (entry.materialPipeline !== "pbr-standard") continue;
+            entry.pbrMaterialPreset = next;
+            appliedModelCount += 1;
+            for (const materialEntry of entry.materials) {
+                const materialPreset = getPbrMaterialShaderPreset(materialEntry.material);
+                if (applyPbrMaterialShaderPreset(materialEntry.material, next, materialPreset)) {
+                    appliedMaterialCount += 1;
+                }
+            }
+        }
+        if (appliedModelCount > 0) {
+            logInfo("render", "PBR material preset applied to loaded models", {
+                preset: next,
+                modelCount: appliedModelCount,
+                materialCount: appliedMaterialCount,
+            });
+            this.onMaterialShaderStateChanged?.();
+        }
+        return next;
+    }
+
+    public isEnvironmentLightingEnabled(): boolean {
+        return this.environmentLightingEnabledValue;
+    }
+
+    public getEnvironmentLightingDiagnostics(): {
+        enabled: boolean;
+        textureName: string | null;
+        textureReady: boolean;
+        hasSphericalPolynomial: boolean;
+        pbrMaterialCount: number;
+        iblIntensity: number;
+    } {
+        const environmentTexture = this.scene.environmentTexture;
+        return {
+            enabled: this.environmentLightingEnabledValue,
+            textureName: environmentTexture?.name ?? null,
+            textureReady: environmentTexture?.isReady() ?? false,
+            hasSphericalPolynomial: environmentTexture?.sphericalPolynomial != null,
+            pbrMaterialCount: this.scene.materials.filter(
+                (material) => material.getClassName() === "PBRMaterial",
+            ).length,
+            iblIntensity: this.scene.iblIntensity,
+        };
+    }
+
+    public getPbrMmdLikeScatteringDiagnostics(): {
+        materialCount: number;
+        configurationEnabled: boolean;
+        prePassEnabled: boolean;
+        metersPerUnit: number | null;
+        frameGraphSceneColorUsesCameraPostProcesses: boolean;
+    } {
+        const configuration = this.scene.subSurfaceConfiguration;
+        return {
+            materialCount: this.scene.materials.filter((material) => {
+                const subSurface = (material as Material & {
+                    subSurface?: { isScatteringEnabled?: boolean };
+                }).subSurface;
+                return subSurface?.isScatteringEnabled === true;
+            }).length,
+            configurationEnabled: configuration?.enabled === true,
+            prePassEnabled: this.scene.prePassRenderer?.enabled === true,
+            metersPerUnit: configuration?.metersPerUnit ?? null,
+            frameGraphSceneColorUsesCameraPostProcesses:
+                this.frameGraphPostEffectsSceneColorTarget?.useCameraPostProcesses === true,
+        };
+    }
+
+    public setEnvironmentLightingEnabled(enabled: boolean): boolean {
+        this.environmentLightingEnabledValue = Boolean(enabled);
+        MmdManager.writeBooleanLocalStorage(
+            MmdManager.ENVIRONMENT_LIGHTING_STORAGE_KEY,
+            this.environmentLightingEnabledValue,
+        );
+        this.syncEnvironmentLightingTexture();
+        logInfo("render", "environment lighting changed", {
+            ...this.getEnvironmentLightingDiagnostics(),
+        });
+        return this.environmentLightingEnabledValue;
+    }
+
+    public getEnvironmentLightingIntensity(): number {
+        return this.environmentLightingIntensityValue;
+    }
+
+    public setEnvironmentLightingIntensity(value: number): number {
+        const next = Number.isFinite(value)
+            ? Math.max(0, Math.min(MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY, value))
+            : 1;
+        this.environmentLightingIntensityValue = next;
+        this.scene.iblIntensity = next;
+        MmdManager.writeNumberLocalStorage(
+            MmdManager.ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY,
+            next,
+        );
+        logInfo("render", "environment lighting intensity changed", {
+            ...this.getEnvironmentLightingDiagnostics(),
+        });
+        return next;
+    }
+
+    public get environmentLightingEnabled(): boolean {
+        return this.environmentLightingEnabledValue;
+    }
+
+    public set environmentLightingEnabled(enabled: boolean) {
+        this.setEnvironmentLightingEnabled(enabled);
+    }
+
+    public get environmentLightingIntensity(): number {
+        return this.environmentLightingIntensityValue;
+    }
+
+    public set environmentLightingIntensity(value: number) {
+        this.setEnvironmentLightingIntensity(value);
+    }
+
     public getPostEffectLutPresetOptions(): ReadonlyArray<{ id: string; label: string }> {
         return getPostEffectLutPresetOptionsImpl(this);
     }
@@ -2313,6 +2505,39 @@ ${beforeFogAppendBlock}
         presetId: WgslMaterialShaderPresetId,
     ): boolean {
         return setWgslMaterialShaderPresetImpl(this, modelIndex, materialKey, presetId);
+    }
+
+    public setPbrMaterialShaderPreset(
+        modelIndex: number,
+        materialKey: string | null,
+        presetId: PbrMaterialShaderPreset,
+    ): boolean {
+        const entry = this.sceneModels[modelIndex];
+        if (!entry || entry.materialPipeline !== "pbr-standard") return false;
+        const targets = materialKey === null
+            ? entry.materials
+            : entry.materials.filter((material) => material.key === materialKey);
+        if (targets.length === 0) return false;
+        const nextPreset = normalizePbrMaterialShaderPreset(presetId);
+
+        let applied = false;
+        for (const target of targets) {
+            applied = applyPbrMaterialShaderPreset(
+                target.material,
+                entry.pbrMaterialPreset,
+                nextPreset,
+            ) || applied;
+        }
+        if (applied) {
+            logInfo("render", "per-material PBR shader preset applied", {
+                modelIndex,
+                materialKey,
+                preset: nextPreset,
+                materialCount: targets.length,
+            });
+            this.onMaterialShaderStateChanged?.();
+        }
+        return applied;
     }
 
     public enableAlphaTextureDebugView(): boolean {
@@ -3065,44 +3290,83 @@ ${beforeFogAppendBlock}
             this.iblFallbackEnvironmentTexture.name = "mmdModokiIblFallbackEnvironment";
             this.iblFallbackEnvironmentTexture.gammaSpace = false;
             this.iblFallbackEnvironmentTexture.coordinatesMode = Texture.CUBIC_MODE;
+            this.iblFallbackEnvironmentTexture.sphericalPolynomial =
+                createConstantEnvironmentSphericalPolynomial(190, 190, 190);
         }
         this.scene.environmentTexture = this.iblFallbackEnvironmentTexture;
     }
 
-    private configureIblTestEnvironmentTexture(): void {
-        if (!IBL_SHADOWS_EXPERIMENT_ENABLED) return;
+    private syncEnvironmentLightingTexture(): void {
+        if (this.environmentLightingEnabledValue) {
+            if (this.environmentLightingSuppressedTexture) {
+                this.scene.environmentTexture = this.environmentLightingSuppressedTexture;
+                this.environmentLightingSuppressedTexture = null;
+            } else {
+                this.ensureFallbackIblEnvironmentTexture();
+            }
+            return;
+        }
+
+        if (this.scene.environmentTexture) {
+            this.environmentLightingSuppressedTexture = this.scene.environmentTexture;
+            this.scene.environmentTexture = null;
+        }
+    }
+
+    private configureBundledEnvironmentTexture(): void {
         if (this.scene.environmentTexture) return;
 
         try {
-            this.iblTestEnvironmentTexture = new HDRCubeTexture(
-                iblShadowTestEnvironmentUrl,
+            const environmentTexture = new HDRCubeTexture(
+                bundledEnvironmentTextureUrl,
                 this.scene,
                 128,
                 false,
                 true,
                 false,
-                false,
+                true,
                 () => {
-                    logInfo("render", "IBL test environment texture loaded", {
-                        url: iblShadowTestEnvironmentUrl,
-                        name: this.iblTestEnvironmentTexture?.name ?? "iblShadowTestEnvironment",
+                    logInfo("render", "bundled IBL environment texture loaded", {
+                        url: bundledEnvironmentTextureUrl,
+                        name: environmentTexture.name,
+                        ready: environmentTexture.isReady(),
+                        hasSphericalPolynomial: environmentTexture.sphericalPolynomial != null,
                     });
                 },
                 (message, exception) => {
-                    logWarn("render", "IBL test environment texture failed", {
+                    logWarn("render", "bundled IBL environment texture failed; using neutral fallback", {
                         message: message ?? "unknown",
                         exception: exception instanceof Error ? exception.message : String(exception ?? ""),
                     });
+                    if (this.scene.environmentTexture === environmentTexture) {
+                        this.scene.environmentTexture = null;
+                    }
+                    if (this.environmentLightingSuppressedTexture === environmentTexture) {
+                        this.environmentLightingSuppressedTexture = null;
+                    }
+                    if (this.bundledEnvironmentTexture === environmentTexture) {
+                        this.bundledEnvironmentTexture = null;
+                    }
+                    environmentTexture.dispose();
+                    this.ensureFallbackIblEnvironmentTexture();
+                    if (!this.environmentLightingEnabledValue) {
+                        this.environmentLightingSuppressedTexture = this.scene.environmentTexture;
+                        this.scene.environmentTexture = null;
+                    }
                 },
             );
-            this.iblTestEnvironmentTexture.name = "iblShadowTestEnvironment";
-            this.iblTestEnvironmentTexture.gammaSpace = false;
-            this.iblTestEnvironmentTexture.coordinatesMode = Texture.CUBIC_MODE;
-            this.scene.environmentTexture = this.iblTestEnvironmentTexture;
+            environmentTexture.name = "mmdModokiBundledEnvironment";
+            environmentTexture.gammaSpace = false;
+            environmentTexture.coordinatesMode = Texture.CUBIC_MODE;
+            this.bundledEnvironmentTexture = environmentTexture;
+            this.scene.environmentTexture = environmentTexture;
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
-            logWarn("render", "IBL test environment texture initialization failed", { message });
-            this.iblTestEnvironmentTexture = null;
+            logWarn("render", "bundled IBL environment texture initialization failed; using neutral fallback", {
+                message,
+            });
+            this.bundledEnvironmentTexture = null;
+            this.ensureFallbackIblEnvironmentTexture();
         }
     }
 
@@ -4632,6 +4896,52 @@ ${beforeFogAppendBlock}
         }
     }
 
+    private installWebGpuValidationMonitor(): void {
+        if (!(this.engine instanceof WebGPUEngine)) return;
+
+        type WebGpuDeviceLike = {
+            addEventListener(type: "uncapturederror", listener: (event: Event) => void): void;
+            removeEventListener(type: "uncapturederror", listener: (event: Event) => void): void;
+        };
+        type WebGpuUncapturedErrorEventLike = Event & {
+            error?: {
+                message?: unknown;
+                toString?: () => string;
+            };
+        };
+
+        const device = (this.engine as unknown as { _device?: WebGpuDeviceLike })._device;
+        if (!device) return;
+
+        const listener = (event: Event): void => {
+            const error = (event as WebGpuUncapturedErrorEventLike).error;
+            const message = typeof error?.message === "string"
+                ? error.message
+                : error?.toString?.() ?? "Unknown WebGPU validation error";
+            this.webGpuValidationErrorCount += 1;
+            if (this.webGpuValidationErrorMessages.length < 20) {
+                this.webGpuValidationErrorMessages.push(message);
+                logWarn("render", "WebGPU uncaptured validation error", {
+                    count: this.webGpuValidationErrorCount,
+                    message,
+                });
+            }
+            this.onWebGpuValidationError?.(message);
+        };
+
+        device.addEventListener("uncapturederror", listener);
+        this.disposeWebGpuValidationMonitor = () => {
+            device.removeEventListener("uncapturederror", listener);
+        };
+    }
+
+    public getWebGpuValidationDiagnostics(): { count: number; messages: readonly string[] } {
+        return {
+            count: this.webGpuValidationErrorCount,
+            messages: [...this.webGpuValidationErrorMessages],
+        };
+    }
+
     private static readBooleanLocalStorage(key: string, fallback: boolean): boolean {
         try {
             const value = globalThis.localStorage?.getItem(key);
@@ -4649,6 +4959,53 @@ ${beforeFogAppendBlock}
         } catch {
             // Ignore persistence failures for optional experiment flags.
         }
+    }
+
+    private static writeStringLocalStorage(key: string, value: string): void {
+        try {
+            globalThis.localStorage?.setItem(key, value);
+        } catch {
+            // Ignore persistence failures for optional experiment flags.
+        }
+    }
+
+    private static readMmdMaterialPipelinePresetLocalStorage(): MmdMaterialPipelinePreset {
+        try {
+            return normalizeMmdMaterialPipelinePreset(
+                globalThis.localStorage?.getItem(MmdManager.MMD_MATERIAL_PIPELINE_STORAGE_KEY),
+            );
+        } catch {
+            return DEFAULT_MMD_MATERIAL_PIPELINE_PRESET;
+        }
+    }
+
+    private static readPbrMaterialPresetLocalStorage(): PbrMaterialPreset {
+        try {
+            return normalizePbrMaterialPreset(
+                globalThis.localStorage?.getItem(MmdManager.PBR_MATERIAL_PRESET_STORAGE_KEY),
+            );
+        } catch {
+            return DEFAULT_PBR_MATERIAL_PRESET;
+        }
+    }
+
+    private static readEnvironmentLightingIntensityLocalStorage(): number {
+        try {
+            const stored = globalThis.localStorage?.getItem(
+                MmdManager.ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY,
+            );
+            if (stored === null || stored === undefined) return 1;
+            const value = Number(stored);
+            if (Number.isFinite(value)) {
+                return Math.max(
+                    0,
+                    Math.min(MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY, value),
+                );
+            }
+        } catch {
+            // Optional experiment flags must never block startup.
+        }
+        return 1;
     }
 
     private static readNumberLocalStorage(key: string, fallback: number, min: number, max: number): number {
@@ -4755,7 +5112,8 @@ ${beforeFogAppendBlock}
 
         // Create engine (WebGPU preferred path is handled by MmdManager.create)
         this.engine = engine ?? MmdManager.createWebGlEngine(canvas);
-        this.configureMmdTextureLoaderForWebGpu();
+        this.installWebGpuValidationMonitor();
+        this.configureMmdTextureLoaderForWebGpuForBuilder(MmdModelLoader.SharedMaterialBuilder);
         this.configureWebGpuRawTextureUploadForNonPOT();
         this.engine.setHardwareScalingLevel(MmdManager.RENDER_HARDWARE_SCALING_LEVEL);
         this.resizeToCanvasClientSize();
@@ -4763,6 +5121,7 @@ ${beforeFogAppendBlock}
 
         // Create scene
         this.scene = new Scene(this.engine);
+        this.scene.iblIntensity = this.environmentLightingIntensityValue;
         Scene.MaxDeltaTime = MmdManager.PHYSICS_SCENE_MAX_DELTA_MS;
         if (this.framePerformanceLogEnabled) {
             this.sceneInstrumentation = new SceneInstrumentation(this.scene);
@@ -4907,7 +5266,8 @@ ${beforeFogAppendBlock}
         this.ground.material = groundMat;
         this.ground.receiveShadows = true;
         stabilizeAppGeneratedPlanarMesh(this.ground);
-        this.configureIblTestEnvironmentTexture();
+        this.configureBundledEnvironmentTexture();
+        this.syncEnvironmentLightingTexture();
 
         this.skydome = CreateSphere("skydome", {
             diameter: 1200,
@@ -5835,20 +6195,12 @@ ${beforeFogAppendBlock}
         const material = mesh.material as Material | null;
         const materialLike = material as (Material & {
             alpha?: unknown;
-            isReadyForSubMesh?: (mesh: Mesh, subMesh: unknown, useInstances?: boolean) => boolean;
         }) | null;
         const subMesh = mesh.subMeshes?.[0] ?? null;
         const sizeMax = Math.max(size.x, size.y, size.z);
         const sizeMin = Math.min(size.x, size.y, size.z);
         const sizeMid = size.x + size.y + size.z - sizeMax - sizeMin;
-        let materialReady: boolean | null = null;
-        try {
-            materialReady = subMesh && typeof materialLike?.isReadyForSubMesh === "function"
-                ? materialLike.isReadyForSubMesh(mesh, subMesh, false)
-                : null;
-        } catch {
-            materialReady = false;
-        }
+        const materialReady = readExistingSubMeshEffectReadiness(subMesh);
 
         return {
             name: mesh.name,
@@ -6535,8 +6887,12 @@ ${beforeFogAppendBlock}
         }
     }
 
-    async loadPMX(filePath: string): Promise<ModelInfo | null> {
-        return await loadPMXImpl(this, filePath);
+    async loadPMX(
+        filePath: string,
+        materialPipeline: MmdMaterialPipelinePreset = this.mmdMaterialPipelinePresetValue,
+        pbrMaterialPreset: PbrMaterialPreset = this.pbrMaterialPresetValue,
+    ): Promise<ModelInfo | null> {
+        return await loadPMXImpl(this, filePath, materialPipeline, pbrMaterialPreset);
     }
 
     private shouldActivateAsCurrent(info: ModelInfo): boolean {
@@ -7731,13 +8087,8 @@ ${beforeFogAppendBlock}
         return texture;
     }
 
-    private configureMmdTextureLoaderForWebGpu(): void {
+    public configureMmdTextureLoaderForWebGpuForBuilder(builder: object): void {
         if (!this.isWebGpuEngine()) {
-            return;
-        }
-
-        const sharedBuilder = MmdModelLoader.SharedMaterialBuilder;
-        if (!(sharedBuilder instanceof MmdStandardMaterialBuilder)) {
             return;
         }
 
@@ -7746,7 +8097,7 @@ ${beforeFogAppendBlock}
             invertY?: boolean;
             samplingMode?: number;
         };
-        const textureLoader = ((sharedBuilder as unknown as { [key: string]: unknown })._textureLoader as {
+        const textureLoader = ((builder as { [key: string]: unknown })._textureLoader as {
             loadTextureAsync?: (
                 uniqueId: unknown,
                 rootUrl: string,
@@ -7765,9 +8116,10 @@ ${beforeFogAppendBlock}
                 applyPathNormalization?: boolean,
             ) => Promise<unknown>;
         } | undefined);
-        if (!textureLoader) {
+        if (!textureLoader || this.webGpuConfiguredMmdTextureLoaders.has(textureLoader)) {
             return;
         }
+        this.webGpuConfiguredMmdTextureLoaders.add(textureLoader);
 
         const originalLoadTextureAsync = textureLoader.loadTextureAsync?.bind(textureLoader);
         if (originalLoadTextureAsync) {
@@ -7931,7 +8283,21 @@ ${beforeFogAppendBlock}
         return hasEnableFn && hasMrtFn;
     }
 
+    private hasActivePbrMmdLikeScattering(): boolean {
+        return this.scene.materials.some((material) => {
+            const subSurface = (material as Material & {
+                subSurface?: { isScatteringEnabled?: boolean };
+            }).subSurface;
+            return subSurface?.isScatteringEnabled === true;
+        });
+    }
+
     private disablePrePassRendererIfSupported(): void {
+        // Babylon screen-space SSS owns the same PrePassRenderer as SSR/DoF.
+        // Keep it alive while any loaded PBR MMD Like material is scattering.
+        if (this.hasActivePbrMmdLikeScattering()) {
+            return;
+        }
         const sceneWithPrePass = this.scene as Scene & { disablePrePassRenderer?: () => void };
         if (typeof sceneWithPrePass.disablePrePassRenderer === "function") {
             sceneWithPrePass.disablePrePassRenderer();
@@ -8407,6 +8773,7 @@ ${beforeFogAppendBlock}
         if (!sceneColorTarget || !customRenderTargets) {
             return;
         }
+        sceneColorTarget.useCameraPostProcesses = this.hasActivePbrMmdLikeScattering();
         const index = customRenderTargets.indexOf(sceneColorTarget);
         const shouldRenderSceneColorTarget = this.postEffectBackend === "frameGraph"
             && this.shouldExecuteFrameGraphPostEffects();
@@ -9846,7 +10213,7 @@ ${beforeFogAppendBlock}
     }
 
     get lightIntensity(): number { return this.dirLight.intensity; }
-    set lightIntensity(v: number) { this.dirLight.intensity = Math.max(0, Math.min(2, v)); }
+    set lightIntensity(v: number) { setLightIntensityImpl(this, v); }
 
     getLightColor(): { r: number; g: number; b: number } {
         return getLightColorImpl(this);
@@ -12025,6 +12392,8 @@ ${beforeFogAppendBlock}
     }
 
     dispose(): void {
+        this.disposeWebGpuValidationMonitor?.();
+        this.disposeWebGpuValidationMonitor = null;
         this.renderingCanvas.removeEventListener("pointerdown", this.onCanvasPointerDown);
         this.renderingCanvas.removeEventListener("pointermove", this.onCanvasPointerMove);
         this.renderingCanvas.removeEventListener("pointerup", this.onCanvasPointerUp);
@@ -12191,12 +12560,13 @@ ${beforeFogAppendBlock}
             this.iblFallbackEnvironmentTexture.dispose();
             this.iblFallbackEnvironmentTexture = null;
         }
-        if (this.iblTestEnvironmentTexture) {
-            if (this.scene.environmentTexture === this.iblTestEnvironmentTexture) {
+        this.environmentLightingSuppressedTexture = null;
+        if (this.bundledEnvironmentTexture) {
+            if (this.scene.environmentTexture === this.bundledEnvironmentTexture) {
                 this.scene.environmentTexture = null;
             }
-            this.iblTestEnvironmentTexture.dispose();
-            this.iblTestEnvironmentTexture = null;
+            this.bundledEnvironmentTexture.dispose();
+            this.bundledEnvironmentTexture = null;
         }
         if (this.iblWebGpuCdfFallbackTexture) {
             this.iblWebGpuCdfFallbackTexture.dispose();

@@ -54,6 +54,8 @@ function createHost() {
         transparentShadowEnabled: false,
         softTransparentShadowEnabled: true,
         iblShadowsEnabled: false,
+        environmentLightingEnabled: false,
+        environmentLightingIntensity: 1,
         iblShadowOpacity: 0.25,
         iblShadowDistanceScale: 4,
         characterContactShadowEnabled: false,
@@ -201,6 +203,27 @@ function createHost() {
 }
 
 describe("exportProjectState", () => {
+    it("writes model material pipelines and environment lighting", () => {
+        const model = {};
+        const project = exportProjectState({
+            ...createHost(),
+            sceneModels: [{
+                info: { path: "C:/models/pbr.pmx" },
+                mesh: {},
+                model,
+                materialPipeline: "pbr-standard" as const,
+                pbrMaterialPreset: "pbr-mmd-like" as const,
+            }],
+            environmentLightingEnabled: true,
+            environmentLightingIntensity: 2.25,
+        });
+
+        expect(project.scene.models[0]?.materialPipeline).toBe("pbr-standard");
+        expect(project.scene.models[0]?.pbrMaterialPreset).toBe("pbr-mmd-like");
+        expect(project.lighting.environmentLightingEnabled).toBe(true);
+        expect(project.lighting.environmentLightingIntensity).toBe(2.25);
+    });
+
     it("writes SSGI tuning independently from the stack enabled state", () => {
         const project = exportProjectState({
             ...createHost(),

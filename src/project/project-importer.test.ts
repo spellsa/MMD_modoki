@@ -98,6 +98,8 @@ function createHost() {
         shadowPenumbraEnabled: false,
         shadowPenumbraSize: 0.08,
         transparentShadowEnabled: true,
+        environmentLightingEnabled: false,
+        environmentLightingIntensity: 1,
         setPhysicsSimulationRateHz: vi.fn(),
         setPhysicsGravityAcceleration: vi.fn(),
         setPhysicsGravityDirection: vi.fn(),
@@ -163,6 +165,61 @@ function createHost() {
 }
 
 describe("importProjectState", () => {
+    it("restores model material pipelines and environment lighting", async () => {
+        const host = createHost();
+        const project = createProject({
+            scene: {
+                ...createProject().scene,
+                models: [{
+                    path: "C:/models/pbr.pmx",
+                    visible: true,
+                    motionImports: [],
+                    materialPipeline: "pbr-standard",
+                    pbrMaterialPreset: "pbr-mmd-like",
+                }],
+            },
+            lighting: {
+                ...createProject().lighting,
+                environmentLightingEnabled: true,
+                environmentLightingIntensity: 2.25,
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.loadPMX).toHaveBeenCalledWith(
+            "C:/models/pbr.pmx",
+            "pbr-standard",
+            "pbr-mmd-like",
+        );
+        expect(host.environmentLightingEnabled).toBe(true);
+        expect(host.environmentLightingIntensity).toBe(2.25);
+    });
+
+    it("uses MMD Standard and disabled environment lighting for legacy projects", async () => {
+        const host = createHost();
+        const project = createProject({
+            scene: {
+                ...createProject().scene,
+                models: [{
+                    path: "C:/models/legacy.pmx",
+                    visible: true,
+                    motionImports: [],
+                }],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.loadPMX).toHaveBeenCalledWith(
+            "C:/models/legacy.pmx",
+            "mmd-standard",
+            "pbr-standard",
+        );
+        expect(host.environmentLightingEnabled).toBe(false);
+        expect(host.environmentLightingIntensity).toBe(1);
+    });
+
     it("restores SSGI tuning with fixed Soft Light blending", async () => {
         const host = createHost();
         const project = createProject({

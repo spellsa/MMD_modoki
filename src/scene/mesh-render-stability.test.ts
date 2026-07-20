@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { classifyLargeThinMesh } from "./mesh-render-stability";
+import {
+    classifyLargeThinMesh,
+    readExistingSubMeshEffectReadiness,
+} from "./mesh-render-stability";
 
 describe("classifyLargeThinMesh", () => {
     it("accepts a large low-poly floor plane", () => {
@@ -24,5 +27,39 @@ describe("classifyLargeThinMesh", () => {
         const result = classifyLargeThinMesh({ x: 120, y: 0.1, z: 6 }, 24, 72, "stage_bar");
 
         expect(result.isLargeThinPlane).toBe(false);
+    });
+});
+
+describe("readExistingSubMeshEffectReadiness", () => {
+    it("reads an already-created effect without invoking material compilation", () => {
+        let materialReadinessCalls = 0;
+        const subMesh = {
+            effect: {
+                isReady: () => true,
+            },
+            material: {
+                isReadyForSubMesh: () => {
+                    materialReadinessCalls += 1;
+                    return true;
+                },
+            },
+        };
+
+        expect(readExistingSubMeshEffectReadiness(subMesh)).toBe(true);
+        expect(materialReadinessCalls).toBe(0);
+    });
+
+    it("reports no readiness before an effect exists", () => {
+        expect(readExistingSubMeshEffectReadiness({ effect: null })).toBeNull();
+    });
+
+    it("contains errors thrown while reading diagnostic state", () => {
+        expect(readExistingSubMeshEffectReadiness({
+            effect: {
+                isReady: () => {
+                    throw new Error("disposed");
+                },
+            },
+        })).toBe(false);
     });
 });

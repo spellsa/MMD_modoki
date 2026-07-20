@@ -12,11 +12,18 @@ const electronExecutable = require("electron");
 const timeoutMs = Number.parseInt(process.env.MMD_MODOKI_SMOKE_PARENT_TIMEOUT_MS ?? "45000", 10) || 45000;
 const smokeTempDir = mkdtempSync(join(tmpdir(), "mmd-modoki-smoke-"));
 const smokeResultPath = join(smokeTempDir, "result.json");
+const keepSmokeTemp = process.env.MMD_MODOKI_SMOKE_KEEP_TEMP === "1";
 const childEnv = {
   ...process.env,
   MMD_MODOKI_SMOKE: "1",
   MMD_MODOKI_SMOKE_TIMEOUT_MS: process.env.MMD_MODOKI_SMOKE_TIMEOUT_MS ?? "25000",
+  MMD_MODOKI_SMOKE_STABILITY_MS: process.env.MMD_MODOKI_SMOKE_STABILITY_MS ?? "3000",
   MMD_MODOKI_SMOKE_REQUIRE_WEBGPU: process.env.MMD_MODOKI_SMOKE_REQUIRE_WEBGPU ?? "1",
+  MMD_MODOKI_SMOKE_RENDER_STABILITY_DIAGNOSTICS:
+    process.env.MMD_MODOKI_SMOKE_RENDER_STABILITY_DIAGNOSTICS ?? "1",
+  MMD_MODOKI_SMOKE_PBR_MMD_LIKE:
+    process.env.MMD_MODOKI_SMOKE_PBR_MMD_LIKE ?? "0",
+  MMD_MODOKI_SMOKE_USER_DATA_PATH: join(smokeTempDir, "user-data"),
   MMD_MODOKI_SMOKE_RESULT_PATH: smokeResultPath,
 };
 
@@ -78,12 +85,24 @@ const printSmokeResult = () => {
     if (result?.data?.scenario) {
       console.log(`[smoke] scenario: ${JSON.stringify(result.data.scenario)}`);
     }
+    if (!result?.success && result?.data) {
+      console.error(`[smoke] failure details: ${JSON.stringify(result.data)}`);
+      const smokeLogPath = join(smokeTempDir, "user-data", "logs", "dev", "main-dev.log");
+      if (existsSync(smokeLogPath)) {
+        const smokeLogLines = readFileSync(smokeLogPath, "utf8").split(/\r?\n/);
+        console.error(`[smoke] log tail:\n${smokeLogLines.slice(-160).join("\n")}`);
+      }
+    }
     return result;
   } catch {
     console.warn("[smoke] result file was not written");
     return null;
   } finally {
-    cleanupTempDir();
+    if (keepSmokeTemp) {
+      console.log(`[smoke] keeping temp directory: ${smokeTempDir}`);
+    } else {
+      cleanupTempDir();
+    }
   }
 };
 

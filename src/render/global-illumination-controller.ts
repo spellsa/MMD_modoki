@@ -1,4 +1,5 @@
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import type { Material } from "@babylonjs/core/Materials/material";
 import type { Scene } from "@babylonjs/core/scene";
 import { GIRSMManager } from "@babylonjs/core/Rendering/GlobalIllumination/giRSMManager";
 import { GIRSM } from "@babylonjs/core/Rendering/GlobalIllumination/giRSM";
@@ -14,6 +15,18 @@ import "@babylonjs/core/ShadersWGSL/rsmFullGlobalIllumination.fragment";
 
 type SceneModelLike = {
     mesh: AbstractMesh;
+};
+
+type PbrSubSurfaceLike = {
+    isScatteringEnabled: boolean;
+};
+
+type MaterialWithSubSurface = Material & {
+    subSurface?: PbrSubSurfaceLike;
+};
+
+type ReflectiveShadowMapWithMaterialClones = ReflectiveShadowMap & {
+    _regularMatToMatWithPlugin?: Map<Material, Material>;
 };
 
 const GI_OUTPUT_TEXTURE_DIMENSIONS = { width: 256, height: 256 };
@@ -251,6 +264,20 @@ export class GlobalIlluminationController {
             }
             this.registeredMeshes.add(mesh);
             this.giRsm.rsm.addMesh(mesh);
+            this.disableScreenSpaceScatteringOnRsmMaterialClones();
+        }
+    }
+
+    private disableScreenSpaceScatteringOnRsmMaterialClones(): void {
+        // Babylon creates internal material clones for the reflective shadow map.
+        // They render into a no-prepass MRT and must not participate in the
+        // camera's screen-space subsurface-scattering pass.
+        const rsm = this.giRsm?.rsm as ReflectiveShadowMapWithMaterialClones | undefined;
+        for (const material of rsm?._regularMatToMatWithPlugin?.values() ?? []) {
+            const subSurface = (material as MaterialWithSubSurface).subSurface;
+            if (subSurface?.isScatteringEnabled) {
+                subSurface.isScatteringEnabled = false;
+            }
         }
     }
 

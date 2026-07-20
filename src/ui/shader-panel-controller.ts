@@ -1,10 +1,16 @@
 import { t } from "../i18n";
 import type { MmdManager, WgslMaterialShaderPresetId } from "../mmd-manager";
 import type { EditorAction } from "../actions/types";
+import type { PbrMaterialShaderPreset } from "../shared/mmd-material-pipeline";
 
 type ToastType = "success" | "error" | "info";
 
 type ShaderPanelElements = {
+    materialPipelineSelect: HTMLSelectElement | null;
+    pbrPresetSelect: HTMLSelectElement | null;
+    iblLightingToggle: HTMLInputElement | null;
+    iblLightingIntensity: HTMLInputElement | null;
+    iblLightingIntensityValue: HTMLElement | null;
     modelSelect: HTMLSelectElement | null;
     presetSelect: HTMLSelectElement | null;
     applySelectedButton: HTMLButtonElement | null;
@@ -49,6 +55,11 @@ const HIDDEN_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
 
 function resolveShaderPanelElements(): ShaderPanelElements {
     return {
+        materialPipelineSelect: document.getElementById("shader-material-pipeline-select") as HTMLSelectElement | null,
+        pbrPresetSelect: document.getElementById("shader-pbr-preset-select") as HTMLSelectElement | null,
+        iblLightingToggle: document.getElementById("shader-ibl-lighting-toggle") as HTMLInputElement | null,
+        iblLightingIntensity: document.getElementById("shader-ibl-lighting-intensity") as HTMLInputElement | null,
+        iblLightingIntensityValue: document.getElementById("shader-ibl-lighting-intensity-value"),
         modelSelect: document.getElementById("shader-model-select") as HTMLSelectElement | null,
         presetSelect: document.getElementById("shader-preset-select") as HTMLSelectElement | null,
         applySelectedButton: document.getElementById("btn-shader-apply-selected") as HTMLButtonElement | null,
@@ -106,6 +117,27 @@ export class ShaderPanelController {
         }
 
         this.syncModelSelectorFromInfo();
+        const models = this.mmdManager.getWgslModelShaderStates();
+        if (elements.materialPipelineSelect) {
+            elements.materialPipelineSelect.value = this.mmdManager.getMmdMaterialPipelinePreset();
+        }
+        if (elements.pbrPresetSelect) {
+            elements.pbrPresetSelect.value = this.mmdManager.getPbrMaterialPreset();
+            elements.pbrPresetSelect.disabled =
+                this.mmdManager.getMmdMaterialPipelinePreset() !== "pbr-standard"
+                && !models.some((model) => model.materialPipeline === "pbr-standard");
+        }
+        if (elements.iblLightingToggle) {
+            elements.iblLightingToggle.checked = this.mmdManager.isEnvironmentLightingEnabled();
+        }
+        if (elements.iblLightingIntensity) {
+            const intensity = this.mmdManager.getEnvironmentLightingIntensity();
+            elements.iblLightingIntensity.value = String(Math.round(intensity * 100));
+            elements.iblLightingIntensity.disabled = !this.mmdManager.isEnvironmentLightingEnabled();
+            if (elements.iblLightingIntensityValue) {
+                elements.iblLightingIntensityValue.textContent = intensity.toFixed(1);
+            }
+        }
 
         if (this.mmdManager.getTimelineTarget() === "camera") {
             this.renderCameraPostEffectsPanel();
@@ -119,9 +151,9 @@ export class ShaderPanelController {
 
         const isAvailable = this.mmdManager.isWgslMaterialShaderAssignmentAvailable();
         const previousSelectedShaderValue = elements.presetSelect.value;
-        const presets = this.mmdManager.getWgslMaterialShaderPresets()
+        let presets: Array<{ id: string; label: string; description: string }> =
+            this.mmdManager.getWgslMaterialShaderPresets()
             .filter((preset) => !HIDDEN_SHADER_PRESET_IDS.has(preset.id));
-        const models = this.mmdManager.getWgslModelShaderStates();
 
         elements.presetSelect.innerHTML = "";
         for (const preset of presets) {
@@ -129,18 +161,6 @@ export class ShaderPanelController {
             option.value = preset.id;
             option.textContent = preset.label;
             elements.presetSelect.appendChild(option);
-        }
-
-        if (!isAvailable) {
-            elements.modelSelect.innerHTML = '<option value="">-</option>';
-            elements.modelSelect.disabled = true;
-            elements.presetSelect.disabled = true;
-            elements.applySelectedButton.disabled = true;
-            elements.applyAllButton.disabled = true;
-            elements.resetButton.disabled = true;
-            elements.note.textContent = t("shader.note.wgslUnavailable");
-            elements.materialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.wgslUnavailable")}</div>`;
-            return;
         }
 
         if (models.length === 0) {
@@ -167,6 +187,39 @@ export class ShaderPanelController {
         }
 
         const selectedModel = models.find((model) => model.modelIndex === selectedModelIndex) ?? models[0];
+        const isPbrModel = selectedModel.materialPipeline === "pbr-standard";
+        if (!isAvailable && !isPbrModel) {
+            elements.modelSelect.innerHTML = '<option value="">-</option>';
+            elements.modelSelect.disabled = true;
+            elements.presetSelect.disabled = true;
+            elements.applySelectedButton.disabled = true;
+            elements.applyAllButton.disabled = true;
+            elements.resetButton.disabled = true;
+            elements.note.textContent = t("shader.note.wgslUnavailable");
+            elements.materialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.wgslUnavailable")}</div>`;
+            return;
+        }
+        if (isPbrModel) {
+            presets = [
+                {
+                    id: "pbr-base",
+                    label: t("shader.pbrMaterial.base"),
+                    description: t("shader.pbrMaterial.baseDescription"),
+                },
+                {
+                    id: "pbr-skin",
+                    label: t("shader.pbrPreset.skin"),
+                    description: t("shader.pbrMaterial.skinDescription"),
+                },
+            ];
+            elements.presetSelect.innerHTML = "";
+            for (const preset of presets) {
+                const option = document.createElement("option");
+                option.value = preset.id;
+                option.textContent = preset.label;
+                elements.presetSelect.appendChild(option);
+            }
+        }
         elements.modelSelect.value = String(selectedModel.modelIndex);
         elements.modelSelect.disabled = false;
 
@@ -191,9 +244,13 @@ export class ShaderPanelController {
         let selectedPresetId = presets[0]?.id ?? "wgsl-mmd-standard";
         let mixedPresets = false;
         if (selectedMaterial) {
-            selectedPresetId = selectedMaterial.presetId;
+            selectedPresetId = isPbrModel
+                ? selectedMaterial.pbrPresetId
+                : selectedMaterial.presetId;
         } else {
-            const allPresetIds = Array.from(new Set(selectedModel.materials.map((material) => material.presetId)));
+            const allPresetIds = Array.from(new Set(selectedModel.materials.map(
+                (material) => isPbrModel ? material.pbrPresetId : material.presetId,
+            )));
             if (allPresetIds.length === 1) {
                 selectedPresetId = allPresetIds[0];
             } else {
@@ -204,7 +261,9 @@ export class ShaderPanelController {
             selectedPresetId = presets[0]?.id ?? "wgsl-mmd-standard";
         }
 
-        const selectedExternalWgslPath = selectedMaterial
+        const selectedExternalWgslPath = isPbrModel
+            ? null
+            : selectedMaterial
             ? selectedMaterial.externalWgslPath
             : (() => {
                 const paths = new Set(
@@ -281,7 +340,11 @@ export class ShaderPanelController {
             presetEl.className = "shader-material-preset";
             presetEl.textContent = material.externalWgslPath
                 ? `WGSL: ${this.getBaseNameForRenderer(material.externalWgslPath)}`
-                : (presetLabelById.get(material.presetId) ?? material.presetId);
+                : (isPbrModel
+                    ? (material.pbrPresetId === "pbr-skin"
+                        ? t("shader.pbrPreset.skin")
+                        : this.getPbrMaterialPresetLabel(selectedModel.pbrMaterialPreset))
+                    : (presetLabelById.get(material.presetId) ?? material.presetId));
             item.appendChild(presetEl);
 
             elements.materialList.appendChild(item);
@@ -399,6 +462,47 @@ export class ShaderPanelController {
     }
 
     private setupEventListeners(): void {
+        this.elements.materialPipelineSelect?.addEventListener("change", () => {
+            const next = this.mmdManager.setMmdMaterialPipelinePreset(
+                this.elements.materialPipelineSelect?.value,
+            );
+            this.showToast(
+                next === "pbr-standard"
+                    ? t("shader.toast.pbrNextImport")
+                    : t("shader.toast.mmdNextImport"),
+                "info",
+            );
+            this.refresh();
+        });
+        this.elements.pbrPresetSelect?.addEventListener("change", () => {
+            const next = this.mmdManager.setPbrMaterialPreset(
+                this.elements.pbrPresetSelect?.value,
+            );
+            this.showToast(
+                t("shader.toast.pbrPresetApplied", {
+                    name: this.getPbrMaterialPresetLabel(next),
+                }),
+                "info",
+            );
+            this.refresh();
+        });
+        this.elements.iblLightingToggle?.addEventListener("change", () => {
+            const enabled = this.mmdManager.setEnvironmentLightingEnabled(
+                this.elements.iblLightingToggle?.checked === true,
+            );
+            this.showToast(
+                enabled ? t("shader.toast.iblEnabled") : t("shader.toast.iblDisabled"),
+                "info",
+            );
+            this.refresh();
+        });
+        this.elements.iblLightingIntensity?.addEventListener("input", () => {
+            const value = Number(this.elements.iblLightingIntensity?.value ?? 100) / 100;
+            const intensity = this.mmdManager.setEnvironmentLightingIntensity(value);
+            if (this.elements.iblLightingIntensityValue) {
+                this.elements.iblLightingIntensityValue.textContent = intensity.toFixed(1);
+            }
+        });
         this.elements.modelSelect?.addEventListener("change", () => {
             const value = this.elements.modelSelect?.value ?? "";
             if (this.dispatchAction?.({
@@ -423,6 +527,18 @@ export class ShaderPanelController {
         });
     }
 
+    private getPbrMaterialPresetLabel(preset: string): string {
+        switch (preset) {
+            case "pbr-mmd-like":
+                return t("shader.pbrPreset.mmdLike");
+            case "pbr-skin":
+                return t("shader.pbrPreset.skin");
+            case "pbr-standard":
+            default:
+                return t("shader.pbrPreset.standard");
+        }
+    }
+
     private parseExternalWgslPresetPath(value: string): string | null {
         if (!value.startsWith(EXTERNAL_WGSL_PRESET_PREFIX)) {
             return null;
@@ -433,10 +549,6 @@ export class ShaderPanelController {
 
     private async applyShaderPresetFromPanel(resetToDefault: boolean, target: "auto" | "selected" | "all"): Promise<void> {
         if (!this.elements.presetSelect) {
-            return;
-        }
-        if (!this.mmdManager.isWgslMaterialShaderAssignmentAvailable()) {
-            this.showToast("WGSL effect assignment is unavailable", "error");
             return;
         }
         if (this.getInfoModelSelectState().value === CAMERA_SELECT_VALUE) {
@@ -460,9 +572,37 @@ export class ShaderPanelController {
             return;
         }
         const materialKey = target === "all" ? null : selectedMaterialKey;
-        const selectedValue = resetToDefault ? "wgsl-mmd-standard" : this.elements.presetSelect.value;
+        const selectedModel = models.find((model) => model.modelIndex === modelIndex);
+        const isPbrModel = selectedModel?.materialPipeline === "pbr-standard";
+        if (!isPbrModel && !this.mmdManager.isWgslMaterialShaderAssignmentAvailable()) {
+            this.showToast("WGSL effect assignment is unavailable", "error");
+            return;
+        }
+        const selectedValue = resetToDefault
+            ? (isPbrModel ? "pbr-base" : "wgsl-mmd-standard")
+            : this.elements.presetSelect.value;
         if (!selectedValue) {
             this.showToast("Effect preset is not selected", "error");
+            return;
+        }
+
+        if (isPbrModel) {
+            const ok = this.mmdManager.setPbrMaterialShaderPreset(
+                modelIndex,
+                materialKey,
+                selectedValue as PbrMaterialShaderPreset,
+            );
+            if (!ok) {
+                this.showToast(t("shader.toast.pbrMaterialFailed"), "error");
+                return;
+            }
+            this.refresh();
+            this.showToast(
+                selectedValue === "pbr-skin"
+                    ? t("shader.toast.pbrSkinApplied")
+                    : t("shader.toast.pbrBaseApplied"),
+                "success",
+            );
             return;
         }
 

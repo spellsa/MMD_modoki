@@ -2985,9 +2985,38 @@ body.file-drag-active #viewport-container {
 
 .shader-panel-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr);
   gap: 6px;
   align-items: center;
+}
+
+.shader-panel-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.shader-panel-checkbox-label input {
+  margin: 0;
+}
+
+.shader-panel-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.shader-panel-range .light-slider {
+  width: 100%;
+}
+
+.shader-panel-range .light-value {
+  text-align: right;
 }
 
 .shader-panel-actions {

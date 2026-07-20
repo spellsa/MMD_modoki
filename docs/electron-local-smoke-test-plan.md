@@ -15,6 +15,19 @@ MMD_modoki は Electron / Babylon.js / WebGPU / ファイル読み込みが絡�
 
 2026-04-16 時点で、`MMD_MODOKI_SMOKE=1` による smoke mode と `scripts/smoke-launch.mjs` は実装済み。Windows ローカルで `npm.cmd run smoke:launch` が成功し、`engine=WebGPU` が報告されることを確認済み。
 
+2026-07-20 に、renderer ready 直後に終了せず既定 3 秒間の安定化監視を行うよう更新した。
+`MMD_MODOKI_SMOKE_STABILITY_MS` で監視時間を変更でき、監視中の renderer process gone、
+window unresponsive、window破棄は失敗として扱う。
+同時に `renderStability` 診断を既定で有効化し、`Invalid ShaderModule`、
+`Invalid RenderPipeline`、`Invalid CommandBuffer`、WGSL parse error が renderer console に
+出た場合も失敗として扱う。診断自体が `Material.isReadyForSubMesh()` を手動実行して
+WebGPU pipeline を壊した回帰を検出するためである。
+
+その後、Chromium / DevTools にだけ見える WebGPU validation message は Electron の
+`console-message` では取りこぼす場合があることを確認した。現在は `GPUDevice` の
+`uncapturederror` を renderer で直接監視し、1 件でも発生した場合は smoke failure と
+アプリログの warning の両方へ送る。
+
 このアプリは WebGPU モードでの利用を前提にしているため、ローカル smoke test では **renderer runtime 初期化後の engine が `WebGPU` であること** も成功条件に含める。
 
 2026-05-30 追記:
@@ -48,6 +61,14 @@ npm.cmd run smoke:launch
 - WebGPU / WebGL2 の見た目差分。
 - 物理シミュレーションの正しさ。
 - UI 操作の手触り。
+
+### 実モデルを使う追加smokeの扱い
+
+通常の`smoke:launch`はモデル未読込の初期画面だけを対象にする。
+ローカルのPMX / PMD、テクスチャ、モーションなどは、権利・利用条件・プライバシー上の
+確認が必要なため、コーディングエージェントが独自判断でテスト入力に使用しない。
+実モデルを使う追加smokeは、ユーザーが対象ファイルと今回の検証への使用を明示的に
+許可した場合に限る。過去にパスを確認済みであることは、次回以降の使用許可を意味しない。
 
 ## なぜ Playwright から始めないか
 
@@ -89,6 +110,7 @@ smoke mode 時の動作:
 - renderer から `MmdManager` 初期化完了と engine 種別が通知されるまで待つ。
 - engine が `WebGPU` であることを成功条件にする。
 - `render-process-gone` / `did-fail-load` / `unresponsive` を失敗条件にする。
+- `renderStability` 診断を動かし、WebGPU shader / pipeline validation error を失敗条件にする。
 - 成功条件到達後、短い猶予を置いて `app.exit(0)` する。
 - 一定時間内に成功条件へ到達しなければ `app.exit(1)` する。
 
