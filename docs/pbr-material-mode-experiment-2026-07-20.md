@@ -10,7 +10,7 @@ ON / OFF し、同じ PMX / PMD を再読込して比較できる段階まで実
 
 この試行は、従来のMMD表示を置き換えるものではなく、PBR表現の成立条件と
 MMD材質をPBRへ移したときの問題を調べる実験である。現時点では
-`PBR Standard`、`PBR MMD Like`、材質別の`PBR Skin`を比較できるが、
+モデル全体は`PBR Standard`へ統一し、材質別の`PBR MMD Like`と`PBR Skin`を比較できるが、
 IBLのPBR出力経路はPBR Standardの実モデル比較でも成立を確認できたが、影・SSS色には未解決問題があり、
 既定表示へ昇格できる状態ではない。
 
@@ -18,13 +18,13 @@ IBLのPBR出力経路はPBR Standardの実モデル比較でも成立を確認�
 
 | 領域 | 試した内容 | 現在の状態 |
 | --- | --- | --- |
-| PBR読込 | babylon-mmdの`PBRMaterialBuilder`を基礎に、従来MMDモードと分離したPBRモードを追加 | モード、モデル別プリセット、プロジェクト保存に対応 |
+| PBR読込 | babylon-mmdの`PBRMaterialBuilder`を基礎に、従来MMDモードと分離したPBRモードを追加 | モデル全体のPBR基準はStandardへ統一 |
 | PBR Standard | babylon-mmd標準に近い比較基準を用意 | 比較用ベースとして維持 |
-| PBR MMD Like | toonテクスチャ左下1px、またはambient色を材質別に取得し、PBRの直接拡散光の暗部へ乗算 | toon色自体は取得できているが、SSS色としての効きは弱い |
-| PBR Skin | 材質別プリセットとして赤系diffusion profileと暗部用の赤い拡散光源を追加 | 色味は比較的良好。EmissiveとTranslucencyは不使用 |
-| SSS | Babylon.js標準PrePass SSSをMMD Like / Skinへ適用し、scene scale、散乱色、粗さを調整 | 動作するが、受け面の影ブレと色の弱さが残る |
-| 透明材質 | 明示的半透明をSSS対象外にし、ほぼ不透明なalpha textureを低い閾値のalpha testへ変換 | 背面透過は抑えたが、毛先の濃淡との両立は引き続き要確認 |
-| 即時切替 | 読込済みPBRMaterialを再生成せずStandard / MMD Like / Skin間で設定を切替 | 再起動・モデル再読込なしで反映 |
+| PBR MMD Like | PMX固有情報を使う材質別プリセットとして試行 | 旧toon / SSS処理を停止し、現在はStandardと同じ描画状態 |
+| PBR Skin | 肌向けの材質別プリセットとして試行 | 旧SSS処理を停止し、現在はStandardと同じ描画状態 |
+| SSS | Babylon.js標準PrePass SSSをMMD Like / Skinへ適用し、scene scale、散乱色、粗さを調整 | 影ブレ等が生じたため現在は無効化。以下に過去の試行を記録 |
+| 透明材質 | 明示的半透明をSSS対象外にし、ほぼ不透明なalpha textureを低い閾値のalpha testへ変換 | プリセット固有変換を停止し、Standardの透明設定を復元 |
+| 即時切替 | 読込済みPBRMaterialを再生成せず材質別プリセットを切替 | 再起動・モデル再読込なしで反映 |
 | IBL | 中立cube texture、同梱`white.hdr`、外部HDR、ON/OFF、強度0〜4を比較 | PBR Standardの実モデルで方向・色・強弱を確認。基盤は成立 |
 | HDRプリフィルタ | Electron / Viteで不足したHDR filtering shaderをGLSL / WGSLとも明示登録 | HTMLをWGSLとして読むvalidation errorは解消 |
 | 方向ライト | 照度上限を4、光色RGBを最大200%相当まで拡張 | PBRの直接光は明るくできるが、暗部と影が目立ちやすくなった |
@@ -180,23 +180,29 @@ MMD Likeは作者指定toon色という役割分担にする。
 
 ### PBR プリセット
 
-PBRモード全体のベースとして次の2プリセットを置く。
+2026-07-21にモデル全体の`PBR MMD Like`を廃止し、PBRモードの読込基準を
+`PBR Standard`へ統一した。PBRモデルでは材質ごとに次の3種類を割り当てる。
 
-- `PBR Standard（babylon-mmd）`
-- `PBR MMD Like（MMD_modoki）`
+- `PBR Standard`
+- `PBR MMD Like`
+- `PBR Skin`
 
-両プリセットは公式 `PBRMaterialBuilder` を継承した適応用 builder を使う。
-`PBR Standard` は公式 builder と同じ状態へ戻し、`PBR MMD Like` は
-材質別toon影色をPBR拡散光へ直接合成し、Babylon.jsの画面空間SSSで散乱させる。
-選択値はモデルごとに保持し、ローカル設定とプロジェクトへ保存する。
+`PBR MMD Like`はPMXのtoon / ambientなどを将来利用するための材質別プリセット、
+`PBR Skin`は肌向け調整を将来追加する材質別プリセットとして位置づける。
+割り当ては材質キー単位でプロジェクトの`materialShaders`へ保存する。
 
-`PBR Skin` はモデル全体のベースではなく、PBRモデルの材質ごとに割り当てる
-追加シェーダープリセットとする。材質パネル下段の「種類」で
-`ベースPBRを使用` / `PBR Skin`を選び、選択材質または全材質へ割り当てる。
-上段のベースをStandard / MMD Like間で切り替えても、Skin指定材質は維持する。
-Skin指定は材質キー単位でプロジェクトの`materialShaders`へ保存する。
+現在は不具合の切り分けを優先し、3種類とも同一のPBR Standard描画設定を使う。
+MMD Like / Skinへ切り替えてもSubSurface、alpha、transparencyMode、roughness、
+specularIntensityをStandard基準へ戻し、独自Material PluginやSSSを有効にしない。
+PMXのtoonテクスチャとambient色は将来の再実装用に保持するが、描画にはまだ使用しない。
 
-### PBR MMD Like: 材質別toon影色と画面空間SSS
+旧プロジェクトにモデル全体の`pbrMaterialPreset: "pbr-mmd-like"`が残っている場合は、
+読込時に全材質へ材質別`PBR MMD Like`を割り当てる互換移行を行う。その後、旧来の
+`materialShaders`に明示指定があれば、材質別指定を優先する。
+
+### 過去の試行: PBR MMD Likeの材質別toon影色と画面空間SSS
+
+以下は2026-07-20時点の試行記録であり、現在のプリセットでは無効化している。
 
 babylon-mmdの`PBRMaterialBuilder`はPMX / PMD材質ごとに別の`PBRMaterial`を生成する。
 `PBR MMD Like`は各材質へ共通のMaterial Pluginを追加し、材質ごとのtoonテクスチャまたは
@@ -262,7 +268,9 @@ PBRモデルの読込時は、どのプリセットでもtoonテクスチャと�
 材質方式の `MMDモード` / `PBRモード` 切替だけは材質クラスが異なるため、引き続き
 次回モデル読込へ適用する。
 
-### PBR Skin: 材質別の強い赤色SSS
+### 過去の試行: PBR Skinの材質別の強い赤色SSS
+
+以下は2026-07-20時点の試行記録であり、現在のプリセットでは無効化している。
 
 `PBR Skin`はPBRモデルの選択材質だけへ即時適用する。不透明SSSとして扱い、
 背景や背面を透過させない。
@@ -331,7 +339,7 @@ sphere / toon / edge と各テクスチャの加算・乗算モーフは、公�
 - 背景の `BackgroundMaterial`、空の表示、背景画像・動画の表示には影響させない。
 - ON / OFF はローカル設定とプロジェクトの `lighting.environmentLightingEnabled`
   へ保存する。
-- `環境光強度`スライダーを`0.0`〜`4.0`で設け、Babylon.jsの
+- `環境光強度`スライダーを`0.0`〜`4.0`で設け、メイン`照度`との積をBabylon.jsの
   `scene.environmentIntensity`へ即時反映する。既定値は`1.0`。
 - `scene.iblIntensity`は`1.0`に固定し、UI値との二重乗算を避ける。
 - 強度変更時は既存PBR材質のuniform再バインドを要求し、読込済みモデルにも即時反映する。
@@ -349,8 +357,9 @@ Babylon.jsのDirectionalLightは、PBRかつ既定の`INTENSITYMODE_AUTOMATIC`�
 照度スライダーとランタイム上限を`4.0`へ拡張する。既定値は`1.0`のまま維持し、
 既存プロジェクトの見た目は変えない。
 
-方向ライトの`specular`は現状0のため、この照度は主に直接拡散光を増やす。
-PBR MMD Likeをマット寄りに保ちつつ、キーライトの明るさだけを増やす意図である。
+方向ライトの`specular`は現状0のため、直接光側では主に拡散光を増やす。
+PBRでは同じ照度をIBL強度にも乗算し、キーライトだけでなくHDRI由来の影部もまとめて
+明るく・暗くする。HDRI背景の明るさはこの照度から独立させる。
 
 光色RGBスライダーは内部的に`128 = 100%`、`255 = 200%`として保存されていたが、
 従来はDirectionalLightへ反映する直前に各成分を100%へ丸めていた。RGBによるHDR光量
@@ -362,7 +371,7 @@ PBR MMD Likeをマット寄りに保ちつつ、キーライトの明るさだ�
 
 既存の WGSL プリセットは `MmdStandardMaterial` のシェーダー断片を差し替える機構で、
 `PBRMaterial` への切替機構ではない。PBRで読み込んだモデルを選択した場合は同じ材質別UIを
-PBR用へ切り替え、WGSLプリセットを隠して`ベースPBRを使用`と`PBR Skin`だけを表示する。
+PBR用へ切り替え、WGSLプリセットを隠して`PBR Standard`、`PBR MMD Like`、`PBR Skin`を表示する。
 選択材質 / 全材質への割当ボタンはPBRでも有効で、WebGPU固有の可否判定には依存しない。
 材質の表示 / 非表示も引き続き使える。
 
@@ -370,11 +379,11 @@ PBR用へ切り替え、WGSLプリセットを隠して`ベースPBRを使用`�
 
 - [x] `MMDモード` が既定値のまま
 - [x] 不正な材質モードを `MMDモード` へフォールバック
-- [x] PBRベースプリセットの選択値をモデルとプロジェクトへ保存
-- [x] 上段のPBRベースをStandard / MMD Likeの2種類へ整理
-- [x] PBR Skinを材質別割り当てへ分離
-- [x] PBR Skinの材質別プロジェクト保存 / 読込
-- [x] `PBR MMD Like` を専用 builder へ分離
+- [x] モデル全体のPBR基準をPBR Standardへ統一
+- [x] PBR MMD Like / PBR Skinを材質別割り当てへ分離
+- [x] PBR MMD Like / PBR Skinの材質別プロジェクト保存 / 読込
+- [x] 旧モデル全体PBR MMD Like指定を全材質指定へ互換移行
+- [x] MMD Like / SkinをPBR Standardと同一の描画状態へ戻す
 - [x] toon影色を材質別PBRシェーダーで処理
 - [x] PBR MMD Like / Skinで`isScatteringEnabled`による画面空間SSSを適用
 - [ ] MMD Like / Skinのscene scaleとSSS適用範囲を整理し、PBR受け面の影ブレを解消
@@ -439,8 +448,8 @@ Babylon.js公式の `.hdr` 直接利用例に合わせ、`HDRCubeTexture` の
 ## 現時点の判断
 
 PBRモードは MMD 再現の代替ではなく、ライティングや質感を試すための実験領域として
-隔離する。MMD の toon / sphere / edge を維持した PBR 寄り表現は
-`PBR MMD Like`の独自builderとMaterial Pluginへ局所化する。toon影色は材質シェーダー、
-内部散乱はBabylon.js標準の画面空間SSSへ役割を分離した。現時点ではtoonの連続ランプ、
-sphere texture、edgeは未対応。散乱距離は全材質で共通なので、将来の詳細設定では
-材質別のSSS強度・対象外指定・厚み分類を追加候補とする。
+隔離する。モデル全体の基準はPBR Standardへ一本化し、PMX固有情報を使う表現は
+材質別`PBR MMD Like`、肌向け表現は材質別`PBR Skin`へ局所化する。
+現在は両プリセットともStandardと同じ描画に戻しており、旧toon / SSS実装は実行経路から
+外している。将来再開する場合は、材質単位の適用範囲、影ブレ、透明度、IBL応答を
+個別に検証し、安定した機能だけを段階的に有効化する。

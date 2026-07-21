@@ -10,9 +10,10 @@ Radiance HDR (`.hdr`) をBabylon.jsの`HDRCubeTexture`として読み込み、�
 2026-07-21の実機比較で、`PBR Standard`は外部HDRの方向・色・強度を自然に反映することを確認した。
 したがって、外部HDRの読込、拡散IBL、鏡面IBL、強度調整までの基本経路は成立している。
 
-`PBR MMD Like`もIBL自体は受けているが、低強度では暗く、高強度では急激に白飛びする。
-これはHDR読込やIBL経路の不具合ではなく、toon暗部補正、独自`finalDiffuse`処理、画面空間SSSを
-組み合わせたシェーダー側の応答として、別課題に分離する。
+旧モデル全体`PBR MMD Like`では、低強度では暗く、高強度では急激に白飛びした。
+これはtoon暗部補正、独自`finalDiffuse`処理、画面空間SSSを組み合わせた試行側の応答だった。
+現在はモデル全体の基準を`PBR Standard`へ統一し、材質別MMD Like / SkinもStandardと同じ
+描画状態へ戻しているため、IBL基盤の評価は`PBR Standard`を基準にする。
 
 ## 用語とライトの区別
 
@@ -108,7 +109,7 @@ Babylon.js 9.2の`BackgroundMaterial`は、HDR背景表示にも
 現在は次のように分離している。
 
 - `scene.iblIntensity = 1`: 共通係数を中立値へ固定
-- `scene.environmentIntensity`: UIのIBL環境光強度
+- `scene.environmentIntensity`: UIのIBL環境光強度 × メイン照度
 - IBL用`texture.level`: HDR露出の自動正規化
 - 背景cloneの`texture.level`: HDRI背景の明るさ
 
@@ -120,6 +121,10 @@ IBL用texture.level
 × material.environmentIntensity
 × scene.environmentIntensity
 ```
+
+メインの`照度`はPBRでも全体の明るさとして扱う。方向ライトだけでなくIBLにも乗算し、
+HDRIの間接光が残る影部も明暗を追従させる。`環境光強度`はその中でIBLの相対量を決める
+独立設定であり、HDRI背景の明るさにはどちらも掛けない。
 
 IBLをOFFにした場合も選択中のHDRは保持し、`scene.environmentIntensity`を`0`にする。
 再度ONにすると同じHDRへ設定強度を適用する。
@@ -148,8 +153,8 @@ babylon-mmdの`PBRMaterialBuilder`は、MMD材質のspecular色をBabylon PBRの
 Babylon PBRでは`reflectionColor`が鏡面radianceだけでなく拡散irradianceにも乗算される。
 MMDで一般的な黒または低いspecular色をそのまま使うと、HDRの拡散IBLまでほぼ消える。
 
-現在は`PBR Standard`、`PBR MMD Like`、`PBR Skin`で`reflectionColor`を白へ正規化する。
-MMD Like / Skinの鏡面の強さは`specularIntensity`と粗さで抑える。
+現在は材質別`PBR Standard`、`PBR MMD Like`、`PBR Skin`のすべてで
+同じStandard基準の`reflectionColor`、`specularIntensity`、粗さを使う。
 
 モデルなしの合成PBR球では既定の白い`reflectionColor`が使われていたため、当初のsmokeでは
 この実モデル固有条件を検出できなかった。実モデルと診断球の差として得られた重要な知見である。
@@ -210,9 +215,9 @@ IBL強度を標準`1.0`へ戻す。
 - 高輝度HDRの自動正規化後、標準強度が実用的な明るさになった
 - 背景輝度とIBL強度を独立して調整できた
 - MMD照明欄の環境光が`0`でもIBLが動作した
-- `PBR MMD Like`でもIBLによる変化は出るが、強度応答が極端
+- 旧モデル全体`PBR MMD Like`でもIBLによる変化は出たが、独自シェーダーの強度応答が極端だった
 
-以上から、IBL / HDRI基盤は成立と判断する。PBR MMD Likeの見た目は材質シェーダー側で継続調整する。
+以上から、IBL / HDRI基盤は成立と判断する。今後のMMD Likeの見た目は材質別プリセットとして調整する。
 
 ## テストアセットの扱い
 
@@ -222,8 +227,8 @@ IBL強度を標準`1.0`へ戻す。
 
 ## 残課題
 
-- PBR MMD Likeのtoon補正のみ / SSSのみ / 両方の分離比較
-- PBR MMD LikeのIBL強度応答と白飛びの調整
+- 材質別PBR MMD Likeでtoon補正のみ / SSSのみ / 両方を段階的に再導入して比較
+- 材質別PBR MMD Likeを再調整する場合のIBL強度応答と白飛びの確認
 - HDRIのY回転
 - `.env`の外部読込
 - 外部HDRパスの相対化またはプロジェクト同梱方針
