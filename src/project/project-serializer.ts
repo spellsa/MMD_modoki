@@ -74,6 +74,9 @@ type ProjectExportHost = {
     iblShadowsEnabled: boolean;
     environmentLightingEnabled: boolean;
     environmentLightingIntensity: number;
+    environmentLightingSourcePath: string | null;
+    environmentBackgroundVisible: boolean;
+    environmentBackgroundIntensity: number;
     iblShadowOpacity: number;
     iblShadowDistanceScale: number;
     characterContactShadowEnabled: boolean;
@@ -337,6 +340,9 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             ambientIntensity: host.ambientIntensity,
             environmentLightingEnabled: host.environmentLightingEnabled,
             environmentLightingIntensity: host.environmentLightingIntensity,
+            environmentLightingSourcePath: host.environmentLightingSourcePath,
+            environmentBackgroundVisible: host.environmentBackgroundVisible,
+            environmentBackgroundIntensity: host.environmentBackgroundIntensity,
             temperatureKelvin: host.lightColorTemperature,
             lightColor: host.getLightColor(),
             lightFlatStrength: host.lightFlatStrength,

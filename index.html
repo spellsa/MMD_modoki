@@ -101,9 +101,11 @@
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleMedia"><span data-i18n="menu.background.toggleMedia">背景画像/動画を表示</span></button>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleBlack"><span data-i18n="menu.background.toggleBlack">黒背景を表示</span></button>
-          <div class="app-menu-separator" role="separator" hidden></div>
-          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleHdriBackground" hidden><span data-i18n="menu.background.toggleHdriBackground">HDRI背景を表示</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.hdriSettings" hidden><span data-i18n="menu.background.hdriSettings">HDRI詳細...</span></button>
+          <div class="app-menu-separator" role="separator"></div>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleEnvironmentLighting"><span data-i18n="menu.background.toggleEnvironmentLighting">環境ライトを使用</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.hdriSettings"><span data-i18n="menu.background.hdriSettings">環境ライト詳細...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.loadHdri"><span data-i18n="menu.background.loadHdri">HDRIを環境ライトに読み込む...</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleHdriBackground"><span data-i18n="menu.background.toggleHdriBackground">HDRI背景を表示</span></button>
         </div>
       </div>
       <div class="app-menu-group">
@@ -614,20 +616,6 @@
                 <option value="pbr-standard" data-i18n="shader.pbrPreset.standard">PBR Standard（babylon-mmd）</option>
                 <option value="pbr-mmd-like" data-i18n="shader.pbrPreset.mmdLike">PBR MMD Like（MMD_modoki）</option>
               </select>
-            </div>
-            <div class="shader-panel-row">
-              <span class="info-label">IBL</span>
-              <label class="shader-panel-checkbox-label">
-                <input id="shader-ibl-lighting-toggle" type="checkbox">
-                <span data-i18n="shader.iblLighting">環境ライティング</span>
-              </label>
-            </div>
-            <div class="shader-panel-row">
-              <span class="info-label" data-i18n="shader.iblIntensity">環境光強度</span>
-              <div class="shader-panel-range">
-                <input id="shader-ibl-lighting-intensity" class="light-slider" type="range" min="0" max="400" value="100" step="1">
-                <span id="shader-ibl-lighting-intensity-value" class="light-value">1.0</span>
-              </div>
             </div>
             <div class="shader-panel-note" data-i18n="shader.pipeline.note">モードは次回読込へ、PBR種類は読込済みPBRモデルにも即時適用されます。</div>
             <div class="shader-panel-row">

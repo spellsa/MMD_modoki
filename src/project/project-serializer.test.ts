@@ -56,6 +56,9 @@ function createHost() {
         iblShadowsEnabled: false,
         environmentLightingEnabled: false,
         environmentLightingIntensity: 1,
+        environmentLightingSourcePath: null,
+        environmentBackgroundVisible: false,
+        environmentBackgroundIntensity: 0.03,
         iblShadowOpacity: 0.25,
         iblShadowDistanceScale: 4,
         characterContactShadowEnabled: false,
@@ -216,12 +219,18 @@ describe("exportProjectState", () => {
             }],
             environmentLightingEnabled: true,
             environmentLightingIntensity: 2.25,
+            environmentLightingSourcePath: "C:/hdr/studio.hdr",
+            environmentBackgroundVisible: true,
+            environmentBackgroundIntensity: 0.08,
         });
 
         expect(project.scene.models[0]?.materialPipeline).toBe("pbr-standard");
         expect(project.scene.models[0]?.pbrMaterialPreset).toBe("pbr-mmd-like");
         expect(project.lighting.environmentLightingEnabled).toBe(true);
         expect(project.lighting.environmentLightingIntensity).toBe(2.25);
+        expect(project.lighting.environmentLightingSourcePath).toBe("C:/hdr/studio.hdr");
+        expect(project.lighting.environmentBackgroundVisible).toBe(true);
+        expect(project.lighting.environmentBackgroundIntensity).toBe(0.08);
     });
 
     it("writes SSGI tuning independently from the stack enabled state", () => {

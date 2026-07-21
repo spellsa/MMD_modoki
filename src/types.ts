@@ -100,6 +100,29 @@ export interface SmokeRendererReadyPayload {
     physicsBackend: string;
     crossOriginIsolated?: boolean;
     sharedArrayBufferAvailable?: boolean;
+    environmentLightingProbe?: {
+        passed: boolean;
+        darkLuminance: number;
+        litLuminance: number;
+        luminanceDelta: number;
+    };
+    environmentLightingDiagnostics?: {
+        enabled: boolean;
+        source: "external" | "bundled" | "fallback" | "none";
+        sourcePath: string | null;
+        textureName: string | null;
+        textureReady: boolean;
+        hasSphericalPolynomial: boolean;
+        backgroundVisible: boolean;
+        backgroundTextureReady: boolean;
+        backgroundMeshEnabled: boolean;
+        backgroundIntensity: number;
+        environmentTextureSize: { width: number; height: number };
+        backgroundTextureSize: { width: number; height: number };
+        pbrMaterialCount: number;
+        iblIntensity: number;
+        environmentIntensity: number;
+    };
     scenario?: AppLogData;
 }
 
@@ -298,6 +321,9 @@ export interface ProjectLightingState {
     ambientIntensity: number;
     environmentLightingEnabled?: boolean;
     environmentLightingIntensity?: number;
+    environmentLightingSourcePath?: string | null;
+    environmentBackgroundVisible?: boolean;
+    environmentBackgroundIntensity?: number;
     temperatureKelvin: number;
     lightColor?: ProjectRgbColor;
     lightFlatStrength?: number;

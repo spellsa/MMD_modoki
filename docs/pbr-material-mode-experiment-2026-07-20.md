@@ -11,7 +11,8 @@ ON / OFF し、同じ PMX / PMD を再読込して比較できる段階まで実
 この試行は、従来のMMD表示を置き換えるものではなく、PBR表現の成立条件と
 MMD材質をPBRへ移したときの問題を調べる実験である。現時点では
 `PBR Standard`、`PBR MMD Like`、材質別の`PBR Skin`を比較できるが、
-IBL・影・SSS色には未解決問題があり、既定表示へ昇格できる状態ではない。
+IBLのPBR出力経路はPBR Standardの実モデル比較でも成立を確認できたが、影・SSS色には未解決問題があり、
+既定表示へ昇格できる状態ではない。
 
 ### 試したこと
 
@@ -24,14 +25,14 @@ IBL・影・SSS色には未解決問題があり、既定表示へ昇格でき�
 | SSS | Babylon.js標準PrePass SSSをMMD Like / Skinへ適用し、scene scale、散乱色、粗さを調整 | 動作するが、受け面の影ブレと色の弱さが残る |
 | 透明材質 | 明示的半透明をSSS対象外にし、ほぼ不透明なalpha textureを低い閾値のalpha testへ変換 | 背面透過は抑えたが、毛先の濃淡との両立は引き続き要確認 |
 | 即時切替 | 読込済みPBRMaterialを再生成せずStandard / MMD Like / Skin間で設定を切替 | 再起動・モデル再読込なしで反映 |
-| IBL | 中立cube texture、同梱`white.hdr`、`HDRCubeTexture`、ON/OFF、強度0〜4を比較 | texture生成は成功するが、実画面で有意な差を確認できていない |
+| IBL | 中立cube texture、同梱`white.hdr`、外部HDR、ON/OFF、強度0〜4を比較 | PBR Standardの実モデルで方向・色・強弱を確認。基盤は成立 |
 | HDRプリフィルタ | Electron / Viteで不足したHDR filtering shaderをGLSL / WGSLとも明示登録 | HTMLをWGSLとして読むvalidation errorは解消 |
 | 方向ライト | 照度上限を4、光色RGBを最大200%相当まで拡張 | PBRの直接光は明るくできるが、暗部と影が目立ちやすくなった |
 | 影ブレ対策 | 非SSS StandardMaterialのlegacy irradianceへ除外値を書き込む互換パッチを追加 | StandardMaterial誤判定は抑制したが、PBR受け面の影ブレは残る |
 
 ### 現在生じている問題
 
-#### 1. IBLが実画面で効いているように見えない
+#### 1. IBLの実寄与（PBR Standard実モデルで確認済み）
 
 観測できていること:
 
@@ -41,16 +42,32 @@ IBL・影・SSS色には未解決問題があり、既定表示へ昇格でき�
 - `scene.iblIntensity`を`0.0`から`4.0`まで変えても、ユーザー確認では
   PBR MMD Likeの見た目に有意な差が出ていない。
 
-したがって、HDRの読込成功だけではIBLが最終PBR出力へ寄与している証明になっていない。
-現時点では次を未確認とする。
+2026-07-21に次の修正と診断を追加した。
 
-- 描画時点でも対象sceneへ正しいenvironment textureが接続されているか。
-- 各PBRMaterial側のenvironment / reflection関連設定が寄与を抑えていないか。
-- 同梱`white.hdr`が均一かつ弱く、方向ライトとトーンマッピングに差を隠されていないか。
-- PBR MMD LikeのMaterial PluginやFrame Graph経路でIBL成分が失われていないか。
+- UIの`環境光強度`は、テクスチャ係数の`scene.iblIntensity`ではなく、PBRの
+  diffuse irradianceとspecular radianceの最終合成へ掛かる`scene.environmentIntensity`
+  を制御する。
+- UI値が二重に乗算されないよう`scene.iblIntensity`は`1.0`へ固定する。
+- 強度変更時に既存PBRMaterialのバインドを更新する。freeze済み材質は強制再バインドする。
+- モデルを使わず、方向ライト寄与を0にしてPBR MMD LikeのMaterial Pluginを付けた
+  合成PBR球を64 x 64のRenderTargetへ描画するsmoke probeを追加した。
+- WebGPU実機で強度0の輝度`0.000`、強度1の輝度`0.872`、差分`0.872`を確認した。
 
-次の切り分けでは、高コントラストなHDR、方向ライト0、IBLのみの診断用PBR球を使い、
-IBL diffuseとspecularを別々に確認する。外部HDRI読込はその後に接続する。
+これにより、HDRからBabylon PBRの最終出力までIBLが届くことは数値で確認できた。
+その後、高コントラストな外部HDRでも実モデルだけ差が出ない原因を追跡し、次を確認した。
+
+- babylon-mmdのPBR builderはMMDのspecular色をBabylon PBRの`reflectionColor`へ割り当てる。
+- Babylon PBRはspecular radianceだけでなくdiffuse irradianceにも`reflectionColor`を乗算する。
+- MMD材質で一般的な黒または低いspecular色は、結果としてHDRの拡散IBLまでほぼ0にする。
+- 合成球probeは既定の白い`reflectionColor`を使っていたため、この実モデル固有条件を再現していなかった。
+
+PBR Standard / MMD Like / Skinでは`reflectionColor`を白へ正規化し、MMD Like / Skinの鏡面の強さは
+既存の`specularIntensity`で抑えるよう修正した。これによりStandardも暗いMMD specular色にIBLを
+遮断されない。
+外部HDRの拡散経路はGPU生成irradiance textureではなくCPU生成spherical polynomialへ統一した。
+HDRの露出差はspherical polynomialから求めた平均輝度を基にtexture levelを自動正規化する。
+基準平均輝度は`0.25`とし、テスト用HDRではlevelが約`0.019`になる。
+MMD照明欄の環境光はHemisphericLightであり、PBR IBLとは別系統なので、値が0でもIBLを無効化しない。
 
 #### 2. PBR MMD Likeで投影影がぶれる
 
@@ -301,7 +318,8 @@ sphere / toon / edge と各テクスチャの加算・乗算モーフは、公�
 
 ### IBL ライティング
 
-- 材質パネルに独立した `IBL 環境ライティング` チェックを置く。
+- 背景メニューに独立した `環境ライトを使用` チェックを置く。
+- ON / OFF と強度は `背景 > 環境ライト詳細...` からも操作できる。
 - 初期値は OFF。
 - OFF では `scene.environmentTexture` を退避して `null` にする。
 - ON では退避済みの environment texture を復元する。
@@ -313,13 +331,15 @@ sphere / toon / edge と各テクスチャの加算・乗算モーフは、公�
 - 背景の `BackgroundMaterial`、空の表示、背景画像・動画の表示には影響させない。
 - ON / OFF はローカル設定とプロジェクトの `lighting.environmentLightingEnabled`
   へ保存する。
-- `環境光強度`スライダーを`0.0`〜`4.0`で設け、Babylon.jsの`scene.iblIntensity`
-  へ即時反映する。既定値は`1.0`。
+- `環境光強度`スライダーを`0.0`〜`4.0`で設け、Babylon.jsの
+  `scene.environmentIntensity`へ即時反映する。既定値は`1.0`。
+- `scene.iblIntensity`は`1.0`に固定し、UI値との二重乗算を避ける。
+- 強度変更時は既存PBR材質のuniform再バインドを要求し、読込済みモデルにも即時反映する。
 - 強度はローカル設定とプロジェクトの`lighting.environmentLightingIntensity`へ保存し、
   旧プロジェクトでは`1.0`へフォールバックする。
 
-外部 HDRI 読込は未実装である。追加するときは、読み込んだ texture を同じ退避・復元経路へ
-接続し、同梱 HDR より優先する。
+外部 HDRI は背景メニュー、通常ファイル読込、ドラッグ＆ドロップから読み込める。
+読み込んだ texture は同じ退避・復元経路へ接続し、同梱 HDR より優先する。
 
 ### メイン方向ライトの光量
 
@@ -370,17 +390,29 @@ PBR用へ切り替え、WGSLプリセットを隠して`ベースPBRを使用`�
 - [x] critical typecheck に未定義名エラーなし
 - [x] Electron smoke 起動（WebGPU / Bullet MPR）
 - [x] 同梱 HDR が ready かつ spherical polynomial 生成済みになることをモデルなしsmokeで確認
+- [x] IBLのみのPBR MMD Like合成球で強度0 / 1の最終画素輝度差をWebGPU smokeで確認
 - [x] PBRモデルのMMD Like → Standard → MMD Like即時切替smoke
 - [x] WebGPU + WGSL + PrePass SSS + Frame Graphでvalidation errorなし
 - [ ] alpha test化後の実画面確認（ユーザー操作で確認）
 - [ ] PMX / PMD を MMD Standard と PBR Standard で実読込して比較
 - [ ] 表情・材質モーフを含む VMD の PBR 表示確認
 - [ ] 透過材質、DDS / BMP / PNG テクスチャの PBR 表示確認
-- [ ] IBL ON / OFF の WebGPU 実画面比較
-- [ ] IBLのみの診断用PBR球と高コントラストHDRでdiffuse / specular寄与を確認
+- [x] reflectionColor補正後のPBR StandardでIBL強度差をWebGPU実画面比較
+- [ ] 高コントラストHDRでIBL diffuse / specular寄与を個別確認
 - [ ] PBR MMD LikeのSSSをキャラクターまたは材質別指定へ限定
 - [ ] toon左下1px色由来の暗部散乱光源をPBR MMD Likeへ追加して強度を比較
-- [ ] 外部 HDRI 読込
+- [x] 外部 HDRI 読込
+
+## 2026-07-21 外部 HDRI 読込
+
+`背景 > HDRI詳細...` から外部 `.hdr` を選択し、PBR の環境ライティングへ
+即時適用できるようにした。選択パス、IBL ON / OFF、環境光強度はプロジェクトへ保存する。
+外部 HDR の解除時は内蔵 `white.hdr` へ戻す。HDRI背景表示と背景輝度の独立調整に対応し、回転は未対応。
+
+Git 管理外の `local-references/hdri` にある実 HDR を Electron / WebGPU smoke へ渡し、
+実ロード、3 秒安定、validation error なし、合成 PBR 球の IBL 輝度差
+`0.0` → `1.0` を確認した。詳細は
+[IBL / 外部 HDRI 現行仕様・調査記録](./external-hdri-environment-lighting-2026-07-21.md)を参照。
 
 ## 2026-07-20 同梱 HDR への切替
 
@@ -400,6 +432,7 @@ Babylon.js公式の `.hdr` 直接利用例に合わせ、`HDRCubeTexture` の
 - spherical polynomialあり
 - WebGPU validation errorなし
 - アプリログのwarning / errorなし
+- 合成PBR球の強度0 / 1の画素輝度差あり（`0.000` → `0.872`）
 
 実モデルでの明暗差と質感はユーザー操作で引き続き確認する。
 

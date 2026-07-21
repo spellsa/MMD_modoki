@@ -5,6 +5,7 @@ import { BackgroundSettingsDialogController } from "./background-settings-dialog
 import { ContactShadowSettingsDialogController } from "./contact-shadow-settings-dialog-controller";
 import { EdgeSettingsDialogController } from "./edge-settings-dialog-controller";
 import { GravitySettingsDialogController } from "./gravity-settings-dialog-controller";
+import { HdriSettingsDialogController } from "./hdri-settings-dialog-controller";
 import { IblShadowSettingsDialogController } from "./ibl-shadow-settings-dialog-controller";
 import { LightingShadowSettingsDialogController } from "./lighting-shadow-settings-dialog-controller";
 import { MirrorFloorSettingsDialogController } from "./mirror-floor-settings-dialog-controller";
@@ -25,10 +26,11 @@ type AppMenuControllerDeps = {
     refreshRuntimeUi: () => void;
     refreshModelEdgeUi: () => void;
     refreshLightingUi: () => void;
+    refreshMaterialUi: () => void;
     createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
 };
 
-type DialogKind = "about" | "shortcuts" | "preferences" | "hdriSettings";
+type DialogKind = "about" | "shortcuts" | "preferences";
 
 type AppMenuElements = {
     root: HTMLElement | null;
@@ -60,6 +62,7 @@ export class AppMenuController {
     private readonly refreshRuntimeUi: () => void;
     private readonly refreshModelEdgeUi: () => void;
     private readonly refreshLightingUi: () => void;
+    private readonly refreshMaterialUi: () => void;
     private readonly createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
     private readonly popupDialogController: PopupDialogController;
     private openGroup: HTMLElement | null = null;
@@ -75,6 +78,7 @@ export class AppMenuController {
         this.refreshRuntimeUi = deps.refreshRuntimeUi;
         this.refreshModelEdgeUi = deps.refreshModelEdgeUi;
         this.refreshLightingUi = deps.refreshLightingUi;
+        this.refreshMaterialUi = deps.refreshMaterialUi;
         this.createWebmExportSettingsAdapter = deps.createWebmExportSettingsAdapter;
         this.popupDialogController = new PopupDialogController();
         this.setupMenuEvents();
@@ -267,8 +271,13 @@ export class AppMenuController {
                 return { checked: this.mmdManager.isBackgroundMediaVisible(), disabled: !this.mmdManager.hasBackgroundMedia() };
             case "background.toggleBlack":
                 return { checked: this.mmdManager.isBackgroundBlack(), disabled: false };
+            case "background.toggleEnvironmentLighting":
+                return { checked: this.mmdManager.isEnvironmentLightingEnabled(), disabled: false };
             case "background.toggleHdriBackground":
-                return { checked: false, disabled: true };
+                return {
+                    checked: this.mmdManager.isEnvironmentBackgroundVisible(),
+                    disabled: this.mmdManager.getEnvironmentLightingSourcePath() === null,
+                };
             case "physics.togglePhysics":
                 return { checked: this.mmdManager.getPhysicsEnabled(), disabled: !this.mmdManager.isPhysicsAvailable() };
             case "physics.toggleFloorCollision":
@@ -443,8 +452,14 @@ export class AppMenuController {
             case "background.toggleBlack":
                 this.dispatchAction({ type: "viewport.toggleBackgroundBlack", source: "menu" });
                 return;
+            case "background.toggleEnvironmentLighting":
+                this.dispatchAction({ type: "runtime.toggleEnvironmentLighting", source: "menu" });
+                return;
+            case "background.loadHdri":
+                this.dispatchAction({ type: "project.openEnvironmentHdr", source: "menu" });
+                return;
             case "background.toggleHdriBackground":
-                this.showToast(t("menu.toast.hdriNotReady"), "info");
+                this.dispatchAction({ type: "viewport.toggleEnvironmentBackground", source: "menu" });
                 return;
             case "expression.addKeyframe":
                 this.dispatchAction({ type: "keyframe.addCurrent", source: "menu" });
@@ -471,7 +486,7 @@ export class AppMenuController {
                 this.openBackgroundSettingsDialog(invoker ?? null);
                 return;
             case "background.hdriSettings":
-                this.openDialog("hdriSettings", invoker ?? null);
+                this.openHdriSettingsDialog(invoker ?? null);
                 return;
             case "physics.gravitySettings":
                 this.openGravitySettingsDialog(invoker ?? null);
@@ -535,47 +550,6 @@ export class AppMenuController {
                     title: t("dialog.preferences.title"),
                     body: `<p>${t("dialog.preferences.body")}</p>`,
                 };
-            case "hdriSettings":
-                return {
-                    title: t("dialog.hdri.title"),
-                    body: `
-                        <div class="popup-form">
-                            <div class="popup-form-grid">
-                                <label class="popup-form-field">
-                                    <span class="popup-form-label">${t("dialog.hdri.current")}</span>
-                                    <span class="popup-form-value">${t("option.none")}</span>
-                                </label>
-                                <label class="popup-form-field">
-                                    <span class="popup-form-label">${t("dialog.hdri.backgroundVisible")}</span>
-                                    <input class="popup-form-checkbox" type="checkbox" disabled>
-                                </label>
-                                <label class="popup-form-field">
-                                    <span class="popup-form-label">${t("dialog.hdri.lightingEnabled")}</span>
-                                    <input class="popup-form-checkbox" type="checkbox" disabled>
-                                </label>
-                                <label class="popup-form-field">
-                                    <span class="popup-form-label">${t("dialog.hdri.intensity")}</span>
-                                    <div class="popup-form-range-row">
-                                        <input class="popup-form-control popup-form-range" type="range" min="0" max="200" value="100" disabled>
-                                        <span class="popup-form-value">100%</span>
-                                    </div>
-                                </label>
-                                <label class="popup-form-field">
-                                    <span class="popup-form-label">${t("dialog.hdri.rotation")}</span>
-                                    <div class="popup-form-range-row">
-                                        <input class="popup-form-control popup-form-range" type="range" min="0" max="360" value="0" disabled>
-                                        <span class="popup-form-value">0°</span>
-                                    </div>
-                                </label>
-                                <div class="popup-form-button-row">
-                                    <button class="popup-form-button popup-form-button-secondary" type="button" disabled>${t("dialog.hdri.load")}</button>
-                                    <button class="popup-form-button popup-form-button-secondary" type="button" disabled>${t("dialog.hdri.clear")}</button>
-                                </div>
-                                <p class="popup-form-note">${t("dialog.hdri.placeholder")}</p>
-                            </div>
-                        </div>
-                    `,
-                };
         }
     }
 
@@ -618,6 +592,26 @@ export class AppMenuController {
             content: new GravitySettingsDialogController({
                 mmdManager: this.mmdManager,
                 refreshUi: () => this.refreshRuntimeUi(),
+            }),
+        });
+    }
+
+    private openHdriSettingsDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "hdri-settings",
+            surface: "modal",
+            title: t("dialog.hdri.title"),
+            size: "md",
+            restoreFocusTo: invoker,
+            content: new HdriSettingsDialogController({
+                mmdManager: this.mmdManager,
+                setStatus: this.setStatus,
+                showToast: this.showToast,
+                refreshUi: () => {
+                    this.refreshMaterialUi();
+                    this.refreshLightingUi();
+                    this.refreshMenuItems();
+                },
             }),
         });
     }

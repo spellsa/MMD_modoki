@@ -46,6 +46,7 @@ export type MmdLikeSubSurfaceTarget = {
 type PbrPresetMaterialTarget = object & {
     subSurface: MmdLikeSubSurfaceTarget;
     ambientColor?: Color3;
+    reflectionColor?: Color3;
     alpha?: number;
     transparencyMode?: number | null;
     useAlphaFromAlbedoTexture?: boolean;
@@ -73,6 +74,7 @@ type PbrPresetRuntimeState = {
     baselineTransparency: PbrTransparencySnapshot | null;
     baselineRoughness: number | null | undefined;
     baselineSpecularIntensity: number | undefined;
+    baselineReflectionColor: Color3 | undefined;
     fallbackColor: Color3;
     toonTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
     materialShaderPreset: PbrMaterialShaderPreset;
@@ -152,6 +154,7 @@ function getOrCreatePbrPresetRuntimeState(
         baselineTransparency: null,
         baselineRoughness: material.roughness,
         baselineSpecularIntensity: material.specularIntensity,
+        baselineReflectionColor: material.reflectionColor?.clone(),
         fallbackColor: resolvedFallbackColor,
         toonTexture: null,
         materialShaderPreset: "pbr-base",
@@ -273,6 +276,14 @@ function applyMmdLikeMatteSurfaceSettings(
     material: PbrPresetMaterialTarget,
     state: PbrPresetRuntimeState,
 ): void {
+    // babylon-mmd maps the MMD specular color to PBR reflectionColor. Babylon
+    // also multiplies diffuse environment irradiance by reflectionColor, so a
+    // common black MMD specular value unintentionally disables HDRI lighting.
+    // In the custom MMD-like presets, keep the environment map color neutral
+    // and control the highlight separately with specularIntensity.
+    if (state.baselineReflectionColor !== undefined) {
+        material.reflectionColor = Color3.White();
+    }
     if (state.baselineRoughness !== undefined) {
         material.roughness = Math.max(
             state.baselineRoughness ?? 0,
@@ -291,6 +302,9 @@ function applyPbrSkinSurfaceSettings(
     material: PbrPresetMaterialTarget,
     state: PbrPresetRuntimeState,
 ): void {
+    if (state.baselineReflectionColor !== undefined) {
+        material.reflectionColor = Color3.White();
+    }
     if (state.baselineRoughness !== undefined) {
         material.roughness = Math.max(
             state.baselineRoughness ?? 0,
@@ -419,6 +433,13 @@ export function applyPbrMaterialPresetToMaterial(
             restorePbrTransparencySettings(material, state.baselineTransparency);
         }
         restorePbrSurfaceSettings(material, state);
+        // Babylon multiplies diffuse IBL by reflectionColor as well as using
+        // it for reflections. Keep this environment-map tint neutral in the
+        // Standard comparison preset too; the original MMD specular mapping
+        // otherwise makes dark-specular materials appear to receive no IBL.
+        if (state.baselineReflectionColor !== undefined) {
+            material.reflectionColor = Color3.White();
+        }
         state.scatteringMetersPerUnit = null;
         if (material instanceof PBRMaterial) {
             applyMmdLikePbrShaderSettings(material, {

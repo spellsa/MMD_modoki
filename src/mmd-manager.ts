@@ -306,7 +306,13 @@ import {
     isBmpTexturePath,
 } from "./scene/bmp-texture-compat";
 import { GlobalIlluminationController } from "./render/global-illumination-controller";
-import { createConstantEnvironmentSphericalPolynomial } from "./render/environment-lighting";
+import {
+    applyEnvironmentLightingIntensity,
+    calculateEnvironmentTextureLevel,
+    createConstantEnvironmentSphericalPolynomial,
+    runEnvironmentLightingDiagnosticProbe,
+    type EnvironmentLightingIntensityResult,
+} from "./render/environment-lighting";
 import {
     addTimelineKeyframe as addTimelineKeyframeImpl,
     applyTimelineKeyframePayload as applyTimelineKeyframePayloadImpl,
@@ -867,7 +873,14 @@ export class MmdManager {
     private static readonly PBR_MATERIAL_PRESET_STORAGE_KEY = "mmd_modoki.pbrMaterialPreset";
     private static readonly ENVIRONMENT_LIGHTING_STORAGE_KEY = "mmd_modoki.environmentLighting";
     private static readonly ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY = "mmd_modoki.environmentLightingIntensity";
+    private static readonly ENVIRONMENT_BACKGROUND_STORAGE_KEY = "mmd_modoki.environmentBackground";
+    private static readonly ENVIRONMENT_BACKGROUND_INTENSITY_STORAGE_KEY = "mmd_modoki.environmentBackgroundIntensity";
     private static readonly MAX_ENVIRONMENT_LIGHTING_INTENSITY = 4;
+    private static readonly MAX_ENVIRONMENT_BACKGROUND_INTENSITY = 1;
+    private static readonly DEFAULT_ENVIRONMENT_BACKGROUND_INTENSITY = 0.03;
+    // External HDR is also displayed directly in the viewport. 256px faces
+    // visibly pixelate a 16K panorama at ordinary editor viewport sizes.
+    private static readonly EXTERNAL_ENVIRONMENT_CUBE_FACE_SIZE = 1024;
     private static readonly FRAME_PERFORMANCE_LOG_INTERVAL_MS = 10_000;
     private static readonly DEFAULT_WGSL_MATERIAL_SHADER_PRESET: WgslMaterialShaderPresetId = "wgsl-mmd-standard";
     private static readonly WGSL_MATERIAL_SHADER_PRESETS: readonly WgslMaterialShaderPresetInfo[] = [
@@ -1557,6 +1570,7 @@ ${beforeFogAppendBlock}
     private skydome: Mesh | null = null;
     private skydomeMaterial: BackgroundMaterial | null = null;
     private skydomeGradientTexture: DynamicTexture | null = null;
+    private environmentSkyboxTexture: BaseTexture | null = null;
     private skydomeVisibleValue = true;
     private skydomeBackgroundStyleValue = normalizeSkydomeBackgroundStyle(DEFAULT_SKYDOME_BACKGROUND_STYLE);
     private backgroundImageLayer: Layer | null = null;
@@ -1582,6 +1596,9 @@ ${beforeFogAppendBlock}
     private iblFallbackEnvironmentTexture: RawCubeTexture | null = null;
     private environmentLightingSuppressedTexture: BaseTexture | null = null;
     private bundledEnvironmentTexture: HDRCubeTexture | null = null;
+    private externalEnvironmentTexture: HDRCubeTexture | null = null;
+    private environmentLightingSourcePathValue: string | null = null;
+    private environmentLightingLoadGeneration = 0;
     private iblWebGpuCdfFallbackTexture: RawTexture | null = null;
     private iblWebGpuSuppressedEnvironmentTexture: BaseTexture | null = null;
     private iblShadowDebugPassSignature = "";
@@ -1590,6 +1607,11 @@ ${beforeFogAppendBlock}
         false,
     );
     private environmentLightingIntensityValue = MmdManager.readEnvironmentLightingIntensityLocalStorage();
+    private environmentBackgroundVisibleValue = MmdManager.readBooleanLocalStorage(
+        MmdManager.ENVIRONMENT_BACKGROUND_STORAGE_KEY,
+        false,
+    );
+    private environmentBackgroundIntensityValue = this.initializeEnvironmentBackgroundIntensityLocalStorage();
     private contactShadowTexture: DynamicTexture | null = null;
     private contactShadowBlobTexture: Texture | null = null;
     private contactShadowMaterial: StandardMaterial | null = null;
@@ -2344,23 +2366,64 @@ ${beforeFogAppendBlock}
 
     public getEnvironmentLightingDiagnostics(): {
         enabled: boolean;
+        source: "external" | "bundled" | "fallback" | "none";
+        sourcePath: string | null;
         textureName: string | null;
         textureReady: boolean;
         hasSphericalPolynomial: boolean;
+        backgroundVisible: boolean;
+        backgroundTextureReady: boolean;
+        backgroundMeshEnabled: boolean;
+        backgroundIntensity: number;
+        environmentTextureSize: { width: number; height: number };
+        environmentTextureLevel: number;
+        backgroundTextureSize: { width: number; height: number };
         pbrMaterialCount: number;
         iblIntensity: number;
+        environmentIntensity: number;
     } {
         const environmentTexture = this.scene.environmentTexture;
+        const availableTexture = environmentTexture ?? this.environmentLightingSuppressedTexture;
+        const source = availableTexture === this.externalEnvironmentTexture
+            ? "external"
+            : availableTexture === this.bundledEnvironmentTexture
+                ? "bundled"
+                : availableTexture === this.iblFallbackEnvironmentTexture
+                    ? "fallback"
+                    : "none";
         return {
             enabled: this.environmentLightingEnabledValue,
+            source,
+            sourcePath: this.environmentLightingSourcePathValue,
             textureName: environmentTexture?.name ?? null,
             textureReady: environmentTexture?.isReady() ?? false,
             hasSphericalPolynomial: environmentTexture?.sphericalPolynomial != null,
+            backgroundVisible: this.isEnvironmentBackgroundVisible(),
+            backgroundTextureReady: this.environmentSkyboxTexture?.isReady() ?? false,
+            backgroundMeshEnabled: this.skydome?.isEnabled() ?? false,
+            backgroundIntensity: this.environmentBackgroundIntensityValue,
+            environmentTextureSize: environmentTexture?.getSize() ?? { width: 0, height: 0 },
+            environmentTextureLevel: environmentTexture?.level ?? 0,
+            backgroundTextureSize: this.environmentSkyboxTexture?.getSize() ?? { width: 0, height: 0 },
             pbrMaterialCount: this.scene.materials.filter(
                 (material) => material.getClassName() === "PBRMaterial",
             ).length,
             iblIntensity: this.scene.iblIntensity,
+            environmentIntensity: this.scene.environmentIntensity,
         };
+    }
+
+    public async runEnvironmentLightingDiagnosticProbe(): Promise<{
+        passed: boolean;
+        darkLuminance: number;
+        litLuminance: number;
+        luminanceDelta: number;
+    }> {
+        return runEnvironmentLightingDiagnosticProbe(
+            this.scene,
+            this.environmentLightingIntensityValue,
+            MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY,
+        );
     }
 
     public getPbrMmdLikeScatteringDiagnostics(): {
@@ -2393,6 +2456,7 @@ ${beforeFogAppendBlock}
             this.environmentLightingEnabledValue,
         );
         this.syncEnvironmentLightingTexture();
+        this.applyCurrentEnvironmentLightingIntensity();
         logInfo("render", "environment lighting changed", {
             ...this.getEnvironmentLightingDiagnostics(),
         });
@@ -2408,15 +2472,168 @@ ${beforeFogAppendBlock}
             ? Math.max(0, Math.min(MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY, value))
             : 1;
         this.environmentLightingIntensityValue = next;
-        this.scene.iblIntensity = next;
+        const applied = this.applyCurrentEnvironmentLightingIntensity();
         MmdManager.writeNumberLocalStorage(
             MmdManager.ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY,
             next,
         );
         logInfo("render", "environment lighting intensity changed", {
             ...this.getEnvironmentLightingDiagnostics(),
+            refreshedMaterialCount: applied.refreshedMaterialCount,
+            refreshedFrozenMaterialCount: applied.refreshedFrozenMaterialCount,
         });
         return next;
+    }
+
+    public getEnvironmentLightingSourcePath(): string | null {
+        return this.environmentLightingSourcePathValue;
+    }
+
+    public isEnvironmentBackgroundVisible(): boolean {
+        return this.environmentBackgroundVisibleValue && this.externalEnvironmentTexture !== null;
+    }
+
+    public setEnvironmentBackgroundVisible(visible: boolean): boolean {
+        this.environmentBackgroundVisibleValue = Boolean(visible) && this.externalEnvironmentTexture !== null;
+        MmdManager.writeBooleanLocalStorage(
+            MmdManager.ENVIRONMENT_BACKGROUND_STORAGE_KEY,
+            this.environmentBackgroundVisibleValue,
+        );
+        this.syncEnvironmentSkybox();
+        return this.isEnvironmentBackgroundVisible();
+    }
+
+    public toggleEnvironmentBackgroundVisible(): boolean {
+        return this.setEnvironmentBackgroundVisible(!this.isEnvironmentBackgroundVisible());
+    }
+
+    public getEnvironmentBackgroundIntensity(): number {
+        return this.environmentBackgroundIntensityValue;
+    }
+
+    public setEnvironmentBackgroundIntensity(value: number): number {
+        const next = Number.isFinite(value)
+            ? Math.max(0, Math.min(MmdManager.MAX_ENVIRONMENT_BACKGROUND_INTENSITY, value))
+            : MmdManager.DEFAULT_ENVIRONMENT_BACKGROUND_INTENSITY;
+        this.environmentBackgroundIntensityValue = next;
+        MmdManager.writeNumberLocalStorage(
+            MmdManager.ENVIRONMENT_BACKGROUND_INTENSITY_STORAGE_KEY,
+            next,
+        );
+        this.applyEnvironmentBackgroundIntensity();
+        logInfo("render", "environment background intensity changed", {
+            ...this.getEnvironmentLightingDiagnostics(),
+        });
+        return next;
+    }
+
+    public async setEnvironmentLightingSourcePath(filePath: string | null): Promise<boolean> {
+        const normalizedPath = filePath?.trim().replace(/\\/g, "/") ?? "";
+        if (!normalizedPath) {
+            this.clearExternalEnvironmentLightingSource();
+            return true;
+        }
+        if (!normalizedPath.toLowerCase().endsWith(".hdr")) {
+            logWarn("render", "external environment texture rejected", {
+                reason: "unsupported extension",
+                path: normalizedPath,
+            });
+            return false;
+        }
+
+        const loadGeneration = ++this.environmentLightingLoadGeneration;
+        let nextTexture: HDRCubeTexture;
+        try {
+            nextTexture = await new Promise<HDRCubeTexture>((resolve, reject) => {
+                let settled = false;
+                const texture = new HDRCubeTexture(
+                    localPathToFileUrl(normalizedPath),
+                    this.scene,
+                    MmdManager.EXTERNAL_ENVIRONMENT_CUBE_FACE_SIZE,
+                    false,
+                    true,
+                    false,
+                    true,
+                    () => {
+                        if (settled) return;
+                        settled = true;
+                        resolve(texture);
+                    },
+                    (message, exception) => {
+                        if (settled) return;
+                        settled = true;
+                        const detail = exception instanceof Error
+                            ? exception.message
+                            : String(exception ?? message ?? "unknown HDR load error");
+                        texture.dispose();
+                        reject(new Error(detail));
+                    },
+                    false,
+                    // Babylon PBR prefers an irradianceTexture over the
+                    // spherical polynomial when both are present. The GPU
+                    // irradiance prefilter can produce a black texture on the
+                    // current WebGPU path, which makes scene.environmentIntensity
+                    // appear ineffective. Keep radiance prefiltering above for
+                    // reflections, but use the CPU spherical polynomial for
+                    // diffuse IBL.
+                    false,
+                    false,
+                    64,
+                );
+                texture.name = `mmdModokiExternalEnvironment:${normalizedPath.split("/").pop() ?? "HDR"}`;
+                texture.gammaSpace = false;
+                texture.coordinatesMode = Texture.CUBIC_MODE;
+            });
+        } catch (err: unknown) {
+            logWarn("render", "external environment texture failed", {
+                path: normalizedPath,
+                message: err instanceof Error ? err.message : String(err),
+            });
+            return false;
+        }
+
+        if (loadGeneration !== this.environmentLightingLoadGeneration) {
+            nextTexture.dispose();
+            return false;
+        }
+
+        nextTexture.level = calculateEnvironmentTextureLevel(nextTexture.sphericalPolynomial);
+
+        const previousTexture = this.externalEnvironmentTexture;
+        this.externalEnvironmentTexture = nextTexture;
+        this.environmentLightingSourcePathValue = normalizedPath;
+        this.scene.environmentTexture = nextTexture;
+        this.environmentLightingSuppressedTexture = null;
+        this.setEnvironmentBackgroundVisible(true);
+        if (previousTexture && previousTexture !== nextTexture) {
+            previousTexture.dispose();
+        }
+        this.applyCurrentEnvironmentLightingIntensity();
+        logInfo("render", "external environment texture loaded", {
+            path: normalizedPath,
+            ...this.getEnvironmentLightingDiagnostics(),
+        });
+        return true;
+    }
+
+    public clearExternalEnvironmentLightingSource(): void {
+        this.environmentLightingLoadGeneration += 1;
+        const previousTexture = this.externalEnvironmentTexture;
+        if (this.scene.environmentTexture === previousTexture) {
+            this.scene.environmentTexture = null;
+        }
+        if (this.environmentLightingSuppressedTexture === previousTexture) {
+            this.environmentLightingSuppressedTexture = null;
+        }
+        this.externalEnvironmentTexture = null;
+        this.environmentLightingSourcePathValue = null;
+        this.setEnvironmentBackgroundVisible(false);
+        previousTexture?.dispose();
+        this.syncEnvironmentLightingTexture();
+        this.applyCurrentEnvironmentLightingIntensity();
+        logInfo("render", "external environment texture cleared", {
+            ...this.getEnvironmentLightingDiagnostics(),
+        });
     }
 
     public get environmentLightingEnabled(): boolean {
@@ -2433,6 +2650,26 @@ ${beforeFogAppendBlock}
 
     public set environmentLightingIntensity(value: number) {
         this.setEnvironmentLightingIntensity(value);
+    }
+
+    public get environmentLightingSourcePath(): string | null {
+        return this.environmentLightingSourcePathValue;
+    }
+
+    public get environmentBackgroundVisible(): boolean {
+        return this.environmentBackgroundVisibleValue;
+    }
+
+    public set environmentBackgroundVisible(visible: boolean) {
+        this.setEnvironmentBackgroundVisible(visible);
+    }
+
+    public get environmentBackgroundIntensity(): number {
+        return this.environmentBackgroundIntensityValue;
+    }
+
+    public set environmentBackgroundIntensity(value: number) {
+        this.setEnvironmentBackgroundIntensity(value);
     }
 
     public getPostEffectLutPresetOptions(): ReadonlyArray<{ id: string; label: string }> {
@@ -3297,20 +3534,51 @@ ${beforeFogAppendBlock}
     }
 
     private syncEnvironmentLightingTexture(): void {
-        if (this.environmentLightingEnabledValue) {
-            if (this.environmentLightingSuppressedTexture) {
-                this.scene.environmentTexture = this.environmentLightingSuppressedTexture;
-                this.environmentLightingSuppressedTexture = null;
-            } else {
-                this.ensureFallbackIblEnvironmentTexture();
-            }
-            return;
+        const preferredTexture = this.externalEnvironmentTexture
+            ?? this.bundledEnvironmentTexture
+            ?? this.iblFallbackEnvironmentTexture;
+        if (preferredTexture) {
+            this.scene.environmentTexture = preferredTexture;
+            this.environmentLightingSuppressedTexture = null;
+        } else {
+            this.ensureFallbackIblEnvironmentTexture();
         }
+    }
 
-        if (this.scene.environmentTexture) {
-            this.environmentLightingSuppressedTexture = this.scene.environmentTexture;
-            this.scene.environmentTexture = null;
+    private applyCurrentEnvironmentLightingIntensity(): EnvironmentLightingIntensityResult {
+        return applyEnvironmentLightingIntensity(
+            this.scene,
+            this.environmentLightingEnabledValue ? this.environmentLightingIntensityValue : 0,
+            MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY,
+        );
+    }
+
+    private syncEnvironmentSkybox(): void {
+        if (this.skydomeMaterial) this.skydomeMaterial.reflectionTexture = null;
+        this.environmentSkyboxTexture?.dispose();
+        this.environmentSkyboxTexture = null;
+
+        if (this.environmentBackgroundVisibleValue && this.externalEnvironmentTexture && this.skydomeMaterial) {
+            const skyboxTexture = this.externalEnvironmentTexture.clone();
+            if (skyboxTexture) {
+                skyboxTexture.name = `${this.externalEnvironmentTexture.name}:skybox`;
+                skyboxTexture.coordinatesMode = Texture.SKYBOX_MODE;
+                skyboxTexture.gammaSpace = false;
+                this.environmentSkyboxTexture = skyboxTexture;
+                this.skydomeMaterial.reflectionTexture = skyboxTexture;
+                this.applyEnvironmentBackgroundIntensity();
+            }
         }
+        this.applySkydomeBackgroundStyle();
+        this.syncSkydomeVisibility();
+    }
+
+    private applyEnvironmentBackgroundIntensity(): void {
+        if (this.environmentSkyboxTexture) {
+            this.environmentSkyboxTexture.level = this.environmentBackgroundIntensityValue;
+        }
+        this.skydomeMaterial?.markDirty();
+        this.scene?.resetCachedMaterial();
     }
 
     private configureBundledEnvironmentTexture(): void {
@@ -3326,11 +3594,15 @@ ${beforeFogAppendBlock}
                 false,
                 true,
                 () => {
+                    environmentTexture.level = calculateEnvironmentTextureLevel(
+                        environmentTexture.sphericalPolynomial,
+                    );
                     logInfo("render", "bundled IBL environment texture loaded", {
                         url: bundledEnvironmentTextureUrl,
                         name: environmentTexture.name,
                         ready: environmentTexture.isReady(),
                         hasSphericalPolynomial: environmentTexture.sphericalPolynomial != null,
+                        textureLevel: environmentTexture.level,
                     });
                 },
                 (message, exception) => {
@@ -3349,10 +3621,6 @@ ${beforeFogAppendBlock}
                     }
                     environmentTexture.dispose();
                     this.ensureFallbackIblEnvironmentTexture();
-                    if (!this.environmentLightingEnabledValue) {
-                        this.environmentLightingSuppressedTexture = this.scene.environmentTexture;
-                        this.scene.environmentTexture = null;
-                    }
                 },
             );
             environmentTexture.name = "mmdModokiBundledEnvironment";
@@ -3708,7 +3976,11 @@ ${beforeFogAppendBlock}
         const addMesh = (mesh: unknown): void => {
             if (!(mesh instanceof Mesh)) return;
             if (seen.has(mesh)) return;
-            if (mesh === this.ground || mesh === this.skydome || mesh === this.mirroringFloor) return;
+            if (
+                mesh === this.ground
+                || mesh === this.skydome
+                || mesh === this.mirroringFloor
+            ) return;
             if (mesh.name.startsWith("characterContactShadow:")) return;
             if (mesh.isDisposed()) return;
             if (!mesh.isEnabled() || !mesh.isVisible) return;
@@ -4295,7 +4567,8 @@ ${beforeFogAppendBlock}
     }
 
     private syncSkydomeVisibility(): void {
-        this.skydome?.setEnabled(this.skydomeVisibleValue && !this.backgroundBlackEnabled);
+        const backgroundVisible = this.skydomeVisibleValue && !this.backgroundBlackEnabled;
+        this.skydome?.setEnabled(backgroundVisible);
     }
 
     private applySkydomeBackgroundStyle(): void {
@@ -4314,6 +4587,18 @@ ${beforeFogAppendBlock}
         const material = this.skydomeMaterial;
         if (!material) return;
 
+        if (this.environmentSkyboxTexture) {
+            material.diffuseTexture = null;
+            material.primaryColor = Color3.White();
+            material.enableNoise = false;
+            // The HDR background has its own exposure-like scale on the cloned
+            // texture. It must not reuse the PBR environment-lighting strength.
+            material.reflectionAmount = 1;
+            material.reflectionBlur = 0;
+            return;
+        }
+
+        material.enableNoise = true;
         material.primaryColor = new Color3(brightness, brightness, brightness);
         if (style.mode === "solid") {
             material.diffuseTexture = null;
@@ -5008,6 +5293,42 @@ ${beforeFogAppendBlock}
         return 1;
     }
 
+    private initializeEnvironmentBackgroundIntensityLocalStorage(): number {
+        try {
+            const stored = globalThis.localStorage?.getItem(
+                MmdManager.ENVIRONMENT_BACKGROUND_INTENSITY_STORAGE_KEY,
+            );
+            if (stored !== null && stored !== undefined) {
+                return MmdManager.readNumberLocalStorage(
+                    MmdManager.ENVIRONMENT_BACKGROUND_INTENSITY_STORAGE_KEY,
+                    MmdManager.DEFAULT_ENVIRONMENT_BACKGROUND_INTENSITY,
+                    0,
+                    MmdManager.MAX_ENVIRONMENT_BACKGROUND_INTENSITY,
+                );
+            }
+
+            // Before background brightness had its own control, users lowered
+            // the shared IBL value to about 0.03 to keep HDR backdrops visible.
+            // Move only that low legacy range to the new background setting.
+            if (this.environmentLightingIntensityValue <= 0.1) {
+                const migratedBackgroundIntensity = this.environmentLightingIntensityValue;
+                this.environmentLightingIntensityValue = 1;
+                MmdManager.writeNumberLocalStorage(
+                    MmdManager.ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY,
+                    this.environmentLightingIntensityValue,
+                );
+                MmdManager.writeNumberLocalStorage(
+                    MmdManager.ENVIRONMENT_BACKGROUND_INTENSITY_STORAGE_KEY,
+                    migratedBackgroundIntensity,
+                );
+                return migratedBackgroundIntensity;
+            }
+        } catch {
+            // Optional rendering preferences must never block startup.
+        }
+        return MmdManager.DEFAULT_ENVIRONMENT_BACKGROUND_INTENSITY;
+    }
+
     private static readNumberLocalStorage(key: string, fallback: number, min: number, max: number): number {
         try {
             const value = Number(globalThis.localStorage?.getItem(key));
@@ -5121,7 +5442,7 @@ ${beforeFogAppendBlock}
 
         // Create scene
         this.scene = new Scene(this.engine);
-        this.scene.iblIntensity = this.environmentLightingIntensityValue;
+        this.applyCurrentEnvironmentLightingIntensity();
         Scene.MaxDeltaTime = MmdManager.PHYSICS_SCENE_MAX_DELTA_MS;
         if (this.framePerformanceLogEnabled) {
             this.sceneInstrumentation = new SceneInstrumentation(this.scene);
@@ -7701,6 +8022,7 @@ ${beforeFogAppendBlock}
 
     private clearProjectForImport(): void {
         this.pause();
+        this.clearExternalEnvironmentLightingSource();
         this.frameGraphPostEffectStackIdsValue = [];
         this.frameGraphPostEffectStackEnabledValue.clear();
         this.frameGraphPostEffectStackInitializedValue = false;
@@ -12561,6 +12883,15 @@ ${beforeFogAppendBlock}
             this.iblFallbackEnvironmentTexture = null;
         }
         this.environmentLightingSuppressedTexture = null;
+        this.environmentLightingLoadGeneration += 1;
+        if (this.externalEnvironmentTexture) {
+            if (this.scene.environmentTexture === this.externalEnvironmentTexture) {
+                this.scene.environmentTexture = null;
+            }
+            this.externalEnvironmentTexture.dispose();
+            this.externalEnvironmentTexture = null;
+        }
+        this.environmentLightingSourcePathValue = null;
         if (this.bundledEnvironmentTexture) {
             if (this.scene.environmentTexture === this.bundledEnvironmentTexture) {
                 this.scene.environmentTexture = null;
@@ -12585,6 +12916,9 @@ ${beforeFogAppendBlock}
             this.contactShadowBlobTexture.dispose();
             this.contactShadowBlobTexture = null;
         }
+        if (this.skydomeMaterial) this.skydomeMaterial.reflectionTexture = null;
+        this.environmentSkyboxTexture?.dispose();
+        this.environmentSkyboxTexture = null;
         if (this.skydomeGradientTexture) {
             this.skydomeGradientTexture.dispose();
             this.skydomeGradientTexture = null;

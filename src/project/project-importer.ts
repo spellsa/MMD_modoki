@@ -128,6 +128,9 @@ type ProjectImportHost = {
     iblShadowsEnabled: boolean;
     environmentLightingEnabled: boolean;
     environmentLightingIntensity: number;
+    environmentBackgroundVisible: boolean;
+    environmentBackgroundIntensity: number;
+    setEnvironmentLightingSourcePath(path: string | null): Promise<boolean>;
     characterContactShadowOpacity: number;
     characterContactShadowScale: number;
     characterContactShadowEnabled: boolean;
@@ -759,6 +762,20 @@ export async function importProjectState(
     host.iblShadowsEnabled = typeof data.lighting.iblShadowsEnabled === "boolean"
         ? data.lighting.iblShadowsEnabled
         : false;
+    const environmentLightingSourcePath = typeof data.lighting.environmentLightingSourcePath === "string"
+        && data.lighting.environmentLightingSourcePath.trim().length > 0
+        ? data.lighting.environmentLightingSourcePath
+        : null;
+    if (!await host.setEnvironmentLightingSourcePath(environmentLightingSourcePath)) {
+        warnings.push(`Environment HDR load failed: ${environmentLightingSourcePath ?? "bundled"}`);
+    }
+    host.environmentBackgroundVisible = typeof data.lighting.environmentBackgroundVisible === "boolean"
+        ? data.lighting.environmentBackgroundVisible
+        : false;
+    host.environmentBackgroundIntensity = typeof data.lighting.environmentBackgroundIntensity === "number"
+        && Number.isFinite(data.lighting.environmentBackgroundIntensity)
+        ? data.lighting.environmentBackgroundIntensity
+        : 0.03;
     host.environmentLightingEnabled = typeof data.lighting.environmentLightingEnabled === "boolean"
         ? data.lighting.environmentLightingEnabled
         : false;

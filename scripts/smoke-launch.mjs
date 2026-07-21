@@ -9,14 +9,18 @@ const vite = require("vite");
 const ViteConfigGenerator = require("@electron-forge/plugin-vite/dist/ViteConfig").default;
 const electronExecutable = require("electron");
 
-const timeoutMs = Number.parseInt(process.env.MMD_MODOKI_SMOKE_PARENT_TIMEOUT_MS ?? "45000", 10) || 45000;
+const smokeUsesExternalHdr = Boolean(process.env.MMD_MODOKI_SMOKE_HDR_PATH);
+const defaultParentTimeoutMs = smokeUsesExternalHdr ? "120000" : "45000";
+const defaultRendererTimeoutMs = smokeUsesExternalHdr ? "100000" : "25000";
+const timeoutMs = Number.parseInt(process.env.MMD_MODOKI_SMOKE_PARENT_TIMEOUT_MS ?? defaultParentTimeoutMs, 10)
+  || Number.parseInt(defaultParentTimeoutMs, 10);
 const smokeTempDir = mkdtempSync(join(tmpdir(), "mmd-modoki-smoke-"));
 const smokeResultPath = join(smokeTempDir, "result.json");
 const keepSmokeTemp = process.env.MMD_MODOKI_SMOKE_KEEP_TEMP === "1";
 const childEnv = {
   ...process.env,
   MMD_MODOKI_SMOKE: "1",
-  MMD_MODOKI_SMOKE_TIMEOUT_MS: process.env.MMD_MODOKI_SMOKE_TIMEOUT_MS ?? "25000",
+  MMD_MODOKI_SMOKE_TIMEOUT_MS: process.env.MMD_MODOKI_SMOKE_TIMEOUT_MS ?? defaultRendererTimeoutMs,
   MMD_MODOKI_SMOKE_STABILITY_MS: process.env.MMD_MODOKI_SMOKE_STABILITY_MS ?? "3000",
   MMD_MODOKI_SMOKE_REQUIRE_WEBGPU: process.env.MMD_MODOKI_SMOKE_REQUIRE_WEBGPU ?? "1",
   MMD_MODOKI_SMOKE_RENDER_STABILITY_DIAGNOSTICS:
@@ -84,6 +88,12 @@ const printSmokeResult = () => {
     console.log(`[smoke] ${status}: ${result?.reason ?? "unknown result"} (engine=${engine}, physics=${physicsBackend})`);
     if (result?.data?.scenario) {
       console.log(`[smoke] scenario: ${JSON.stringify(result.data.scenario)}`);
+    }
+    if (result?.data?.environmentLightingProbe) {
+      console.log(`[smoke] environment lighting probe: ${JSON.stringify(result.data.environmentLightingProbe)}`);
+    }
+    if (result?.data?.environmentLightingDiagnostics) {
+      console.log(`[smoke] environment lighting diagnostics: ${JSON.stringify(result.data.environmentLightingDiagnostics)}`);
     }
     if (!result?.success && result?.data) {
       console.error(`[smoke] failure details: ${JSON.stringify(result.data)}`);

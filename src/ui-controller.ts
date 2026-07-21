@@ -616,6 +616,7 @@ export class UIController {
             refreshRuntimeUi: () => this.runtimeFeatureUiController?.refresh(),
             refreshModelEdgeUi: () => this.modelEdgeController?.refresh(),
             refreshLightingUi: () => this.refreshLightingUiFromRuntime(),
+            refreshMaterialUi: () => this.shaderPanelController?.refresh(),
             createWebmExportSettingsAdapter: () => this.exportUiController?.createWebmExportSettingsAdapter() ?? {
                 getState: () => ({
                     aspectPreset: "16:9",
@@ -2157,6 +2158,10 @@ export class UIController {
         this.actionDispatcher.register("viewport.toggleBackgroundBlack", () => {
             this.sceneEnvironmentUiController?.toggleBackgroundBlack();
         });
+        this.actionDispatcher.register("viewport.toggleEnvironmentBackground", () => {
+            this.mmdManager.toggleEnvironmentBackgroundVisible();
+            this.appMenuController?.refresh();
+        });
         this.actionDispatcher.register("viewport.toggleSkydome", () => {
             this.sceneEnvironmentUiController?.toggleSkydome();
         });
@@ -2173,6 +2178,9 @@ export class UIController {
         });
         this.actionDispatcher.register("project.openFile", () => {
             void this.loadFileFromDialog();
+        });
+        this.actionDispatcher.register("project.openEnvironmentHdr", () => {
+            void this.loadEnvironmentHdrFromDialog();
         });
         this.actionDispatcher.register("project.dropFiles", (action) => {
             void this.loadDroppedFiles(action.filePaths);
@@ -2211,6 +2219,18 @@ export class UIController {
         });
         this.actionDispatcher.register("runtime.toggleShadow", () => {
             this.runtimeFeatureUiController?.toggleShadow();
+        });
+        this.actionDispatcher.register("runtime.toggleEnvironmentLighting", () => {
+            const enabled = this.mmdManager.setEnvironmentLightingEnabled(
+                !this.mmdManager.isEnvironmentLightingEnabled(),
+            );
+            this.shaderPanelController?.refresh();
+            this.refreshLightingUiFromRuntime();
+            this.appMenuController?.refresh();
+            this.showToast(
+                enabled ? t("shader.toast.iblEnabled") : t("shader.toast.iblDisabled"),
+                "info",
+            );
         });
         this.actionDispatcher.register("runtime.toggleFloorCollision", () => {
             this.runtimeFeatureUiController?.toggleFloorCollision();
@@ -3067,12 +3087,39 @@ export class UIController {
 
     private async loadFileFromDialog(): Promise<void> {
         const filePath = await window.electronAPI.openFileDialog([
-            { name: "Supported files", extensions: ["pmx", "pmd", "x", "vmd", "vpd", "mp3", "wav", "ogg", "png", "jpg", "jpeg", "bmp", "webp", "webm", "mp4", "avi"] },
+            { name: "Supported files", extensions: ["pmx", "pmd", "x", "vmd", "vpd", "mp3", "wav", "ogg", "png", "jpg", "jpeg", "bmp", "webp", "webm", "mp4", "avi", "hdr"] },
             { name: "All files", extensions: ["*"] },
         ]);
 
         if (!filePath) return;
         await this.loadFileByPath(filePath, "dialog");
+    }
+
+    private async loadEnvironmentHdrFromDialog(): Promise<void> {
+        const filePath = await window.electronAPI.openFileDialog([
+            { name: t("dialog.hdri.hdrFiles"), extensions: ["hdr"] },
+            { name: t("option.allFiles"), extensions: ["*"] },
+        ]);
+        if (!filePath) return;
+        await this.loadEnvironmentHdrByPath(filePath);
+    }
+
+    private async loadEnvironmentHdrByPath(filePath: string): Promise<boolean> {
+        this.setStatus(t("dialog.hdri.loading"), true);
+        const loaded = await this.mmdManager.setEnvironmentLightingSourcePath(filePath);
+        if (!loaded) {
+            this.setStatus(t("dialog.hdri.loadFailed"), false);
+            this.showToast(t("dialog.hdri.loadFailed"), "error");
+            return false;
+        }
+
+        this.mmdManager.setEnvironmentLightingEnabled(true);
+        this.shaderPanelController?.refresh();
+        this.refreshLightingUiFromRuntime();
+        this.appMenuController?.refresh();
+        this.setStatus(t("dialog.hdri.loaded"), false);
+        this.showToast(`${t("dialog.hdri.loaded")}: ${this.getBaseNameForRenderer(filePath)}`, "success");
+        return true;
     }
 
     private getFileExtension(filePath: string): string {
@@ -3094,6 +3141,9 @@ export class UIController {
     private async loadFileByPath(filePath: string, source: "dialog" | "drop"): Promise<void> {
         const ext = this.getFileExtension(filePath);
         switch (ext) {
+            case "hdr":
+                await this.loadEnvironmentHdrByPath(filePath);
+                return;
             case "pmx":
             case "pmd":
                 this.setStatus("Loading PMX/PMD...", true);

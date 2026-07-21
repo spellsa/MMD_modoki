@@ -8,9 +8,6 @@ type ToastType = "success" | "error" | "info";
 type ShaderPanelElements = {
     materialPipelineSelect: HTMLSelectElement | null;
     pbrPresetSelect: HTMLSelectElement | null;
-    iblLightingToggle: HTMLInputElement | null;
-    iblLightingIntensity: HTMLInputElement | null;
-    iblLightingIntensityValue: HTMLElement | null;
     modelSelect: HTMLSelectElement | null;
     presetSelect: HTMLSelectElement | null;
     applySelectedButton: HTMLButtonElement | null;
@@ -57,9 +54,6 @@ function resolveShaderPanelElements(): ShaderPanelElements {
     return {
         materialPipelineSelect: document.getElementById("shader-material-pipeline-select") as HTMLSelectElement | null,
         pbrPresetSelect: document.getElementById("shader-pbr-preset-select") as HTMLSelectElement | null,
-        iblLightingToggle: document.getElementById("shader-ibl-lighting-toggle") as HTMLInputElement | null,
-        iblLightingIntensity: document.getElementById("shader-ibl-lighting-intensity") as HTMLInputElement | null,
-        iblLightingIntensityValue: document.getElementById("shader-ibl-lighting-intensity-value"),
         modelSelect: document.getElementById("shader-model-select") as HTMLSelectElement | null,
         presetSelect: document.getElementById("shader-preset-select") as HTMLSelectElement | null,
         applySelectedButton: document.getElementById("btn-shader-apply-selected") as HTMLButtonElement | null,
@@ -127,18 +121,6 @@ export class ShaderPanelController {
                 this.mmdManager.getMmdMaterialPipelinePreset() !== "pbr-standard"
                 && !models.some((model) => model.materialPipeline === "pbr-standard");
         }
-        if (elements.iblLightingToggle) {
-            elements.iblLightingToggle.checked = this.mmdManager.isEnvironmentLightingEnabled();
-        }
-        if (elements.iblLightingIntensity) {
-            const intensity = this.mmdManager.getEnvironmentLightingIntensity();
-            elements.iblLightingIntensity.value = String(Math.round(intensity * 100));
-            elements.iblLightingIntensity.disabled = !this.mmdManager.isEnvironmentLightingEnabled();
-            if (elements.iblLightingIntensityValue) {
-                elements.iblLightingIntensityValue.textContent = intensity.toFixed(1);
-            }
-        }
-
         if (this.mmdManager.getTimelineTarget() === "camera") {
             this.renderCameraPostEffectsPanel();
             return;
@@ -485,23 +467,6 @@ export class ShaderPanelController {
                 "info",
             );
             this.refresh();
-        });
-        this.elements.iblLightingToggle?.addEventListener("change", () => {
-            const enabled = this.mmdManager.setEnvironmentLightingEnabled(
-                this.elements.iblLightingToggle?.checked === true,
-            );
-            this.showToast(
-                enabled ? t("shader.toast.iblEnabled") : t("shader.toast.iblDisabled"),
-                "info",
-            );
-            this.refresh();
-        });
-        this.elements.iblLightingIntensity?.addEventListener("input", () => {
-            const value = Number(this.elements.iblLightingIntensity?.value ?? 100) / 100;
-            const intensity = this.mmdManager.setEnvironmentLightingIntensity(value);
-            if (this.elements.iblLightingIntensityValue) {
-                this.elements.iblLightingIntensityValue.textContent = intensity.toFixed(1);
-            }
         });
         this.elements.modelSelect?.addEventListener("change", () => {
             const value = this.elements.modelSelect?.value ?? "";

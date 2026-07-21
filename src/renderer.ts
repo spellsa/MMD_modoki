@@ -232,6 +232,7 @@ async function initializeApp(): Promise<void> {
   const searchParams = new URLSearchParams(window.location.search);
   const mode = searchParams.get("mode");
   const smokeModelPath = searchParams.get("smokeModelPath");
+  const smokeHdrPath = searchParams.get("smokeHdrPath");
   const smokePbrMmdLike = searchParams.get("smokePbrMmdLike") === "1";
   const smokeRenderStabilityDiagnostics =
     searchParams.get("smokeRenderStabilityDiagnostics") === "1";
@@ -269,6 +270,12 @@ async function initializeApp(): Promise<void> {
 
   try {
     const mmdManager = await MmdManager.create(canvas);
+    if (smokeHdrPath) {
+      const loaded = await mmdManager.setEnvironmentLightingSourcePath(smokeHdrPath);
+      if (!loaded) {
+        throw new Error(`Smoke HDR load failed: ${smokeHdrPath}`);
+      }
+    }
     if (smokePbrMmdLike) {
       mmdManager.setMmdMaterialPipelinePreset("pbr-standard");
       mmdManager.setPbrMaterialPreset("pbr-mmd-like");
@@ -313,6 +320,8 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
+    let environmentLightingProbe: Awaited<ReturnType<typeof mmdManager.runEnvironmentLightingDiagnosticProbe>> | undefined;
+    let environmentLightingDiagnostics: ReturnType<typeof mmdManager.getEnvironmentLightingDiagnostics> | undefined;
     if (smokeRenderStabilityDiagnostics) {
       const diagnostics = mmdManager.getWebGpuValidationDiagnostics();
       if (diagnostics.count > 0) {
@@ -328,6 +337,7 @@ async function initializeApp(): Promise<void> {
       const environmentLightingWasEnabled = mmdManager.isEnvironmentLightingEnabled();
       mmdManager.setEnvironmentLightingEnabled(true);
       const environmentDiagnostics = mmdManager.getEnvironmentLightingDiagnostics();
+      environmentLightingDiagnostics = environmentDiagnostics;
       mmdManager.setEnvironmentLightingEnabled(environmentLightingWasEnabled);
       if (
         !environmentDiagnostics.textureReady
@@ -335,6 +345,28 @@ async function initializeApp(): Promise<void> {
       ) {
         reportSmokeRendererFailure("Environment lighting is not PBR-ready", {
           environmentDiagnostics,
+        });
+        return;
+      }
+      if (smokeHdrPath && (
+        !environmentDiagnostics.backgroundVisible
+        || !environmentDiagnostics.backgroundTextureReady
+        || !environmentDiagnostics.backgroundMeshEnabled
+        || environmentDiagnostics.environmentTextureSize.width < 1024
+        || environmentDiagnostics.backgroundTextureSize.width < 1024
+      )) {
+        reportSmokeRendererFailure("External HDR background is not ready", {
+          environmentDiagnostics,
+        });
+        return;
+      }
+      mmdManager.setEnvironmentLightingEnabled(true);
+      environmentLightingProbe = await mmdManager.runEnvironmentLightingDiagnosticProbe();
+      mmdManager.setEnvironmentLightingEnabled(environmentLightingWasEnabled);
+      if (!environmentLightingProbe.passed) {
+        reportSmokeRendererFailure("Environment lighting did not affect synthetic PBR output", {
+          environmentDiagnostics,
+          environmentLightingProbe,
         });
         return;
       }
@@ -347,6 +379,8 @@ async function initializeApp(): Promise<void> {
       physicsBackend,
       crossOriginIsolated: globalThis.crossOriginIsolated,
       sharedArrayBufferAvailable: typeof SharedArrayBuffer !== "undefined",
+      environmentLightingProbe,
+      environmentLightingDiagnostics,
       scenario,
     });
   } catch (err: unknown) {

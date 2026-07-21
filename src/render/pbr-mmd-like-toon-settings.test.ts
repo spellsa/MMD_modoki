@@ -104,6 +104,7 @@ describe("PBR MMD Like toon subsurface settings", () => {
             metallic: 0,
             metallicF0Factor: 1,
             specularIntensity: 1,
+            reflectionColor: new Color3(0.05, 0.1, 0.15),
             markAsDirty: () => undefined,
         };
         const toonTexture = {
@@ -126,6 +127,7 @@ describe("PBR MMD Like toon subsurface settings", () => {
         expect(material.subSurface.translucencyColorTexture).toBeNull();
         expect(material.roughness).toBe(MMD_LIKE_MIN_ROUGHNESS);
         expect(material.specularIntensity).toBe(MMD_LIKE_SPECULAR_INTENSITY);
+        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
 
         expect(applyPbrMaterialPresetToMaterial(material, "pbr-standard")).toBe(true);
         expect(material.subSurface.isTranslucencyEnabled).toBe(false);
@@ -135,6 +137,7 @@ describe("PBR MMD Like toon subsurface settings", () => {
         expect(material.subSurface.translucencyColorTexture).toBeNull();
         expect(material.roughness).toBe(0.35);
         expect(material.specularIntensity).toBe(1);
+        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
     });
 
     it("applies strong red scattering to an individually assigned Skin material", () => {
@@ -143,6 +146,7 @@ describe("PBR MMD Like toon subsurface settings", () => {
             ambientColor: new Color3(0.1, 0.2, 0.3),
             roughness: 0.35,
             specularIntensity: 1,
+            reflectionColor: new Color3(0, 0, 0),
         };
         registerPbrPresetMaterial(material, material.ambientColor);
 
@@ -159,6 +163,7 @@ describe("PBR MMD Like toon subsurface settings", () => {
         )).toBe(true);
         expect(material.roughness).toBe(PBR_SKIN_MIN_ROUGHNESS);
         expect(material.specularIntensity).toBe(PBR_SKIN_SPECULAR_INTENSITY);
+        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
 
         expect(applyPbrMaterialShaderPreset(
             material,

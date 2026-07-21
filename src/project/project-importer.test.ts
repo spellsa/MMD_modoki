@@ -100,6 +100,9 @@ function createHost() {
         transparentShadowEnabled: true,
         environmentLightingEnabled: false,
         environmentLightingIntensity: 1,
+        environmentBackgroundVisible: false,
+        environmentBackgroundIntensity: 0.03,
+        setEnvironmentLightingSourcePath: vi.fn(async () => true),
         setPhysicsSimulationRateHz: vi.fn(),
         setPhysicsGravityAcceleration: vi.fn(),
         setPhysicsGravityDirection: vi.fn(),
@@ -182,6 +185,9 @@ describe("importProjectState", () => {
                 ...createProject().lighting,
                 environmentLightingEnabled: true,
                 environmentLightingIntensity: 2.25,
+                environmentLightingSourcePath: "C:/hdr/studio.hdr",
+                environmentBackgroundVisible: true,
+                environmentBackgroundIntensity: 0.08,
             },
         });
 
@@ -194,6 +200,9 @@ describe("importProjectState", () => {
         );
         expect(host.environmentLightingEnabled).toBe(true);
         expect(host.environmentLightingIntensity).toBe(2.25);
+        expect(host.environmentBackgroundVisible).toBe(true);
+        expect(host.environmentBackgroundIntensity).toBe(0.08);
+        expect(host.setEnvironmentLightingSourcePath).toHaveBeenCalledWith("C:/hdr/studio.hdr");
     });
 
     it("uses MMD Standard and disabled environment lighting for legacy projects", async () => {
@@ -218,6 +227,9 @@ describe("importProjectState", () => {
         );
         expect(host.environmentLightingEnabled).toBe(false);
         expect(host.environmentLightingIntensity).toBe(1);
+        expect(host.environmentBackgroundVisible).toBe(false);
+        expect(host.environmentBackgroundIntensity).toBe(0.03);
+        expect(host.setEnvironmentLightingSourcePath).toHaveBeenCalledWith(null);
     });
 
     it("restores SSGI tuning with fixed Soft Light blending", async () => {

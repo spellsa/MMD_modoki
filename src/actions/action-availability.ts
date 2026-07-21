@@ -77,9 +77,11 @@ export function canExecuteEditorAction(
         case "viewport.toggleEdge":
         case "viewport.toggleBackgroundMedia":
         case "viewport.toggleBackgroundBlack":
+        case "viewport.toggleEnvironmentBackground":
         case "viewport.toggleSkydome":
         case "viewport.togglePhysicsBones":
         case "project.openFile":
+        case "project.openEnvironmentHdr":
         case "project.openModel":
         case "project.openMotion":
         case "project.openCameraMotion":
@@ -95,6 +97,7 @@ export function canExecuteEditorAction(
         case "runtime.toggleAntialias":
         case "runtime.togglePhysics":
         case "runtime.toggleShadow":
+        case "runtime.toggleEnvironmentLighting":
         case "runtime.toggleFloorCollision":
         case "runtime.toggleRigidBodies":
         case "runtime.toggleGlobalIllumination":

@@ -195,6 +195,7 @@ const SMOKE_TEST_STABILITY_MS = Math.max(
   Number.parseInt(process.env.MMD_MODOKI_SMOKE_STABILITY_MS ?? '3000', 10) || 0,
 );
 const SMOKE_TEST_MODEL_PATH = process.env.MMD_MODOKI_SMOKE_MODEL_PATH ?? null;
+const SMOKE_TEST_HDR_PATH = process.env.MMD_MODOKI_SMOKE_HDR_PATH ?? null;
 const SMOKE_TEST_RENDER_STABILITY_DIAGNOSTICS =
   process.env.MMD_MODOKI_SMOKE_RENDER_STABILITY_DIAGNOSTICS !== '0';
 const SMOKE_TEST_PBR_MMD_LIKE = process.env.MMD_MODOKI_SMOKE_PBR_MMD_LIKE === '1';
@@ -777,6 +778,8 @@ const setupSmokeTestLifecycle = (mainWindow: BrowserWindow, loadPromise: Promise
       crossOriginIsolated,
       sharedArrayBufferAvailable,
       stabilityMs: SMOKE_TEST_STABILITY_MS,
+      environmentLightingProbe: payload?.environmentLightingProbe,
+      environmentLightingDiagnostics: payload?.environmentLightingDiagnostics,
       scenario: payload?.scenario,
       webContentsId: mainWindow.webContents.id,
     };
@@ -852,6 +855,7 @@ const createWindow = () => {
   const smokeQuery = isSmokeMode
     ? {
         ...(SMOKE_TEST_MODEL_PATH ? { smokeModelPath: SMOKE_TEST_MODEL_PATH } : {}),
+        ...(SMOKE_TEST_HDR_PATH ? { smokeHdrPath: SMOKE_TEST_HDR_PATH } : {}),
         ...(SMOKE_TEST_RENDER_STABILITY_DIAGNOSTICS ? { smokeRenderStabilityDiagnostics: '1' } : {}),
         ...(SMOKE_TEST_PBR_MMD_LIKE ? { smokePbrMmdLike: '1' } : {}),
       }

@@ -218,7 +218,9 @@
 - [ ] 疑似サブサーフェススキャッタリング（肌向け soft / back-light wrap）
 - [ ] 疑似メタリック表現（ハイライト / sphere / toon 応答の調整）
 - [ ] 材質タイプ別プリセット整理（肌 / 髪 / 布 / 金属）
-- [ ] PBR IBLの実寄与を診断用PBR球と高コントラストHDRで確認
+- [x] PBR IBLの実寄与をモデルなしPBR MMD Like合成球の画素輝度差で確認
+- [x] 高輝度外部HDRを使い、PBR Standard実モデルでIBLの方向・色・強弱を実機確認
+- [ ] 高コントラストHDRでPBR IBLのdiffuse / specular寄与を個別確認
 - [ ] PBR MMD LikeのSSS適用範囲をキャラクター / 材質別へ限定し、影ブレを解消
 - [ ] Babylon.js SSSの40サンプル上限、散乱半径、PrePass再合成回数を可視化して二重影を切り分け
 - [ ] PBR MMD Likeへtoon色由来の暗部散乱光源を追加し、SSS色の効きを比較
@@ -310,6 +312,18 @@
 - [ ] 右パネルを Material / PostFX / Environment / Experimental のカテゴリに整理する案を具体化する
 - [ ] キー登録、前後キー移動、補間編集、dirty 表示の導線を優先して再配置する
 - 詳細: [UI 再整理スコープメモ 2026-06-18](./ui-reorganization-scope-2026-06-18.md)
+
+## 2026-07-21 外部 HDRI
+
+- [x] 外部 `.hdr` を環境ライティングへ読み込む
+- [x] IBL ON / OFF と強度を HDRI 詳細 popup から操作する
+- [x] 背景メニューへ環境ライト ON / OFF と詳細 popup を移し、材質パネルの重複 UI を削除する
+- [x] 外部 HDR パスをプロジェクトへ保存 / 復元する
+- [x] 背景メニュー、通常ファイル読込、ドラッグ＆ドロップから `.hdr` を読み込む
+- [x] Git 管理外の実 HDR で Electron / WebGPU smoke を通す
+- [x] 外部 HDRI を背景へ表示し、背景メニュー / 詳細 popup から ON / OFF する
+- [ ] HDRI の回転
+- 詳細: [IBL / 外部 HDRI 現行仕様・調査記録 2026-07-21](./external-hdri-environment-lighting-2026-07-21.md)
 
 ## 2026-06-25 キー登録 v0.2 リリース前集中メモ
 

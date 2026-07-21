@@ -60,12 +60,14 @@ export type ViewportAction =
     | { type: "viewport.toggleEdge"; source: ActionSource }
     | { type: "viewport.toggleBackgroundMedia"; source: ActionSource }
     | { type: "viewport.toggleBackgroundBlack"; source: ActionSource }
+    | { type: "viewport.toggleEnvironmentBackground"; source: ActionSource }
     | { type: "viewport.toggleSkydome"; source: ActionSource }
     | { type: "viewport.togglePhysicsBones"; source: ActionSource }
     | { type: "timeline.togglePhysicsBones"; source: ActionSource };
 
 export type ProjectAction =
     | { type: "project.openFile"; source: ActionSource }
+    | { type: "project.openEnvironmentHdr"; source: ActionSource }
     | { type: "project.dropFiles"; source: ActionSource; filePaths: string[] }
     | { type: "project.openModel"; source: ActionSource }
     | { type: "project.openMotion"; source: ActionSource }
@@ -86,6 +88,7 @@ export type RuntimeAction =
     | { type: "runtime.toggleAntialias"; source: ActionSource }
     | { type: "runtime.togglePhysics"; source: ActionSource }
     | { type: "runtime.toggleShadow"; source: ActionSource }
+    | { type: "runtime.toggleEnvironmentLighting"; source: ActionSource }
     | { type: "runtime.toggleFloorCollision"; source: ActionSource }
     | { type: "runtime.toggleRigidBodies"; source: ActionSource }
     | { type: "runtime.toggleGlobalIllumination"; source: ActionSource }

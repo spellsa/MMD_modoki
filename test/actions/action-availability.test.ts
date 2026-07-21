@@ -278,6 +278,10 @@ describe("canExecuteEditorAction", () => {
         expect(canExecuteEditorAction({ type: "runtime.toggleAntialias", source: "button" }, readySnapshot)).toBe(true);
         expect(canExecuteEditorAction({ type: "runtime.togglePhysics", source: "button" }, readySnapshot)).toBe(true);
         expect(canExecuteEditorAction({ type: "runtime.toggleShadow", source: "button" }, readySnapshot)).toBe(true);
+        expect(canExecuteEditorAction(
+            { type: "runtime.toggleEnvironmentLighting", source: "menu" },
+            readySnapshot,
+        )).toBe(true);
         expect(canExecuteEditorAction({ type: "runtime.toggleRigidBodies", source: "button" }, readySnapshot)).toBe(true);
         expect(canExecuteEditorAction(
             { type: "runtime.toggleGlobalIllumination", source: "button" },

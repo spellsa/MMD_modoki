@@ -43,6 +43,25 @@
   - 空配列では実行されない。
   - drop由来の読み込みsourceが維持される。
 
+### `project.openEnvironmentHdr`
+
+- 意図:
+  - 背景メニューから環境ライティング用の `.hdr` を選択して読み込む。
+- 入力:
+  - `source`: `menu`
+  - `payload`: なし
+- 出力:
+  - 外部 HDR が environment texture へ設定され、IBL が ON になる。
+- 副作用:
+  - ファイルダイアログ、HDR変換、PBR材質の再bindが発生する。
+- canExecute:
+  - 常に実行可能。
+- undo:
+  - 対象外。外部アセット選択としてproject状態へ保存する。
+- テスト観点:
+  - handlerがHDR専用ファイル選択へ到達する。
+  - `.hdr` のdropが通常ファイル読込と同じ適用処理へ到達する。
+
 ### `project.openModel`
 
 - 意図:
