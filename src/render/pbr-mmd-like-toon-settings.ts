@@ -1,8 +1,15 @@
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 import { Material } from "@babylonjs/core/Materials/material";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import "@babylonjs/core/Rendering/prePassRendererSceneComponent";
 import "@babylonjs/core/Rendering/subSurfaceSceneComponent";
+import { applyMmdLikePbrShadowTint } from "./pbr-mmd-like-material-plugin";
+import {
+    applyPbrSkinFaceNormal,
+    PBR_SKIN_FACE_NORMAL_STRENGTH,
+} from "./pbr-skin-face-normal-plugin";
+import { applyPbrNoShadow } from "./pbr-no-shadow-material-plugin";
 import {
     normalizePbrMaterialShaderPreset,
     type PbrMaterialShaderPreset,
@@ -10,11 +17,20 @@ import {
 
 export const PBR_MMD_LIKE_ENVIRONMENT_INTENSITY = 0.8;
 export const PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY = 0.02;
+export const PBR_MMD_LIKE_MINIMUM_ROUGHNESS = 0.72;
 export const PBR_SKIN_ENVIRONMENT_INTENSITY = 0.8;
 export const PBR_SKIN_TRANSLUCENCY_INTENSITY = 0.02;
 export const PBR_SKIN_TRANSLUCENCY_COLOR_RGB = [1, 0.68, 0.58] as const;
+export const PBR_SKIN_MINIMUM_ROUGHNESS = 0.68;
 export const PBR_SKIN_MINIMUM_THICKNESS = 0;
 export const PBR_SKIN_MAXIMUM_THICKNESS = 0.3;
+
+export function getPbrMmdLikeShadowTintStrength(toonInfluence: number): number {
+    const normalizedInfluence = Number.isFinite(toonInfluence)
+        ? Math.max(0, Math.min(1, toonInfluence))
+        : 0;
+    return 1 - normalizedInfluence;
+}
 
 export type MmdLikeToonTextureTarget = {
     uOffset: number;
@@ -105,6 +121,8 @@ type PbrPresetRuntimeState = {
     fallbackColor: Color3;
     toonTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
     toonTranslucencyTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
+    shadowTintColor: Color3;
+    shadowTintStrength: number;
     materialShaderPreset: PbrMaterialShaderPreset;
 };
 
@@ -194,6 +212,8 @@ function getOrCreatePbrPresetRuntimeState(
         fallbackColor: resolvedFallbackColor,
         toonTexture: null,
         toonTranslucencyTexture: null,
+        shadowTintColor: new Color3(0.5, 0.5, 0.5),
+        shadowTintStrength: 1,
         materialShaderPreset: "pbr-base",
     };
     Object.defineProperty(target, PBR_PRESET_RUNTIME_STATE, {
@@ -230,7 +250,6 @@ function restorePbrStandardSettings(
     material.roughness = state.baselineRoughness;
     material.specularIntensity = state.baselineSpecularIntensity;
     material.environmentIntensity = state.baselineEnvironmentIntensity;
-
     // babylon-mmd maps MMD specular color to reflectionColor, while Babylon
     // also multiplies diffuse IBL by this value. Keep the verified Standard
     // behavior that uses a neutral environment-map tint.
@@ -312,6 +331,10 @@ function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): bool
     if (material.environmentIntensity !== undefined) {
         material.environmentIntensity = PBR_SKIN_ENVIRONMENT_INTENSITY;
     }
+    material.roughness = Math.max(
+        material.roughness ?? 0,
+        PBR_SKIN_MINIMUM_ROUGHNESS,
+    );
     return true;
 }
 
@@ -326,9 +349,7 @@ function applyPbrMmdLikeSubSurfaceSettings(
     material.subSurface.linkRefractionWithTransparency = false;
     material.subSurface.isTranslucencyEnabled = true;
     material.subSurface.translucencyIntensity = PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY;
-    material.subSurface.translucencyColor = toonColorTexture
-        ? Color3.White()
-        : state.fallbackColor.clone();
+    material.subSurface.translucencyColor = Color3.White();
     material.subSurface.translucencyColorTexture = toonColorTexture;
     material.subSurface.useAlbedoToTintTranslucency = true;
     material.subSurface.minimumThickness = PBR_SKIN_MINIMUM_THICKNESS;
@@ -338,6 +359,51 @@ function applyPbrMmdLikeSubSurfaceSettings(
     if (material.environmentIntensity !== undefined) {
         material.environmentIntensity = PBR_MMD_LIKE_ENVIRONMENT_INTENSITY;
     }
+    material.roughness = Math.max(
+        material.roughness ?? 0,
+        PBR_MMD_LIKE_MINIMUM_ROUGHNESS,
+    );
+}
+
+function syncPbrMmdLikeShadowTint(
+    material: PbrPresetMaterialTarget,
+    state: PbrPresetRuntimeState,
+): void {
+    if (!(material instanceof PBRMaterial)) return;
+    applyMmdLikePbrShadowTint(material, {
+        enabled: isPbrShadowTintPreset(state.materialShaderPreset),
+        color: state.shadowTintColor,
+        strength: state.shadowTintStrength,
+    });
+}
+
+export function isPbrShadowTintPreset(
+    preset: PbrMaterialShaderPreset,
+): boolean {
+    return preset === "pbr-mmd-like"
+        || preset === "pbr-skin"
+        || preset === "pbr-skin-face";
+}
+
+function syncPbrSkinFaceNormal(
+    material: PbrPresetMaterialTarget,
+    state: PbrPresetRuntimeState,
+): void {
+    if (!(material instanceof PBRMaterial)) return;
+    applyPbrSkinFaceNormal(material, {
+        enabled: state.materialShaderPreset === "pbr-skin-face",
+        strength: PBR_SKIN_FACE_NORMAL_STRENGTH,
+    });
+}
+
+function syncPbrNoShadow(
+    material: PbrPresetMaterialTarget,
+    state: PbrPresetRuntimeState,
+): void {
+    if (!(material instanceof PBRMaterial)) return;
+    applyPbrNoShadow(material, {
+        enabled: state.materialShaderPreset === "pbr-no-shadow",
+    });
 }
 
 export function registerPbrPresetMaterial(
@@ -372,6 +438,19 @@ export function getPbrMaterialShaderPreset(
     return getOrCreatePbrPresetRuntimeState(material).materialShaderPreset;
 }
 
+export function applyPbrMmdLikeShadowTintSettings(
+    material: unknown,
+    color: Color3,
+    strength: number,
+): boolean {
+    if (!isPbrPresetMaterialTarget(material)) return false;
+    const state = getOrCreatePbrPresetRuntimeState(material);
+    state.shadowTintColor.copyFrom(color);
+    state.shadowTintStrength = Math.max(0, Math.min(1, Number.isFinite(strength) ? strength : 0));
+    syncPbrMmdLikeShadowTint(material, state);
+    return isPbrShadowTintPreset(state.materialShaderPreset);
+}
+
 export function applyPbrMaterialShaderPreset(
     material: unknown,
     materialPreset: unknown,
@@ -385,7 +464,10 @@ export function applyPbrMaterialShaderPreset(
         applyPbrMmdLikeSubSurfaceSettings(material, state);
     }
 
-    if (nextPreset === "pbr-skin" && !applyPbrSkinSubSurfaceSettings(material)) {
+    if (
+        (nextPreset === "pbr-skin" || nextPreset === "pbr-skin-face")
+        && !applyPbrSkinSubSurfaceSettings(material)
+    ) {
         state.materialShaderPreset = "pbr-base";
         syncPbrSkinSceneConfiguration(material);
         material.markAsDirty?.(Material.AllDirtyFlag);
@@ -394,6 +476,9 @@ export function applyPbrMaterialShaderPreset(
 
     state.materialShaderPreset = nextPreset;
     syncPbrSkinSceneConfiguration(material);
+    syncPbrMmdLikeShadowTint(material, state);
+    syncPbrSkinFaceNormal(material, state);
+    syncPbrNoShadow(material, state);
 
     material.markAsDirty?.(Material.AllDirtyFlag);
     return true;

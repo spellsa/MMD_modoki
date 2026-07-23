@@ -7,20 +7,39 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Scene } from "@babylonjs/core/scene";
 import {
     PBR_MMD_LIKE_ENVIRONMENT_INTENSITY,
+    PBR_MMD_LIKE_MINIMUM_ROUGHNESS,
     PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
     PBR_SKIN_ENVIRONMENT_INTENSITY,
     PBR_SKIN_MAXIMUM_THICKNESS,
+    PBR_SKIN_MINIMUM_ROUGHNESS,
     PBR_SKIN_MINIMUM_THICKNESS,
     PBR_SKIN_TRANSLUCENCY_COLOR_RGB,
     PBR_SKIN_TRANSLUCENCY_INTENSITY,
+    applyPbrMmdLikeShadowTintSettings,
     applyPbrMaterialShaderPreset,
+    getPbrMmdLikeShadowTintStrength,
     getPbrMaterialShaderPreset,
+    isPbrShadowTintPreset,
     registerPbrPresetMaterial,
     registerPbrPresetTransparencyBaseline,
     registerPbrPresetToonTexture,
     type MmdLikeSubSurfaceTarget,
     type MmdLikeToonTextureTarget,
 } from "./pbr-mmd-like-toon-settings";
+
+describe("PBR MMD Like shadow control", () => {
+    it("inverts the Toon influence for multiplicative shadow tint", () => {
+        expect(getPbrMmdLikeShadowTintStrength(0)).toBe(1);
+        expect(getPbrMmdLikeShadowTintStrength(0.25)).toBe(0.75);
+        expect(getPbrMmdLikeShadowTintStrength(1)).toBe(0);
+    });
+
+    it("clamps invalid or out-of-range Toon influence values", () => {
+        expect(getPbrMmdLikeShadowTintStrength(-1)).toBe(1);
+        expect(getPbrMmdLikeShadowTintStrength(2)).toBe(0);
+        expect(getPbrMmdLikeShadowTintStrength(Number.NaN)).toBe(1);
+    });
+});
 
 function createSubSurfaceTarget(): MmdLikeSubSurfaceTarget {
     return {
@@ -151,6 +170,7 @@ describe("PBR material shader presets", () => {
         expect(material.subSurface.translucencyColorTexture).toBe(toonSampleTexture);
         expect(material.subSurface.useAlbedoToTintTranslucency).toBe(true);
         expect(material.environmentIntensity).toBe(PBR_MMD_LIKE_ENVIRONMENT_INTENSITY);
+        expect(material.roughness).toBe(PBR_MMD_LIKE_MINIMUM_ROUGHNESS);
 
         // Freeze every material UV at the center of the toon texture's
         // left-bottom pixel. The original PMX toon texture remains unchanged.
@@ -164,18 +184,26 @@ describe("PBR material shader presets", () => {
         expect(toonTexture.vOffset).toBe(0);
     });
 
-    it("falls back to the PMX ambient shadow color when no toon texture exists", () => {
+    it("uses neutral white translucency when no toon texture exists", () => {
         const material = createMaterial();
         registerPbrPresetMaterial(material, material.ambientColor);
 
         expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
         expect(material.subSurface.translucencyColorTexture).toBeNull();
-        expect(material.subSurface.translucencyColor?.equals(
-            material.ambientColor,
-        )).toBe(true);
+        expect(material.subSurface.translucencyColor?.equals(Color3.White())).toBe(true);
         expect(material.subSurface.translucencyIntensity).toBe(
             PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
         );
+        expect(material.roughness).toBe(PBR_MMD_LIKE_MINIMUM_ROUGHNESS);
+    });
+
+    it("preserves a rougher source material in PBR MMD Like", () => {
+        const material = createMaterial();
+        material.roughness = 0.9;
+        registerPbrPresetMaterial(material, material.ambientColor);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+        expect(material.roughness).toBe(0.9);
     });
 
     it("uses opaque translucency without screen-space scattering for PBR Skin", () => {
@@ -212,10 +240,25 @@ describe("PBR material shader presets", () => {
         expect(material.useAlphaFromAlbedoTexture).toBe(true);
         expect(material.forceDepthWrite).toBe(true);
         expect(material.alphaCutOff).toBe(0.4);
-        expect(material.roughness).toBe(0.35);
+        expect(material.roughness).toBe(PBR_SKIN_MINIMUM_ROUGHNESS);
         expect(material.specularIntensity).toBe(1);
         expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
         expect(material.reflectionColor.equals(Color3.White())).toBe(true);
+    });
+
+    it("uses the PBR Skin surface settings for PBR Skin Face", () => {
+        const material = createMaterial();
+        registerPbrPresetMaterial(material, material.ambientColor);
+        registerPbrPresetTransparencyBaseline(material);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin-face")).toBe(true);
+        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-skin-face");
+        expect(material.subSurface.isTranslucencyEnabled).toBe(true);
+        expect(material.subSurface.translucencyIntensity).toBe(
+            PBR_SKIN_TRANSLUCENCY_INTENSITY,
+        );
+        expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
+        expect(material.roughness).toBe(PBR_SKIN_MINIMUM_ROUGHNESS);
     });
 
     it("configures Babylon PBRMaterial without requiring a scene prepass", () => {
@@ -243,10 +286,80 @@ describe("PBR material shader presets", () => {
             )).toBe(true);
             expect(material.subSurface.useAlbedoToTintTranslucency).toBe(true);
             expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
+            expect(material.roughness).toBe(PBR_SKIN_MINIMUM_ROUGHNESS);
             expect(material.subSurface.minimumThickness).toBe(PBR_SKIN_MINIMUM_THICKNESS);
             expect(material.subSurface.maximumThickness).toBe(PBR_SKIN_MAXIMUM_THICKNESS);
             expect(material.subSurface.legacyTranslucency).toBe(false);
             expect(material.subSurface.scatteringDiffusionProfile).toBeNull();
+        } finally {
+            material.dispose();
+            scene.dispose();
+            engine.dispose();
+        }
+    });
+
+    it("accepts the shared shadow controls for MMD Like and Skin presets", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        const material = new PBRMaterial("mmd-like-shadow-tint", scene);
+        try {
+            registerPbrPresetMaterial(material, Color3.Black());
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+            expect(applyPbrMmdLikeShadowTintSettings(
+                material,
+                new Color3(0.25, 0.5, 0.75),
+                0.6,
+            )).toBe(true);
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+            expect(applyPbrMmdLikeShadowTintSettings(
+                material,
+                Color3.Red(),
+                1,
+            )).toBe(true);
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-skin-face")).toBe(true);
+            expect(applyPbrMmdLikeShadowTintSettings(
+                material,
+                Color3.Green(),
+                0.5,
+            )).toBe(true);
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-no-shadow")).toBe(true);
+            expect(applyPbrMmdLikeShadowTintSettings(
+                material,
+                Color3.Blue(),
+                1,
+            )).toBe(false);
+        } finally {
+            material.dispose();
+            scene.dispose();
+            engine.dispose();
+        }
+    });
+
+    it("limits the PBR shadow tint to shaded custom presets", () => {
+        expect(isPbrShadowTintPreset("pbr-base")).toBe(false);
+        expect(isPbrShadowTintPreset("pbr-mmd-like")).toBe(true);
+        expect(isPbrShadowTintPreset("pbr-skin")).toBe(true);
+        expect(isPbrShadowTintPreset("pbr-skin-face")).toBe(true);
+        expect(isPbrShadowTintPreset("pbr-no-shadow")).toBe(false);
+    });
+
+    it("accepts a lit PBR preset that only bypasses shadow maps", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        const material = new PBRMaterial("no-shadow", scene);
+        try {
+            registerPbrPresetMaterial(material, Color3.Black());
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-no-shadow")).toBe(true);
+            expect(getPbrMaterialShaderPreset(material)).toBe("pbr-no-shadow");
+            expect(material.unlit).toBe(false);
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
+            expect(material.unlit).toBe(false);
         } finally {
             material.dispose();
             scene.dispose();
@@ -261,6 +374,8 @@ describe("PBR material shader presets", () => {
 
         expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
         expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin-face")).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-no-shadow")).toBe(true);
         expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
 
         expect(getPbrMaterialShaderPreset(material)).toBe("pbr-base");

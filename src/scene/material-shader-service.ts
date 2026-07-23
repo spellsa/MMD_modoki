@@ -2099,7 +2099,12 @@ export function applyImportedMaterialShaderStates(
                 warnings.push("Invalid PBR material shader assignment: " + modelPath);
                 continue;
             }
-            if (state.presetId !== "pbr-mmd-like" && state.presetId !== "pbr-skin") {
+            if (
+                state.presetId !== "pbr-mmd-like"
+                && state.presetId !== "pbr-skin"
+                && state.presetId !== "pbr-skin-face"
+                && state.presetId !== "pbr-no-shadow"
+            ) {
                 warnings.push("Unknown PBR shader preset '" + state.presetId + "' for " + modelPath);
                 continue;
             }

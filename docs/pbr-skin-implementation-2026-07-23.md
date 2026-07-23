@@ -30,7 +30,8 @@ IBL と外部 HDRI の仕様は
 - `Refraction` は使わない
 - `alpha` / `transparencyMode` は変更しない
 - emissive や独自の拡散光加算で明るさを補正しない
-- roughness / specular は変更しない
+- roughness は元値を尊重しつつ、最低 `0.68` まで引き上げる
+- specular intensity は変更しない
 - 肌材質だけIBLの影響をStandardの80%に抑える
 
 実機で IBL の ON / OFF を比較した結果、極端な暗化と赤被りが収まり、
@@ -83,6 +84,7 @@ diffusion profile index を出力し、後段の SubSurface Scattering post-proc
 | `legacyTranslucency` | `false` | Babylon.js の現行モデルを使う |
 | `isScatteringEnabled` | `false` | PrePassと画面空間SSSを生成しない |
 | 材質 `environmentIntensity` | `0.80` | Standardと同値で白飛びしたため、Skinだけ20%抑える |
+| roughness下限 | `0.68` | 肌の強い鏡面反射を広げ、マット寄りにする |
 
 現在は thickness texture を持たず、全画素で同じ範囲を使う。
 顔の頬、耳、鼻、腕などで厚みを変える表現はまだ行っていない。
@@ -110,8 +112,9 @@ Standard、MMD Like、Skin を何度切り替えても前回の設定が累積�
 - material-local environment intensity
 - reflection color
 
-プリセットを外すと保存済みの値へ戻す。`PBR Skin` 自身は透明度、発光色、粗さ、
-スペキュラを変更しない。
+プリセットを外すと保存済みの値へ戻す。`PBR Skin` 自身は透明度、発光色、
+スペキュラを変更しない。roughnessはプリセット適用中だけ最低`0.68`へ制限し、
+Standardへ戻したときに保存済みの値を復元する。
 
 なお、現在の `PBR Standard` は babylon-mmd が PMX specular color を入れた
 `reflectionColor` を中立白へ正規化する。この処理は IBL の diffuse まで PMX の
@@ -254,6 +257,7 @@ SubSurface Scattering post-process を必要とする。
 - 適用時にscene PrePassを要求しない
 - alpha / transparency / roughness / specular を変更しない
 - material-local environment intensity を `0.80` にする
+- roughnessが`0.68`未満なら下限まで引き上げる
 - Standard へ戻したときに保存済みの値を復元する
 - 実`PBRMaterial`と`NullEngine`でも不要なPrePassが生成されない
 
@@ -262,6 +266,26 @@ SubSurface Scattering post-process を必要とする。
 
 実機比較に使用したモデル、HDRI、スクリーンショットはローカル参照であり、
 権利上の理由から Git 管理対象へ追加しない。
+
+## PBR Skin Face
+
+顔用の派生プリセットとして`PBR Skin Face`を追加した。SubSurface、IBL、
+roughnessはPBR Skinと同じで、頂点法線だけをモデル正面＋少し上向きへ`30%`寄せる。
+
+これは顔の陰影を完全に平坦化する処理ではない。元法線を70%残し、顔の左右や鼻周辺の
+法線陰影を弱める。メッシュ形状、shadow mapの投影形状、材質の受影設定は変更しない。
+したがって、PMX側で遮蔽影を受けない材質へ影を追加する機能ではない。
+
+## PBR No Shadow
+
+白目などへ使う`PBR No Shadow`は、PBR Skinの派生ではなくPBR Standardを基準にする。
+遮蔽影だけを受けず、direct light、IBL、法線、照度、AO、露出は維持する。
+unlitやemissiveによる真っ白な表現ではないため、環境の中に存在する明るさと立体感を残す。
+
+実装ではBabylon.jsのlight define準備後に、各ライトのshadow define一式だけを
+無効化する。`SHADOWn`だけを消すと`SHADOWCSMn`等が残り、WebGPU/WGSLのvarying不一致で
+黒画面になるため、CSM、PCF、PCSS、ESM、quality関連を含むdefine群をまとめて消す。
+2026-07-23のElectron/WebGPU実機確認では、修正後に黒画面が解消した。
 
 ## 既知の制約
 

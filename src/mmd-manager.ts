@@ -1697,7 +1697,7 @@ ${beforeFogAppendBlock}
         false,
     );
     private shadowEnabled = true;
-    private shadowDarknessValue = 0.2;
+    private shadowDarknessValue = 0.05;
     private shadowModeValue: ShadowMode = "cascaded";
     private shadowFrustumSizeValue = 220;
     private shadowMaxZValue = 1000;
@@ -2737,6 +2737,7 @@ ${beforeFogAppendBlock}
             ) || applied;
         }
         if (applied) {
+            this.applyToonShadowInfluenceToAllModels();
             this.syncFrameGraphRenderTargetState();
             logInfo("render", "per-material PBR shader preset applied", {
                 modelIndex,
@@ -6982,6 +6983,7 @@ ${beforeFogAppendBlock}
     private resolvePmxShadowFlagsForMaterial(
         material: unknown,
         materialFlagMap: WeakMap<object, number>,
+        forceReceiveShadow = false,
     ): { castsShadow: boolean; receivesShadow: boolean } {
         if (!material || typeof material !== "object") {
             return { castsShadow: true, receivesShadow: true };
@@ -7002,7 +7004,11 @@ ${beforeFogAppendBlock}
         }
 
         let castsShadow = false;
-        let receivesShadow = false;
+        // Toon-oriented PMX models often disable self-shadow receiving on face
+        // materials. Keep that authoring choice in MMD mode, but PBR needs the
+        // Babylon shadow map to reach opaque model surfaces. Alpha overlays were
+        // already excluded above and remain shadowless.
+        let receivesShadow = forceReceiveShadow;
         let sawMappedMaterial = false;
 
         for (const subMaterial of modelSubMaterials) {

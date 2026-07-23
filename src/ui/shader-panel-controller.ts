@@ -190,6 +190,16 @@ export class ShaderPanelController {
                     label: t("shader.pbrPreset.skin"),
                     description: t("shader.pbrMaterial.skinDescription"),
                 },
+                {
+                    id: "pbr-skin-face",
+                    label: t("shader.pbrPreset.skinFace"),
+                    description: t("shader.pbrMaterial.skinFaceDescription"),
+                },
+                {
+                    id: "pbr-no-shadow",
+                    label: t("shader.pbrPreset.noShadow"),
+                    description: t("shader.pbrMaterial.noShadowDescription"),
+                },
             ];
             elements.presetSelect.innerHTML = "";
             for (const preset of presets) {
@@ -539,7 +549,11 @@ export class ShaderPanelController {
                     : t("shader.toast.pbrMaterialApplied", {
                         name: selectedValue === "pbr-mmd-like"
                             ? t("shader.pbrPreset.mmdLike")
-                            : t("shader.pbrPreset.skin"),
+                            : selectedValue === "pbr-skin-face"
+                                ? t("shader.pbrPreset.skinFace")
+                                : selectedValue === "pbr-no-shadow"
+                                    ? t("shader.pbrPreset.noShadow")
+                                    : t("shader.pbrPreset.skin"),
                     }),
                 "success",
             );

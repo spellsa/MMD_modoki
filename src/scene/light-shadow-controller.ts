@@ -7,6 +7,12 @@ import { CascadedShadowGenerator } from "@babylonjs/core/Lights/Shadows/cascaded
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
+import {
+    applyPbrMmdLikeShadowTintSettings,
+    getPbrMmdLikeShadowTintStrength,
+    getPbrMaterialShaderPreset,
+    isPbrShadowTintPreset,
+} from "../render/pbr-mmd-like-toon-settings";
 
 type LightShadowMaterialColor = {
     set?: (r: number, g: number, b: number, a: number) => void;
@@ -613,6 +619,15 @@ export function applyToonShadowInfluenceToMeshes(host: LightShadowHost, meshes: 
     const toonInfluence = clamp01(host.toonShadowInfluenceValue);
 
     for (const mat of materials) {
+        if (isPbrShadowTintPreset(getPbrMaterialShaderPreset(mat))) {
+            applyPbrMmdLikeShadowTintSettings(
+                mat,
+                host.shadowGroundColorValue,
+                getPbrMmdLikeShadowTintStrength(toonInfluence),
+            );
+            host.markMaterialShaderDirty(mat);
+        }
+
         if (!("toonTextureMultiplicativeColor" in mat)) continue;
         const toonMultiplicativeColor = mat.toonTextureMultiplicativeColor;
         if (!toonMultiplicativeColor || typeof toonMultiplicativeColor !== "object") continue;

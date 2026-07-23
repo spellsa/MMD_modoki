@@ -102,7 +102,7 @@ function createHost() {
 }
 
 describe("material shader preset restore", () => {
-    it("persists and restores per-material PBR MMD Like assignments", () => {
+    it("persists and restores per-material PBR shader assignments", () => {
         const host = createHost();
         const pbrMaterial = {
             subSurface: {
@@ -141,13 +141,26 @@ describe("material shader preset restore", () => {
         expect(pbrMaterial.subSurface.translucencyIntensity).toBe(
             PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
         );
-        expect(pbrMaterial.subSurface.translucencyColor?.equals(
-            pbrMaterial.ambientColor,
-        )).toBe(true);
+        expect(pbrMaterial.subSurface.translucencyColor?.equals(Color3.White())).toBe(true);
+        expect(pbrMaterial.roughness).toBeGreaterThan(0.4);
         expect(pbrMaterial.subSurface.scatteringDiffusionProfile).toBeNull();
         expect(getSerializedMaterialShaderStates(host, host.sceneModels[0])).toEqual([{
             materialKey: "0:face",
             presetId: "pbr-mmd-like",
+        }]);
+
+        applyImportedMaterialShaderStates(
+            host,
+            0,
+            [{ materialKey: "0:face", presetId: "pbr-no-shadow" }],
+            warnings,
+            "C:/models/pbr.pmx",
+        );
+
+        expect(warnings).toEqual([]);
+        expect(getSerializedMaterialShaderStates(host, host.sceneModels[0])).toEqual([{
+            materialKey: "0:face",
+            presetId: "pbr-no-shadow",
         }]);
     });
 

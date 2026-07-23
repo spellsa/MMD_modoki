@@ -486,7 +486,11 @@ type ModelAssetHost = {
     applyGpuBoneTextureStorageForLargeSkeletons?: (fileName: string, meshes: Mesh[], skeletons: Skeleton[]) => void;
     applyCpuSkinningFallbackForWebGpuSdefMeshes?: (fileName: string, meshes: Mesh[]) => void;
     buildPmxMaterialFlagMap(metadata: object): WeakMap<object, number>;
-    resolvePmxShadowFlagsForMaterial(material: unknown, materialFlagMap: WeakMap<object, number>): {
+    resolvePmxShadowFlagsForMaterial(
+        material: unknown,
+        materialFlagMap: WeakMap<object, number>,
+        forceReceiveShadow?: boolean,
+    ): {
         receivesShadow: boolean;
         castsShadow: boolean;
     };
@@ -1278,7 +1282,11 @@ export async function loadPMX(
         for (const mesh of result.meshes) {
             mesh.setEnabled(true);
             mesh.isVisible = true;
-            const shadowFlags = host.resolvePmxShadowFlagsForMaterial(mesh.material, materialFlagMap);
+            const shadowFlags = host.resolvePmxShadowFlagsForMaterial(
+                mesh.material,
+                materialFlagMap,
+                isPbrMaterialPipelinePreset(materialPipeline),
+            );
             mesh.receiveShadows = shadowFlags.receivesShadow;
             if ((mesh.getTotalVertices?.() ?? 0) > 0 && shadowFlags.castsShadow) {
                 host.shadowGenerator.addShadowCaster(mesh, true);
