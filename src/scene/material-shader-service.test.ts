@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import {
+    PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
+} from "../render/pbr-mmd-like-toon-settings";
+import {
     applyImportedMaterialShaderStates,
     getFrameGraphLuminousMaskMaterialState,
     getSerializedMaterialShaderStates,
@@ -134,7 +137,13 @@ describe("material shader preset restore", () => {
 
         expect(warnings).toEqual([]);
         expect(pbrMaterial.subSurface.isScatteringEnabled).toBe(false);
-        expect(pbrMaterial.subSurface.isTranslucencyEnabled).toBe(false);
+        expect(pbrMaterial.subSurface.isTranslucencyEnabled).toBe(true);
+        expect(pbrMaterial.subSurface.translucencyIntensity).toBe(
+            PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
+        );
+        expect(pbrMaterial.subSurface.translucencyColor?.equals(
+            pbrMaterial.ambientColor,
+        )).toBe(true);
         expect(pbrMaterial.subSurface.scatteringDiffusionProfile).toBeNull();
         expect(getSerializedMaterialShaderStates(host, host.sceneModels[0])).toEqual([{
             materialKey: "0:face",

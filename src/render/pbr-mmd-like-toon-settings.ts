@@ -8,6 +8,8 @@ import {
     type PbrMaterialShaderPreset,
 } from "../shared/mmd-material-pipeline";
 
+export const PBR_MMD_LIKE_ENVIRONMENT_INTENSITY = 0.8;
+export const PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY = 0.02;
 export const PBR_SKIN_ENVIRONMENT_INTENSITY = 0.8;
 export const PBR_SKIN_TRANSLUCENCY_INTENSITY = 0.02;
 export const PBR_SKIN_TRANSLUCENCY_COLOR_RGB = [1, 0.68, 0.58] as const;
@@ -102,6 +104,7 @@ type PbrPresetRuntimeState = {
     baselineReflectionColor: Color3 | undefined;
     fallbackColor: Color3;
     toonTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
+    toonTranslucencyTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
     materialShaderPreset: PbrMaterialShaderPreset;
 };
 
@@ -190,6 +193,7 @@ function getOrCreatePbrPresetRuntimeState(
         baselineReflectionColor: material.reflectionColor?.clone(),
         fallbackColor: resolvedFallbackColor,
         toonTexture: null,
+        toonTranslucencyTexture: null,
         materialShaderPreset: "pbr-base",
     };
     Object.defineProperty(target, PBR_PRESET_RUNTIME_STATE, {
@@ -239,6 +243,42 @@ function createPbrSkinTranslucencyColor(): Color3 {
     return new Color3(...PBR_SKIN_TRANSLUCENCY_COLOR_RGB);
 }
 
+function createMmdLikeToonTranslucencyTexture(
+    state: PbrPresetRuntimeState,
+): (MmdLikeToonTextureTarget & BaseTexture) | null {
+    if (state.toonTranslucencyTexture) {
+        return state.toonTranslucencyTexture;
+    }
+    const source = state.toonTexture;
+    if (!source) return null;
+
+    const clone = source.clone();
+    if (
+        !clone
+        || !("uOffset" in clone)
+        || !("vOffset" in clone)
+        || !("uScale" in clone)
+        || !("vScale" in clone)
+        || !("wrapU" in clone)
+        || !("wrapV" in clone)
+    ) {
+        clone?.dispose();
+        return null;
+    }
+
+    const sampleTexture = clone as MmdLikeToonTextureTarget & BaseTexture;
+    const size = source.getSize();
+    // MMD's deepest toon/shadow color is the left-bottom texel. Freeze the
+    // cloned texture matrix at its texel center so Babylon's standard
+    // translucency path receives one constant PMX shadow color for all UVs.
+    sampleTexture.uScale = 0;
+    sampleTexture.vScale = 0;
+    sampleTexture.uOffset = 0.5 / Math.max(1, size.width);
+    sampleTexture.vOffset = 0.5 / Math.max(1, size.height);
+    state.toonTranslucencyTexture = sampleTexture;
+    return sampleTexture;
+}
+
 function hasScreenSpaceScattering(value: unknown): boolean {
     if (!value || typeof value !== "object") return false;
     const subSurface = (value as { subSurface?: { isScatteringEnabled?: boolean } }).subSurface;
@@ -254,8 +294,8 @@ function syncPbrSkinSceneConfiguration(material: PbrPresetMaterialTarget): void 
 
 function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): boolean {
     // Use Babylon.js' opaque diffuse-transmission path without the screen-space
-    // scattering pass. The latter clamps HDR irradiance before blurring and can
-    // make this application's high-intensity PBR lighting unexpectedly darker.
+    // scattering pass. Even a narrow diffusion profile currently breaks the
+    // application's final composition and darkens the selected skin material.
     // Refraction and alpha remain disabled/untouched, so the surface stays opaque.
     material.subSurface.isRefractionEnabled = false;
     material.subSurface.refractionIntensity = 0;
@@ -275,6 +315,31 @@ function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): bool
     return true;
 }
 
+function applyPbrMmdLikeSubSurfaceSettings(
+    material: PbrPresetMaterialTarget,
+    state: PbrPresetRuntimeState,
+): void {
+    const toonColorTexture = createMmdLikeToonTranslucencyTexture(state);
+
+    material.subSurface.isRefractionEnabled = false;
+    material.subSurface.refractionIntensity = 0;
+    material.subSurface.linkRefractionWithTransparency = false;
+    material.subSurface.isTranslucencyEnabled = true;
+    material.subSurface.translucencyIntensity = PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY;
+    material.subSurface.translucencyColor = toonColorTexture
+        ? Color3.White()
+        : state.fallbackColor.clone();
+    material.subSurface.translucencyColorTexture = toonColorTexture;
+    material.subSurface.useAlbedoToTintTranslucency = true;
+    material.subSurface.minimumThickness = PBR_SKIN_MINIMUM_THICKNESS;
+    material.subSurface.maximumThickness = PBR_SKIN_MAXIMUM_THICKNESS;
+    material.subSurface.legacyTranslucency = false;
+    material.subSurface.isScatteringEnabled = false;
+    if (material.environmentIntensity !== undefined) {
+        material.environmentIntensity = PBR_MMD_LIKE_ENVIRONMENT_INTENSITY;
+    }
+}
+
 export function registerPbrPresetMaterial(
     material: PbrPresetMaterialTarget,
     fallbackColor: readonly [number, number, number] | Color3,
@@ -286,7 +351,11 @@ export function registerPbrPresetToonTexture(
     material: PbrPresetMaterialTarget,
     toonTexture: MmdLikeToonTextureTarget & BaseTexture,
 ): void {
-    getOrCreatePbrPresetRuntimeState(material).toonTexture = toonTexture;
+    const state = getOrCreatePbrPresetRuntimeState(material);
+    if (state.toonTexture === toonTexture) return;
+    state.toonTranslucencyTexture?.dispose();
+    state.toonTranslucencyTexture = null;
+    state.toonTexture = toonTexture;
 }
 
 export function registerPbrPresetTransparencyBaseline(
@@ -311,6 +380,10 @@ export function applyPbrMaterialShaderPreset(
     const state = getOrCreatePbrPresetRuntimeState(material);
     const nextPreset = normalizePbrMaterialShaderPreset(materialPreset);
     restorePbrStandardSettings(material, state);
+
+    if (nextPreset === "pbr-mmd-like") {
+        applyPbrMmdLikeSubSurfaceSettings(material, state);
+    }
 
     if (nextPreset === "pbr-skin" && !applyPbrSkinSubSurfaceSettings(material)) {
         state.materialShaderPreset = "pbr-base";

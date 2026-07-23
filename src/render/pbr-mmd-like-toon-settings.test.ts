@@ -6,6 +6,8 @@ import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Scene } from "@babylonjs/core/scene";
 import {
+    PBR_MMD_LIKE_ENVIRONMENT_INTENSITY,
+    PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
     PBR_SKIN_ENVIRONMENT_INTENSITY,
     PBR_SKIN_MAXIMUM_THICKNESS,
     PBR_SKIN_MINIMUM_THICKNESS,
@@ -92,9 +94,9 @@ function expectStandardBaseline(material: ReturnType<typeof createMaterial>): vo
 }
 
 describe("PBR material shader presets", () => {
-    it.each(["pbr-base", "pbr-mmd-like"] as const)(
-        "keeps %s on the verified PBR Standard rendering baseline",
-        (preset) => {
+    it(
+        "keeps PBR Standard on the verified rendering baseline",
+        () => {
             const material = createMaterial();
             registerPbrPresetMaterial(material, material.ambientColor);
             registerPbrPresetTransparencyBaseline(material);
@@ -106,12 +108,75 @@ describe("PBR material shader presets", () => {
             material.roughness = 1;
             material.specularIntensity = 0.2;
 
-            expect(applyPbrMaterialShaderPreset(material, preset)).toBe(true);
-            expect(getPbrMaterialShaderPreset(material)).toBe(preset);
+            expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
+            expect(getPbrMaterialShaderPreset(material)).toBe("pbr-base");
             expectStandardBaseline(material);
             expect(material.markAsDirty).toHaveBeenCalledWith(Material.AllDirtyFlag);
         },
     );
+
+    it("uses the PMX toon shadow texel as PBR MMD Like translucency color", () => {
+        const material = createMaterial();
+        const toonSampleTexture = {
+            uOffset: 0,
+            vOffset: 0,
+            uScale: 1,
+            vScale: 1,
+            wrapU: -1,
+            wrapV: -1,
+            getSize: () => ({ width: 256, height: 32 }),
+        } as MmdLikeToonTextureTarget & BaseTexture;
+        const toonTexture = {
+            uOffset: 0,
+            vOffset: 0,
+            uScale: 1,
+            vScale: 1,
+            wrapU: -1,
+            wrapV: -1,
+            getSize: () => ({ width: 256, height: 32 }),
+            clone: vi.fn(() => toonSampleTexture),
+        } as unknown as MmdLikeToonTextureTarget & BaseTexture;
+        registerPbrPresetMaterial(material, material.ambientColor);
+        registerPbrPresetTransparencyBaseline(material);
+        registerPbrPresetToonTexture(material, toonTexture);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+        expect(material.subSurface.isScatteringEnabled).toBe(false);
+        expect(material.subSurface.isRefractionEnabled).toBe(false);
+        expect(material.subSurface.isTranslucencyEnabled).toBe(true);
+        expect(material.subSurface.translucencyIntensity).toBe(
+            PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
+        );
+        expect(material.subSurface.translucencyColor?.equals(Color3.White())).toBe(true);
+        expect(material.subSurface.translucencyColorTexture).toBe(toonSampleTexture);
+        expect(material.subSurface.useAlbedoToTintTranslucency).toBe(true);
+        expect(material.environmentIntensity).toBe(PBR_MMD_LIKE_ENVIRONMENT_INTENSITY);
+
+        // Freeze every material UV at the center of the toon texture's
+        // left-bottom pixel. The original PMX toon texture remains unchanged.
+        expect(toonSampleTexture.uScale).toBe(0);
+        expect(toonSampleTexture.vScale).toBe(0);
+        expect(toonSampleTexture.uOffset).toBeCloseTo(0.5 / 256);
+        expect(toonSampleTexture.vOffset).toBeCloseTo(0.5 / 32);
+        expect(toonTexture.uScale).toBe(1);
+        expect(toonTexture.vScale).toBe(1);
+        expect(toonTexture.uOffset).toBe(0);
+        expect(toonTexture.vOffset).toBe(0);
+    });
+
+    it("falls back to the PMX ambient shadow color when no toon texture exists", () => {
+        const material = createMaterial();
+        registerPbrPresetMaterial(material, material.ambientColor);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+        expect(material.subSurface.translucencyColorTexture).toBeNull();
+        expect(material.subSurface.translucencyColor?.equals(
+            material.ambientColor,
+        )).toBe(true);
+        expect(material.subSurface.translucencyIntensity).toBe(
+            PBR_MMD_LIKE_TRANSLUCENCY_INTENSITY,
+        );
+    });
 
     it("uses opaque translucency without screen-space scattering for PBR Skin", () => {
         const material = createMaterial();
@@ -215,9 +280,9 @@ describe("PBR material shader presets", () => {
         expect(material.subSurface.isTranslucencyEnabled).toBe(true);
     });
 
-    it("retains the PMX toon texture for future MMD Like shader work without changing it", () => {
+    it("restores the Standard baseline after using the PMX toon texture", () => {
         const material = createMaterial();
-        const toonTexture = {
+        const toonSampleTexture = {
             uOffset: 0,
             vOffset: 0,
             uScale: 1,
@@ -226,10 +291,21 @@ describe("PBR material shader presets", () => {
             wrapV: -1,
             getSize: () => ({ width: 256, height: 32 }),
         } as MmdLikeToonTextureTarget & BaseTexture;
+        const toonTexture = {
+            uOffset: 0,
+            vOffset: 0,
+            uScale: 1,
+            vScale: 1,
+            wrapU: -1,
+            wrapV: -1,
+            getSize: () => ({ width: 256, height: 32 }),
+            clone: vi.fn(() => toonSampleTexture),
+        } as unknown as MmdLikeToonTextureTarget & BaseTexture;
         registerPbrPresetMaterial(material, material.ambientColor);
         registerPbrPresetToonTexture(material, toonTexture);
 
         expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
         expect(toonTexture.wrapU).toBe(-1);
         expect(toonTexture.wrapV).toBe(-1);
         expectStandardBaseline(material);

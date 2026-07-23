@@ -10,7 +10,7 @@
 この文書では、次をまとめる。
 
 - 現在採用している Babylon.js 標準 `Translucency` の設定
-- `Scattering` をいったん無効にした理由
+- `Scattering` を再試行して無効に戻した理由
 - HDRI / IBL と SubSurface の相互作用
 - プリセットを外したときに元へ戻す仕組み
 - 今後再調整するときの順序と確認項目
@@ -23,8 +23,8 @@ IBL と外部 HDRI の仕様は
 
 ## 現在の結論
 
-2026-07-23 時点の `PBR Skin` は、画面空間 `Scattering` を使わず、
-低強度の `Translucency` だけを使う。
+2026-07-23 時点の `PBR Skin` は、画面空間`Scattering`を使わず、
+低強度の`Translucency`だけを使う。
 
 - 表面は不透明のまま
 - `Refraction` は使わない
@@ -81,7 +81,7 @@ diffusion profile index を出力し、後段の SubSurface Scattering post-proc
 | `minimumThickness` | `0.0` | 一様 thickness の下限 |
 | `maximumThickness` | `0.3` | 一様 thickness の上限 |
 | `legacyTranslucency` | `false` | Babylon.js の現行モデルを使う |
-| `isScatteringEnabled` | `false` | PrePass と画面空間 SSS を生成しない |
+| `isScatteringEnabled` | `false` | PrePassと画面空間SSSを生成しない |
 | 材質 `environmentIntensity` | `0.80` | Standardと同値で白飛びしたため、Skinだけ20%抑える |
 
 現在は thickness texture を持たず、全画素で同じ範囲を使う。
@@ -192,7 +192,9 @@ Scattering と赤系 Translucency を併用した試行では、HDRI を有効�
 画面空間散乱と裏側 environment irradiance の両方が有効な状態で、散乱色、透過色、IBL 強度を
 同時に動かしていたため、原因と強度を分離しづらかった。
 
-現在は Scattering を切り、Translucency だけを低い値から合わせ直している。
+Translucencyの値を固定し、以前より大幅に狭い`(0.08, 0.025, 0.012)`の
+diffusion profileでも再試行したが、画面全体の白化とSkin材質の黒化が同時に発生した。
+拡散幅の調整では解消しない描画経路の問題と判断し、Scatteringを再度無効にした。
 
 ### 3. 影の「ぶれ」と Scattering は別問題の可能性が高い
 
@@ -248,12 +250,12 @@ SubSurface Scattering post-process を必要とする。
 現在の自動確認では次を検証している。
 
 - PBR Skin が Translucency を有効にする
-- Refraction と Scattering を無効にする
-- 適用時に scene PrePass を要求しない
+- Refraction とScatteringを無効にする
+- 適用時にscene PrePassを要求しない
 - alpha / transparency / roughness / specular を変更しない
 - material-local environment intensity を `0.80` にする
 - Standard へ戻したときに保存済みの値を復元する
-- 実 `PBRMaterial` と `NullEngine` でも不要な PrePass が生成されない
+- 実`PBRMaterial`と`NullEngine`でも不要なPrePassが生成されない
 
 2026-07-23 の実機比較では、同じ材質に対して IBL を ON / OFF しても、以前のような
 極端な暗化と赤被りは発生せず、Translucency-only 設定を暫定採用できると判断した。
@@ -268,7 +270,7 @@ SubSurface Scattering post-process を必要とする。
 - PMX 材質名や部位から Skin を自動判定しない
 - 肌、耳、唇、爪などを別パラメータに分けていない
 - HDRI ごとの推奨値や露出補正を持たない
-- Scattering を使わないため、頬や耳の画面空間ブラーはない
+- Scatteringを使わないため、頬や耳の画面空間ブラーはない
 - 材質ローカル `environmentIntensity` は diffuse と specular の IBL をまとめて弱める
 
 現状は「肌に見える安全な初期値」であり、汎用の物理スキンモデルではない。

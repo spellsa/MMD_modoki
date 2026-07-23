@@ -11,9 +11,10 @@ ON / OFF し、同じ PMX / PMD を再読込して比較できる段階まで実
 この試行は、従来のMMD表示を置き換えるものではなく、PBR表現の成立条件と
 MMD材質をPBRへ移したときの問題を調べる実験である。現時点では
 モデル全体は`PBR Standard`へ統一し、材質別の`PBR MMD Like`と`PBR Skin`を比較できる。
-IBLのPBR出力経路はPBR Standardの実モデル比較で成立を確認した。`PBR Skin`は旧実装を
+IBLのPBR出力経路はPBR Standardの実モデル比較で成立を確認した。`PBR MMD Like`は
+PMXのtoon左下1px色を標準Translucencyへ渡す材質別プリセットとして再実装した。`PBR Skin`は旧実装を
 使わず、Babylon.js標準のTranslucency単独構成で2026-07-23に再調整した。画面空間Scatteringは
-HDR irradianceのclampによる暗化を切り分けるため一時的に無効化している。実モデルでの色・影・
+狭い拡散幅でも画面全体の白化とSkin材質の黒化が再現したため、再度無効化している。実モデルでの色・影・
 透明度の確認前であり、既定表示へ昇格できる状態ではない。
 
 ### 試したこと
@@ -22,9 +23,9 @@ HDR irradianceのclampによる暗化を切り分けるため一時的に無効�
 | --- | --- | --- |
 | PBR読込 | babylon-mmdの`PBRMaterialBuilder`を基礎に、従来MMDモードと分離したPBRモードを追加 | モデル全体のPBR基準はStandardへ統一 |
 | PBR Standard | babylon-mmd標準に近い比較基準を用意 | 比較用ベースとして維持 |
-| PBR MMD Like | PMX固有情報を使う材質別プリセットとして試行 | 旧toon / SSS処理を停止し、現在はStandardと同じ描画状態 |
+| PBR MMD Like | PMX固有情報を使う材質別プリセットとして試行 | PBR影響0.8、Translucency 0.02、toon左下1px色（なければambient色）を使用 |
 | PBR Skin | 肌向けの材質別プリセットとして試行 | Standard表面設定を維持し、Babylon.js標準Translucencyを単独適用 |
-| SSS | PrePass ScatteringとDiffuse transmissionを比較 | Scatteringは暗化切り分けのため停止し、Translucency寄りで実描画調整中 |
+| SSS | PrePass ScatteringとDiffuse transmissionを比較 | 狭いprofileでも描画破綻したため、Translucency単独へ復帰 |
 | 透明材質 | 明示的半透明をSSS対象外にし、ほぼ不透明なalpha textureを低い閾値のalpha testへ変換 | プリセット固有変換を停止し、Standardの透明設定を復元 |
 | 即時切替 | 読込済みPBRMaterialを再生成せず材質別プリセットを切替 | 再起動・モデル再読込なしで反映 |
 | IBL | 中立cube texture、同梱HDR、外部HDR、ON/OFF、強度0〜4を比較 | PBR Standardの実モデルで方向・色・強弱を確認。基盤は成立 |
@@ -193,15 +194,15 @@ MMD Likeは作者指定toon色という役割分担にする。
 - `PBR MMD Like`
 - `PBR Skin`
 
-`PBR MMD Like`はPMXのtoon / ambientなどを将来利用するための材質別プリセット、
+`PBR MMD Like`はPMXのtoon / ambientを利用する材質別プリセット、
 `PBR Skin`は肌向け調整を将来追加する材質別プリセットとして位置づける。
 割り当ては材質キー単位でプロジェクトの`materialShaders`へ保存する。
 
-`PBR MMD Like`は不具合の切り分けを優先し、PBR Standardと同一の描画設定を使う。
+`PBR MMD Like`はPBR Standardの表面設定を基準とし、材質ローカルの
+`environmentIntensity = 0.8`と、toon左下1px色を使う標準Translucency 0.02を加える。
 `PBR Skin`はStandardのalpha、transparencyMode、roughness、specularIntensityを維持したまま、
-Babylon.js標準の画面空間Scatteringと低強度Translucencyを有効にする。独自Material Plugin、
-Emissive、Refraction、alpha補正、暗部補正は使わない。PMXのtoonテクスチャとambient色は将来のMMD Like再実装用に保持するが、
-描画にはまだ使用しない。
+Babylon.js標準の低強度Translucencyを有効にする。両プリセットとも独自Material Plugin、
+画面空間Scattering、Emissive、Refraction、alpha補正、暗部補正は使わない。
 
 旧プロジェクトにモデル全体の`pbrMaterialPreset: "pbr-mmd-like"`が残っている場合は、
 読込時に全材質へ材質別`PBR MMD Like`を割り当てる互換移行を行う。その後、旧来の
@@ -420,6 +421,7 @@ PBR用へ切り替え、WGSLプリセットを隠して`PBR Standard`、`PBR MMD
 - [x] PBR MMD Like / PBR Skinの材質別プロジェクト保存 / 読込
 - [x] 旧モデル全体PBR MMD Like指定を全材質指定へ互換移行
 - [x] MMD LikeをPBR Standardと同一の描画状態へ戻す
+- [x] PBR MMD Likeをtoon左下1px色と標準Translucencyで再実装
 - [x] PBR SkinをBabylon.js標準PrePass Scatteringで試作（現在は失敗記録として無効化）
 - [x] PBR Skinを低強度の標準Translucency単独へ変更し、Refraction / alpha変更なしで適用
 - [x] toon影色を材質別PBRシェーダーで処理
@@ -446,8 +448,8 @@ PBR用へ切り替え、WGSLプリセットを隠して`PBR Standard`、`PBR MMD
 - [ ] 透過材質、DDS / BMP / PNG テクスチャの PBR 表示確認
 - [x] reflectionColor補正後のPBR StandardでIBL強度差をWebGPU実画面比較
 - [ ] 高コントラストHDRでIBL diffuse / specular寄与を個別確認
-- [ ] PBR MMD LikeのSSSをキャラクターまたは材質別指定へ限定
-- [ ] toon左下1px色由来の暗部散乱光源をPBR MMD Likeへ追加して強度を比較
+- [x] PBR MMD LikeのSubSurfaceを材質別指定へ限定
+- [x] toon左下1px色由来のTranslucencyをPBR MMD Likeへ追加
 - [x] 外部 HDRI 読込
 
 ## 2026-07-21 外部 HDRI 読込
