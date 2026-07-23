@@ -58,12 +58,21 @@ MMD環境光が`0`でも、PBRのIBLは動作する。
 
 ## 推奨初期値
 
+- IBL環境ライト: `ON`
+- IBLソース: 内蔵`yamagata-field-20181231-1137-2k.hdr`
 - HDRI背景の明るさ: `0.03`
 - IBL環境光強度: `1.0`
 - IBL OFF: 実効強度`0.0`
 
 背景の明るさは、実機上では`0.02`から`0.03`付近が白飛びしにくい。
 IBL強度`1.0`はHDRごとの自動正規化後の基準値であり、`4.0`は比較・演出用の強い上限とする。
+新規環境ではIBLをONにし、外部HDRが未指定なら内蔵の2K TrueHDRIを使用する。
+HDRI背景表示はOFFのままとし、デフォルト空の見た目とPBRへの環境ライティングを分離する。
+ローカル設定またはプロジェクトに明示されたON / OFFは、この初期値より優先する。
+
+2026-07-23のモデルなしElectron / WebGPU smokeでは、新規状態で`enabled = true`、
+`source = bundled`、内蔵HDRのreadyとspherical polynomial生成済み、
+`backgroundVisible = false`を確認した。
 
 ## 処理経路
 
@@ -164,8 +173,15 @@ MMDで一般的な黒または低いspecular色をそのまま使うと、HDRの
 環境テクスチャは次の優先順位で選択する。
 
 1. ユーザーが読み込んだ外部HDR
-2. 内蔵`white.hdr`
+2. 内蔵`yamagata-field-20181231-1137-2k.hdr`
 3. 中立色のfallback cube texture
+
+内蔵HDRはBandai Namco Studios TrueHDRIのCC0素材
+`YamagataField_20181231_1137`を、線形HDR値のまま16Kから2Kへ縮小した派生版である。
+雪原による明るい全周光と太陽・空の方向差があり、外部HDRなしでもdiffuse / specular IBLと
+Translucencyを確認できる。表示背景には使用せず、既定空の見た目とは独立させる。
+生成条件、名義、ライセンスは`src/assets/ibl-shadows/README.md`と
+`THIRD_PARTY_NOTICES.md`に記録する。
 
 実装上の注意:
 

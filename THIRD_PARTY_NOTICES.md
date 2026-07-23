@@ -3,7 +3,7 @@
 This project includes third-party software.
 Each component remains licensed by its original author under its own license.
 
-Last updated: 2026-06-13
+Last updated: 2026-07-23
 
 ## Runtime dependencies
 
@@ -43,6 +43,12 @@ Last updated: 2026-06-13
 | `typescript` | `5.9.3` | Apache-2.0 | https://github.com/microsoft/TypeScript |
 | `vite` | `7.3.3` | MIT | https://github.com/vitejs/vite |
 | `vitest` | `4.1.6` | MIT | https://github.com/vitest-dev/vitest |
+
+## Bundled visual assets
+
+| Asset | Modification | License | Credit | Source |
+| --- | --- | --- | --- | --- |
+| `YamagataField_20181231_1137` TrueHDRI | Linear box downsample from 16384×8192 Radiance HDR to 2048×1024 | CC0-1.0 | ©Bandai Namco Studios Inc. | https://www.bandainamcostudios.com/projects/truehdri/library/16878 |
 
 ## Notes
 

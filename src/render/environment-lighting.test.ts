@@ -2,8 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import {
     applyEnvironmentLightingIntensity,
     calculateEnvironmentTextureLevel,
+    combineEnvironmentLightingAndIlluminance,
     createConstantEnvironmentSphericalPolynomial,
 } from "./environment-lighting";
+
+describe("combineEnvironmentLightingAndIlluminance", () => {
+    it("uses illuminance as a master multiplier for indirect PBR light", () => {
+        expect(combineEnvironmentLightingAndIlluminance(1, 0)).toBe(0);
+        expect(combineEnvironmentLightingAndIlluminance(1, 0.5)).toBe(0.5);
+        expect(combineEnvironmentLightingAndIlluminance(0.75, 2)).toBe(1.5);
+    });
+
+    it("normalizes invalid values and clamps the combined maximum", () => {
+        expect(combineEnvironmentLightingAndIlluminance(Number.NaN, Number.NaN)).toBe(1);
+        expect(combineEnvironmentLightingAndIlluminance(-1, 2)).toBe(0);
+        expect(combineEnvironmentLightingAndIlluminance(4, 4, 8)).toBe(8);
+    });
+});
 
 describe("applyEnvironmentLightingIntensity", () => {
     it("uses PBR environment intensity while keeping the shared IBL texture level neutral", () => {

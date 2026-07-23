@@ -1,250 +1,237 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
+import { Material } from "@babylonjs/core/Materials/material";
+import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Scene } from "@babylonjs/core/scene";
 import {
-    applyPbrMaterialPresetToMaterial,
+    PBR_SKIN_ENVIRONMENT_INTENSITY,
+    PBR_SKIN_MAXIMUM_THICKNESS,
+    PBR_SKIN_MINIMUM_THICKNESS,
+    PBR_SKIN_TRANSLUCENCY_COLOR_RGB,
+    PBR_SKIN_TRANSLUCENCY_INTENSITY,
     applyPbrMaterialShaderPreset,
-    applyMmdLikeFallbackSubSurfaceSettings,
-    applyMmdLikeToonSubSurfaceSettings,
-    MMD_LIKE_ALPHA_CUTOFF,
-    MMD_LIKE_MIN_ROUGHNESS,
-    MMD_LIKE_OPAQUE_ALPHA_THRESHOLD,
-    MMD_LIKE_SCATTERING_PROFILE,
-    MMD_LIKE_SPECULAR_INTENSITY,
-    PBR_SKIN_MIN_ROUGHNESS,
-    PBR_SKIN_SCATTERING_PROFILE,
-    PBR_SKIN_SPECULAR_INTENSITY,
     getPbrMaterialShaderPreset,
-    type MmdLikeSubSurfaceTarget,
-    type MmdLikeToonTextureTarget,
     registerPbrPresetMaterial,
     registerPbrPresetTransparencyBaseline,
     registerPbrPresetToonTexture,
+    type MmdLikeSubSurfaceTarget,
+    type MmdLikeToonTextureTarget,
 } from "./pbr-mmd-like-toon-settings";
-import {
-    getMmdLikeToonSampleUv,
-    getPbrSkinScatterSourceStrength,
-} from "./pbr-mmd-like-material-plugin";
-import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
-import { Material } from "@babylonjs/core/Materials/material";
 
 function createSubSurfaceTarget(): MmdLikeSubSurfaceTarget {
     return {
+        isRefractionEnabled: true,
         isTranslucencyEnabled: false,
         isScatteringEnabled: false,
-        translucencyIntensity: 0,
+        refractionIntensity: 0.4,
+        translucencyIntensity: 0.25,
+        linkRefractionWithTransparency: true,
+        legacyTranslucency: true,
         useAlbedoToTintTranslucency: true,
-        tintColor: Color3.Black(),
+        minimumThickness: 0.1,
+        maximumThickness: 0.9,
+        tintColor: new Color3(0.8, 0.7, 0.6),
         translucencyColor: null,
         translucencyColorTexture: null,
         scatteringDiffusionProfile: null,
     };
 }
 
-describe("PBR MMD Like toon subsurface settings", () => {
-    it("feeds more red scattering source into dark Skin pixels", () => {
-        expect(getPbrSkinScatterSourceStrength(0)).toBeCloseTo(0.35);
-        expect(getPbrSkinScatterSourceStrength(0.4)).toBeGreaterThan(
-            getPbrSkinScatterSourceStrength(1),
-        );
-        expect(getPbrSkinScatterSourceStrength(1)).toBeCloseTo(0.1225);
-    });
+function createMaterial() {
+    const subSurfaceConfiguration = {
+        enabled: false,
+        metersPerUnit: 1,
+    };
+    const scene = {
+        materials: [] as unknown[],
+        subSurfaceConfiguration,
+        enableSubSurfaceForPrePass: vi.fn(() => subSurfaceConfiguration),
+    };
+    const material = {
+        subSurface: createSubSurfaceTarget(),
+        ambientColor: new Color3(0.2, 0.3, 0.4),
+        alpha: 1,
+        transparencyMode: Material.MATERIAL_ALPHABLEND,
+        useAlphaFromAlbedoTexture: true,
+        forceDepthWrite: true,
+        alphaCutOff: 0.4,
+        roughness: 0.35,
+        specularIntensity: 1,
+        environmentIntensity: 0.9,
+        reflectionColor: new Color3(0.05, 0.1, 0.15),
+        getScene: () => scene,
+        markAsDirty: vi.fn(),
+    };
+    scene.materials.push(material);
+    return material;
+}
 
-    it("uses the centre of the bottom-left toon texel in the material shader", () => {
-        const subSurface = createSubSurfaceTarget();
-        const toonTexture = {
-            uOffset: 0,
-            vOffset: 0,
-            uScale: 1,
-            vScale: 1,
-            wrapU: -1,
-            wrapV: -1,
-            getSize: () => ({ width: 256, height: 32 }),
-        } as MmdLikeToonTextureTarget & BaseTexture;
+function expectStandardBaseline(material: ReturnType<typeof createMaterial>): void {
+    expect(material.subSurface.isRefractionEnabled).toBe(true);
+    expect(material.subSurface.isTranslucencyEnabled).toBe(false);
+    expect(material.subSurface.isScatteringEnabled).toBe(false);
+    expect(material.subSurface.refractionIntensity).toBe(0.4);
+    expect(material.subSurface.translucencyIntensity).toBe(0.25);
+    expect(material.subSurface.linkRefractionWithTransparency).toBe(true);
+    expect(material.subSurface.legacyTranslucency).toBe(true);
+    expect(material.subSurface.useAlbedoToTintTranslucency).toBe(true);
+    expect(material.subSurface.minimumThickness).toBe(0.1);
+    expect(material.subSurface.maximumThickness).toBe(0.9);
+    expect(material.subSurface.tintColor.equals(new Color3(0.8, 0.7, 0.6))).toBe(true);
+    expect(material.alpha).toBe(1);
+    expect(material.transparencyMode).toBe(Material.MATERIAL_ALPHABLEND);
+    expect(material.useAlphaFromAlbedoTexture).toBe(true);
+    expect(material.forceDepthWrite).toBe(true);
+    expect(material.alphaCutOff).toBe(0.4);
+    expect(material.roughness).toBe(0.35);
+    expect(material.specularIntensity).toBe(1);
+    expect(material.environmentIntensity).toBe(0.9);
+    expect(material.reflectionColor.equals(Color3.White())).toBe(true);
+}
 
-        applyMmdLikeToonSubSurfaceSettings(subSurface, toonTexture);
+describe("PBR material shader presets", () => {
+    it.each(["pbr-base", "pbr-mmd-like"] as const)(
+        "keeps %s on the verified PBR Standard rendering baseline",
+        (preset) => {
+            const material = createMaterial();
+            registerPbrPresetMaterial(material, material.ambientColor);
+            registerPbrPresetTransparencyBaseline(material);
 
-        expect(getMmdLikeToonSampleUv(toonTexture)).toEqual({
-            u: 0.5 / 256,
-            v: 0.5 / 32,
-        });
-        expect(subSurface.isTranslucencyEnabled).toBe(false);
-        expect(subSurface.isScatteringEnabled).toBe(true);
-        expect(subSurface.translucencyIntensity).toBe(0);
-        expect(subSurface.useAlbedoToTintTranslucency).toBe(false);
-        expect(subSurface.translucencyColor).toBeNull();
-        expect(subSurface.translucencyColorTexture).toBeNull();
-        expect(subSurface.scatteringDiffusionProfile?.equals(
-            MMD_LIKE_SCATTERING_PROFILE,
-        )).toBe(true);
-    });
+            material.subSurface.isScatteringEnabled = true;
+            material.subSurface.translucencyIntensity = 0;
+            material.alpha = 0.5;
+            material.transparencyMode = Material.MATERIAL_ALPHATEST;
+            material.roughness = 1;
+            material.specularIntensity = 0.2;
 
-    it("uses scattering without translucency when a toon texture cannot be loaded", () => {
-        const subSurface = createSubSurfaceTarget();
+            expect(applyPbrMaterialShaderPreset(material, preset)).toBe(true);
+            expect(getPbrMaterialShaderPreset(material)).toBe(preset);
+            expectStandardBaseline(material);
+            expect(material.markAsDirty).toHaveBeenCalledWith(Material.AllDirtyFlag);
+        },
+    );
 
-        applyMmdLikeFallbackSubSurfaceSettings(subSurface, [0.2, 0.3, 0.4]);
-
-        expect(subSurface.isTranslucencyEnabled).toBe(false);
-        expect(subSurface.isScatteringEnabled).toBe(true);
-        expect(subSurface.translucencyIntensity).toBe(0);
-        expect(subSurface.translucencyColor).toBeNull();
-        expect(subSurface.translucencyColorTexture).toBeNull();
-        expect(subSurface.scatteringDiffusionProfile?.equals(
-            MMD_LIKE_SCATTERING_PROFILE,
-        )).toBe(true);
-    });
-
-    it("switches an existing PBR material between Standard and MMD Like without recreating it", () => {
-        const subSurface = createSubSurfaceTarget();
-        subSurface.translucencyIntensity = 0.25;
-        subSurface.tintColor = new Color3(0.8, 0.7, 0.6);
-        const material = {
-            subSurface,
-            ambientColor: new Color3(0.2, 0.3, 0.4),
-            roughness: 0.35,
-            metallic: 0,
-            metallicF0Factor: 1,
-            specularIntensity: 1,
-            reflectionColor: new Color3(0.05, 0.1, 0.15),
-            markAsDirty: () => undefined,
-        };
-        const toonTexture = {
-            uOffset: 0,
-            vOffset: 0,
-            uScale: 1,
-            vScale: 1,
-            wrapU: -1,
-            wrapV: -1,
-            getSize: () => ({ width: 256, height: 32 }),
-        } as MmdLikeToonTextureTarget & BaseTexture;
-
-        registerPbrPresetMaterial(material, [0.2, 0.3, 0.4]);
-        registerPbrPresetToonTexture(material, toonTexture);
-
-        expect(applyPbrMaterialPresetToMaterial(material, "pbr-mmd-like")).toBe(true);
-        expect(material.subSurface.isTranslucencyEnabled).toBe(false);
-        expect(material.subSurface.isScatteringEnabled).toBe(true);
-        expect(material.subSurface.translucencyIntensity).toBe(0);
-        expect(material.subSurface.translucencyColorTexture).toBeNull();
-        expect(material.roughness).toBe(MMD_LIKE_MIN_ROUGHNESS);
-        expect(material.specularIntensity).toBe(MMD_LIKE_SPECULAR_INTENSITY);
-        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
-
-        expect(applyPbrMaterialPresetToMaterial(material, "pbr-standard")).toBe(true);
-        expect(material.subSurface.isTranslucencyEnabled).toBe(false);
-        expect(material.subSurface.isScatteringEnabled).toBe(false);
-        expect(material.subSurface.translucencyIntensity).toBe(0.25);
-        expect(material.subSurface.tintColor.equals(new Color3(0.8, 0.7, 0.6))).toBe(true);
-        expect(material.subSurface.translucencyColorTexture).toBeNull();
-        expect(material.roughness).toBe(0.35);
-        expect(material.specularIntensity).toBe(1);
-        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
-    });
-
-    it("applies strong red scattering to an individually assigned Skin material", () => {
-        const material = {
-            subSurface: createSubSurfaceTarget(),
-            ambientColor: new Color3(0.1, 0.2, 0.3),
-            roughness: 0.35,
-            specularIntensity: 1,
-            reflectionColor: new Color3(0, 0, 0),
-        };
-        registerPbrPresetMaterial(material, material.ambientColor);
-
-        expect(applyPbrMaterialShaderPreset(
-            material,
-            "pbr-mmd-like",
-            "pbr-skin",
-        )).toBe(true);
-        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-skin");
-        expect(material.subSurface.isTranslucencyEnabled).toBe(false);
-        expect(material.subSurface.isScatteringEnabled).toBe(true);
-        expect(material.subSurface.scatteringDiffusionProfile?.equals(
-            PBR_SKIN_SCATTERING_PROFILE,
-        )).toBe(true);
-        expect(material.roughness).toBe(PBR_SKIN_MIN_ROUGHNESS);
-        expect(material.specularIntensity).toBe(PBR_SKIN_SPECULAR_INTENSITY);
-        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
-
-        expect(applyPbrMaterialShaderPreset(
-            material,
-            "pbr-mmd-like",
-            "pbr-base",
-        )).toBe(true);
-        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-base");
-        expect(material.subSurface.isTranslucencyEnabled).toBe(false);
-        expect(material.subSurface.isScatteringEnabled).toBe(true);
-        expect(material.subSurface.scatteringDiffusionProfile?.equals(
-            MMD_LIKE_SCATTERING_PROFILE,
-        )).toBe(true);
-    });
-
-    it("uses alpha test instead of alpha blend for opaque SSS surfaces with texture cutouts", () => {
-        const material = {
-            subSurface: createSubSurfaceTarget(),
-            ambientColor: new Color3(0.1, 0.2, 0.3),
-            alpha: 1,
-            transparencyMode: Material.MATERIAL_ALPHABLEND,
-            useAlphaFromAlbedoTexture: true,
-            forceDepthWrite: true,
-            alphaCutOff: 0.4,
-            albedoTexture: { hasAlpha: true } as BaseTexture,
-        };
+    it("uses opaque translucency without screen-space scattering for PBR Skin", () => {
+        const material = createMaterial();
         registerPbrPresetMaterial(material, material.ambientColor);
         registerPbrPresetTransparencyBaseline(material);
 
-        expect(applyPbrMaterialPresetToMaterial(material, "pbr-mmd-like")).toBe(true);
-        expect(material.alpha).toBe(1);
-        expect(material.transparencyMode).toBe(Material.MATERIAL_ALPHATEST);
-        expect(material.useAlphaFromAlbedoTexture).toBe(true);
-        expect(material.forceDepthWrite).toBe(false);
-        expect(material.alphaCutOff).toBe(MMD_LIKE_ALPHA_CUTOFF);
-        expect(material.subSurface.isScatteringEnabled).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-skin");
+        expect(material.getScene().enableSubSurfaceForPrePass).not.toHaveBeenCalled();
+        expect(material.getScene().subSurfaceConfiguration.enabled).toBe(false);
+        expect(material.subSurface.isScatteringEnabled).toBe(false);
+        expect(material.subSurface.isRefractionEnabled).toBe(false);
+        expect(material.subSurface.refractionIntensity).toBe(0);
+        expect(material.subSurface.linkRefractionWithTransparency).toBe(false);
+        expect(material.subSurface.isTranslucencyEnabled).toBe(true);
+        expect(material.subSurface.translucencyIntensity).toBe(
+            PBR_SKIN_TRANSLUCENCY_INTENSITY,
+        );
+        expect(material.subSurface.translucencyColor?.equals(
+            new Color3(...PBR_SKIN_TRANSLUCENCY_COLOR_RGB),
+        )).toBe(true);
+        expect(material.subSurface.translucencyColorTexture).toBeNull();
+        expect(material.subSurface.useAlbedoToTintTranslucency).toBe(true);
+        expect(material.subSurface.minimumThickness).toBe(PBR_SKIN_MINIMUM_THICKNESS);
+        expect(material.subSurface.maximumThickness).toBe(PBR_SKIN_MAXIMUM_THICKNESS);
+        expect(material.subSurface.legacyTranslucency).toBe(false);
+        expect(material.subSurface.scatteringDiffusionProfile).toBeNull();
 
-        expect(applyPbrMaterialPresetToMaterial(material, "pbr-standard")).toBe(true);
+        // Skin does not rewrite opacity, enable refraction, or compensate with
+        // emissive/custom lighting. Standard surface values remain intact.
+        expect(material.alpha).toBe(1);
         expect(material.transparencyMode).toBe(Material.MATERIAL_ALPHABLEND);
         expect(material.useAlphaFromAlbedoTexture).toBe(true);
         expect(material.forceDepthWrite).toBe(true);
         expect(material.alphaCutOff).toBe(0.4);
+        expect(material.roughness).toBe(0.35);
+        expect(material.specularIntensity).toBe(1);
+        expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
+        expect(material.reflectionColor.equals(Color3.White())).toBe(true);
     });
 
-    it("keeps explicitly transparent materials out of screen-space scattering", () => {
-        const material = {
-            subSurface: createSubSurfaceTarget(),
-            ambientColor: new Color3(0.1, 0.2, 0.3),
-            alpha: 0.5,
-            transparencyMode: Material.MATERIAL_ALPHABLEND,
-            useAlphaFromAlbedoTexture: true,
-            forceDepthWrite: true,
-            alphaCutOff: 0.4,
-            albedoTexture: { hasAlpha: true } as BaseTexture,
-        };
+    it("configures Babylon PBRMaterial without requiring a scene prepass", () => {
+        const engine = new NullEngine();
+        (engine.getCaps() as { drawBuffersExtension: boolean }).drawBuffersExtension = true;
+        const scene = new Scene(engine);
+        const material = new PBRMaterial("skin", scene);
+        try {
+            registerPbrPresetMaterial(material, Color3.Black());
+            const prePassBefore = scene.prePassRenderer;
+            const subSurfaceConfigurationBefore = scene.subSurfaceConfiguration;
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+            expect(scene.prePassRenderer).toBe(prePassBefore);
+            expect(scene.subSurfaceConfiguration).toBe(subSurfaceConfigurationBefore);
+            expect(scene.subSurfaceConfiguration?.enabled ?? false).toBe(false);
+            expect(material.subSurface.isScatteringEnabled).toBe(false);
+            expect(material.subSurface.isRefractionEnabled).toBe(false);
+            expect(material.subSurface.isTranslucencyEnabled).toBe(true);
+            expect(material.subSurface.translucencyIntensity).toBe(
+                PBR_SKIN_TRANSLUCENCY_INTENSITY,
+            );
+            expect(material.subSurface.translucencyColor?.equals(
+                new Color3(...PBR_SKIN_TRANSLUCENCY_COLOR_RGB),
+            )).toBe(true);
+            expect(material.subSurface.useAlbedoToTintTranslucency).toBe(true);
+            expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
+            expect(material.subSurface.minimumThickness).toBe(PBR_SKIN_MINIMUM_THICKNESS);
+            expect(material.subSurface.maximumThickness).toBe(PBR_SKIN_MAXIMUM_THICKNESS);
+            expect(material.subSurface.legacyTranslucency).toBe(false);
+            expect(material.subSurface.scatteringDiffusionProfile).toBeNull();
+        } finally {
+            material.dispose();
+            scene.dispose();
+            engine.dispose();
+        }
+    });
+
+    it("switches assignments without carrying MMD Like or Skin state", () => {
+        const material = createMaterial();
         registerPbrPresetMaterial(material, material.ambientColor);
         registerPbrPresetTransparencyBaseline(material);
 
-        expect(applyPbrMaterialPresetToMaterial(material, "pbr-mmd-like")).toBe(true);
-        expect(material.alpha).toBe(0.5);
-        expect(material.transparencyMode).toBe(Material.MATERIAL_ALPHABLEND);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
+
+        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-base");
+        expect(material.getScene().subSurfaceConfiguration.enabled).toBe(false);
+        expectStandardBaseline(material);
+    });
+
+    it("does not require Babylon's subsurface prepass", () => {
+        const material = createMaterial();
+        material.getScene().enableSubSurfaceForPrePass.mockReturnValueOnce(null);
+        registerPbrPresetMaterial(material, material.ambientColor);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-skin");
+        expect(material.getScene().enableSubSurfaceForPrePass).not.toHaveBeenCalled();
         expect(material.subSurface.isScatteringEnabled).toBe(false);
+        expect(material.subSurface.isTranslucencyEnabled).toBe(true);
     });
 
-    it("treats near-opaque MMD alpha as an opaque alpha-test surface", () => {
-        const material = {
-            subSurface: createSubSurfaceTarget(),
-            ambientColor: new Color3(0.1, 0.2, 0.3),
-            alpha: MMD_LIKE_OPAQUE_ALPHA_THRESHOLD + 0.01,
-            transparencyMode: Material.MATERIAL_ALPHABLEND,
-            useAlphaFromAlbedoTexture: true,
-            forceDepthWrite: true,
-            alphaCutOff: 0.4,
-            albedoTexture: { hasAlpha: true } as BaseTexture,
-        };
+    it("retains the PMX toon texture for future MMD Like shader work without changing it", () => {
+        const material = createMaterial();
+        const toonTexture = {
+            uOffset: 0,
+            vOffset: 0,
+            uScale: 1,
+            vScale: 1,
+            wrapU: -1,
+            wrapV: -1,
+            getSize: () => ({ width: 256, height: 32 }),
+        } as MmdLikeToonTextureTarget & BaseTexture;
         registerPbrPresetMaterial(material, material.ambientColor);
-        registerPbrPresetTransparencyBaseline(material);
+        registerPbrPresetToonTexture(material, toonTexture);
 
-        expect(applyPbrMaterialPresetToMaterial(material, "pbr-mmd-like")).toBe(true);
-        expect(material.alpha).toBe(1);
-        expect(material.transparencyMode).toBe(Material.MATERIAL_ALPHATEST);
-        expect(material.alphaCutOff).toBe(MMD_LIKE_ALPHA_CUTOFF);
-        expect(material.subSurface.isScatteringEnabled).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
+        expect(toonTexture.wrapU).toBe(-1);
+        expect(toonTexture.wrapV).toBe(-1);
+        expectStandardBaseline(material);
     });
 });

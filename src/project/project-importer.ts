@@ -21,9 +21,8 @@ import {
 } from "../shared/skydome-background-style";
 import {
     normalizeMmdMaterialPipelinePreset,
-    normalizePbrMaterialPreset,
     type MmdMaterialPipelinePreset,
-    type PbrMaterialPreset,
+    type PbrMaterialShaderPreset,
 } from "../shared/mmd-material-pipeline";
 
 type ProjectImportRuntimeModel = {
@@ -45,7 +44,6 @@ type ProjectImportHost = {
     loadPMX(
         path: string,
         materialPipeline?: MmdMaterialPipelinePreset,
-        pbrMaterialPreset?: PbrMaterialPreset,
     ): Promise<{ name: string } | null>;
     loadVMD(path: string): Promise<unknown>;
     loadVPD(path: string): Promise<unknown>;
@@ -57,6 +55,11 @@ type ProjectImportHost = {
         warnings: string[],
         modelPath: string,
     ): void;
+    setPbrMaterialShaderPreset?(
+        modelIndex: number,
+        materialKey: string | null,
+        presetId: PbrMaterialShaderPreset,
+    ): boolean;
     setLightDirection(x: number, y: number, z: number): void;
     setDofFocusTargetByPath?: (modelPath: string | null, boneName: string | null) => void;
     updateEditorDofFocusAndFStop?: () => void;
@@ -297,6 +300,10 @@ function finalizeImportedRenderState(
     const lightDirectionZ = readLightingDirectionComponent(data.lighting, "z");
     for (let modelIndex = 0; modelIndex < data.scene.models.length; modelIndex += 1) {
         const modelState = data.scene.models[modelIndex];
+        const legacyPbrPreset = (modelState as { pbrMaterialPreset?: unknown }).pbrMaterialPreset;
+        if (legacyPbrPreset === "pbr-mmd-like") {
+            host.setPbrMaterialShaderPreset?.(modelIndex, null, "pbr-mmd-like");
+        }
         host.applyImportedMaterialShaderStates(modelIndex, modelState.materialShaders, warnings, modelState.path);
     }
 
@@ -358,7 +365,6 @@ export async function importProjectState(
         const modelInfo = await host.loadPMX(
             modelState.path,
             normalizeMmdMaterialPipelinePreset(modelState.materialPipeline),
-            normalizePbrMaterialPreset(modelState.pbrMaterialPreset),
         );
         if (!modelInfo) {
             warnings.push(`Model load failed: ${modelState.path}`);

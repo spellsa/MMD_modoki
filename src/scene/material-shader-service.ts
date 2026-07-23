@@ -34,9 +34,7 @@ import type { SubMesh } from "@babylonjs/core/Meshes/subMesh";
 import type { ProjectModelMaterialShaderState } from "../types";
 import {
     DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
-    DEFAULT_PBR_MATERIAL_PRESET,
     type MmdMaterialPipelinePreset,
-    type PbrMaterialPreset,
     type PbrMaterialShaderPreset,
 } from "../shared/mmd-material-pipeline";
 import {
@@ -94,7 +92,6 @@ type MaterialShaderSceneModel = {
     model: MaterialShaderModel;
     mesh: MaterialShaderMesh;
     materialPipeline?: MmdMaterialPipelinePreset;
-    pbrMaterialPreset?: PbrMaterialPreset;
     materials: Array<{
         key: string;
         name: string;
@@ -2036,7 +2033,6 @@ export function getWgslModelShaderStates(host: MaterialShaderHost): Array<{
     modelPath: string;
     active: boolean;
     materialPipeline: MmdMaterialPipelinePreset;
-    pbrMaterialPreset: PbrMaterialPreset;
     materials: Array<{
         key: string;
         name: string;
@@ -2052,7 +2048,6 @@ export function getWgslModelShaderStates(host: MaterialShaderHost): Array<{
         modelPath: entry.info.path,
         active: entry.model === host.currentModel,
         materialPipeline: entry.materialPipeline ?? DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
-        pbrMaterialPreset: entry.pbrMaterialPreset ?? DEFAULT_PBR_MATERIAL_PRESET,
         materials: entry.materials.map((material) => ({
             key: material.key,
             name: material.name,
@@ -2104,14 +2099,13 @@ export function applyImportedMaterialShaderStates(
                 warnings.push("Invalid PBR material shader assignment: " + modelPath);
                 continue;
             }
-            if (state.presetId !== "pbr-skin") {
+            if (state.presetId !== "pbr-mmd-like" && state.presetId !== "pbr-skin") {
                 warnings.push("Unknown PBR shader preset '" + state.presetId + "' for " + modelPath);
                 continue;
             }
             const target = entry.materials.find((material) => material.key === state.materialKey);
             if (!target || !applyPbrMaterialShaderPreset(
                 target.material,
-                entry.pbrMaterialPreset ?? DEFAULT_PBR_MATERIAL_PRESET,
                 state.presetId,
             )) {
                 warnings.push("PBR material shader target not found: " + state.materialKey + " (" + modelPath + ")");

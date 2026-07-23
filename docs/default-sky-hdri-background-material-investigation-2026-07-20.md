@@ -241,7 +241,7 @@ raw `.hdr` / `.exr` も `HDRCubeTexture` / `EXRCubeTexture` で読み込める�
 
 - bundled default は `.hdr` ではなく、オフライン変換済み `.env` を第一候補にする。
 - raw `.hdr` はユーザー読込や比較検証用候補に留める。
-- 現在ある `src/assets/ibl-shadows/white.hdr` は IBL Shadows の検証用単色アセットであり、デフォルト空の絵作りには使わない。
+- `src/assets/ibl-shadows/white.hdr` は手続き生成の診断用アセットとして残す。2026-07-23以降の既定IBLはCC0 TrueHDRIの2K派生版だが、どちらもデフォルト空の絵作りには使わない。
 
 公式:
 

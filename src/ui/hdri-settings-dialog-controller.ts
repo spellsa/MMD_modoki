@@ -53,7 +53,7 @@ export class HdriSettingsDialogController implements PopupContentController {
         backgroundVisible.type = "checkbox";
         backgroundVisible.className = "popup-form-checkbox";
         backgroundVisible.checked = this.mmdManager.isEnvironmentBackgroundVisible();
-        backgroundVisible.disabled = sourcePath === null;
+        backgroundVisible.disabled = !this.mmdManager.canShowEnvironmentBackground();
         grid.appendChild(createPopupFormField(t("dialog.hdri.backgroundVisible"), backgroundVisible));
 
         const backgroundIntensity = document.createElement("input");
@@ -65,7 +65,8 @@ export class HdriSettingsDialogController implements PopupContentController {
         backgroundIntensity.value = String(Math.round(
             this.mmdManager.getEnvironmentBackgroundIntensity() * 100,
         ));
-        backgroundIntensity.disabled = sourcePath === null || !backgroundVisible.checked;
+        backgroundIntensity.disabled = !this.mmdManager.canShowEnvironmentBackground()
+            || !backgroundVisible.checked;
         const backgroundIntensityValue = createPopupFormValueText(
             this.mmdManager.getEnvironmentBackgroundIntensity().toFixed(2),
         );
@@ -115,9 +116,10 @@ export class HdriSettingsDialogController implements PopupContentController {
             sourceValue.textContent = path ? getBaseName(path) : t("dialog.hdri.bundled");
             sourceValue.title = path ?? "";
             clearButton.disabled = path === null;
-            backgroundVisible.disabled = path === null;
+            backgroundVisible.disabled = !this.mmdManager.canShowEnvironmentBackground();
             backgroundVisible.checked = this.mmdManager.isEnvironmentBackgroundVisible();
-            backgroundIntensity.disabled = path === null || !backgroundVisible.checked;
+            backgroundIntensity.disabled = !this.mmdManager.canShowEnvironmentBackground()
+                || !backgroundVisible.checked;
         };
 
         backgroundVisible.addEventListener("change", () => {

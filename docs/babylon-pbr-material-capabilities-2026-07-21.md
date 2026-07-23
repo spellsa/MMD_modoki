@@ -360,7 +360,7 @@ Node Material Editor には PBR ブロックがあり、独自 BRDF や複雑な
 |---|---|---|
 | PBR Standard | metallic 0、材質別 roughness、IBL | 現在の全体ベース |
 | PBR MMD Like | まず Standard と同値 | toon 影色は Material Plugin を別工程で検証 |
-| PBR Skin | 高 roughness、低い鏡面、必要なら弱い sheen | Scattering は scene scale と pre-pass が安定してから |
+| PBR Skin | Standard表面設定＋暖色Translucency | Translucency 0.12、材質IBL 0.35で比較中。画面空間Scatteringは暗化切り分けのため停止。Refraction / alpha変更なし |
 | PBR Hair | roughness、sheen、anisotropy | tangent 品質の確認が必要 |
 | PBR Cloth | 高 roughness、sheen | 薄布だけ translucency / SSS を限定適用 |
 | PBR Metal | metallic、roughness、必要なら anisotropy | PMX 材質から自動判定しない方が安全 |
@@ -374,7 +374,7 @@ Node Material Editor には PBR ブロックがあり、独自 BRDF や複雑な
 2. roughness / metallic / sheen / clear coat など、材質だけで完結するプリセットを追加する
 3. tangent を検査できるようにしてから Hair anisotropy を試す
 4. alpha test / blend / refraction を材質種別ごとに分離する
-5. scene scale と pre-pass を診断可能にしてから Scattering を再導入する
+5. SkinのTranslucency単独構成を実描画比較し、必要ならscene scaleとpre-passを診断しながらScatteringを再検討する
 6. 最後に Material Plugin で MMD toon 色・段階影を実験する
 
 SSS や MMD toon 合成を先に全材質へ入れると、透明度、pre-pass、影、IBL のどこが原因か切り分けにくくなる。まず標準 PBR 属性で作れるプリセットを小さく積み上げる方がよい。

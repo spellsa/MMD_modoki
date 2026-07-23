@@ -147,6 +147,7 @@
 - [Mac / Linux file URL texture whiteout 調査](./mac-linux-file-url-texture-whiteout-2026-07-14.md)
 - [Material shader customization guide](./material-shader-customization-guide.md)
 - [Babylon.js PBR 材質で使える属性・表現 2026-07-21](./babylon-pbr-material-capabilities-2026-07-21.md)
+- [PBR Skin 実装メモ 2026-07-23](./pbr-skin-implementation-2026-07-23.md)
 - [Babylon.js OpenPBR と外部読込の調査 2026-07-21](./babylon-openpbr-external-import-investigation-2026-07-21.md)
 - [WebGPU 不発 / 平坦化の調査メモ](./webgpu-not-working-investigation.md)
 - [WebGPU / WGSL 実現可能性メモ](./webgpu-wgsl-feasibility.md)

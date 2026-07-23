@@ -1,26 +1,18 @@
-import { Texture } from "@babylonjs/core/Materials/Textures/texture";
-import { Color3 } from "@babylonjs/core/Maths/math.color";
 import type { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 import { Material } from "@babylonjs/core/Materials/material";
-import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
+import "@babylonjs/core/Rendering/prePassRendererSceneComponent";
 import "@babylonjs/core/Rendering/subSurfaceSceneComponent";
 import {
     normalizePbrMaterialShaderPreset,
-    type PbrMaterialPreset,
     type PbrMaterialShaderPreset,
 } from "../shared/mmd-material-pipeline";
-import { applyMmdLikePbrShaderSettings } from "./pbr-mmd-like-material-plugin";
 
-export const MMD_LIKE_METERS_PER_UNIT = 0.08;
-export const MMD_LIKE_SCATTERING_PROFILE = new Color3(0.5, 0.5, 0.5);
-export const MMD_LIKE_MIN_ROUGHNESS = 0.82;
-export const MMD_LIKE_SPECULAR_INTENSITY = 0.3;
-export const PBR_SKIN_METERS_PER_UNIT = 0.08;
-export const PBR_SKIN_SCATTERING_PROFILE = new Color3(1, 0.16, 0.08);
-export const PBR_SKIN_MIN_ROUGHNESS = 0.72;
-export const PBR_SKIN_SPECULAR_INTENSITY = 0.38;
-export const MMD_LIKE_OPAQUE_ALPHA_THRESHOLD = 0.95;
-export const MMD_LIKE_ALPHA_CUTOFF = 0.02;
+export const PBR_SKIN_ENVIRONMENT_INTENSITY = 0.8;
+export const PBR_SKIN_TRANSLUCENCY_INTENSITY = 0.02;
+export const PBR_SKIN_TRANSLUCENCY_COLOR_RGB = [1, 0.68, 0.58] as const;
+export const PBR_SKIN_MINIMUM_THICKNESS = 0;
+export const PBR_SKIN_MAXIMUM_THICKNESS = 0.3;
 
 export type MmdLikeToonTextureTarget = {
     uOffset: number;
@@ -33,10 +25,16 @@ export type MmdLikeToonTextureTarget = {
 };
 
 export type MmdLikeSubSurfaceTarget = {
+    isRefractionEnabled: boolean;
     isTranslucencyEnabled: boolean;
     isScatteringEnabled: boolean;
+    refractionIntensity: number;
     translucencyIntensity: number;
+    linkRefractionWithTransparency: boolean;
+    legacyTranslucency: boolean;
     useAlbedoToTintTranslucency: boolean;
+    minimumThickness: number;
+    maximumThickness: number;
     tintColor: Color3;
     translucencyColor: Color3 | null;
     translucencyColorTexture: BaseTexture | null;
@@ -52,33 +50,39 @@ type PbrPresetMaterialTarget = object & {
     useAlphaFromAlbedoTexture?: boolean;
     forceDepthWrite?: boolean;
     alphaCutOff?: number;
-    albedoTexture?: BaseTexture | null;
     roughness?: number | null;
     specularIntensity?: number;
+    environmentIntensity?: number;
+    getScene?: () => PbrPresetSceneTarget;
     markAsDirty?: (flag: number) => void;
 };
 
+type PbrPresetSubSurfaceConfigurationTarget = {
+    enabled: boolean;
+    metersPerUnit: number;
+};
+
+type PbrPresetSceneTarget = {
+    materials?: readonly unknown[];
+    subSurfaceConfiguration?: PbrPresetSubSurfaceConfigurationTarget | null;
+    enableSubSurfaceForPrePass?: () => PbrPresetSubSurfaceConfigurationTarget | null;
+};
+
 type SubSurfaceSnapshot = {
+    isRefractionEnabled: boolean;
     isTranslucencyEnabled: boolean;
     isScatteringEnabled: boolean;
+    refractionIntensity: number;
     translucencyIntensity: number;
+    linkRefractionWithTransparency: boolean;
+    legacyTranslucency: boolean;
     useAlbedoToTintTranslucency: boolean;
+    minimumThickness: number;
+    maximumThickness: number;
     tintColor: Color3;
     translucencyColor: Color3 | null;
     translucencyColorTexture: BaseTexture | null;
     scatteringDiffusionProfile: Color3 | null;
-};
-
-type PbrPresetRuntimeState = {
-    baseline: SubSurfaceSnapshot;
-    baselineTransparency: PbrTransparencySnapshot | null;
-    baselineRoughness: number | null | undefined;
-    baselineSpecularIntensity: number | undefined;
-    baselineReflectionColor: Color3 | undefined;
-    fallbackColor: Color3;
-    toonTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
-    materialShaderPreset: PbrMaterialShaderPreset;
-    scatteringMetersPerUnit: number | null;
 };
 
 type PbrTransparencySnapshot = {
@@ -87,6 +91,18 @@ type PbrTransparencySnapshot = {
     useAlphaFromAlbedoTexture: boolean | undefined;
     forceDepthWrite: boolean | undefined;
     alphaCutOff: number | undefined;
+};
+
+type PbrPresetRuntimeState = {
+    baseline: SubSurfaceSnapshot;
+    baselineTransparency: PbrTransparencySnapshot | null;
+    baselineRoughness: number | null | undefined;
+    baselineSpecularIntensity: number | undefined;
+    baselineEnvironmentIntensity: number | undefined;
+    baselineReflectionColor: Color3 | undefined;
+    fallbackColor: Color3;
+    toonTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
+    materialShaderPreset: PbrMaterialShaderPreset;
 };
 
 const PBR_PRESET_RUNTIME_STATE = Symbol.for("mmdModoki.pbrPresetRuntimeState");
@@ -103,10 +119,16 @@ function isPbrPresetMaterialTarget(value: unknown): value is PbrPresetMaterialTa
 
 function captureSubSurfaceSnapshot(subSurface: MmdLikeSubSurfaceTarget): SubSurfaceSnapshot {
     return {
+        isRefractionEnabled: subSurface.isRefractionEnabled,
         isTranslucencyEnabled: subSurface.isTranslucencyEnabled,
         isScatteringEnabled: subSurface.isScatteringEnabled,
+        refractionIntensity: subSurface.refractionIntensity,
         translucencyIntensity: subSurface.translucencyIntensity,
+        linkRefractionWithTransparency: subSurface.linkRefractionWithTransparency,
+        legacyTranslucency: subSurface.legacyTranslucency,
         useAlbedoToTintTranslucency: subSurface.useAlbedoToTintTranslucency,
+        minimumThickness: subSurface.minimumThickness,
+        maximumThickness: subSurface.maximumThickness,
         tintColor: subSurface.tintColor.clone(),
         translucencyColor: subSurface.translucencyColor?.clone() ?? null,
         translucencyColorTexture: subSurface.translucencyColorTexture,
@@ -118,15 +140,25 @@ function restoreSubSurfaceSnapshot(
     subSurface: MmdLikeSubSurfaceTarget,
     snapshot: SubSurfaceSnapshot,
 ): void {
+    subSurface.isRefractionEnabled = snapshot.isRefractionEnabled;
     subSurface.isTranslucencyEnabled = snapshot.isTranslucencyEnabled;
     subSurface.isScatteringEnabled = snapshot.isScatteringEnabled;
+    subSurface.refractionIntensity = snapshot.refractionIntensity;
     subSurface.translucencyIntensity = snapshot.translucencyIntensity;
+    subSurface.linkRefractionWithTransparency = snapshot.linkRefractionWithTransparency;
+    subSurface.legacyTranslucency = snapshot.legacyTranslucency;
     subSurface.useAlbedoToTintTranslucency = snapshot.useAlbedoToTintTranslucency;
+    subSurface.minimumThickness = snapshot.minimumThickness;
+    subSurface.maximumThickness = snapshot.maximumThickness;
     subSurface.tintColor = snapshot.tintColor.clone();
     subSurface.translucencyColor = snapshot.translucencyColor?.clone() ?? null;
     subSurface.translucencyColorTexture = snapshot.translucencyColorTexture;
-    subSurface.scatteringDiffusionProfile =
-        snapshot.scatteringDiffusionProfile?.clone() ?? null;
+    // Babylon's setter enables the SubSurface pre-pass even when assigned null.
+    // There is no profile to restore when the baseline is null, and the profile
+    // is ignored while scattering is disabled, so avoid creating that pass.
+    if (snapshot.scatteringDiffusionProfile) {
+        subSurface.scatteringDiffusionProfile = snapshot.scatteringDiffusionProfile.clone();
+    }
 }
 
 function getOrCreatePbrPresetRuntimeState(
@@ -154,63 +186,17 @@ function getOrCreatePbrPresetRuntimeState(
         baselineTransparency: null,
         baselineRoughness: material.roughness,
         baselineSpecularIntensity: material.specularIntensity,
+        baselineEnvironmentIntensity: material.environmentIntensity,
         baselineReflectionColor: material.reflectionColor?.clone(),
         fallbackColor: resolvedFallbackColor,
         toonTexture: null,
         materialShaderPreset: "pbr-base",
-        scatteringMetersPerUnit: null,
     };
     Object.defineProperty(target, PBR_PRESET_RUNTIME_STATE, {
         value: state,
         configurable: true,
     });
     return state;
-}
-
-export function applyMmdLikeToonSubSurfaceSettings(
-    subSurface: MmdLikeSubSurfaceTarget,
-    toonTexture: MmdLikeToonTextureTarget & BaseTexture,
-): void {
-    toonTexture.wrapU = Texture.CLAMP_ADDRESSMODE;
-    toonTexture.wrapV = Texture.CLAMP_ADDRESSMODE;
-
-    applyMmdLikeScatteringSettings(subSurface);
-}
-
-export function applyMmdLikeFallbackSubSurfaceSettings(
-    subSurface: MmdLikeSubSurfaceTarget,
-    fallbackColor: readonly [number, number, number] | Color3,
-): void {
-    // The shader uses this per-material fallback when no toon texture exists.
-    void fallbackColor;
-    applyMmdLikeScatteringSettings(subSurface);
-}
-
-function applyMmdLikeScatteringSettings(
-    subSurface: MmdLikeSubSurfaceTarget,
-): void {
-    subSurface.isTranslucencyEnabled = false;
-    subSurface.isScatteringEnabled = true;
-    subSurface.translucencyIntensity = 0;
-    subSurface.useAlbedoToTintTranslucency = false;
-    subSurface.tintColor = Color3.White();
-    subSurface.translucencyColor = null;
-    subSurface.translucencyColorTexture = null;
-    subSurface.scatteringDiffusionProfile = MMD_LIKE_SCATTERING_PROFILE;
-}
-
-function applyPbrSkinScatteringSettings(
-    subSurface: MmdLikeSubSurfaceTarget,
-    scatteringEnabled = true,
-): void {
-    subSurface.isTranslucencyEnabled = false;
-    subSurface.isScatteringEnabled = scatteringEnabled;
-    subSurface.translucencyIntensity = 0;
-    subSurface.useAlbedoToTintTranslucency = false;
-    subSurface.tintColor = Color3.White();
-    subSurface.translucencyColor = null;
-    subSurface.translucencyColorTexture = null;
-    subSurface.scatteringDiffusionProfile = PBR_SKIN_SCATTERING_PROFILE;
 }
 
 function capturePbrTransparencySnapshot(
@@ -225,110 +211,68 @@ function capturePbrTransparencySnapshot(
     };
 }
 
-function restorePbrTransparencySettings(
-    material: PbrPresetMaterialTarget,
-    snapshot: PbrTransparencySnapshot,
-): void {
-    material.alpha = snapshot.alpha;
-    material.transparencyMode = snapshot.transparencyMode;
-    material.useAlphaFromAlbedoTexture = snapshot.useAlphaFromAlbedoTexture;
-    material.forceDepthWrite = snapshot.forceDepthWrite;
-    material.alphaCutOff = snapshot.alphaCutOff;
-}
-
-function applyMmdLikeOpaqueSurfaceSettings(
+function restorePbrStandardSettings(
     material: PbrPresetMaterialTarget,
     state: PbrPresetRuntimeState,
-): boolean {
-    const baseline = state.baselineTransparency;
-    const alpha = baseline?.alpha ?? material.alpha ?? 1;
-    if (alpha < MMD_LIKE_OPAQUE_ALPHA_THRESHOLD) {
-        if (baseline) {
-            restorePbrTransparencySettings(material, baseline);
-        }
-        return false;
+): void {
+    restoreSubSurfaceSnapshot(material.subSurface, state.baseline);
+    if (state.baselineTransparency) {
+        material.alpha = state.baselineTransparency.alpha;
+        material.transparencyMode = state.baselineTransparency.transparencyMode;
+        material.useAlphaFromAlbedoTexture = state.baselineTransparency.useAlphaFromAlbedoTexture;
+        material.forceDepthWrite = state.baselineTransparency.forceDepthWrite;
+        material.alphaCutOff = state.baselineTransparency.alphaCutOff;
     }
+    material.roughness = state.baselineRoughness;
+    material.specularIntensity = state.baselineSpecularIntensity;
+    material.environmentIntensity = state.baselineEnvironmentIntensity;
 
-    if (!baseline) {
-        return true;
+    // babylon-mmd maps MMD specular color to reflectionColor, while Babylon
+    // also multiplies diffuse IBL by this value. Keep the verified Standard
+    // behavior that uses a neutral environment-map tint.
+    if (state.baselineReflectionColor !== undefined) {
+        material.reflectionColor = Color3.White();
     }
+}
 
-    material.alpha = 1;
-    const usesTextureCutout = material.albedoTexture?.hasAlpha === true
-        && (
-            baseline.useAlphaFromAlbedoTexture === true
-            || baseline.transparencyMode === Material.MATERIAL_ALPHATEST
-            || baseline.transparencyMode === Material.MATERIAL_ALPHABLEND
-            || baseline.transparencyMode === Material.MATERIAL_ALPHATESTANDBLEND
-        );
-    material.transparencyMode = usesTextureCutout
-        ? Material.MATERIAL_ALPHATEST
-        : Material.MATERIAL_OPAQUE;
-    material.useAlphaFromAlbedoTexture = usesTextureCutout;
-    material.forceDepthWrite = false;
-    if (usesTextureCutout) {
-        material.alphaCutOff = MMD_LIKE_ALPHA_CUTOFF;
+function createPbrSkinTranslucencyColor(): Color3 {
+    return new Color3(...PBR_SKIN_TRANSLUCENCY_COLOR_RGB);
+}
+
+function hasScreenSpaceScattering(value: unknown): boolean {
+    if (!value || typeof value !== "object") return false;
+    const subSurface = (value as { subSurface?: { isScatteringEnabled?: boolean } }).subSurface;
+    return subSurface?.isScatteringEnabled === true;
+}
+
+function syncPbrSkinSceneConfiguration(material: PbrPresetMaterialTarget): void {
+    const scene = material.getScene?.();
+    const configuration = scene?.subSurfaceConfiguration;
+    if (!configuration || !scene.materials) return;
+    configuration.enabled = scene.materials.some(hasScreenSpaceScattering);
+}
+
+function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): boolean {
+    // Use Babylon.js' opaque diffuse-transmission path without the screen-space
+    // scattering pass. The latter clamps HDR irradiance before blurring and can
+    // make this application's high-intensity PBR lighting unexpectedly darker.
+    // Refraction and alpha remain disabled/untouched, so the surface stays opaque.
+    material.subSurface.isRefractionEnabled = false;
+    material.subSurface.refractionIntensity = 0;
+    material.subSurface.linkRefractionWithTransparency = false;
+    material.subSurface.isTranslucencyEnabled = true;
+    material.subSurface.translucencyIntensity = PBR_SKIN_TRANSLUCENCY_INTENSITY;
+    material.subSurface.translucencyColor = createPbrSkinTranslucencyColor();
+    material.subSurface.translucencyColorTexture = null;
+    material.subSurface.useAlbedoToTintTranslucency = true;
+    material.subSurface.minimumThickness = PBR_SKIN_MINIMUM_THICKNESS;
+    material.subSurface.maximumThickness = PBR_SKIN_MAXIMUM_THICKNESS;
+    material.subSurface.legacyTranslucency = false;
+    material.subSurface.isScatteringEnabled = false;
+    if (material.environmentIntensity !== undefined) {
+        material.environmentIntensity = PBR_SKIN_ENVIRONMENT_INTENSITY;
     }
     return true;
-}
-
-function applyMmdLikeMatteSurfaceSettings(
-    material: PbrPresetMaterialTarget,
-    state: PbrPresetRuntimeState,
-): void {
-    // babylon-mmd maps the MMD specular color to PBR reflectionColor. Babylon
-    // also multiplies diffuse environment irradiance by reflectionColor, so a
-    // common black MMD specular value unintentionally disables HDRI lighting.
-    // In the custom MMD-like presets, keep the environment map color neutral
-    // and control the highlight separately with specularIntensity.
-    if (state.baselineReflectionColor !== undefined) {
-        material.reflectionColor = Color3.White();
-    }
-    if (state.baselineRoughness !== undefined) {
-        material.roughness = Math.max(
-            state.baselineRoughness ?? 0,
-            MMD_LIKE_MIN_ROUGHNESS,
-        );
-    }
-    if (state.baselineSpecularIntensity !== undefined) {
-        material.specularIntensity = Math.min(
-            state.baselineSpecularIntensity,
-            MMD_LIKE_SPECULAR_INTENSITY,
-        );
-    }
-}
-
-function applyPbrSkinSurfaceSettings(
-    material: PbrPresetMaterialTarget,
-    state: PbrPresetRuntimeState,
-): void {
-    if (state.baselineReflectionColor !== undefined) {
-        material.reflectionColor = Color3.White();
-    }
-    if (state.baselineRoughness !== undefined) {
-        material.roughness = Math.max(
-            state.baselineRoughness ?? 0,
-            PBR_SKIN_MIN_ROUGHNESS,
-        );
-    }
-    if (state.baselineSpecularIntensity !== undefined) {
-        material.specularIntensity = Math.min(
-            state.baselineSpecularIntensity,
-            PBR_SKIN_SPECULAR_INTENSITY,
-        );
-    }
-}
-
-function restorePbrSurfaceSettings(
-    material: PbrPresetMaterialTarget,
-    state: PbrPresetRuntimeState,
-): void {
-    if (state.baselineRoughness !== undefined) {
-        material.roughness = state.baselineRoughness;
-    }
-    if (state.baselineSpecularIntensity !== undefined) {
-        material.specularIntensity = state.baselineSpecularIntensity;
-    }
 }
 
 export function registerPbrPresetMaterial(
@@ -352,108 +296,6 @@ export function registerPbrPresetTransparencyBaseline(
         capturePbrTransparencySnapshot(material);
 }
 
-function syncSceneSubSurfaceConfiguration(
-    material: PBRMaterial,
-): void {
-    const scene = material.getScene();
-    const activeMetersPerUnit = scene.materials.flatMap((candidate) => {
-        if (!(candidate instanceof PBRMaterial)) return [];
-        if (!candidate.subSurface.isScatteringEnabled) return [];
-        const candidateState = (
-            candidate as PbrPresetMaterialWithRuntimeState
-        )[PBR_PRESET_RUNTIME_STATE];
-        const value = candidateState?.scatteringMetersPerUnit;
-        return [typeof value === "number" ? value : PBR_SKIN_METERS_PER_UNIT];
-    });
-    if (activeMetersPerUnit.length > 0) {
-        const configuration = scene.enableSubSurfaceForPrePass();
-        if (configuration) {
-            configuration.metersPerUnit = Math.min(...activeMetersPerUnit);
-            configuration.enabled = true;
-        }
-        return;
-    }
-
-    const hasScatteringMaterial = scene.materials.some((candidate) => (
-        candidate instanceof PBRMaterial
-        && candidate.subSurface.isScatteringEnabled
-    ));
-    if (!hasScatteringMaterial && scene.subSurfaceConfiguration) {
-        scene.subSurfaceConfiguration.enabled = false;
-    }
-}
-
-export function applyPbrMaterialPresetToMaterial(
-    material: unknown,
-    preset: PbrMaterialPreset | "pbr-skin",
-): boolean {
-    if (!isPbrPresetMaterialTarget(material)) return false;
-
-    const state = getOrCreatePbrPresetRuntimeState(material);
-    if (preset === "pbr-mmd-like") {
-        const scatteringEnabled = applyMmdLikeOpaqueSurfaceSettings(
-            material,
-            state,
-        );
-        if (state.toonTexture) {
-            applyMmdLikeToonSubSurfaceSettings(material.subSurface, state.toonTexture);
-        } else {
-            applyMmdLikeFallbackSubSurfaceSettings(material.subSurface, state.fallbackColor);
-        }
-        material.subSurface.isScatteringEnabled = scatteringEnabled;
-        state.scatteringMetersPerUnit = scatteringEnabled ? MMD_LIKE_METERS_PER_UNIT : null;
-        applyMmdLikeMatteSurfaceSettings(material, state);
-        if (material instanceof PBRMaterial) {
-            applyMmdLikePbrShaderSettings(material, {
-                mode: "mmd-like",
-                toonTexture: state.toonTexture,
-                fallbackColor: state.fallbackColor,
-            });
-            syncSceneSubSurfaceConfiguration(material);
-        }
-    } else if (preset === "pbr-skin") {
-        const scatteringEnabled = applyMmdLikeOpaqueSurfaceSettings(
-            material,
-            state,
-        );
-        applyPbrSkinScatteringSettings(material.subSurface, scatteringEnabled);
-        state.scatteringMetersPerUnit = scatteringEnabled ? PBR_SKIN_METERS_PER_UNIT : null;
-        applyPbrSkinSurfaceSettings(material, state);
-        if (material instanceof PBRMaterial) {
-            applyMmdLikePbrShaderSettings(material, {
-                mode: scatteringEnabled ? "skin" : "off",
-                toonTexture: state.toonTexture,
-                fallbackColor: state.fallbackColor,
-            });
-            syncSceneSubSurfaceConfiguration(material);
-        }
-    } else {
-        restoreSubSurfaceSnapshot(material.subSurface, state.baseline);
-        if (state.baselineTransparency) {
-            restorePbrTransparencySettings(material, state.baselineTransparency);
-        }
-        restorePbrSurfaceSettings(material, state);
-        // Babylon multiplies diffuse IBL by reflectionColor as well as using
-        // it for reflections. Keep this environment-map tint neutral in the
-        // Standard comparison preset too; the original MMD specular mapping
-        // otherwise makes dark-specular materials appear to receive no IBL.
-        if (state.baselineReflectionColor !== undefined) {
-            material.reflectionColor = Color3.White();
-        }
-        state.scatteringMetersPerUnit = null;
-        if (material instanceof PBRMaterial) {
-            applyMmdLikePbrShaderSettings(material, {
-                mode: "off",
-                toonTexture: state.toonTexture,
-                fallbackColor: state.fallbackColor,
-            });
-            syncSceneSubSurfaceConfiguration(material);
-        }
-    }
-    material.markAsDirty?.(Material.AllDirtyFlag);
-    return true;
-}
-
 export function getPbrMaterialShaderPreset(
     material: unknown,
 ): PbrMaterialShaderPreset {
@@ -463,14 +305,23 @@ export function getPbrMaterialShaderPreset(
 
 export function applyPbrMaterialShaderPreset(
     material: unknown,
-    basePreset: PbrMaterialPreset,
     materialPreset: unknown,
 ): boolean {
     if (!isPbrPresetMaterialTarget(material)) return false;
     const state = getOrCreatePbrPresetRuntimeState(material);
-    state.materialShaderPreset = normalizePbrMaterialShaderPreset(materialPreset);
-    return applyPbrMaterialPresetToMaterial(
-        material,
-        state.materialShaderPreset === "pbr-skin" ? "pbr-skin" : basePreset,
-    );
+    const nextPreset = normalizePbrMaterialShaderPreset(materialPreset);
+    restorePbrStandardSettings(material, state);
+
+    if (nextPreset === "pbr-skin" && !applyPbrSkinSubSurfaceSettings(material)) {
+        state.materialShaderPreset = "pbr-base";
+        syncPbrSkinSceneConfiguration(material);
+        material.markAsDirty?.(Material.AllDirtyFlag);
+        return false;
+    }
+
+    state.materialShaderPreset = nextPreset;
+    syncPbrSkinSceneConfiguration(material);
+
+    material.markAsDirty?.(Material.AllDirtyFlag);
+    return true;
 }

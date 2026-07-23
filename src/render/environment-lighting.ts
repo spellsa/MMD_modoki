@@ -5,7 +5,6 @@ import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { CreateSphere } from "@babylonjs/core/Meshes/Builders/sphereBuilder";
 import type { Scene } from "@babylonjs/core/scene";
-import { applyMmdLikePbrShaderSettings } from "./pbr-mmd-like-material-plugin";
 
 type EnvironmentLightingMaterialLike = {
     getClassName(): string;
@@ -36,6 +35,28 @@ export type EnvironmentLightingDiagnosticProbeResult = {
 export const ENVIRONMENT_LIGHTING_TARGET_LUMINANCE = 0.25;
 export const MIN_ENVIRONMENT_TEXTURE_LEVEL = 0.01;
 export const MAX_ENVIRONMENT_TEXTURE_LEVEL = 4;
+
+/**
+ * Treats the main illuminance control as a master light level for PBR.
+ * The HDRI control remains a relative IBL balance, while illuminance raises
+ * and lowers both the key light and the indirect light visible in shadows.
+ */
+export function combineEnvironmentLightingAndIlluminance(
+    environmentIntensity: number,
+    illuminance: number,
+    maximum = 16,
+): number {
+    const safeEnvironmentIntensity = Number.isFinite(environmentIntensity)
+        ? Math.max(0, environmentIntensity)
+        : 1;
+    const safeIlluminance = Number.isFinite(illuminance)
+        ? Math.max(0, illuminance)
+        : 1;
+    const safeMaximum = Number.isFinite(maximum)
+        ? Math.max(0, maximum)
+        : 16;
+    return Math.min(safeMaximum, safeEnvironmentIntensity * safeIlluminance);
+}
 
 function toByte(value: number): number {
     if (!Number.isFinite(value)) return 0;
@@ -82,8 +103,9 @@ export function calculateEnvironmentTextureLevel(
  *
  * Keep scene.iblIntensity neutral because Babylon BackgroundMaterial also
  * multiplies its displayed reflection texture by that scene-wide value. The
- * application's lighting slider therefore uses scene.environmentIntensity,
- * which affects PBR indirect lighting without changing the HDRI backdrop.
+ * application's effective IBL level therefore uses scene.environmentIntensity.
+ * It combines the HDRI balance with the main illuminance control and affects
+ * PBR indirect lighting without changing the HDRI backdrop.
  * PBR material bindings are refreshed because scene intensity fields do not
  * invalidate already-synchronized material UBOs on their own.
  */
@@ -156,11 +178,6 @@ export async function runEnvironmentLightingDiagnosticProbe(
     material.directIntensity = 0;
     material.emissiveIntensity = 0;
     material.environmentIntensity = 1;
-    applyMmdLikePbrShaderSettings(material, {
-        mode: "mmd-like",
-        toonTexture: null,
-        fallbackColor: new Color3(0.55, 0.55, 0.55),
-    });
     sphere.material = material;
 
     const renderTarget = new RenderTargetTexture(

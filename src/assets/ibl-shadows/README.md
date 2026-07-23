@@ -8,9 +8,68 @@ IBL環境ライティングとIBL Shadowsの検証用アセットを置く。
 - `.env`
 - `.dds`
 
-`white.hdr` は現在、PBRモードの既定環境ライトとして使用する。
+## `yamagata-field-20181231-1137-2k.hdr`
+
+PBRモードの既定環境ライト。Bandai Namco Studios TrueHDRIの
+`YamagataField_20181231_1137`を、線形HDR値のまま16Kから2Kへ縮小した派生版である。
 Babylon.jsの `HDRCubeTexture` で読み込み、harmonicsとPBR反射用プリフィルタを生成する。
 表示背景とは独立しており、環境ライティングをOFFにするとsceneから一時的に外す。
+
+- 元解像度: `16384 x 8192`
+- 同梱解像度: `2048 x 1024`
+- 元バリアント: Light Clip `Clipped`、gamut `sRGB`、Radiance RGBE（`.hdr`）
+- 撮影日時: `2018-12-31 11:37`
+- ホワイトバランス: `6500K`
+- 単位輝度: `1000cd/m² = 1.0`
+- 縮小方法: HDR線形値の `8 x 8` ボックス平均
+- 元素材名義・任意クレジット: `©Bandai Namco Studios Inc.`
+- ライセンス: `CC0-1.0`
+- 配布元: https://www.bandainamcostudios.com/projects/truehdri/library/16878
+- 加工: MMD_modoki contributors
+
+元素材の配布ページは改変、再配布、製品への組み込みを許可し、クレジットを必須として
+いない。ただし配布元の希望に従い、HDRヘッダーと `THIRD_PARTY_NOTICES.md` に任意
+クレジットを記載する。
+
+元HDR本体のRadianceヘッダーは `FORMAT` と解像度だけで、作者やライセンスを含まない。
+上記の権利・撮影情報は、元素材に付属する `bandai.txt` と公式配布ページで確認した。
+GPS情報も公式ページに掲載されているが、同梱派生版のヘッダーには複製していない。
+
+再生成と検証:
+
+```powershell
+node scripts/resize-radiance-hdr.mjs local-references/hdri/009131/TrueHDRI_YamagataField_181231_1137_L1000_Clipped_sRGB.hdr src/assets/ibl-shadows/yamagata-field-20181231-1137-2k.hdr 2048
+node scripts/verify-radiance-hdr.mjs src/assets/ibl-shadows/yamagata-field-20181231-1137-2k.hdr
+```
+
+元の16Kファイルは `local-references/` にのみ置き、Gitへ追加しない。
+
+## `white.hdr`
+
+方向性や中立色の比較に使う手続き生成の診断用IBL。既定環境ライトには使用しない。
+`scripts/generate-bundled-studio-hdr.mjs` が数式から生成する中立色のスタジオ環境である。
+
+- 強い光源: モデル背面側（`+Z`）の広いキーライト
+- 補助光: 正面側（`-Z`）の弱いフィルライト
+- 輪郭光: 斜め上からの弱いサイドリム
+- 写真、人物、場所、ロゴ、商標、文字情報: 含まない
+- 埋め込み名義: `MMD_modoki contributors`
+- 著作権表記: `Copyright (c) 2026 MMD_modoki contributors`
+- ライセンス: リポジトリ本体と同じMIT License
+- 生成元: `scripts/generate-bundled-studio-hdr.mjs`
+
+再生成と検証:
+
+```powershell
+node scripts/generate-bundled-studio-hdr.mjs
+node scripts/verify-radiance-hdr.mjs
+```
+
+旧 `white.hdr` はGitコミット `ea2a9fad2721569d427f5dd6388c98717af500d1`
+（コミット作者名 `togechiyo`）で追加された。旧ファイルのHDRヘッダーには作者、
+著作権、入手元の情報がなく、READMEにも外部由来か自作かの記録がなかったため、
+第三者由来でないことを確認できなかった。現在の手続き的生成版への置換により、
+この出自不明点を解消した。
 
 このフォルダのアセットは実験用として扱う。配布可否やライセンスが不明なファイルは
 コミットしないこと。

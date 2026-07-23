@@ -80,12 +80,9 @@ import {
 } from "./shared/skydome-background-style";
 import {
     DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
-    DEFAULT_PBR_MATERIAL_PRESET,
     normalizeMmdMaterialPipelinePreset,
-    normalizePbrMaterialPreset,
     normalizePbrMaterialShaderPreset,
     type MmdMaterialPipelinePreset,
-    type PbrMaterialPreset,
     type PbrMaterialShaderPreset,
 } from "./shared/mmd-material-pipeline";
 import {
@@ -96,10 +93,7 @@ import {
 } from "./assets/motion-asset-service";
 import { isDebugLogEnabled, logDebugIfEnabled, logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
-import {
-    applyPbrMaterialShaderPreset,
-    getPbrMaterialShaderPreset,
-} from "./render/pbr-mmd-like-toon-settings";
+import { applyPbrMaterialShaderPreset } from "./render/pbr-mmd-like-toon-settings";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
     getExternalWgslToonShaderPath as getExternalWgslToonShaderPathImpl,
@@ -257,6 +251,7 @@ import {
     type FrameGraphPostEffectStackEntry,
 } from "./shared/frame-graph-post-effect-stack";
 import {
+    MAX_DIRECTIONAL_LIGHT_INTENSITY,
     applyLightColorTemperature as applyLightColorTemperatureImpl,
     applyShadowEdgeSoftness as applyShadowEdgeSoftnessImpl,
     applyShadowFrustumSize as applyShadowFrustumSizeImpl,
@@ -309,6 +304,7 @@ import { GlobalIlluminationController } from "./render/global-illumination-contr
 import {
     applyEnvironmentLightingIntensity,
     calculateEnvironmentTextureLevel,
+    combineEnvironmentLightingAndIlluminance,
     createConstantEnvironmentSphericalPolynomial,
     runEnvironmentLightingDiagnosticProbe,
     type EnvironmentLightingIntensityResult,
@@ -683,7 +679,7 @@ import twgslJsUrl from "@babylonjs/core/assets/twgsl/twgsl.js?url";
 // eslint-disable-next-line import/no-unresolved
 import twgslWasmUrl from "@babylonjs/core/assets/twgsl/twgsl.wasm?url";
 // eslint-disable-next-line import/no-unresolved
-import bundledEnvironmentTextureUrl from "./assets/ibl-shadows/white.hdr?url";
+import bundledEnvironmentTextureUrl from "./assets/ibl-shadows/yamagata-field-20181231-1137-2k.hdr?url";
 // eslint-disable-next-line import/no-unresolved
 import blobShadowTextureUrl from "./assets/blob-shadows/BlobShadow.png?url";
 import type { Skeleton } from "@babylonjs/core/Bones/skeleton";
@@ -753,7 +749,6 @@ export interface WgslModelShaderInfo {
     modelPath: string;
     active: boolean;
     materialPipeline: MmdMaterialPipelinePreset;
-    pbrMaterialPreset: PbrMaterialPreset;
     materials: WgslMaterialShaderInfo[];
 }
 
@@ -813,7 +808,6 @@ type SceneModelEntry = {
     contactShadowMesh: Mesh | null;
     castShadow: boolean;
     materialPipeline: MmdMaterialPipelinePreset;
-    pbrMaterialPreset: PbrMaterialPreset;
 };
 
 type CameraExternalParentKeyframe = {
@@ -870,7 +864,6 @@ export class MmdManager {
     private static readonly FORCE_MODEL_DEBUG_MATERIAL_STORAGE_KEY = "mmd_modoki.debug.forceModelDebugMaterial";
     private static readonly ALPHA_TEXTURE_DEBUG_STORAGE_KEY = "mmd_modoki.debug.alphaTextureView";
     private static readonly MMD_MATERIAL_PIPELINE_STORAGE_KEY = "mmd_modoki.materialPipeline";
-    private static readonly PBR_MATERIAL_PRESET_STORAGE_KEY = "mmd_modoki.pbrMaterialPreset";
     private static readonly ENVIRONMENT_LIGHTING_STORAGE_KEY = "mmd_modoki.environmentLighting";
     private static readonly ENVIRONMENT_LIGHTING_INTENSITY_STORAGE_KEY = "mmd_modoki.environmentLightingIntensity";
     private static readonly ENVIRONMENT_BACKGROUND_STORAGE_KEY = "mmd_modoki.environmentBackground";
@@ -1529,7 +1522,6 @@ ${beforeFogAppendBlock}
     private activeModelInfo: ModelInfo | null = null;
     private sceneModels: SceneModelEntry[] = [];
     private mmdMaterialPipelinePresetValue = MmdManager.readMmdMaterialPipelinePresetLocalStorage();
-    private pbrMaterialPresetValue = MmdManager.readPbrMaterialPresetLocalStorage();
     private _isPlaying = false;
     private _currentFrame = 0;
     private _totalFrames = 300;
@@ -1604,7 +1596,7 @@ ${beforeFogAppendBlock}
     private iblShadowDebugPassSignature = "";
     private environmentLightingEnabledValue = MmdManager.readBooleanLocalStorage(
         MmdManager.ENVIRONMENT_LIGHTING_STORAGE_KEY,
-        false,
+        true,
     );
     private environmentLightingIntensityValue = MmdManager.readEnvironmentLightingIntensityLocalStorage();
     private environmentBackgroundVisibleValue = MmdManager.readBooleanLocalStorage(
@@ -2327,39 +2319,6 @@ ${beforeFogAppendBlock}
         return next;
     }
 
-    public getPbrMaterialPreset(): PbrMaterialPreset {
-        return this.pbrMaterialPresetValue;
-    }
-
-    public setPbrMaterialPreset(value: unknown): PbrMaterialPreset {
-        const next = normalizePbrMaterialPreset(value);
-        this.pbrMaterialPresetValue = next;
-        MmdManager.writeStringLocalStorage(MmdManager.PBR_MATERIAL_PRESET_STORAGE_KEY, next);
-
-        let appliedModelCount = 0;
-        let appliedMaterialCount = 0;
-        for (const entry of this.sceneModels) {
-            if (entry.materialPipeline !== "pbr-standard") continue;
-            entry.pbrMaterialPreset = next;
-            appliedModelCount += 1;
-            for (const materialEntry of entry.materials) {
-                const materialPreset = getPbrMaterialShaderPreset(materialEntry.material);
-                if (applyPbrMaterialShaderPreset(materialEntry.material, next, materialPreset)) {
-                    appliedMaterialCount += 1;
-                }
-            }
-        }
-        if (appliedModelCount > 0) {
-            logInfo("render", "PBR material preset applied to loaded models", {
-                preset: next,
-                modelCount: appliedModelCount,
-                materialCount: appliedMaterialCount,
-            });
-            this.onMaterialShaderStateChanged?.();
-        }
-        return next;
-    }
-
     public isEnvironmentLightingEnabled(): boolean {
         return this.environmentLightingEnabledValue;
     }
@@ -2419,11 +2378,20 @@ ${beforeFogAppendBlock}
         litLuminance: number;
         luminanceDelta: number;
     }> {
-        return runEnvironmentLightingDiagnosticProbe(
+        const effectiveIntensity = this.environmentLightingEnabledValue
+            ? combineEnvironmentLightingAndIlluminance(
+                this.environmentLightingIntensityValue,
+                this.dirLight?.intensity ?? 1,
+                MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY * MAX_DIRECTIONAL_LIGHT_INTENSITY,
+            )
+            : 0;
+        const result = await runEnvironmentLightingDiagnosticProbe(
             this.scene,
-            this.environmentLightingIntensityValue,
-            MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY,
+            effectiveIntensity,
+            MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY * MAX_DIRECTIONAL_LIGHT_INTENSITY,
         );
+        this.applyCurrentEnvironmentLightingIntensity();
+        return result;
     }
 
     public getPbrMmdLikeScatteringDiagnostics(): {
@@ -2489,12 +2457,16 @@ ${beforeFogAppendBlock}
         return this.environmentLightingSourcePathValue;
     }
 
+    public canShowEnvironmentBackground(): boolean {
+        return this.getEnvironmentBackgroundSourceTexture() !== null;
+    }
+
     public isEnvironmentBackgroundVisible(): boolean {
-        return this.environmentBackgroundVisibleValue && this.externalEnvironmentTexture !== null;
+        return this.environmentBackgroundVisibleValue && this.canShowEnvironmentBackground();
     }
 
     public setEnvironmentBackgroundVisible(visible: boolean): boolean {
-        this.environmentBackgroundVisibleValue = Boolean(visible) && this.externalEnvironmentTexture !== null;
+        this.environmentBackgroundVisibleValue = Boolean(visible) && this.canShowEnvironmentBackground();
         MmdManager.writeBooleanLocalStorage(
             MmdManager.ENVIRONMENT_BACKGROUND_STORAGE_KEY,
             this.environmentBackgroundVisibleValue,
@@ -2761,11 +2733,11 @@ ${beforeFogAppendBlock}
         for (const target of targets) {
             applied = applyPbrMaterialShaderPreset(
                 target.material,
-                entry.pbrMaterialPreset,
                 nextPreset,
             ) || applied;
         }
         if (applied) {
+            this.syncFrameGraphRenderTargetState();
             logInfo("render", "per-material PBR shader preset applied", {
                 modelIndex,
                 materialKey,
@@ -2913,6 +2885,7 @@ ${beforeFogAppendBlock}
         modelPath: string,
     ): void {
         applyImportedMaterialShaderStatesImpl(this, modelIndex, states, warnings, modelPath);
+        this.syncFrameGraphRenderTargetState();
     }
 
     private getModelVisibility(mesh: MmdMesh): boolean {
@@ -3546,11 +3519,22 @@ ${beforeFogAppendBlock}
     }
 
     private applyCurrentEnvironmentLightingIntensity(): EnvironmentLightingIntensityResult {
+        const effectiveIntensity = this.environmentLightingEnabledValue
+            ? combineEnvironmentLightingAndIlluminance(
+                this.environmentLightingIntensityValue,
+                this.dirLight?.intensity ?? 1,
+                MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY * MAX_DIRECTIONAL_LIGHT_INTENSITY,
+            )
+            : 0;
         return applyEnvironmentLightingIntensity(
             this.scene,
-            this.environmentLightingEnabledValue ? this.environmentLightingIntensityValue : 0,
-            MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY,
+            effectiveIntensity,
+            MmdManager.MAX_ENVIRONMENT_LIGHTING_INTENSITY * MAX_DIRECTIONAL_LIGHT_INTENSITY,
         );
+    }
+
+    private getEnvironmentBackgroundSourceTexture(): HDRCubeTexture | null {
+        return this.externalEnvironmentTexture ?? this.bundledEnvironmentTexture;
     }
 
     private syncEnvironmentSkybox(): void {
@@ -3558,10 +3542,11 @@ ${beforeFogAppendBlock}
         this.environmentSkyboxTexture?.dispose();
         this.environmentSkyboxTexture = null;
 
-        if (this.environmentBackgroundVisibleValue && this.externalEnvironmentTexture && this.skydomeMaterial) {
-            const skyboxTexture = this.externalEnvironmentTexture.clone();
+        const sourceTexture = this.getEnvironmentBackgroundSourceTexture();
+        if (this.environmentBackgroundVisibleValue && sourceTexture && this.skydomeMaterial) {
+            const skyboxTexture = sourceTexture.clone();
             if (skyboxTexture) {
-                skyboxTexture.name = `${this.externalEnvironmentTexture.name}:skybox`;
+                skyboxTexture.name = `${sourceTexture.name}:skybox`;
                 skyboxTexture.coordinatesMode = Texture.SKYBOX_MODE;
                 skyboxTexture.gammaSpace = false;
                 this.environmentSkyboxTexture = skyboxTexture;
@@ -3597,6 +3582,9 @@ ${beforeFogAppendBlock}
                     environmentTexture.level = calculateEnvironmentTextureLevel(
                         environmentTexture.sphericalPolynomial,
                     );
+                    if (this.environmentBackgroundVisibleValue) {
+                        this.syncEnvironmentSkybox();
+                    }
                     logInfo("render", "bundled IBL environment texture loaded", {
                         url: bundledEnvironmentTextureUrl,
                         name: environmentTexture.name,
@@ -5264,16 +5252,6 @@ ${beforeFogAppendBlock}
         }
     }
 
-    private static readPbrMaterialPresetLocalStorage(): PbrMaterialPreset {
-        try {
-            return normalizePbrMaterialPreset(
-                globalThis.localStorage?.getItem(MmdManager.PBR_MATERIAL_PRESET_STORAGE_KEY),
-            );
-        } catch {
-            return DEFAULT_PBR_MATERIAL_PRESET;
-        }
-    }
-
     private static readEnvironmentLightingIntensityLocalStorage(): number {
         try {
             const stored = globalThis.localStorage?.getItem(
@@ -5607,8 +5585,7 @@ ${beforeFogAppendBlock}
         this.skydome.infiniteDistance = true;
         this.skydome.isPickable = false;
         this.skydome.receiveShadows = false;
-        this.applySkydomeBackgroundStyle();
-        this.syncSkydomeVisibility();
+        this.syncEnvironmentSkybox();
         refreshMeshBoundingInfoForRenderStability(this.skydome);
         // MMD Runtime (without physics for initial version)
         this.mmdRuntime = new MmdRuntime(this.scene);
@@ -7211,9 +7188,8 @@ ${beforeFogAppendBlock}
     async loadPMX(
         filePath: string,
         materialPipeline: MmdMaterialPipelinePreset = this.mmdMaterialPipelinePresetValue,
-        pbrMaterialPreset: PbrMaterialPreset = this.pbrMaterialPresetValue,
     ): Promise<ModelInfo | null> {
-        return await loadPMXImpl(this, filePath, materialPipeline, pbrMaterialPreset);
+        return await loadPMXImpl(this, filePath, materialPipeline);
     }
 
     private shouldActivateAsCurrent(info: ModelInfo): boolean {
@@ -10535,7 +10511,13 @@ ${beforeFogAppendBlock}
     }
 
     get lightIntensity(): number { return this.dirLight.intensity; }
-    set lightIntensity(v: number) { setLightIntensityImpl(this, v); }
+    set lightIntensity(v: number) {
+        setLightIntensityImpl(this, v);
+        // In PBR, HDRI remains visible in shadowed areas. Reapply its effective
+        // level so the existing illuminance slider behaves as a master light
+        // control instead of changing only the directional key light.
+        this.applyCurrentEnvironmentLightingIntensity();
+    }
 
     getLightColor(): { r: number; g: number; b: number } {
         return getLightColorImpl(this);

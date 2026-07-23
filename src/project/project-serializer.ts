@@ -9,10 +9,7 @@ import type {
     SsgiBlendMode,
 } from "../types";
 import type { FrameGraphPostEffectStackEntry } from "../shared/frame-graph-post-effect-stack";
-import type {
-    MmdMaterialPipelinePreset,
-    PbrMaterialPreset,
-} from "../shared/mmd-material-pipeline";
+import type { MmdMaterialPipelinePreset } from "../shared/mmd-material-pipeline";
 import {
     normalizeSkydomeBackgroundStyle,
     type SkydomeBackgroundStyle,
@@ -30,7 +27,6 @@ type ProjectExportSceneModel = {
     mesh: object;
     model: object;
     materialPipeline?: MmdMaterialPipelinePreset;
-    pbrMaterialPreset?: PbrMaterialPreset;
 };
 
 type ProjectExportHost = {
@@ -246,7 +242,6 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
         visible: host.getModelVisibility(entry.mesh),
         castsShadow: host.getModelCastsShadow(entry),
         materialPipeline: entry.materialPipeline ?? "mmd-standard",
-        pbrMaterialPreset: entry.pbrMaterialPreset ?? "pbr-standard",
         motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item) => ({ ...item })),
         materialShaders: host.getSerializedMaterialShaderStates(entry),
     }));

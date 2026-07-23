@@ -7,7 +7,6 @@ type ToastType = "success" | "error" | "info";
 
 type ShaderPanelElements = {
     materialPipelineSelect: HTMLSelectElement | null;
-    pbrPresetSelect: HTMLSelectElement | null;
     modelSelect: HTMLSelectElement | null;
     presetSelect: HTMLSelectElement | null;
     applySelectedButton: HTMLButtonElement | null;
@@ -53,7 +52,6 @@ const HIDDEN_SHADER_PRESET_IDS = new Set<WgslMaterialShaderPresetId>([
 function resolveShaderPanelElements(): ShaderPanelElements {
     return {
         materialPipelineSelect: document.getElementById("shader-material-pipeline-select") as HTMLSelectElement | null,
-        pbrPresetSelect: document.getElementById("shader-pbr-preset-select") as HTMLSelectElement | null,
         modelSelect: document.getElementById("shader-model-select") as HTMLSelectElement | null,
         presetSelect: document.getElementById("shader-preset-select") as HTMLSelectElement | null,
         applySelectedButton: document.getElementById("btn-shader-apply-selected") as HTMLButtonElement | null,
@@ -114,12 +112,6 @@ export class ShaderPanelController {
         const models = this.mmdManager.getWgslModelShaderStates();
         if (elements.materialPipelineSelect) {
             elements.materialPipelineSelect.value = this.mmdManager.getMmdMaterialPipelinePreset();
-        }
-        if (elements.pbrPresetSelect) {
-            elements.pbrPresetSelect.value = this.mmdManager.getPbrMaterialPreset();
-            elements.pbrPresetSelect.disabled =
-                this.mmdManager.getMmdMaterialPipelinePreset() !== "pbr-standard"
-                && !models.some((model) => model.materialPipeline === "pbr-standard");
         }
         if (this.mmdManager.getTimelineTarget() === "camera") {
             this.renderCameraPostEffectsPanel();
@@ -185,8 +177,13 @@ export class ShaderPanelController {
             presets = [
                 {
                     id: "pbr-base",
-                    label: t("shader.pbrMaterial.base"),
+                    label: t("shader.pbrPreset.standard"),
                     description: t("shader.pbrMaterial.baseDescription"),
+                },
+                {
+                    id: "pbr-mmd-like",
+                    label: t("shader.pbrPreset.mmdLike"),
+                    description: t("shader.pbrMaterial.mmdLikeDescription"),
                 },
                 {
                     id: "pbr-skin",
@@ -323,9 +320,7 @@ export class ShaderPanelController {
             presetEl.textContent = material.externalWgslPath
                 ? `WGSL: ${this.getBaseNameForRenderer(material.externalWgslPath)}`
                 : (isPbrModel
-                    ? (material.pbrPresetId === "pbr-skin"
-                        ? t("shader.pbrPreset.skin")
-                        : this.getPbrMaterialPresetLabel(selectedModel.pbrMaterialPreset))
+                    ? (presetLabelById.get(material.pbrPresetId) ?? material.pbrPresetId)
                     : (presetLabelById.get(material.presetId) ?? material.presetId));
             item.appendChild(presetEl);
 
@@ -456,18 +451,6 @@ export class ShaderPanelController {
             );
             this.refresh();
         });
-        this.elements.pbrPresetSelect?.addEventListener("change", () => {
-            const next = this.mmdManager.setPbrMaterialPreset(
-                this.elements.pbrPresetSelect?.value,
-            );
-            this.showToast(
-                t("shader.toast.pbrPresetApplied", {
-                    name: this.getPbrMaterialPresetLabel(next),
-                }),
-                "info",
-            );
-            this.refresh();
-        });
         this.elements.modelSelect?.addEventListener("change", () => {
             const value = this.elements.modelSelect?.value ?? "";
             if (this.dispatchAction?.({
@@ -490,18 +473,6 @@ export class ShaderPanelController {
             if (this.dispatchAction?.({ type: "shader.reset", source: "button" })) return;
             void this.resetShaderPreset();
         });
-    }
-
-    private getPbrMaterialPresetLabel(preset: string): string {
-        switch (preset) {
-            case "pbr-mmd-like":
-                return t("shader.pbrPreset.mmdLike");
-            case "pbr-skin":
-                return t("shader.pbrPreset.skin");
-            case "pbr-standard":
-            default:
-                return t("shader.pbrPreset.standard");
-        }
     }
 
     private parseExternalWgslPresetPath(value: string): string | null {
@@ -563,9 +534,13 @@ export class ShaderPanelController {
             }
             this.refresh();
             this.showToast(
-                selectedValue === "pbr-skin"
-                    ? t("shader.toast.pbrSkinApplied")
-                    : t("shader.toast.pbrBaseApplied"),
+                selectedValue === "pbr-base"
+                    ? t("shader.toast.pbrBaseApplied")
+                    : t("shader.toast.pbrMaterialApplied", {
+                        name: selectedValue === "pbr-mmd-like"
+                            ? t("shader.pbrPreset.mmdLike")
+                            : t("shader.pbrPreset.skin"),
+                    }),
                 "success",
             );
             return;

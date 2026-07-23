@@ -215,7 +215,6 @@ describe("exportProjectState", () => {
                 mesh: {},
                 model,
                 materialPipeline: "pbr-standard" as const,
-                pbrMaterialPreset: "pbr-mmd-like" as const,
             }],
             environmentLightingEnabled: true,
             environmentLightingIntensity: 2.25,
@@ -225,7 +224,7 @@ describe("exportProjectState", () => {
         });
 
         expect(project.scene.models[0]?.materialPipeline).toBe("pbr-standard");
-        expect(project.scene.models[0]?.pbrMaterialPreset).toBe("pbr-mmd-like");
+        expect(project.scene.models[0]).not.toHaveProperty("pbrMaterialPreset");
         expect(project.lighting.environmentLightingEnabled).toBe(true);
         expect(project.lighting.environmentLightingIntensity).toBe(2.25);
         expect(project.lighting.environmentLightingSourcePath).toBe("C:/hdr/studio.hdr");

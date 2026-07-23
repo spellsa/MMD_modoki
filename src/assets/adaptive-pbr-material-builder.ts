@@ -13,12 +13,11 @@ import { PBRMaterialBuilder } from "babylon-mmd/esm/Loader/pbrMaterialBuilder";
 import type { ReferenceFileResolver } from "babylon-mmd/esm/Loader/referenceFileResolver";
 import type { TextureAlphaChecker } from "babylon-mmd/esm/Loader/textureAlphaChecker";
 import {
-    applyPbrMaterialPresetToMaterial,
+    applyPbrMaterialShaderPreset,
     registerPbrPresetMaterial,
     registerPbrPresetTransparencyBaseline,
     registerPbrPresetToonTexture,
 } from "../render/pbr-mmd-like-toon-settings";
-import type { PbrMaterialPreset } from "../shared/mmd-material-pipeline";
 
 type ToonTextureLoadArguments = [
     uniqueId: number,
@@ -35,8 +34,6 @@ type ToonTextureLoadArguments = [
 ];
 
 export class AdaptivePbrMaterialBuilder extends PBRMaterialBuilder {
-    public pbrMaterialPreset: PbrMaterialPreset = "pbr-standard";
-
     public override loadGeneralScalarProperties(
         material: PBRMaterial,
         materialInfo: MaterialInfo,
@@ -44,7 +41,7 @@ export class AdaptivePbrMaterialBuilder extends PBRMaterialBuilder {
     ): void {
         super.loadGeneralScalarProperties(material, materialInfo, meshes);
         registerPbrPresetMaterial(material, materialInfo.ambient);
-        applyPbrMaterialPresetToMaterial(material, this.pbrMaterialPreset);
+        applyPbrMaterialShaderPreset(material, "pbr-base");
     }
 
     public override async setAlphaBlendMode(
@@ -62,7 +59,7 @@ export class AdaptivePbrMaterialBuilder extends PBRMaterialBuilder {
             getTextureAlphaChecker,
         );
         registerPbrPresetTransparencyBaseline(material);
-        applyPbrMaterialPresetToMaterial(material, this.pbrMaterialPreset);
+        applyPbrMaterialShaderPreset(material, "pbr-base");
     }
 
     public override loadToonTexture(...args: unknown[]): void {
@@ -136,7 +133,6 @@ export class AdaptivePbrMaterialBuilder extends PBRMaterialBuilder {
 
         if (toonTexture !== null) {
             registerPbrPresetToonTexture(material, toonTexture);
-            applyPbrMaterialPresetToMaterial(material, this.pbrMaterialPreset);
         } else {
             logger.error(`Failed to load toon texture for adaptive PBR presets: ${toonTextureFileFullPath}`);
         }

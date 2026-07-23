@@ -276,7 +276,7 @@ export class AppMenuController {
             case "background.toggleHdriBackground":
                 return {
                     checked: this.mmdManager.isEnvironmentBackgroundVisible(),
-                    disabled: this.mmdManager.getEnvironmentLightingSourcePath() === null,
+                    disabled: !this.mmdManager.canShowEnvironmentBackground(),
                 };
             case "physics.togglePhysics":
                 return { checked: this.mmdManager.getPhysicsEnabled(), disabled: !this.mmdManager.isPhysicsAvailable() };

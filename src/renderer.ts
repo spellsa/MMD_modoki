@@ -71,22 +71,17 @@ async function runSmokeLuminousScenario(
 
   if (pbrMmdLike) {
     await waitAnimationFrames(12);
-    const initialScattering = mmdManager.getPbrMmdLikeScatteringDiagnostics();
-    mmdManager.setPbrMaterialPreset("pbr-standard");
-    await waitAnimationFrames(6);
-    const standard = mmdManager.getPbrMmdLikeScatteringDiagnostics();
-    if (standard.materialCount !== 0 || standard.configurationEnabled) {
-      throw new Error(`PBR Standard did not disable MMD Like scattering: ${JSON.stringify(standard)}`);
+    if (!mmdManager.setPbrMaterialShaderPreset(
+      modelState.modelIndex,
+      null,
+      "pbr-mmd-like",
+    )) {
+      throw new Error("PBR MMD Like could not be assigned to all materials");
     }
-    mmdManager.setPbrMaterialPreset("pbr-mmd-like");
-    await waitAnimationFrames(12);
+    await waitAnimationFrames(6);
     const mmdLike = mmdManager.getPbrMmdLikeScatteringDiagnostics();
-    if (
-      mmdLike.materialCount === 0
-      || !mmdLike.configurationEnabled
-      || !mmdLike.prePassEnabled
-    ) {
-      throw new Error(`PBR MMD Like scattering was not activated: ${JSON.stringify(mmdLike)}`);
+    if (mmdLike.materialCount !== 0 || mmdLike.configurationEnabled) {
+      throw new Error(`PBR MMD Like no longer matches Standard: ${JSON.stringify(mmdLike)}`);
     }
     const skinMaterialKey = modelState.materials[0]?.key ?? null;
     if (!skinMaterialKey || !mmdManager.setPbrMaterialShaderPreset(
@@ -94,27 +89,25 @@ async function runSmokeLuminousScenario(
       skinMaterialKey,
       "pbr-skin",
     )) {
-      throw new Error("PBR Skin could not be assigned for the scattering smoke scenario");
+      throw new Error("PBR Skin could not be assigned for the translucency smoke scenario");
     }
     await waitAnimationFrames(12);
-    const scattering = mmdManager.getPbrMmdLikeScatteringDiagnostics();
+    const skin = mmdManager.getPbrMmdLikeScatteringDiagnostics();
     if (
-      scattering.materialCount === 0
-      || !scattering.configurationEnabled
-      || !scattering.prePassEnabled
+      skin.materialCount !== 0
+      || skin.configurationEnabled
     ) {
-      throw new Error(`PBR Skin scattering was not activated: ${JSON.stringify(scattering)}`);
+      throw new Error(`PBR Skin unexpectedly enabled screen-space scattering: ${JSON.stringify(skin)}`);
     }
     return {
-      kind: "pbrSkinScattering",
+      kind: "pbrSkinTranslucency",
       modelName: modelInfo.name,
       materialCount: modelState.materials.length,
       beforeBackend,
       afterBackend: mmdManager.getPostEffectBackend(),
-      initialMaterialCount: initialScattering.materialCount,
-      standardMaterialCount: standard.materialCount,
       mmdLikeMaterialCount: mmdLike.materialCount,
-      ...scattering,
+      skinScatteringMaterialCount: skin.materialCount,
+      ...skin,
     };
   }
 
@@ -278,7 +271,6 @@ async function initializeApp(): Promise<void> {
     }
     if (smokePbrMmdLike) {
       mmdManager.setMmdMaterialPipelinePreset("pbr-standard");
-      mmdManager.setPbrMaterialPreset("pbr-mmd-like");
     }
     let smokeWebGpuFailureReported = false;
     if (smokeRenderStabilityDiagnostics) {

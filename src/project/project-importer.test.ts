@@ -81,6 +81,7 @@ function createHost() {
         setModelCastsShadowByIndex: vi.fn(),
         setModelMotionImports: vi.fn(),
         applyImportedMaterialShaderStates: vi.fn(),
+        setPbrMaterialShaderPreset: vi.fn(),
         setGroundVisible: vi.fn(),
         setSkydomeVisible: vi.fn(),
         setSkydomeBackgroundStyle: vi.fn(),
@@ -170,16 +171,17 @@ function createHost() {
 describe("importProjectState", () => {
     it("restores model material pipelines and environment lighting", async () => {
         const host = createHost();
+        const legacyPbrModel = {
+            path: "C:/models/pbr.pmx",
+            visible: true,
+            motionImports: [],
+            materialPipeline: "pbr-standard" as const,
+            pbrMaterialPreset: "pbr-mmd-like",
+        };
         const project = createProject({
             scene: {
                 ...createProject().scene,
-                models: [{
-                    path: "C:/models/pbr.pmx",
-                    visible: true,
-                    motionImports: [],
-                    materialPipeline: "pbr-standard",
-                    pbrMaterialPreset: "pbr-mmd-like",
-                }],
+                models: [legacyPbrModel],
             },
             lighting: {
                 ...createProject().lighting,
@@ -196,8 +198,8 @@ describe("importProjectState", () => {
         expect(host.loadPMX).toHaveBeenCalledWith(
             "C:/models/pbr.pmx",
             "pbr-standard",
-            "pbr-mmd-like",
         );
+        expect(host.setPbrMaterialShaderPreset).toHaveBeenCalledWith(0, null, "pbr-mmd-like");
         expect(host.environmentLightingEnabled).toBe(true);
         expect(host.environmentLightingIntensity).toBe(2.25);
         expect(host.environmentBackgroundVisible).toBe(true);
@@ -223,7 +225,6 @@ describe("importProjectState", () => {
         expect(host.loadPMX).toHaveBeenCalledWith(
             "C:/models/legacy.pmx",
             "mmd-standard",
-            "pbr-standard",
         );
         expect(host.environmentLightingEnabled).toBe(false);
         expect(host.environmentLightingIntensity).toBe(1);

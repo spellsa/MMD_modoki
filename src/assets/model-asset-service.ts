@@ -17,12 +17,9 @@ import { readExistingSubMeshEffectReadiness } from "../scene/mesh-render-stabili
 import {
     isPbrMaterialPipelinePreset,
     normalizeMmdMaterialPipelinePreset,
-    normalizePbrMaterialPreset,
     type MmdMaterialPipelinePreset,
-    type PbrMaterialPreset,
 } from "../shared/mmd-material-pipeline";
 import { PbrMaterialProxy } from "../runtime/pbr-material-proxy";
-import { applyPbrMaterialPresetToMaterial } from "../render/pbr-mmd-like-toon-settings";
 import { AdaptivePbrMaterialBuilder } from "./adaptive-pbr-material-builder";
 
 const PMX_BONE_FLAG_VISIBLE = 0x0008;
@@ -129,14 +126,12 @@ type SupportedMmdMaterialBuilder = MmdStandardMaterialBuilder | PBRMaterialBuild
 function ensureSharedMmdMaterialBuilder(
     fileName: string,
     materialPipeline: MmdMaterialPipelinePreset,
-    pbrMaterialPreset: PbrMaterialPreset,
 ): SupportedMmdMaterialBuilder {
     const currentBuilder = MmdModelLoader.SharedMaterialBuilder;
     if (isPbrMaterialPipelinePreset(materialPipeline)) {
         const builder = currentBuilder instanceof AdaptivePbrMaterialBuilder
             ? currentBuilder
             : new AdaptivePbrMaterialBuilder();
-        builder.pbrMaterialPreset = pbrMaterialPreset;
         builder.renderMethod = MmdMaterialRenderMethod.DepthWriteAlphaBlendingWithEvaluation;
         if (builder !== currentBuilder) {
             MmdModelLoader.SharedMaterialBuilder = builder;
@@ -145,7 +140,6 @@ function ensureSharedMmdMaterialBuilder(
             fileName,
             previousBuilder: getConstructorName(currentBuilder),
             builder: getConstructorName(builder),
-            pbrMaterialPreset,
             renderMethod: formatMmdMaterialRenderMethod(builder.renderMethod),
         });
         return builder;
@@ -556,7 +550,6 @@ type ModelAssetHost = {
         contactShadowMesh: null;
         castShadow: boolean;
         materialPipeline: MmdMaterialPipelinePreset;
-        pbrMaterialPreset: PbrMaterialPreset;
     }>;
     refreshRigidBodyVisualizerTarget(): void;
     syncLuminousGlowLayer?: () => void;
@@ -1146,7 +1139,6 @@ export async function loadPMX(
     host: ModelAssetHost,
     filePath: string,
     requestedMaterialPipeline?: MmdMaterialPipelinePreset,
-    requestedPbrMaterialPreset?: PbrMaterialPreset,
 ): Promise<ModelInfo | null> {
     let renderingSuspended = false;
     try {
@@ -1155,15 +1147,13 @@ export async function loadPMX(
         const { dir, fileName } = splitFilePath(filePath);
         const fileUrl = localPathToFileUrl(dir);
         const materialPipeline = normalizeMmdMaterialPipelinePreset(requestedMaterialPipeline);
-        const pbrMaterialPreset = normalizePbrMaterialPreset(requestedPbrMaterialPreset);
 
         logInfo("asset", "model load started", {
             filePath,
             fileName,
             materialPipeline,
-            pbrMaterialPreset,
         });
-        const materialBuilder = ensureSharedMmdMaterialBuilder(fileName, materialPipeline, pbrMaterialPreset);
+        const materialBuilder = ensureSharedMmdMaterialBuilder(fileName, materialPipeline);
         host.configureMmdTextureLoaderForWebGpuForBuilder?.(materialBuilder);
         if (materialBuilder instanceof MmdStandardMaterialBuilder) {
             installPmxMaterialDiagnosticCapture(materialBuilder);
@@ -1316,17 +1306,6 @@ export async function loadPMX(
         logSuspiciousMaterialAlphaDiagnostics(fileName, result.meshes as Mesh[], "after-material-setup");
         logAlphaTextureKeptOpaqueCandidates(fileName, result.meshes as Mesh[], "after-material-setup");
         const sceneMaterials = collectSceneModelMaterials(host, result.meshes as Mesh[], materialPipeline);
-        if (
-            isPbrMaterialPipelinePreset(materialPipeline)
-            && pbrMaterialPreset === "pbr-mmd-like"
-        ) {
-            // Common MMD alpha compatibility runs after the builder and can put
-            // near-opaque face/hair textures back into alpha blend. MMD Like
-            // needs its final opaque/alpha-test state for screen-space SSS.
-            for (const entry of sceneMaterials) {
-                applyPbrMaterialPresetToMaterial(entry.material, pbrMaterialPreset);
-            }
-        }
 
         const mmdModel = createMmdModelWithPhysicsDiagnostics(host, mmdMesh, {
             materialProxyConstructor: isPbrMaterialPipelinePreset(materialPipeline)
@@ -1560,7 +1539,6 @@ export async function loadPMX(
             contactShadowMesh: null,
             castShadow: true,
             materialPipeline,
-            pbrMaterialPreset,
         });
         host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);
@@ -1592,7 +1570,6 @@ export async function loadPMX(
             vertexCount,
             boneCount,
             materialPipeline,
-            pbrMaterialPreset,
             morphCount: morphEntries.length,
             meshCount: result.meshes.length,
             sceneModelCount: host.sceneModels.length,

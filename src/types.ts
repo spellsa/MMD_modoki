@@ -1,8 +1,5 @@
 import type { FrameGraphPostEffectStackEntry } from "./shared/frame-graph-post-effect-stack";
-import type {
-    MmdMaterialPipelinePreset,
-    PbrMaterialPreset,
-} from "./shared/mmd-material-pipeline";
+import type { MmdMaterialPipelinePreset } from "./shared/mmd-material-pipeline";
 
 export interface ElectronAPI {
     openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
@@ -289,7 +286,6 @@ export interface ProjectModelState {
     visible: boolean;
     castsShadow?: boolean;
     materialPipeline?: MmdMaterialPipelinePreset;
-    pbrMaterialPreset?: PbrMaterialPreset;
     motionImports: ProjectMotionImport[];
     materialShaders?: ProjectModelMaterialShaderState[];
     animation?: ProjectSerializedModelAnimation | null;

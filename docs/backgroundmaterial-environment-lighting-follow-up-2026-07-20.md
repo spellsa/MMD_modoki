@@ -5,7 +5,7 @@
 現時点の環境ライティング仕様は次のとおり。
 
 - 環境ライティング OFF では `scene.environmentTexture` を外す。
-- ON では同梱の `src/assets/ibl-shadows/white.hdr` をPBR環境テクスチャとして使う。
+- ON では同梱の `src/assets/ibl-shadows/yamagata-field-20181231-1137-2k.hdr` をPBR環境テクスチャとして使う。
 - `.hdr` は `HDRCubeTexture` で読み込み、harmonics生成とPBR反射用プリフィルタを行う。
 - HDRの読み込みに失敗した場合だけ、全方向 `RGB 190, 190, 190` の単色 CubeTextureを使う。
 - 単色フォールバックには同色からCPU生成した spherical polynomialを設定する。

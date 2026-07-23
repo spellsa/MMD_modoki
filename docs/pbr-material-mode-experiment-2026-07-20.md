@@ -6,13 +6,15 @@
 PBR専用プリセット枠を追加する。あわせて、背景表示とは独立して IBL ライティングを
 ON / OFF し、同じ PMX / PMD を再読込して比較できる段階まで実装する。
 
-## 2026-07-20 現状サマリー
+## 2026-07-23 現状サマリー
 
 この試行は、従来のMMD表示を置き換えるものではなく、PBR表現の成立条件と
 MMD材質をPBRへ移したときの問題を調べる実験である。現時点では
-モデル全体は`PBR Standard`へ統一し、材質別の`PBR MMD Like`と`PBR Skin`を比較できるが、
-IBLのPBR出力経路はPBR Standardの実モデル比較でも成立を確認できたが、影・SSS色には未解決問題があり、
-既定表示へ昇格できる状態ではない。
+モデル全体は`PBR Standard`へ統一し、材質別の`PBR MMD Like`と`PBR Skin`を比較できる。
+IBLのPBR出力経路はPBR Standardの実モデル比較で成立を確認した。`PBR Skin`は旧実装を
+使わず、Babylon.js標準のTranslucency単独構成で2026-07-23に再調整した。画面空間Scatteringは
+HDR irradianceのclampによる暗化を切り分けるため一時的に無効化している。実モデルでの色・影・
+透明度の確認前であり、既定表示へ昇格できる状態ではない。
 
 ### 試したこと
 
@@ -21,11 +23,11 @@ IBLのPBR出力経路はPBR Standardの実モデル比較でも成立を確認�
 | PBR読込 | babylon-mmdの`PBRMaterialBuilder`を基礎に、従来MMDモードと分離したPBRモードを追加 | モデル全体のPBR基準はStandardへ統一 |
 | PBR Standard | babylon-mmd標準に近い比較基準を用意 | 比較用ベースとして維持 |
 | PBR MMD Like | PMX固有情報を使う材質別プリセットとして試行 | 旧toon / SSS処理を停止し、現在はStandardと同じ描画状態 |
-| PBR Skin | 肌向けの材質別プリセットとして試行 | 旧SSS処理を停止し、現在はStandardと同じ描画状態 |
-| SSS | Babylon.js標準PrePass SSSをMMD Like / Skinへ適用し、scene scale、散乱色、粗さを調整 | 影ブレ等が生じたため現在は無効化。以下に過去の試行を記録 |
+| PBR Skin | 肌向けの材質別プリセットとして試行 | Standard表面設定を維持し、Babylon.js標準Translucencyを単独適用 |
+| SSS | PrePass ScatteringとDiffuse transmissionを比較 | Scatteringは暗化切り分けのため停止し、Translucency寄りで実描画調整中 |
 | 透明材質 | 明示的半透明をSSS対象外にし、ほぼ不透明なalpha textureを低い閾値のalpha testへ変換 | プリセット固有変換を停止し、Standardの透明設定を復元 |
 | 即時切替 | 読込済みPBRMaterialを再生成せず材質別プリセットを切替 | 再起動・モデル再読込なしで反映 |
-| IBL | 中立cube texture、同梱`white.hdr`、外部HDR、ON/OFF、強度0〜4を比較 | PBR Standardの実モデルで方向・色・強弱を確認。基盤は成立 |
+| IBL | 中立cube texture、同梱HDR、外部HDR、ON/OFF、強度0〜4を比較 | PBR Standardの実モデルで方向・色・強弱を確認。基盤は成立 |
 | HDRプリフィルタ | Electron / Viteで不足したHDR filtering shaderをGLSL / WGSLとも明示登録 | HTMLをWGSLとして読むvalidation errorは解消 |
 | 方向ライト | 照度上限を4、光色RGBを最大200%相当まで拡張 | PBRの直接光は明るくできるが、暗部と影が目立ちやすくなった |
 | 影ブレ対策 | 非SSS StandardMaterialのlegacy irradianceへ除外値を書き込む互換パッチを追加 | StandardMaterial誤判定は抑制したが、PBR受け面の影ブレは残る |
@@ -71,6 +73,10 @@ MMD照明欄の環境光はHemisphericLightであり、PBR IBLとは別系統な
 
 #### 2. PBR MMD Likeで投影影がぶれる
 
+以下は画面空間Scatteringを使っていた過去試行の分析である。現在のPBR MMD Likeは
+Standardと同じ描画状態へ戻し、PBR SkinもScatteringを無効化しているため、現行経路には
+このSSS処理を適用していない。
+
 正常な表面下散乱であれば、影境界の拡散光が局所的かつ連続的に柔らかくなる。
 輪郭が別位置へ複製されたように見える二重影や、一定方向へ伸びる筋は
 期待するSSS表現ではない。現在の症状はシャドウマップの単純な低解像度化より、
@@ -90,7 +96,7 @@ Babylon.js標準SSSは材質単体の処理ではなく、PrePassのirradiance�
 ゴースト状の輪郭として見える可能性がある。このスパースサンプリング不足が、
 現在の「ぶれた影」の直接原因候補である。
 
-現状の`PBR MMD Like`は、明示的な半透明を除く全PBR材質へ
+当時の`PBR MMD Like`は、明示的な半透明を除く全PBR材質へ
 `isScatteringEnabled = true`を設定する。このため、キャラクターだけでなく
 床・建物・ステージなどの影を受けるPBR材質までMMD Likeになっている場合、
 床に描かれた影の拡散光成分まで、大きなSSSカーネルと固定40サンプルで処理される。
@@ -116,13 +122,13 @@ skeletonを持つキャラクター材質、`PBR Skin`、将来の髪・薄布�
 限定する案が有力である。ただし、適用範囲を狭めるだけで原因調査を終えず、
 キャラクター表面でも滑らかな散乱になる半径と再合成経路を確認する。
 
-#### 3. SSSの色の効きが弱い
+#### 3. SSSの色の効きが弱い（過去試行）
 
 Babylon.jsの`scatteringDiffusionProfile`は、主に散乱距離とRGBごとの広がり方を
 定義する値で、暗部へ新しい光を作る値ではない。入射光がほぼ0の場所では、
 profileの彩度や強度だけを上げても色は出にくい。
 
-`PBR Skin`では赤系の拡散光源を`finalDiffuse`へ加えてからPrePass SSSへ渡すため、
+過去の`PBR Skin`では赤系の拡散光源を`finalDiffuse`へ加えてからPrePass SSSへ渡すため、
 比較的はっきりした赤みが得られている。一方、現在の`PBR MMD Like`はtoon色を
 暗部へ乗算しているだけで、toon色由来の散乱光源はまだ追加していない。
 さらにdiffusion profileも中立グレー`Color3(0.5, 0.5, 0.5)`なので、
@@ -191,10 +197,11 @@ MMD Likeは作者指定toon色という役割分担にする。
 `PBR Skin`は肌向け調整を将来追加する材質別プリセットとして位置づける。
 割り当ては材質キー単位でプロジェクトの`materialShaders`へ保存する。
 
-現在は不具合の切り分けを優先し、3種類とも同一のPBR Standard描画設定を使う。
-MMD Like / Skinへ切り替えてもSubSurface、alpha、transparencyMode、roughness、
-specularIntensityをStandard基準へ戻し、独自Material PluginやSSSを有効にしない。
-PMXのtoonテクスチャとambient色は将来の再実装用に保持するが、描画にはまだ使用しない。
+`PBR MMD Like`は不具合の切り分けを優先し、PBR Standardと同一の描画設定を使う。
+`PBR Skin`はStandardのalpha、transparencyMode、roughness、specularIntensityを維持したまま、
+Babylon.js標準の画面空間Scatteringと低強度Translucencyを有効にする。独自Material Plugin、
+Emissive、Refraction、alpha補正、暗部補正は使わない。PMXのtoonテクスチャとambient色は将来のMMD Like再実装用に保持するが、
+描画にはまだ使用しない。
 
 旧プロジェクトにモデル全体の`pbrMaterialPreset: "pbr-mmd-like"`が残っている場合は、
 読込時に全材質へ材質別`PBR MMD Like`を割り当てる互換移行を行う。その後、旧来の
@@ -268,6 +275,35 @@ PBRモデルの読込時は、どのプリセットでもtoonテクスチャと�
 材質方式の `MMDモード` / `PBRモード` 切替だけは材質クラスが異なるため、引き続き
 次回モデル読込へ適用する。
 
+### 2026-07-23再調整: PBR Skinの標準Translucency
+
+前回のSkin用Material Plugin、赤い拡散光加算、roughness / specular補正、alpha変換は
+再利用しない。画面空間Scattering併用時にIBLなしでは暗く、IBLありでは赤が過剰になることを
+実モデルで確認したため、比較用にTranslucency単独へ切り替えて次だけを行う。
+
+- `isTranslucencyEnabled = true`、`translucencyIntensity = 0.16`とする
+- `translucencyColor = Color3(1.0, 0.68, 0.58)`、厚み範囲を`0.0`から`0.3`とする
+- Skin材質は`environmentIntensity = 0.80`とし、透過光を元のalbedoでも色付けする
+- `isRefractionEnabled = false`とし、alpha / transparencyModeは変更しない
+- Babylon.js 8以降の現行計算を使い、`legacyTranslucency = false`とする
+- `isScatteringEnabled = false`とし、PrePass Scatteringを使わない
+
+SSSは元材質のalpha、alpha texture、transparencyMode、roughness、specularIntensityを変更しない。
+したがって、元材質が半透明ならその透明度は残るが、Skinプリセット自身が新たな透過を作ることはない。
+StandardまたはMMD Likeへ戻すと、保存していたSubSurface状態を復元する。
+
+単体試験では実`PBRMaterial`と`Scene`に対してPrePassを生成しないこと、Translucency有効、
+Refraction無効、元のalpha維持を確認する。実モデルの目視確認では次を重点的に見る。
+
+- 暖色の拡散透過が照明のある領域から自然に出るか
+- 逆光側の頬・耳・腕に赤い透過光が出るか
+- 背景・目・髪がSkin材質越しに透けないか
+- 床や顔の影が二重にぶれないか
+- Frame Graph効果の有無でSSSが二重適用されないか
+
+現行値、Scattering試行の失敗要因、HDRIとの相互作用は
+[PBR Skin 実装メモ](./pbr-skin-implementation-2026-07-23.md)へ分離している。
+
 ### 過去の試行: PBR Skinの材質別の強い赤色SSS
 
 以下は2026-07-20時点の試行記録であり、現在のプリセットでは無効化している。
@@ -328,10 +364,10 @@ sphere / toon / edge と各テクスチャの加算・乗算モーフは、公�
 
 - 背景メニューに独立した `環境ライトを使用` チェックを置く。
 - ON / OFF と強度は `背景 > 環境ライト詳細...` からも操作できる。
-- 初期値は OFF。
+- 新規環境の初期値は ON。保存済み設定と既存プロジェクトの明示値は維持する。
 - OFF では `scene.environmentTexture` を退避して `null` にする。
 - ON では退避済みの environment texture を復元する。
-- 既定ソースは同梱の `src/assets/ibl-shadows/white.hdr` とする。
+- 既定ソースは同梱の `src/assets/ibl-shadows/yamagata-field-20181231-1137-2k.hdr` とする。
 - 同梱 HDR は `HDRCubeTexture` で読み込み、PBR の粗さ別反射に必要なプリフィルタを
   読み込み時に生成する。
 - 同梱 HDR の初期化または読み込みに失敗した場合だけ、中立グレー 1 x 1 cube texture
@@ -383,14 +419,16 @@ PBR用へ切り替え、WGSLプリセットを隠して`PBR Standard`、`PBR MMD
 - [x] PBR MMD Like / PBR Skinを材質別割り当てへ分離
 - [x] PBR MMD Like / PBR Skinの材質別プロジェクト保存 / 読込
 - [x] 旧モデル全体PBR MMD Like指定を全材質指定へ互換移行
-- [x] MMD Like / SkinをPBR Standardと同一の描画状態へ戻す
+- [x] MMD LikeをPBR Standardと同一の描画状態へ戻す
+- [x] PBR SkinをBabylon.js標準PrePass Scatteringで試作（現在は失敗記録として無効化）
+- [x] PBR Skinを低強度の標準Translucency単独へ変更し、Refraction / alpha変更なしで適用
 - [x] toon影色を材質別PBRシェーダーで処理
-- [x] PBR MMD Like / Skinで`isScatteringEnabled`による画面空間SSSを適用
-- [ ] MMD Like / Skinのscene scaleとSSS適用範囲を整理し、PBR受け面の影ブレを解消
-- [x] Skinの赤い拡散光源をPBRシェーダーからPrePass SSSへ入力
+- [x] PBR Skinの`isScatteringEnabled`を無効化し、不要なPrePassを生成しない
+- [x] Scattering試作用の`metersPerUnit = 0.08`を実行経路から除外
+- [x] 実描画でTranslucency-onlyのIBL ON / OFFを比較し、暫定基準として採用
+- [x] 旧Skin用の赤い拡散光源・Material Pluginを実行経路から除外
 - [x] StandardMaterialの未初期化legacy irradianceを補正し、非SSS受け面の誤判定を抑制
-- [x] 不透明Skin材質のtexture alphaをalpha blendからalpha testへ変換
-- [x] 明示的な透明材質をSSS対象外にする
+- [x] PBR Skin固有のalpha / transparencyMode変換を行わない
 - [x] 読込済みPBRモデルのプリセットを再読込なしで即時切替
 - [x] PBR 材質モーフ proxy の色、透明度、roughness、reset
 - [x] 材質方式と IBL ON / OFF のプロジェクト保存 / 読込
@@ -416,7 +454,7 @@ PBR用へ切り替え、WGSLプリセットを隠して`PBR Standard`、`PBR MMD
 
 `背景 > HDRI詳細...` から外部 `.hdr` を選択し、PBR の環境ライティングへ
 即時適用できるようにした。選択パス、IBL ON / OFF、環境光強度はプロジェクトへ保存する。
-外部 HDR の解除時は内蔵 `white.hdr` へ戻す。HDRI背景表示と背景輝度の独立調整に対応し、回転は未対応。
+外部 HDR の解除時は内蔵の2K TrueHDRIへ戻す。HDRI背景表示と背景輝度の独立調整に対応し、回転は未対応。
 
 Git 管理外の `local-references/hdri` にある実 HDR を Electron / WebGPU smoke へ渡し、
 実ロード、3 秒安定、validation error なし、合成 PBR 球の IBL 輝度差
@@ -428,6 +466,9 @@ Git 管理外の `local-references/hdri` にある実 HDR を Electron / WebGPU 
 中立グレーの `RawCubeTexture` とCPU生成 spherical polynomialでは、実画面上で
 `scene.iblIntensity = 0.0` と `4.0` の差が確認できなかった。そのため通常の環境ライトを
 同梱 `white.hdr` へ切り替えた。
+
+2026-07-23に、既定IBLをCC0 TrueHDRI `YamagataField_20181231_1137`の2K派生版へ
+更新した。`white.hdr` は方向性を制御した比較用の手続き生成アセットとして残す。
 
 Babylon.js公式の `.hdr` 直接利用例に合わせ、`HDRCubeTexture` の
 `generateHarmonics = true`、`gammaSpace = false`、`prefilterOnLoad = true` を使用する。
