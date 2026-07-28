@@ -191,6 +191,11 @@ export class ShaderPanelController {
                     description: t("shader.pbrMaterial.skinDescription"),
                 },
                 {
+                    id: "pbr-skin-sss",
+                    label: t("shader.pbrPreset.skinSss"),
+                    description: t("shader.pbrMaterial.skinSssDescription"),
+                },
+                {
                     id: "pbr-skin-face",
                     label: t("shader.pbrPreset.skinFace"),
                     description: t("shader.pbrMaterial.skinFaceDescription"),
@@ -549,6 +554,8 @@ export class ShaderPanelController {
                     : t("shader.toast.pbrMaterialApplied", {
                         name: selectedValue === "pbr-mmd-like"
                             ? t("shader.pbrPreset.mmdLike")
+                            : selectedValue === "pbr-skin-sss"
+                                ? t("shader.pbrPreset.skinSss")
                             : selectedValue === "pbr-skin-face"
                                 ? t("shader.pbrPreset.skinFace")
                                 : selectedValue === "pbr-no-shadow"

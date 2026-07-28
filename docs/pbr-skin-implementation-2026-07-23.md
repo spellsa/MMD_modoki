@@ -1,6 +1,6 @@
 # PBR Skin 実装メモ
 
-調査・更新日: 2026-07-23
+調査・更新日: 2026-07-28
 
 ## 目的
 
@@ -11,6 +11,7 @@
 
 - 現在採用している Babylon.js 標準 `Translucency` の設定
 - `Scattering` を再試行して無効に戻した理由
+- 安定版から分離した `PBR Skin SSS` 実験プリセット
 - HDRI / IBL と SubSurface の相互作用
 - プリセットを外したときに元へ戻す仕組み
 - 今後再調整するときの順序と確認項目
@@ -39,6 +40,130 @@ IBL と外部 HDRI の仕様は
 
 これは物理測定値を再現した完成版の肌シェーダーではない。
 MMD キャラクターへ適用しやすく、壊れにくい出発点を優先した実験設定である。
+
+## PBR Skin SSS（2026-07-28 再試行）
+
+過去の失敗を安定版へ持ち込まないため、`PBR Skin`はTranslucency-onlyのまま残し、
+画面空間Scatteringを使う`PBR Skin SSS`を独立した材質プリセットとして追加した。
+モデル全体へ自動適用せず、評価したい肌材質へ明示的に割り当てる。
+
+初期値はBabylon.js公式の肌向け例を出発点にし、MMDモデルのスケールへ合わせて
+散乱距離を調整している。
+
+| 設定 | 値 | 備考 |
+|---|---:|---|
+| `scene.enableSubSurfaceForPrePass()` | 有効 | PrePassとSubSurface post-processを準備 |
+| `metersPerUnit` | `0.08` | MMDキャラクターを約20 unit ≒ 1.6 mとみなす暫定換算 |
+| `scatteringDiffusionProfile` | `(0.08, 0.025, 0.012)` | MMDスケール向けに縮小したRGB散乱距離 |
+| `isScatteringEnabled` | `true` | この実験プリセットだけで有効 |
+| `isTranslucencyEnabled` | `true` | 調整済みPBR Skinの基準値を併用 |
+| `translucencyIntensity` | `0.02` | 安定版PBR Skinと同値 |
+| 材質 `environmentIntensity` | `0.80` | 安定版PBR Skinと同値 |
+| roughness下限 | `0.68` | 安定版PBR Skinと同値 |
+
+`scatteringDiffusionProfile`は加算する「SSS色」ではなく、RGBごとの散乱距離を表す。
+そのため、赤チャンネルの値が大きくても単純な赤い発光にはならない。またScatteringは
+画面空間の再合成なので、必ず明るくなる処理でもない。
+
+PrePassを利用できないbackendでは適用を失敗扱いにし、その材質を`PBR Standard`へ戻す。
+一つでもScattering材質が残っている間だけscene側のSubSurface設定を有効にし、最後の
+SSS材質を別プリセットへ戻したら無効化する。PrePassRenderer自体の生成コストは残り得るため、
+本採用前にGPU時間とメモリも確認する。
+
+自動テストでは、Babylon.jsの実`PBRMaterial`と`NullEngine`を使って次を確認した。
+
+- PrePassRendererが生成される
+- sceneのSubSurface設定と`metersPerUnit`が反映される
+- 材質へdiffusion profileとScatteringが反映される
+- `PBR Standard`へ戻すとScatteringとscene設定が無効になる
+- PrePassを利用できない場合はStandardへ安全にフォールバックする
+
+ただし、自動テストは最終ピクセルを評価していない。Electron / WebGPU実機では過去に
+暗化、全体白化、Skin材質の黒化、二重輪郭状の影ぶれが起きたため、今回のプリセットも
+現時点では「実装経路を分離して再検証できる段階」であり、見た目の完成判定ではない。
+
+2026-07-28の起動スモークでは、Electron、WebGPU renderer、Bullet MPR、
+環境ライティング合成球診断まで通過し、3秒間の安定稼働を確認した。
+ただし、スモークは実PMXへSSS材質を割り当てないため、PBR Skin SSSの最終ピクセルと
+影ぶれは引き続き実機手動確認とする。
+
+### 2026-07-28 画面全体の白化対策
+
+実PMXの一材質へ`PBR Skin SSS`を割り当てたとき、材質だけでなく背景を含む画面全体が
+白く霞む症状を確認した。Babylon.jsのSubSurface post-processは、
+`scatteringDiffusionProfile`の距離を`metersPerUnit`で画面上のフィルタ半径へ換算する。
+以前の設定は最大散乱距離`0.75`、`metersPerUnit = 0.01`で、相対半径の概算が`75`だった。
+肌材質のirradianceが画面の広範囲へ拡散され、白化した可能性が高い。
+
+対策として、最大散乱距離とscene scaleの比を`1`付近まで抑えた。
+
+```text
+旧: max(0.75, 0.25, 0.20) / 0.01 = 75
+新: max(0.08, 0.025, 0.012) / 0.08 = 1
+```
+
+また、PBR Skin SSSを割り当てた時だけ、次を`render` scopeのinfoログへ記録する。
+
+- SSS材質数とsceneのPrePass / SubSurface有効状態
+- `metersPerUnit`、diffusion profile、相対フィルタ半径
+- Babylon StandardMaterialをSSS再合成から除外するGLSL / WGSLパッチの適用成否
+
+実機で再確認するときは`npm.cmd run log:tail`を併用し、
+`per-material PBR shader preset applied`の`sssDiagnostics`を確認する。
+修正後の同一モデルでの見た目は、モデルを自動読込せずユーザー操作で再確認する。
+
+散乱半径を縮小しても白化が残ったため、診断ログとBabylon.js 9.2.0の
+`PrePassRenderer`を再確認した。SubSurface Scattering post-processは有効な
+PrePass targetごとに自動挿入され、`needsImageProcessing = true`の場合はその直後に
+Image Processingも実行される。一方、本アプリのFrame Graph経路は中間シーンカラーを
+取り込んだ後に最終Image Processingを行うため、同じシーン色へ色変換が二重適用されていた。
+
+Frame Graphの中間シーンカラーが有効な間は、次の方針に変更した。
+
+- SubSurface Scattering合成はBabylon.jsのPrePass経路で行う
+- 中間RenderTargetではcamera post-processを再利用しない
+- `SubSurfaceConfiguration.needsImageProcessing`を無効にし、中間結果をlinearのまま保つ
+- tone mapping、exposureなどの最終色変換はFrame Graph側で一度だけ行う
+- Classic経路でも最終画像処理はアプリ側へ任せる
+
+しかし、2026-07-28 11:39の実機ログではFrame Graphの中間シーンカラーが非アクティブな
+Classic経路でも白化が残った。スクリーンショットではSSSを割り当てていない髪・服・背景まで
+同時に持ち上がっており、散乱距離だけでなくPrePassのSSS対象マスク漏れが疑われる。
+
+Babylon.js 9.2.0の`pbrBlockPrePass`を確認すると、legacy irradiance attachmentのalphaへ
+diffusion profile indexを格納している。SubSurface post-processは`alpha < 1`をSSS対象と
+判定する一方、標準PBRシェーダーは`finalColor.a <= ALPHATESTVALUE`のピクセルへalpha `0`を
+書く。この`0`は「非ジオメトリ」ではなくdiffusion profile `0`として解釈されるため、
+透明部分や非SSS材質が散乱対象へ混入し、画面全体を白く再合成する可能性がある。
+
+暫定互換パッチではGLSL / WGSL両方に対し、次のマスク規則を適用した。
+
+- 可視なSSSピクセル: 本来のdiffusion profile indexを維持
+- 透明なSSSピクセル: SSS対象外を示すalpha `1`
+- 非SSSピクセル: 常にSSS対象外を示すalpha `1`
+
+`sssDiagnostics.pbrMaterialMaskPatch`へ実際のshader include置換結果を記録する。
+この修正はBabylon.js本体を直接変更せず、アプリ起動時のShaderStoreへ局所適用する。
+実PMXでの白化解消は、モデルを自動読込せずユーザー操作で再確認する。
+
+2026-07-28 11:58の再確認では、上記マスク修正がGLSL / WGSLとも適用済みでも
+画面全体の白化が残った。同じログではscene image processingが
+`isEnabled = false`、`applyByPostProcess = false`である一方、
+SubSurfaceConfigurationだけが`needsImageProcessing = true`だった。
+
+Babylon.js 9.2.0の`PrePassRenderer`はscene image processingの有効状態とは別に、
+effect configurationの`needsImageProcessing`を調べる。この値が`true`ならSSS後へ
+全画面composition effectを追加し、sceneの`applyByPostProcess`も切り替える。
+本アプリではClassic / Frame Graphの各出力経路が最終画像処理を管理するため、
+SSS適用時とbackend同期時の両方で`needsImageProcessing = false`へ固定した。
+
+実機では、SSS対象外の背景・服・髪の明るさが適用前後で変わらないことを先に確認する。
+その後、肌だけに拡散差が残るか、露出やtone mappingが一度だけ効くかを確認する。
+
+2026-07-28 12:31、Electron / WebGPU実機で画面全体の白飛び解消を確認した。
+原因、試行した対策、診断ログ、再発確認項目は
+[PBR Skin SSS 白飛び対策・再発防止メモ](./pbr-skin-sss-whiteout-countermeasures-2026-07-28.md)
+へ分離して記録する。暗化、散乱色、影ぶれの評価は引き続き本メモの対象とする。
 
 ## Babylon.js の三つの SubSurface 経路
 
@@ -260,6 +385,9 @@ SubSurface Scattering post-process を必要とする。
 - roughnessが`0.68`未満なら下限まで引き上げる
 - Standard へ戻したときに保存済みの値を復元する
 - 実`PBRMaterial`と`NullEngine`でも不要なPrePassが生成されない
+- PBR Skin SSSだけがPrePassと画面空間Scatteringを有効にする
+- PBR Skin SSSからStandardへ戻すとsceneのSubSurface設定も無効になる
+- SSS用PrePassを利用できない場合はStandardへフォールバックする
 
 2026-07-23 の実機比較では、同じ材質に対して IBL を ON / OFF しても、以前のような
 極端な暗化と赤被りは発生せず、Translucency-only 設定を暫定採用できると判断した。
@@ -330,6 +458,7 @@ Scattering の評価用 UI を作る場合も、最初から本番プリセッ�
 
 - `src/render/pbr-mmd-like-toon-settings.ts`
 - `src/render/pbr-mmd-like-toon-settings.test.ts`
+- [PBR Skin SSS 白飛び対策・再発防止メモ](./pbr-skin-sss-whiteout-countermeasures-2026-07-28.md)
 - `scripts/generate-bundled-studio-hdr.mjs`
 - `scripts/resize-radiance-hdr.mjs`
 - `scripts/verify-radiance-hdr.mjs`

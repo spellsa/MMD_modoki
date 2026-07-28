@@ -11,6 +11,7 @@ export const PBR_MATERIAL_SHADER_PRESETS = [
     "pbr-base",
     "pbr-mmd-like",
     "pbr-skin",
+    "pbr-skin-sss",
     "pbr-skin-face",
     "pbr-no-shadow",
 ] as const;
@@ -31,6 +32,7 @@ export function normalizePbrMaterialShaderPreset(value: unknown): PbrMaterialSha
     switch (value) {
         case "pbr-mmd-like":
         case "pbr-skin":
+        case "pbr-skin-sss":
         case "pbr-skin-face":
         case "pbr-no-shadow":
             return value;

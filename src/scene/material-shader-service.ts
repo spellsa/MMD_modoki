@@ -2102,6 +2102,7 @@ export function applyImportedMaterialShaderStates(
             if (
                 state.presetId !== "pbr-mmd-like"
                 && state.presetId !== "pbr-skin"
+                && state.presetId !== "pbr-skin-sss"
                 && state.presetId !== "pbr-skin-face"
                 && state.presetId !== "pbr-no-shadow"
             ) {

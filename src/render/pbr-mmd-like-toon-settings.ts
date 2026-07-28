@@ -24,6 +24,18 @@ export const PBR_SKIN_TRANSLUCENCY_COLOR_RGB = [1, 0.68, 0.58] as const;
 export const PBR_SKIN_MINIMUM_ROUGHNESS = 0.68;
 export const PBR_SKIN_MINIMUM_THICKNESS = 0;
 export const PBR_SKIN_MAXIMUM_THICKNESS = 0.3;
+export const PBR_SKIN_SSS_METERS_PER_UNIT = 0.08;
+export const PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB = [0.08, 0.025, 0.012] as const;
+
+export function getPbrSkinSssRelativeRadius(
+    metersPerUnit: number,
+    diffusionProfile: readonly [number, number, number],
+): number {
+    if (!Number.isFinite(metersPerUnit) || metersPerUnit <= 0) {
+        return Number.POSITIVE_INFINITY;
+    }
+    return Math.max(...diffusionProfile) / metersPerUnit;
+}
 
 export function getPbrMmdLikeShadowTintStrength(toonInfluence: number): number {
     const normalizedInfluence = Number.isFinite(toonInfluence)
@@ -78,6 +90,7 @@ type PbrPresetMaterialTarget = object & {
 type PbrPresetSubSurfaceConfigurationTarget = {
     enabled: boolean;
     metersPerUnit: number;
+    needsImageProcessing?: boolean;
 };
 
 type PbrPresetSceneTarget = {
@@ -262,6 +275,10 @@ function createPbrSkinTranslucencyColor(): Color3 {
     return new Color3(...PBR_SKIN_TRANSLUCENCY_COLOR_RGB);
 }
 
+function createPbrSkinSssDiffusionProfile(): Color3 {
+    return new Color3(...PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB);
+}
+
 function createMmdLikeToonTranslucencyTexture(
     state: PbrPresetRuntimeState,
 ): (MmdLikeToonTextureTarget & BaseTexture) | null {
@@ -338,6 +355,29 @@ function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): bool
     return true;
 }
 
+function applyPbrSkinSssSettings(material: PbrPresetMaterialTarget): boolean {
+    const scene = material.getScene?.();
+    const configuration = scene?.enableSubSurfaceForPrePass?.();
+    if (!configuration) return false;
+
+    // Follow Babylon.js' documented screen-space skin scattering setup. MMD
+    // models are commonly around 20 units tall, so use roughly 8 cm per unit.
+    // The filter footprint scales with diffusion distance / metersPerUnit;
+    // keeping that ratio near 1 avoids spreading skin irradiance over the
+    // entire viewport.
+    applyPbrSkinSubSurfaceSettings(material);
+    configuration.metersPerUnit = PBR_SKIN_SSS_METERS_PER_UNIT;
+    // Final image processing is owned by the editor's selected output path.
+    // Babylon's default `true` adds a full-screen composition pass after SSS
+    // even when scene image processing is disabled, lifting the whole viewport.
+    configuration.needsImageProcessing = false;
+    material.subSurface.scatteringDiffusionProfile =
+        createPbrSkinSssDiffusionProfile();
+    material.subSurface.isScatteringEnabled = true;
+    configuration.enabled = true;
+    return true;
+}
+
 function applyPbrMmdLikeSubSurfaceSettings(
     material: PbrPresetMaterialTarget,
     state: PbrPresetRuntimeState,
@@ -382,6 +422,7 @@ export function isPbrShadowTintPreset(
 ): boolean {
     return preset === "pbr-mmd-like"
         || preset === "pbr-skin"
+        || preset === "pbr-skin-sss"
         || preset === "pbr-skin-face";
 }
 
@@ -470,6 +511,20 @@ export function applyPbrMaterialShaderPreset(
     ) {
         state.materialShaderPreset = "pbr-base";
         syncPbrSkinSceneConfiguration(material);
+        material.markAsDirty?.(Material.AllDirtyFlag);
+        return false;
+    }
+
+    if (
+        nextPreset === "pbr-skin-sss"
+        && !applyPbrSkinSssSettings(material)
+    ) {
+        restorePbrStandardSettings(material, state);
+        state.materialShaderPreset = "pbr-base";
+        syncPbrSkinSceneConfiguration(material);
+        syncPbrMmdLikeShadowTint(material, state);
+        syncPbrSkinFaceNormal(material, state);
+        syncPbrNoShadow(material, state);
         material.markAsDirty?.(Material.AllDirtyFlag);
         return false;
     }

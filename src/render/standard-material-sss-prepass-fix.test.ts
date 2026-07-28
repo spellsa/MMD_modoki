@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    getStandardMaterialSssPrePassPatchDiagnostics,
     injectStandardMaterialSssExclusion,
 } from "./standard-material-sss-prepass-fix";
 
@@ -22,5 +23,16 @@ describe("StandardMaterial SSS pre-pass compatibility", () => {
         expect(patched).toContain(
             "gl_FragData[PREPASS_IRRADIANCE_LEGACY_INDEX]=vec4(0.0,0.0,0.0,1.0);",
         );
+    });
+
+    it("patches the installed Babylon default shaders used by the app", () => {
+        expect(getStandardMaterialSssPrePassPatchDiagnostics()).toEqual({
+            glslSourcePresent: true,
+            glslMarkerPresent: true,
+            glslExclusionPresent: true,
+            wgslSourcePresent: true,
+            wgslMarkerPresent: true,
+            wgslExclusionPresent: true,
+        });
     });
 });

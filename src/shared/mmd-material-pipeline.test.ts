@@ -23,6 +23,7 @@ describe("mmd material pipeline", () => {
         expect(normalizePbrMaterialShaderPreset("pbr-base")).toBe("pbr-base");
         expect(normalizePbrMaterialShaderPreset("pbr-mmd-like")).toBe("pbr-mmd-like");
         expect(normalizePbrMaterialShaderPreset("pbr-skin")).toBe("pbr-skin");
+        expect(normalizePbrMaterialShaderPreset("pbr-skin-sss")).toBe("pbr-skin-sss");
         expect(normalizePbrMaterialShaderPreset("pbr-skin-face")).toBe("pbr-skin-face");
         expect(normalizePbrMaterialShaderPreset("pbr-no-shadow")).toBe("pbr-no-shadow");
         expect(normalizePbrMaterialShaderPreset("unknown")).toBe("pbr-base");

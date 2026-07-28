@@ -220,6 +220,11 @@
 - [ ] 材質タイプ別プリセット整理（肌 / 髪 / 布 / 金属）
 - [x] PBR IBLの実寄与をモデルなしPBR MMD Like合成球の画素輝度差で確認
 - [x] 高輝度外部HDRを使い、PBR Standard実モデルでIBLの方向・色・強弱を実機確認
+- [x] 安定版PBR Skinと分離した`PBR Skin SSS`実験プリセットを追加
+- [x] `PBR Skin SSS`の画面全体白化に対し、散乱距離 / scene scale比を制限して診断ログを追加
+- [x] `PBR Skin SSS`のPrePass対象マスク互換パッチがElectron / WebGPUで適用されることをログ確認
+- [x] `PBR Skin SSS`の追加Image Processingを無効化し、全画面白飛びの解消をElectron / WebGPU実機確認
+- [ ] `PBR Skin SSS`をElectron / WebGPU実機で比較し、暗化・影ぶれの有無を記録
 - [ ] 高コントラストHDRでPBR IBLのdiffuse / specular寄与を個別確認
 - [ ] PBR MMD LikeのSSS適用範囲をキャラクター / 材質別へ限定し、影ブレを解消
 - [ ] Babylon.js SSSの40サンプル上限、散乱半径、PrePass再合成回数を可視化して二重影を切り分け

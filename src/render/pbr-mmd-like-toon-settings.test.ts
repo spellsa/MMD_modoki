@@ -13,12 +13,15 @@ import {
     PBR_SKIN_MAXIMUM_THICKNESS,
     PBR_SKIN_MINIMUM_ROUGHNESS,
     PBR_SKIN_MINIMUM_THICKNESS,
+    PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
+    PBR_SKIN_SSS_METERS_PER_UNIT,
     PBR_SKIN_TRANSLUCENCY_COLOR_RGB,
     PBR_SKIN_TRANSLUCENCY_INTENSITY,
     applyPbrMmdLikeShadowTintSettings,
     applyPbrMaterialShaderPreset,
     getPbrMmdLikeShadowTintStrength,
     getPbrMaterialShaderPreset,
+    getPbrSkinSssRelativeRadius,
     isPbrShadowTintPreset,
     registerPbrPresetMaterial,
     registerPbrPresetTransparencyBaseline,
@@ -64,6 +67,7 @@ function createMaterial() {
     const subSurfaceConfiguration = {
         enabled: false,
         metersPerUnit: 1,
+        needsImageProcessing: true,
     };
     const scene = {
         materials: [] as unknown[],
@@ -113,6 +117,17 @@ function expectStandardBaseline(material: ReturnType<typeof createMaterial>): vo
 }
 
 describe("PBR material shader presets", () => {
+    it("keeps the experimental SSS filter footprint bounded", () => {
+        expect(getPbrSkinSssRelativeRadius(
+            PBR_SKIN_SSS_METERS_PER_UNIT,
+            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
+        )).toBeLessThanOrEqual(1);
+        expect(getPbrSkinSssRelativeRadius(
+            0,
+            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
+        )).toBe(Number.POSITIVE_INFINITY);
+    });
+
     it(
         "keeps PBR Standard on the verified rendering baseline",
         () => {
@@ -261,6 +276,36 @@ describe("PBR material shader presets", () => {
         expect(material.roughness).toBe(PBR_SKIN_MINIMUM_ROUGHNESS);
     });
 
+    it("adds documented screen-space scattering only for PBR Skin SSS", () => {
+        const material = createMaterial();
+        registerPbrPresetMaterial(material, material.ambientColor);
+        registerPbrPresetTransparencyBaseline(material);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin-sss")).toBe(true);
+        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-skin-sss");
+        expect(material.getScene().enableSubSurfaceForPrePass).toHaveBeenCalledOnce();
+        expect(material.getScene().subSurfaceConfiguration.enabled).toBe(true);
+        expect(material.getScene().subSurfaceConfiguration.metersPerUnit).toBe(
+            PBR_SKIN_SSS_METERS_PER_UNIT,
+        );
+        expect(material.getScene().subSurfaceConfiguration.needsImageProcessing).toBe(false);
+        expect(material.subSurface.isScatteringEnabled).toBe(true);
+        expect(material.subSurface.scatteringDiffusionProfile?.equals(
+            new Color3(...PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB),
+        )).toBe(true);
+
+        // The independent SSS preset keeps the already tuned, opaque Skin
+        // surface as its baseline instead of modifying alpha or refraction.
+        expect(material.subSurface.isRefractionEnabled).toBe(false);
+        expect(material.subSurface.isTranslucencyEnabled).toBe(true);
+        expect(material.subSurface.translucencyIntensity).toBe(
+            PBR_SKIN_TRANSLUCENCY_INTENSITY,
+        );
+        expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
+        expect(material.roughness).toBe(PBR_SKIN_MINIMUM_ROUGHNESS);
+        expect(material.alpha).toBe(1);
+    });
+
     it("configures Babylon PBRMaterial without requiring a scene prepass", () => {
         const engine = new NullEngine();
         (engine.getCaps() as { drawBuffersExtension: boolean }).drawBuffersExtension = true;
@@ -298,8 +343,39 @@ describe("PBR material shader presets", () => {
         }
     });
 
+    it("configures Babylon's prepass and diffusion profile for PBR Skin SSS", () => {
+        const engine = new NullEngine();
+        (engine.getCaps() as { drawBuffersExtension: boolean }).drawBuffersExtension = true;
+        const scene = new Scene(engine);
+        const material = new PBRMaterial("skin-sss", scene);
+        try {
+            registerPbrPresetMaterial(material, Color3.Black());
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-skin-sss")).toBe(true);
+            expect(scene.prePassRenderer).not.toBeNull();
+            expect(scene.subSurfaceConfiguration?.enabled).toBe(true);
+            expect(scene.subSurfaceConfiguration?.metersPerUnit).toBe(
+                PBR_SKIN_SSS_METERS_PER_UNIT,
+            );
+            expect(scene.subSurfaceConfiguration?.needsImageProcessing).toBe(false);
+            expect(material.subSurface.isScatteringEnabled).toBe(true);
+            expect(material.subSurface.scatteringDiffusionProfile?.equals(
+                new Color3(...PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB),
+            )).toBe(true);
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
+            expect(material.subSurface.isScatteringEnabled).toBe(false);
+            expect(scene.subSurfaceConfiguration?.enabled).toBe(false);
+        } finally {
+            material.dispose();
+            scene.dispose();
+            engine.dispose();
+        }
+    });
+
     it("accepts the shared shadow controls for MMD Like and Skin presets", () => {
         const engine = new NullEngine();
+        (engine.getCaps() as { drawBuffersExtension: boolean }).drawBuffersExtension = true;
         const scene = new Scene(engine);
         const material = new PBRMaterial("mmd-like-shadow-tint", scene);
         try {
@@ -317,6 +393,13 @@ describe("PBR material shader presets", () => {
                 material,
                 Color3.Red(),
                 1,
+            )).toBe(true);
+
+            expect(applyPbrMaterialShaderPreset(material, "pbr-skin-sss")).toBe(true);
+            expect(applyPbrMmdLikeShadowTintSettings(
+                material,
+                Color3.Yellow(),
+                0.75,
             )).toBe(true);
 
             expect(applyPbrMaterialShaderPreset(material, "pbr-skin-face")).toBe(true);
@@ -343,6 +426,7 @@ describe("PBR material shader presets", () => {
         expect(isPbrShadowTintPreset("pbr-base")).toBe(false);
         expect(isPbrShadowTintPreset("pbr-mmd-like")).toBe(true);
         expect(isPbrShadowTintPreset("pbr-skin")).toBe(true);
+        expect(isPbrShadowTintPreset("pbr-skin-sss")).toBe(true);
         expect(isPbrShadowTintPreset("pbr-skin-face")).toBe(true);
         expect(isPbrShadowTintPreset("pbr-no-shadow")).toBe(false);
     });
@@ -374,6 +458,7 @@ describe("PBR material shader presets", () => {
 
         expect(applyPbrMaterialShaderPreset(material, "pbr-mmd-like")).toBe(true);
         expect(applyPbrMaterialShaderPreset(material, "pbr-skin")).toBe(true);
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin-sss")).toBe(true);
         expect(applyPbrMaterialShaderPreset(material, "pbr-skin-face")).toBe(true);
         expect(applyPbrMaterialShaderPreset(material, "pbr-no-shadow")).toBe(true);
         expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
@@ -393,6 +478,18 @@ describe("PBR material shader presets", () => {
         expect(material.getScene().enableSubSurfaceForPrePass).not.toHaveBeenCalled();
         expect(material.subSurface.isScatteringEnabled).toBe(false);
         expect(material.subSurface.isTranslucencyEnabled).toBe(true);
+    });
+
+    it("falls back to PBR Standard when the SSS prepass is unavailable", () => {
+        const material = createMaterial();
+        material.getScene().enableSubSurfaceForPrePass.mockReturnValueOnce(null);
+        registerPbrPresetMaterial(material, material.ambientColor);
+        registerPbrPresetTransparencyBaseline(material);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin-sss")).toBe(false);
+        expect(getPbrMaterialShaderPreset(material)).toBe("pbr-base");
+        expect(material.getScene().subSurfaceConfiguration.enabled).toBe(false);
+        expectStandardBaseline(material);
     });
 
     it("restores the Standard baseline after using the PMX toon texture", () => {

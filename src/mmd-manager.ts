@@ -93,7 +93,19 @@ import {
 } from "./assets/motion-asset-service";
 import { isDebugLogEnabled, logDebugIfEnabled, logInfo, logWarn, toLogErrorData } from "./app-logger";
 import { loadPMX as loadPMXImpl } from "./assets/model-asset-service";
-import { applyPbrMaterialShaderPreset } from "./render/pbr-mmd-like-toon-settings";
+import {
+    applyPbrMaterialShaderPreset,
+    getPbrSkinSssRelativeRadius,
+    PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
+    PBR_SKIN_SSS_METERS_PER_UNIT,
+} from "./render/pbr-mmd-like-toon-settings";
+import {
+    getStandardMaterialSssPrePassPatchDiagnostics,
+} from "./render/standard-material-sss-prepass-fix";
+import {
+    getPbrMaterialSssPrePassMaskPatchDiagnostics,
+} from "./render/pbr-material-sss-prepass-mask-fix";
+import { resolveSubSurfaceFrameGraphPolicy } from "./render/subsurface-frame-graph-policy";
 import {
     applyImportedMaterialShaderStates as applyImportedMaterialShaderStatesImpl,
     getExternalWgslToonShaderPath as getExternalWgslToonShaderPathImpl,
@@ -587,7 +599,6 @@ import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeCameraAnimation";
 import "babylon-mmd/esm/Runtime/Optimized/Animation/mmdWasmRuntimeModelAnimation";
 import "@babylonjs/core/Materials/Textures/Loaders/tgaTextureLoader";
 import "@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent";
-import "./render/standard-material-sss-prepass-fix";
 import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/core/Rendering/prePassRendererSceneComponent";
 import "@babylonjs/core/Engines/WebGPU/Extensions/engine.dynamicTexture";
@@ -2397,11 +2408,14 @@ ${beforeFogAppendBlock}
     public getPbrMmdLikeScatteringDiagnostics(): {
         materialCount: number;
         configurationEnabled: boolean;
+        configurationNeedsImageProcessing: boolean | null;
         prePassEnabled: boolean;
         metersPerUnit: number | null;
         frameGraphSceneColorUsesCameraPostProcesses: boolean;
+        frameGraphSceneColorTargetActive: boolean;
     } {
         const configuration = this.scene.subSurfaceConfiguration;
+        const sceneColorTarget = this.frameGraphPostEffectsSceneColorTarget;
         return {
             materialCount: this.scene.materials.filter((material) => {
                 const subSurface = (material as Material & {
@@ -2410,10 +2424,14 @@ ${beforeFogAppendBlock}
                 return subSurface?.isScatteringEnabled === true;
             }).length,
             configurationEnabled: configuration?.enabled === true,
+            configurationNeedsImageProcessing: configuration?.needsImageProcessing ?? null,
             prePassEnabled: this.scene.prePassRenderer?.enabled === true,
             metersPerUnit: configuration?.metersPerUnit ?? null,
             frameGraphSceneColorUsesCameraPostProcesses:
-                this.frameGraphPostEffectsSceneColorTarget?.useCameraPostProcesses === true,
+                sceneColorTarget?.useCameraPostProcesses === true,
+            frameGraphSceneColorTargetActive:
+                sceneColorTarget !== null
+                && (this.camera?.customRenderTargets.includes(sceneColorTarget) ?? false),
         };
     }
 
@@ -2730,20 +2748,42 @@ ${beforeFogAppendBlock}
         const nextPreset = normalizePbrMaterialShaderPreset(presetId);
 
         let applied = false;
+        let appliedMaterialCount = 0;
         for (const target of targets) {
-            applied = applyPbrMaterialShaderPreset(
+            const materialApplied = applyPbrMaterialShaderPreset(
                 target.material,
                 nextPreset,
-            ) || applied;
+            );
+            applied = materialApplied || applied;
+            if (materialApplied) {
+                appliedMaterialCount += 1;
+            }
         }
         if (applied) {
             this.applyToonShadowInfluenceToAllModels();
             this.syncFrameGraphRenderTargetState();
+            const sssDiagnostics = nextPreset === "pbr-skin-sss"
+                ? {
+                    ...this.getPbrMmdLikeScatteringDiagnostics(),
+                    metersPerUnit: PBR_SKIN_SSS_METERS_PER_UNIT,
+                    diffusionProfile: [...PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB],
+                    relativeFilterRadius: getPbrSkinSssRelativeRadius(
+                        PBR_SKIN_SSS_METERS_PER_UNIT,
+                        PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
+                    ),
+                    standardMaterialPatch:
+                        getStandardMaterialSssPrePassPatchDiagnostics(),
+                    pbrMaterialMaskPatch:
+                        getPbrMaterialSssPrePassMaskPatchDiagnostics(),
+                }
+                : undefined;
             logInfo("render", "per-material PBR shader preset applied", {
                 modelIndex,
                 materialKey,
                 preset: nextPreset,
                 materialCount: targets.length,
+                appliedMaterialCount,
+                sssDiagnostics,
             });
             this.onMaterialShaderStateChanged?.();
         }
@@ -9077,10 +9117,19 @@ ${beforeFogAppendBlock}
         if (!sceneColorTarget || !customRenderTargets) {
             return;
         }
-        sceneColorTarget.useCameraPostProcesses = this.hasActivePbrMmdLikeScattering();
         const index = customRenderTargets.indexOf(sceneColorTarget);
         const shouldRenderSceneColorTarget = this.postEffectBackend === "frameGraph"
             && this.shouldExecuteFrameGraphPostEffects();
+        const subSurfacePolicy = resolveSubSurfaceFrameGraphPolicy(shouldRenderSceneColorTarget);
+        sceneColorTarget.useCameraPostProcesses = subSurfacePolicy.sceneColorUseCameraPostProcesses;
+        const subSurfaceConfiguration = this.scene.subSurfaceConfiguration;
+        if (subSurfaceConfiguration) {
+            // SSS itself is inserted into the PrePass chain automatically.
+            // Final image processing belongs to the selected application
+            // output path, not to an extra SSS-owned full-screen pass.
+            subSurfaceConfiguration.needsImageProcessing =
+                subSurfacePolicy.configurationNeedsImageProcessing;
+        }
         if (shouldRenderSceneColorTarget) {
             if (index < 0) {
                 customRenderTargets.push(sceneColorTarget);
@@ -9144,6 +9193,11 @@ ${beforeFogAppendBlock}
             // effects are disposed.
         }
         this.postEffectBackend = "classic";
+        const subSurfaceConfiguration = this.scene.subSurfaceConfiguration;
+        if (subSurfaceConfiguration) {
+            subSurfaceConfiguration.needsImageProcessing =
+                resolveSubSurfaceFrameGraphPolicy(false).configurationNeedsImageProcessing;
+        }
         this.disposeFrameGraphPostEffectsController();
     }
 
