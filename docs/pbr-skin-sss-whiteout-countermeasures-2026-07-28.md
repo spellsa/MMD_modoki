@@ -99,8 +99,14 @@ backend切替やFrame Graph同期時にBabylon.js側の設定が戻らないよ�
 | 項目 | 値 |
 |---|---:|
 | `metersPerUnit` | `0.08` |
-| diffusion profile | `(0.08, 0.025, 0.012)` |
-| 相対フィルタ半径 | `1.0` |
+| diffusion profile | `(0.0016, 0.00152, 0.00148)` |
+| 相対フィルタ半径 | `0.02` |
+| Translucency | 無効 |
+
+`addDiffusionProfile(Color3)`のRGB値は表示へ加算する色ではなく、各チャンネルの散乱距離として
+扱われる。赤チャンネルだけを広く散乱させると、アルベドよりプロファイルの色が支配的になり、
+非赤チャンネルが暗く見えやすい。このためRGB差を約8%に抑え、最大距離も従来の50分の1へ
+縮小した。色と明暗の原因を分離するため、`PBR Skin SSS`ではTranslucencyを併用しない。
 
 ### 4. PrePassのSSS対象マスクを防御的に補正
 

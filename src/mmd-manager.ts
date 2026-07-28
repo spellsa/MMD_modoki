@@ -2746,6 +2746,66 @@ ${beforeFogAppendBlock}
             : entry.materials.filter((material) => material.key === materialKey);
         if (targets.length === 0) return false;
         const nextPreset = normalizePbrMaterialShaderPreset(presetId);
+        const createPbrAppearanceDiagnostics = (material: MmdManagerMaterialLike): Record<string, unknown> => {
+            const colorToRgb = (value: unknown): [number, number, number] | null => {
+                if (!value || typeof value !== "object") return null;
+                const color = value as { r?: unknown; g?: unknown; b?: unknown };
+                return typeof color.r === "number"
+                    && typeof color.g === "number"
+                    && typeof color.b === "number"
+                    ? [color.r, color.g, color.b]
+                    : null;
+            };
+            const pbrMaterial = material as MmdManagerMaterialLike & {
+                albedoColor?: unknown;
+                ambientColor?: unknown;
+                emissiveColor?: unknown;
+                reflectionColor?: unknown;
+                metallic?: unknown;
+                roughness?: unknown;
+                environmentIntensity?: unknown;
+                albedoTexture?: {
+                    level?: unknown;
+                    gammaSpace?: unknown;
+                } | null;
+                subSurface?: {
+                    isScatteringEnabled?: unknown;
+                    isTranslucencyEnabled?: unknown;
+                    scatteringDiffusionProfile?: unknown;
+                };
+            };
+            return {
+                albedoColor: colorToRgb(pbrMaterial.albedoColor),
+                ambientColor: colorToRgb(pbrMaterial.ambientColor),
+                emissiveColor: colorToRgb(pbrMaterial.emissiveColor),
+                reflectionColor: colorToRgb(pbrMaterial.reflectionColor),
+                hasAlbedoTexture: pbrMaterial.albedoTexture != null,
+                albedoTextureLevel: typeof pbrMaterial.albedoTexture?.level === "number"
+                    ? pbrMaterial.albedoTexture.level
+                    : null,
+                albedoTextureGammaSpace: typeof pbrMaterial.albedoTexture?.gammaSpace === "boolean"
+                    ? pbrMaterial.albedoTexture.gammaSpace
+                    : null,
+                metallic: typeof pbrMaterial.metallic === "number" ? pbrMaterial.metallic : null,
+                roughness: typeof pbrMaterial.roughness === "number" ? pbrMaterial.roughness : null,
+                environmentIntensity: typeof pbrMaterial.environmentIntensity === "number"
+                    ? pbrMaterial.environmentIntensity
+                    : null,
+                alpha: typeof pbrMaterial.alpha === "number" ? pbrMaterial.alpha : null,
+                scatteringEnabled: pbrMaterial.subSurface?.isScatteringEnabled === true,
+                translucencyEnabled: pbrMaterial.subSurface?.isTranslucencyEnabled === true,
+                scatteringDiffusionProfile: typeof pbrMaterial.subSurface?.scatteringDiffusionProfile === "number"
+                    ? pbrMaterial.subSurface.scatteringDiffusionProfile
+                    : null,
+            };
+        };
+        const appearanceBefore = nextPreset === "pbr-skin-sss"
+            ? targets.map((target) => ({
+                key: target.key,
+                name: target.name,
+                ...createPbrAppearanceDiagnostics(target.material),
+            }))
+            : undefined;
 
         let applied = false;
         let appliedMaterialCount = 0;
@@ -2762,6 +2822,13 @@ ${beforeFogAppendBlock}
         if (applied) {
             this.applyToonShadowInfluenceToAllModels();
             this.syncFrameGraphRenderTargetState();
+            const appearanceAfter = nextPreset === "pbr-skin-sss"
+                ? targets.map((target) => ({
+                    key: target.key,
+                    name: target.name,
+                    ...createPbrAppearanceDiagnostics(target.material),
+                }))
+                : undefined;
             const sssDiagnostics = nextPreset === "pbr-skin-sss"
                 ? {
                     ...this.getPbrMmdLikeScatteringDiagnostics(),
@@ -2775,6 +2842,10 @@ ${beforeFogAppendBlock}
                         getStandardMaterialSssPrePassPatchDiagnostics(),
                     pbrMaterialMaskPatch:
                         getPbrMaterialSssPrePassMaskPatchDiagnostics(),
+                    // electron-log collapses nested object arrays to "[object]".
+                    // Keep this JSON-encoded so PMX-to-PBR conversion values remain inspectable.
+                    appearanceBeforeJson: JSON.stringify(appearanceBefore ?? []),
+                    appearanceAfterJson: JSON.stringify(appearanceAfter ?? []),
                 }
                 : undefined;
             logInfo("render", "per-material PBR shader preset applied", {

@@ -24,8 +24,11 @@ export const PBR_SKIN_TRANSLUCENCY_COLOR_RGB = [1, 0.68, 0.58] as const;
 export const PBR_SKIN_MINIMUM_ROUGHNESS = 0.68;
 export const PBR_SKIN_MINIMUM_THICKNESS = 0;
 export const PBR_SKIN_MAXIMUM_THICKNESS = 0.3;
+export const PBR_SKIN_SSS_ENVIRONMENT_INTENSITY = 1;
 export const PBR_SKIN_SSS_METERS_PER_UNIT = 0.08;
-export const PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB = [0.08, 0.025, 0.012] as const;
+// Babylon の値は発光色ではなく、RGB 各成分の散乱距離。
+// 最大距離は維持したまま、赤だけわずかに遠く届く白寄りの薄いピンクにする。
+export const PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB = [0.0016, 0.00152, 0.00148] as const;
 
 export function getPbrSkinSssRelativeRadius(
     metersPerUnit: number,
@@ -73,6 +76,8 @@ export type MmdLikeSubSurfaceTarget = {
 
 type PbrPresetMaterialTarget = object & {
     subSurface: MmdLikeSubSurfaceTarget;
+    albedoColor?: Color3;
+    albedoTexture?: BaseTexture | null;
     ambientColor?: Color3;
     reflectionColor?: Color3;
     alpha?: number;
@@ -131,6 +136,7 @@ type PbrPresetRuntimeState = {
     baselineSpecularIntensity: number | undefined;
     baselineEnvironmentIntensity: number | undefined;
     baselineReflectionColor: Color3 | undefined;
+    baselineAlbedoColor: Color3 | undefined;
     fallbackColor: Color3;
     toonTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
     toonTranslucencyTexture: (MmdLikeToonTextureTarget & BaseTexture) | null;
@@ -222,6 +228,7 @@ function getOrCreatePbrPresetRuntimeState(
         baselineSpecularIntensity: material.specularIntensity,
         baselineEnvironmentIntensity: material.environmentIntensity,
         baselineReflectionColor: material.reflectionColor?.clone(),
+        baselineAlbedoColor: material.albedoColor?.clone(),
         fallbackColor: resolvedFallbackColor,
         toonTexture: null,
         toonTranslucencyTexture: null,
@@ -263,6 +270,9 @@ function restorePbrStandardSettings(
     material.roughness = state.baselineRoughness;
     material.specularIntensity = state.baselineSpecularIntensity;
     material.environmentIntensity = state.baselineEnvironmentIntensity;
+    if (state.baselineAlbedoColor !== undefined) {
+        material.albedoColor = state.baselineAlbedoColor.clone();
+    }
     // babylon-mmd maps MMD specular color to reflectionColor, while Babylon
     // also multiplies diffuse IBL by this value. Keep the verified Standard
     // behavior that uses a neutral environment-map tint.
@@ -328,14 +338,23 @@ function syncPbrSkinSceneConfiguration(material: PbrPresetMaterialTarget): void 
     configuration.enabled = scene.materials.some(hasScreenSpaceScattering);
 }
 
-function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): boolean {
-    // Use Babylon.js' opaque diffuse-transmission path without the screen-space
-    // scattering pass. Even a narrow diffusion profile currently breaks the
-    // application's final composition and darkens the selected skin material.
-    // Refraction and alpha remain disabled/untouched, so the surface stays opaque.
+function applyPbrSkinBaseSurfaceSettings(material: PbrPresetMaterialTarget): void {
     material.subSurface.isRefractionEnabled = false;
     material.subSurface.refractionIntensity = 0;
     material.subSurface.linkRefractionWithTransparency = false;
+    if (material.environmentIntensity !== undefined) {
+        material.environmentIntensity = PBR_SKIN_ENVIRONMENT_INTENSITY;
+    }
+    material.roughness = Math.max(
+        material.roughness ?? 0,
+        PBR_SKIN_MINIMUM_ROUGHNESS,
+    );
+}
+
+function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): boolean {
+    // The stable Skin preset uses Babylon's opaque diffuse-transmission path
+    // without the screen-space scattering pass.
+    applyPbrSkinBaseSurfaceSettings(material);
     material.subSurface.isTranslucencyEnabled = true;
     material.subSurface.translucencyIntensity = PBR_SKIN_TRANSLUCENCY_INTENSITY;
     material.subSurface.translucencyColor = createPbrSkinTranslucencyColor();
@@ -345,13 +364,6 @@ function applyPbrSkinSubSurfaceSettings(material: PbrPresetMaterialTarget): bool
     material.subSurface.maximumThickness = PBR_SKIN_MAXIMUM_THICKNESS;
     material.subSurface.legacyTranslucency = false;
     material.subSurface.isScatteringEnabled = false;
-    if (material.environmentIntensity !== undefined) {
-        material.environmentIntensity = PBR_SKIN_ENVIRONMENT_INTENSITY;
-    }
-    material.roughness = Math.max(
-        material.roughness ?? 0,
-        PBR_SKIN_MINIMUM_ROUGHNESS,
-    );
     return true;
 }
 
@@ -362,10 +374,34 @@ function applyPbrSkinSssSettings(material: PbrPresetMaterialTarget): boolean {
 
     // Follow Babylon.js' documented screen-space skin scattering setup. MMD
     // models are commonly around 20 units tall, so use roughly 8 cm per unit.
-    // The filter footprint scales with diffusion distance / metersPerUnit;
-    // keeping that ratio near 1 avoids spreading skin irradiance over the
-    // entire viewport.
-    applyPbrSkinSubSurfaceSettings(material);
+    // The profile channels are scattering distances, not an additive tint.
+    // Keep the relative radius around 0.1 and the RGB distances nearly neutral
+    // so the source albedo remains dominant while SSS adds only subtle warmth.
+    applyPbrSkinBaseSurfaceSettings(material);
+    // Match PBR Standard while diagnosing the scattering-only preset. The
+    // stable Skin preset intentionally stays at its lower IBL response.
+    if (material.environmentIntensity !== undefined) {
+        material.environmentIntensity = PBR_SKIN_SSS_ENVIRONMENT_INTENSITY;
+    }
+    // babylon-mmd maps PMX diffuse RGB to albedoColor. That multiplier is
+    // authored for MMD's diffuse + ambient lighting model and is not reliably
+    // usable as a physical base-color multiplier. For textured skin, keep the
+    // texture's authored color intact and restore the PMX value when leaving
+    // this preset. Textureless materials still need their PMX diffuse color.
+    if (material.albedoTexture && material.albedoColor) {
+        material.albedoColor = Color3.White();
+    }
+    // Keep this diagnostic preset scattering-only. Translucency uses a
+    // separate tint/attenuation path and previously compounded the warm
+    // diffusion profile into red highlights and dark non-red channels.
+    material.subSurface.isTranslucencyEnabled = false;
+    material.subSurface.translucencyIntensity = 0;
+    material.subSurface.translucencyColor = null;
+    material.subSurface.translucencyColorTexture = null;
+    material.subSurface.useAlbedoToTintTranslucency = false;
+    material.subSurface.minimumThickness = 0;
+    material.subSurface.maximumThickness = 0;
+    material.subSurface.legacyTranslucency = false;
     configuration.metersPerUnit = PBR_SKIN_SSS_METERS_PER_UNIT;
     // Final image processing is owned by the editor's selected output path.
     // Babylon's default `true` adds a full-screen composition pass after SSS

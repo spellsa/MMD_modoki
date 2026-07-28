@@ -54,16 +54,20 @@ MMD キャラクターへ適用しやすく、壊れにくい出発点を優先�
 |---|---:|---|
 | `scene.enableSubSurfaceForPrePass()` | 有効 | PrePassとSubSurface post-processを準備 |
 | `metersPerUnit` | `0.08` | MMDキャラクターを約20 unit ≒ 1.6 mとみなす暫定換算 |
-| `scatteringDiffusionProfile` | `(0.08, 0.025, 0.012)` | MMDスケール向けに縮小したRGB散乱距離 |
+| `scatteringDiffusionProfile` | `(0.0016, 0.00152, 0.00148)` | アルベドを支配しない、ごく薄い暖色のRGB散乱距離 |
 | `isScatteringEnabled` | `true` | この実験プリセットだけで有効 |
-| `isTranslucencyEnabled` | `true` | 調整済みPBR Skinの基準値を併用 |
-| `translucencyIntensity` | `0.02` | 安定版PBR Skinと同値 |
+| `isTranslucencyEnabled` | `false` | Scatteringの色・明暗を単独評価するため併用しない |
+| `translucencyIntensity` | `0` | Translucency由来の暖色加算を除外 |
 | 材質 `environmentIntensity` | `0.80` | 安定版PBR Skinと同値 |
 | roughness下限 | `0.68` | 安定版PBR Skinと同値 |
 
 `scatteringDiffusionProfile`は加算する「SSS色」ではなく、RGBごとの散乱距離を表す。
 そのため、赤チャンネルの値が大きくても単純な赤い発光にはならない。またScatteringは
 画面空間の再合成なので、必ず明るくなる処理でもない。
+
+2026-07-28の再調整では、赤だけが広く散乱して緑・青が暗くなる挙動を避けるため、
+RGB差を小さくした薄い暖色へ変更した。`PBR Skin SSS`ではTranslucencyを完全に外し、
+Scattering単独で赤黒化と影ぶれを評価する。安定版`PBR Skin`のTranslucency設定は変更しない。
 
 PrePassを利用できないbackendでは適用を失敗扱いにし、その材質を`PBR Standard`へ戻す。
 一つでもScattering材質が残っている間だけscene側のSubSurface設定を有効にし、最後の

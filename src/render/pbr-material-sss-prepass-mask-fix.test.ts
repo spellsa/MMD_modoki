@@ -42,6 +42,10 @@ describe("PBR material SSS prepass mask compatibility", () => {
 
     it("patches the installed Babylon PBR prepass includes", () => {
         expect(getPbrMaterialSssPrePassMaskPatchDiagnostics()).toEqual({
+            glslVertexShaderPresent: true,
+            glslFragmentShaderPresent: true,
+            wgslVertexShaderPresent: true,
+            wgslFragmentShaderPresent: true,
             glslSourcePresent: true,
             glslScatteringMarkerPresent: false,
             glslTransparentExclusionPresent: true,

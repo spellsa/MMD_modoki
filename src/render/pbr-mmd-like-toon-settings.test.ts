@@ -14,6 +14,7 @@ import {
     PBR_SKIN_MINIMUM_ROUGHNESS,
     PBR_SKIN_MINIMUM_THICKNESS,
     PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
+    PBR_SKIN_SSS_ENVIRONMENT_INTENSITY,
     PBR_SKIN_SSS_METERS_PER_UNIT,
     PBR_SKIN_TRANSLUCENCY_COLOR_RGB,
     PBR_SKIN_TRANSLUCENCY_INTENSITY,
@@ -76,6 +77,8 @@ function createMaterial() {
     };
     const material = {
         subSurface: createSubSurfaceTarget(),
+        albedoColor: new Color3(0.45, 0.5, 0.55),
+        albedoTexture: null as BaseTexture | null,
         ambientColor: new Color3(0.2, 0.3, 0.4),
         alpha: 1,
         transparencyMode: Material.MATERIAL_ALPHABLEND,
@@ -114,14 +117,26 @@ function expectStandardBaseline(material: ReturnType<typeof createMaterial>): vo
     expect(material.specularIntensity).toBe(1);
     expect(material.environmentIntensity).toBe(0.9);
     expect(material.reflectionColor.equals(Color3.White())).toBe(true);
+    expect(material.albedoColor.equals(new Color3(0.45, 0.5, 0.55))).toBe(true);
 }
 
 describe("PBR material shader presets", () => {
     it("keeps the experimental SSS filter footprint bounded", () => {
-        expect(getPbrSkinSssRelativeRadius(
+        const relativeRadius = getPbrSkinSssRelativeRadius(
             PBR_SKIN_SSS_METERS_PER_UNIT,
             PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
-        )).toBeLessThanOrEqual(1);
+        );
+        expect(relativeRadius).toBeCloseTo(0.02);
+        expect(PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[0]).toBeGreaterThan(
+            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[1],
+        );
+        expect(PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[1]).toBeGreaterThan(
+            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[2],
+        );
+        expect(
+            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[0]
+            / PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[2],
+        ).toBeLessThan(1.1);
         expect(getPbrSkinSssRelativeRadius(
             0,
             PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
@@ -294,14 +309,15 @@ describe("PBR material shader presets", () => {
             new Color3(...PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB),
         )).toBe(true);
 
-        // The independent SSS preset keeps the already tuned, opaque Skin
-        // surface as its baseline instead of modifying alpha or refraction.
+        // The independent SSS preset stays opaque and uses scattering alone,
+        // so Translucency cannot compound the warm diffusion profile.
         expect(material.subSurface.isRefractionEnabled).toBe(false);
-        expect(material.subSurface.isTranslucencyEnabled).toBe(true);
-        expect(material.subSurface.translucencyIntensity).toBe(
-            PBR_SKIN_TRANSLUCENCY_INTENSITY,
-        );
-        expect(material.environmentIntensity).toBe(PBR_SKIN_ENVIRONMENT_INTENSITY);
+        expect(material.subSurface.isTranslucencyEnabled).toBe(false);
+        expect(material.subSurface.translucencyIntensity).toBe(0);
+        expect(material.subSurface.translucencyColor).toBeNull();
+        expect(material.subSurface.translucencyColorTexture).toBeNull();
+        expect(material.subSurface.useAlbedoToTintTranslucency).toBe(false);
+        expect(material.environmentIntensity).toBe(PBR_SKIN_SSS_ENVIRONMENT_INTENSITY);
         expect(material.roughness).toBe(PBR_SKIN_MINIMUM_ROUGHNESS);
         expect(material.alpha).toBe(1);
     });
@@ -362,6 +378,13 @@ describe("PBR material shader presets", () => {
             expect(material.subSurface.scatteringDiffusionProfile?.equals(
                 new Color3(...PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB),
             )).toBe(true);
+            expect(material.subSurface.isTranslucencyEnabled).toBe(false);
+            expect(material.subSurface.translucencyIntensity).toBe(0);
+            expect(material.subSurface.translucencyColor).toBeNull();
+            expect(material.subSurface.translucencyColorTexture).toBeNull();
+            expect(material.environmentIntensity).toBe(
+                PBR_SKIN_SSS_ENVIRONMENT_INTENSITY,
+            );
 
             expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
             expect(material.subSurface.isScatteringEnabled).toBe(false);
@@ -371,6 +394,18 @@ describe("PBR material shader presets", () => {
             scene.dispose();
             engine.dispose();
         }
+    });
+
+    it("does not multiply textured PBR Skin SSS by PMX diffuse RGB", () => {
+        const material = createMaterial();
+        material.albedoTexture = {} as BaseTexture;
+        registerPbrPresetMaterial(material, Color3.Black());
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-skin-sss")).toBe(true);
+        expect(material.albedoColor.equals(Color3.White())).toBe(true);
+
+        expect(applyPbrMaterialShaderPreset(material, "pbr-base")).toBe(true);
+        expect(material.albedoColor.equals(new Color3(0.45, 0.5, 0.55))).toBe(true);
     });
 
     it("accepts the shared shadow controls for MMD Like and Skin presets", () => {

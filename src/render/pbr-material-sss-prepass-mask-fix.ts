@@ -1,4 +1,8 @@
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
+import "@babylonjs/core/Shaders/pbr.vertex";
+import "@babylonjs/core/Shaders/pbr.fragment";
+import "@babylonjs/core/ShadersWGSL/pbr.vertex";
+import "@babylonjs/core/ShadersWGSL/pbr.fragment";
 import "@babylonjs/core/Shaders/ShadersInclude/pbrBlockPrePass";
 import "@babylonjs/core/ShadersWGSL/ShadersInclude/pbrBlockPrePass";
 
@@ -17,6 +21,10 @@ const WGSL_NON_SCATTERING_REPLACEMENT =
     "vec4f(clamp(irradiance,vec3f(0.),vec3f(1.)),1.0);";
 
 export type PbrMaterialSssPrePassMaskPatchDiagnostics = {
+    glslVertexShaderPresent: boolean;
+    glslFragmentShaderPresent: boolean;
+    wgslVertexShaderPresent: boolean;
+    wgslFragmentShaderPresent: boolean;
     glslSourcePresent: boolean;
     glslScatteringMarkerPresent: boolean;
     glslTransparentExclusionPresent: boolean;
@@ -115,6 +123,14 @@ PbrMaterialSssPrePassMaskPatchDiagnostics {
     const glsl = inspectPatchState(glslSource, "glsl");
     const wgsl = inspectPatchState(wgslSource, "wgsl");
     return {
+        glslVertexShaderPresent:
+            typeof ShaderStore.ShadersStore.pbrVertexShader === "string",
+        glslFragmentShaderPresent:
+            typeof ShaderStore.ShadersStore.pbrPixelShader === "string",
+        wgslVertexShaderPresent:
+            typeof ShaderStore.ShadersStoreWGSL.pbrVertexShader === "string",
+        wgslFragmentShaderPresent:
+            typeof ShaderStore.ShadersStoreWGSL.pbrPixelShader === "string",
         glslSourcePresent: typeof glslSource === "string",
         glslScatteringMarkerPresent: glsl.glslScatteringMarkerPresent,
         glslTransparentExclusionPresent:
