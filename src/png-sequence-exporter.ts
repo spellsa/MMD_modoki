@@ -1,4 +1,4 @@
-import { MmdManager } from "./mmd-manager";
+import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
 import { CreateScreenshotUsingRenderTargetAsync } from "@babylonjs/core/Misc/screenshotTools";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
@@ -108,6 +108,7 @@ export async function runPngSequenceExportJob(
     canvas: HTMLCanvasElement,
     request: PngSequenceExportRequest,
     callbacks: PngSequenceExportCallbacks = {},
+    enginePreference: RenderEnginePreference = "auto",
 ): Promise<PngSequenceExportResult> {
     const startFrame = Math.max(0, Math.floor(request.startFrame));
     const endFrame = Math.max(startFrame, Math.floor(request.endFrame));
@@ -135,7 +136,7 @@ export async function runPngSequenceExportJob(
     }
 
     callbacks.onStatus?.("Initializing export renderer...");
-    const mmdManager = await MmdManager.create(canvas);
+    const mmdManager = await MmdManager.create(canvas, enginePreference);
 
     try {
         callbacks.onStatus?.("Loading project into export renderer...");

@@ -6,7 +6,7 @@
 import "@babylonjs/loaders/glTF";
 import { WebRequest } from "@babylonjs/core/Misc/webRequest";
 import "./index.css";
-import { MmdManager } from "./mmd-manager";
+import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
 import "./mmd-manager-x-extension";
 import { Timeline } from "./timeline";
 import { BottomPanel } from "./bottom-panel";
@@ -224,12 +224,20 @@ document.addEventListener("DOMContentLoaded", () => {
 async function initializeApp(): Promise<void> {
   const searchParams = new URLSearchParams(window.location.search);
   const mode = searchParams.get("mode");
+  const rendererBackendParam = searchParams.get("rendererBackend");
+  const rendererBackend: RenderEnginePreference =
+    rendererBackendParam === "webgpu" || rendererBackendParam === "webgl2"
+      ? rendererBackendParam
+      : "auto";
   const smokeModelPath = searchParams.get("smokeModelPath");
   const smokeHdrPath = searchParams.get("smokeHdrPath");
   const smokePbrMmdLike = searchParams.get("smokePbrMmdLike") === "1";
   const smokeRenderStabilityDiagnostics =
     searchParams.get("smokeRenderStabilityDiagnostics") === "1";
-  logInfo("renderer", "initialize app", { mode: mode ?? "editor" });
+  logInfo("renderer", "initialize app", {
+    mode: mode ?? "editor",
+    rendererBackend,
+  });
   if (mode === "exporter") {
     await initializePngSequenceExporter(searchParams);
     return;
@@ -262,7 +270,7 @@ async function initializeApp(): Promise<void> {
   }
 
   try {
-    const mmdManager = await MmdManager.create(canvas);
+    const mmdManager = await MmdManager.create(canvas, rendererBackend);
     if (smokeHdrPath) {
       const loaded = await mmdManager.setEnvironmentLightingSourcePath(smokeHdrPath);
       if (!loaded) {
@@ -448,6 +456,11 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
     }
 
     let lastProgressReportAt = 0;
+    const rendererBackendParam = searchParams.get("rendererBackend");
+    const rendererBackend: RenderEnginePreference =
+      rendererBackendParam === "webgpu" || rendererBackendParam === "webgl2"
+        ? rendererBackendParam
+        : "auto";
     const result = await runPngSequenceExportJob(canvas, request, {
       onStatus: (message) => {
         setStatus(message);
@@ -468,7 +481,7 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
           });
         }
       },
-    });
+    }, rendererBackend);
 
     setStatus(`Done: ${result.exportedFrames} frame(s)`);
     closeExporterWindowSoon();
@@ -579,6 +592,11 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       });
     };
 
+    const rendererBackendParam = searchParams.get("rendererBackend");
+    const rendererBackend: RenderEnginePreference =
+      rendererBackendParam === "webgpu" || rendererBackendParam === "webgl2"
+        ? rendererBackendParam
+        : "auto";
     const result = await runWebmExportJob(canvas, request, {
       onStatus: (message, phase) => {
         setStatus(message);
@@ -598,7 +616,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
         setStatus(progressMessage);
         emitWebmProgress("encoding", progressMessage, encoded === total);
       },
-    });
+    }, rendererBackend);
 
     setStatus(`Done: ${result.encodedFrames} frame(s) ${result.codec}`);
     logInfo("webm", "exporter job completed", {

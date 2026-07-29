@@ -30,6 +30,11 @@ if (started) {
 
 const isDev = Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL);
 const isSmokeMode = process.env.MMD_MODOKI_SMOKE === '1';
+const forcedRendererBackend =
+  process.env.MMD_MODOKI_RENDERER === 'webgpu'
+  || process.env.MMD_MODOKI_RENDERER === 'webgl2'
+    ? process.env.MMD_MODOKI_RENDERER
+    : undefined;
 if (isSmokeMode && process.env.MMD_MODOKI_SMOKE_USER_DATA_PATH) {
   app.setPath('userData', process.env.MMD_MODOKI_SMOKE_USER_DATA_PATH);
 }
@@ -504,10 +509,15 @@ const loadEditorWindow = async (
   targetWindow: BrowserWindow,
   query?: Record<string, string>,
 ): Promise<void> => {
+  const effectiveQuery = {
+    ...(query ?? {}),
+    ...(forcedRendererBackend ? { rendererBackend: forcedRendererBackend } : {}),
+  };
+  const hasQuery = Object.keys(effectiveQuery).length > 0;
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     const url = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-    if (query) {
-      for (const [key, value] of Object.entries(query)) {
+    if (hasQuery) {
+      for (const [key, value] of Object.entries(effectiveQuery)) {
         url.searchParams.set(key, value);
       }
     }
@@ -517,7 +527,7 @@ const loadEditorWindow = async (
 
   await targetWindow.loadFile(
     path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    query ? { query } : undefined,
+    hasQuery ? { query: effectiveQuery } : undefined,
   );
 };
 

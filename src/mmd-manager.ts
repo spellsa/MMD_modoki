@@ -104,6 +104,7 @@ import {
 } from "./render/standard-material-sss-prepass-fix";
 import {
     getPbrMaterialSssPrePassMaskPatchDiagnostics,
+    PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH,
 } from "./render/pbr-material-sss-prepass-mask-fix";
 import { resolveSubSurfaceFrameGraphPolicy } from "./render/subsurface-frame-graph-policy";
 import {
@@ -852,6 +853,8 @@ interface PreferredEngineResult {
     engine: Engine | WebGPUEngine;
     startupDiagnostics: string[];
 }
+
+export type RenderEnginePreference = "auto" | "webgpu" | "webgl2";
 
 export class MmdManager {
     private static readonly RENDER_ENGINE_OPTIONS = {
@@ -2411,10 +2414,13 @@ ${beforeFogAppendBlock}
         configurationNeedsImageProcessing: boolean | null;
         prePassEnabled: boolean;
         metersPerUnit: number | null;
+        compiledSssCenterBlendPresent: boolean | null;
         frameGraphSceneColorUsesCameraPostProcesses: boolean;
         frameGraphSceneColorTargetActive: boolean;
     } {
         const configuration = this.scene.subSurfaceConfiguration;
+        const compiledSssFragmentSource =
+            configuration?.postProcess?.getEffect().fragmentSourceCode;
         const sceneColorTarget = this.frameGraphPostEffectsSceneColorTarget;
         return {
             materialCount: this.scene.materials.filter((material) => {
@@ -2427,6 +2433,10 @@ ${beforeFogAppendBlock}
             configurationNeedsImageProcessing: configuration?.needsImageProcessing ?? null,
             prePassEnabled: this.scene.prePassRenderer?.enabled === true,
             metersPerUnit: configuration?.metersPerUnit ?? null,
+            compiledSssCenterBlendPresent:
+                typeof compiledSssFragmentSource === "string"
+                    ? compiledSssFragmentSource.includes("composedIrradiance")
+                    : null,
             frameGraphSceneColorUsesCameraPostProcesses:
                 sceneColorTarget?.useCameraPostProcesses === true,
             frameGraphSceneColorTargetActive:
@@ -2820,6 +2830,13 @@ ${beforeFogAppendBlock}
             }
         }
         if (applied) {
+            if (nextPreset === "pbr-skin-sss") {
+                // The SSS post-process can already be compiled when a preset
+                // is changed during an Electron session. Rebuild it from the
+                // patched ShaderStore source so hot reload and live preset
+                // switching cannot keep the previous composition shader.
+                this.scene.subSurfaceConfiguration?.postProcess?.updateEffect();
+            }
             this.applyToonShadowInfluenceToAllModels();
             this.syncFrameGraphRenderTargetState();
             const appearanceAfter = nextPreset === "pbr-skin-sss"
@@ -2838,6 +2855,8 @@ ${beforeFogAppendBlock}
                         PBR_SKIN_SSS_METERS_PER_UNIT,
                         PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
                     ),
+                    scatteringBlendStrength:
+                        PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH,
                     standardMaterialPatch:
                         getStandardMaterialSssPrePassPatchDiagnostics(),
                     pbrMaterialMaskPatch:
@@ -5234,8 +5253,14 @@ ${beforeFogAppendBlock}
         this.physicsController.setGravityDirection(x, y, z);
     }
 
-    static async create(canvas: HTMLCanvasElement): Promise<MmdManager> {
-        const { engine, startupDiagnostics } = await MmdManager.createPreferredEngine(canvas);
+    static async create(
+        canvas: HTMLCanvasElement,
+        enginePreference: RenderEnginePreference = "auto",
+    ): Promise<MmdManager> {
+        const { engine, startupDiagnostics } = await MmdManager.createPreferredEngine(
+            canvas,
+            enginePreference,
+        );
         return new MmdManager(canvas, engine, startupDiagnostics);
     }
 
@@ -5243,11 +5268,27 @@ ${beforeFogAppendBlock}
         return new Engine(canvas, false, MmdManager.RENDER_ENGINE_OPTIONS);
     }
 
-    private static async createPreferredEngine(canvas: HTMLCanvasElement): Promise<PreferredEngineResult> {
+    private static async createPreferredEngine(
+        canvas: HTMLCanvasElement,
+        enginePreference: RenderEnginePreference,
+    ): Promise<PreferredEngineResult> {
         const startupDiagnostics: string[] = [];
+        if (enginePreference === "webgl2") {
+            console.info("Using WebGL2 renderer (forced by development setting).");
+            logInfo("shader", "using WebGL2 renderer", { reason: "forced-development-setting" });
+            startupDiagnostics.push("Development renderer override: WebGL2.");
+            return {
+                engine: MmdManager.createWebGlEngine(canvas),
+                startupDiagnostics,
+            };
+        }
+
         try {
             const isWebGpuSupported = await WebGPUEngine.IsSupportedAsync;
             if (!isWebGpuSupported) {
+                if (enginePreference === "webgpu") {
+                    throw new Error("WebGPU was required by MMD_MODOKI_RENDERER but is unavailable.");
+                }
                 console.info("WebGPU unavailable. Falling back to WebGL2.");
                 logInfo("shader", "WebGPU unavailable; falling back to WebGL2");
                 startupDiagnostics.push("WebGPU unavailable. Using WebGL2.");
@@ -5273,6 +5314,10 @@ ${beforeFogAppendBlock}
             logInfo("shader", "using WebGPU renderer", { mode: webGpuMode });
             return { engine, startupDiagnostics };
         } catch (err: unknown) {
+            if (enginePreference === "webgpu") {
+                logWarn("shader", "forced WebGPU renderer initialization failed", toLogErrorData(err));
+                throw err;
+            }
             const message = err instanceof Error ? err.message : String(err);
             console.warn(`WebGPU initialization failed. Falling back to WebGL2. Reason: ${message}`);
             logWarn("shader", "WebGPU initialization failed; falling back to WebGL2", toLogErrorData(err));

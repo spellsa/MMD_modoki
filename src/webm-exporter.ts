@@ -14,7 +14,7 @@ import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTa
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
-import { MmdManager } from "./mmd-manager";
+import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
 import type { WebmCaptureMode, WebmExportPhase, WebmExportRequest } from "./types";
 
 export interface WebmExportCallbacks {
@@ -526,6 +526,7 @@ export async function runWebmExportJob(
     canvas: HTMLCanvasElement,
     request: WebmExportRequest,
     callbacks: WebmExportCallbacks = {},
+    enginePreference: RenderEnginePreference = "auto",
 ): Promise<WebmExportResult> {
     if (!window.isSecureContext) {
         throw new Error("WebCodecs requires a secure context");
@@ -552,7 +553,7 @@ export async function runWebmExportJob(
     const frameDuration = 1 / fps;
 
     updateStatus(callbacks, "Initializing WebM export renderer...", "initializing");
-    const mmdManager = await MmdManager.create(canvas);
+    const mmdManager = await MmdManager.create(canvas, enginePreference);
 
     try {
         const exportRuntimeInternals = mmdManager as unknown as ExportRuntimeInternals & {
