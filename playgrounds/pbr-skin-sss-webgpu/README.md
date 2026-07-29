@@ -11,6 +11,7 @@ SSS対象だけが元のalbedoより赤黒く見える現象を調べます。
 ## コード
 
 [`playground.js`](./playground.js)をBabylon.js Playgroundへ貼り付けます。
+現行Playgroundのモジュール形式に合わせ、先頭の`export const createScene = ...`も含めてください。
 
 - 左: 通常のPBRMaterial
 - 右: 同じ値へScatteringだけを追加したPBRMaterial

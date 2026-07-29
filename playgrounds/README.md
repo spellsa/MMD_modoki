@@ -26,6 +26,9 @@ JavaScript欄へそのまま貼り付けられる形にします。
 - [`pbr-skin-sss-webgpu`](./pbr-skin-sss-webgpu/README.md)
   - PBRMaterialのscreen-space SSSがWebGPUで赤黒く見える問題
   - WebGL2、WebGPU、SSS有効、SSS無効を比較する
+- [`pbr-skin-sss-frame-graph-webgpu`](./pbr-skin-sss-frame-graph-webgpu/README.md)
+  - PrePass SSSと中間RenderTarget、Frame Graphの混成経路を比較する
+  - Direct、Frame Graph copy、Frame Graph Image Processingを切り替える
 
 フォーラム投稿の下書きには
 [`templates/forum-report.md`](./templates/forum-report.md)を使います。
@@ -33,6 +36,7 @@ JavaScript欄へそのまま貼り付けられる形にします。
 ## Playgroundへ載せる手順
 
 1. 対象フォルダの`playground.js`をBabylon.js Playgroundへ貼り付ける
+   - 現行Playgroundはモジュール形式のため、先頭の`export const createScene = ...`も含めて貼り付ける
 2. 通常URLでWebGL2を確認する
 3. URLへ`?webgpu`を付けてWebGPUを確認する
 4. コンソールのBabylon.jsバージョン、backend、GPU情報を保存する

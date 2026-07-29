@@ -1,4 +1,4 @@
-const createScene = async function () {
+export const createScene = async function () {
     const scene = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0.055, 0.065, 0.085, 1);
 

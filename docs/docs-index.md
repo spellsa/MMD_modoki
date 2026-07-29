@@ -171,6 +171,7 @@
 ## Frame Graph / PostFX
 
 - [ポストエフェクト拡充バックログ](./post-effects-backlog.md)
+- [Babylon.js 公式相談候補台帳 2026-07-29](./babylon-official-consultation-candidates-2026-07-29.md)
 - [FrameGraph / PostFX 危険メモ 2026-07-01](./framegraph-postfx-risk-note-2026-07-01.md)
 - [Frame Graph post effects plan](./frame-graph-post-effects-plan-2026-04-28.md)
 - [Frame Graph post effects progress](./frame-graph-post-effects-progress-2026-04-28.md)

@@ -224,6 +224,18 @@
 - [x] `PBR Skin SSS`の画面全体白化に対し、散乱距離 / scene scale比を制限して診断ログを追加
 - [x] `PBR Skin SSS`のPrePass対象マスク互換パッチがElectron / WebGPUで適用されることをログ確認
 - [x] `PBR Skin SSS`の追加Image Processingを無効化し、全画面白飛びの解消をElectron / WebGPU実機確認
+- [x] Babylon.js 公式相談候補を質問 / 不具合 / 機能要望へ分類し、投稿前台帳を作成
+- [x] docs 横断で Frame Graph / WebGPU の公式相談候補を棚卸しし、現行候補 / 旧版再検証 / アプリ側解決へ分類
+- [ ] PrePass SSSの最終合成をFrame Graphへ渡す正式経路について、保存済みPlayground URL付きで公式へ相談
+- [ ] FrameGraph ImageProcessing task の LUT 非反映を Babylon.js 9.18.1 単体 Playground で再現確認
+- [ ] Frame Graph の task parameter / 接続 / imported texture 更新に必要な再 build 境界を公式 API と最小再現で確認
+- [ ] Babylon.js 8.45.3 時代の SSAO2 / PrePass / MRT WebGPU 事象を現行版で再確認し、再発時だけ相談候補へ昇格
+- [ ] 重量 PMX の CPU skinning fallback 後の顔モーフ崩れを現行 Babylon.js / babylon-mmd と WebGPU / WebGL2 で比較し、権利上共有可能な最小再現を作る
+- [ ] RenderTarget readback を `readPixels` / `onAfterUnbindObservable` / 直接 buffer copy で比較する WebGPU Playground を作る
+- [ ] DDS 読み込み前に adapter の `texture-compression-bc` と Babylon.js の有効 feature を記録し、CPU fallback が必要な条件を確定する
+- [ ] IBL Shadows の `r32float` validation を現行 Babylon.js で再確認し、`float32-filterable` の有無と `enableAllFeatures` ON / OFF を記録する
+- [ ] Frame Graph + MirrorTexture の PNG 保存を WebGPU / WebGL2、各 screenshot helper、resize 有無で比較する Playground を作る
+- [ ] 外部 HDR の GPU 生成 irradiance texture 黒化が現行 WebGPU でも再発するか確認し、IBL Shadows の CDF 問題とは分離して記録する
 - [ ] `PBR Skin SSS`をElectron / WebGPU実機で比較し、暗化・影ぶれの有無を記録
 - [ ] 高コントラストHDRでPBR IBLのdiffuse / specular寄与を個別確認
 - [ ] PBR MMD LikeのSSS適用範囲をキャラクター / 材質別へ限定し、影ブレを解消
@@ -283,7 +295,7 @@
 
 ## 2026-04-18 メモ
 
-- [ ] WebGPU 重量モデルでの顔モーフ崩れは当面既知制限として扱う → [webgpu-heavy-model-face-morph-limit-2026-04-18.md](./webgpu-heavy-model-face-morph-limit-2026-04-18.md)
+- [ ] WebGPU 重量モデルでの顔モーフ崩れは、現行版比較と共有可能な最小再現ができるまで既知制限として扱う → [webgpu-heavy-model-face-morph-limit-2026-04-18.md](./webgpu-heavy-model-face-morph-limit-2026-04-18.md)
 
 - [mmd-project-positioning-note.md](./mmd-project-positioning-note.md)
 - [glb-loading-investigation-2026-04-01.md](./glb-loading-investigation-2026-04-01.md)
