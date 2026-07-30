@@ -146,6 +146,7 @@
 - [BMP alpha transparency investigation](./bmp-alpha-transparency-investigation-2026-06-28.md)
 - [Mac / Linux file URL texture whiteout 調査](./mac-linux-file-url-texture-whiteout-2026-07-14.md)
 - [Material shader customization guide](./material-shader-customization-guide.md)
+- [Babylon.js 公式 Material カタログ 2026-07-30](./babylon-official-material-catalog-2026-07-30.md)
 - [Babylon.js PBR 材質で使える属性・表現 2026-07-21](./babylon-pbr-material-capabilities-2026-07-21.md)
 - [Babylon.js Material Plugin 詳細調査 2026-07-28](./babylon-material-plugin-investigation-2026-07-28.md)
 - [PBR Skin 実装メモ 2026-07-23](./pbr-skin-implementation-2026-07-23.md)
@@ -213,6 +214,7 @@
 - [IBL shadows investigation](./ibl-shadows-investigation-2026-05-07.md)
 - [Babylon RSM GI メモ](./babylon-rsm-gi-notes.md)
 - [MirroringFloor 実装検討メモ](./mirroring-floor-plan-2026-05-11.md)
+- [床・ステージ表面構想メモ 2026-07-30](./stage-surface-design-note-2026-07-30.md)
 
 ## Effect Panel
 
