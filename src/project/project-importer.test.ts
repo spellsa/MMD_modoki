@@ -79,6 +79,7 @@ function createHost() {
         setActiveModelByIndex: vi.fn(),
         setActiveModelVisibility: vi.fn(),
         setModelCastsShadowByIndex: vi.fn(),
+        setModelExternalParent: vi.fn(() => true),
         setModelMotionImports: vi.fn(),
         applyImportedMaterialShaderStates: vi.fn(),
         setPbrMaterialShaderPreset: vi.fn(),
@@ -169,6 +170,47 @@ function createHost() {
 }
 
 describe("importProjectState", () => {
+    it("restores model external parents after all models are loaded", async () => {
+        const host = createHost();
+        host.loadPMX.mockImplementation(async (modelPath: string) => {
+            host.sceneModels.push({
+                info: { path: modelPath },
+                mesh: {},
+                model: {
+                    createRuntimeAnimation: vi.fn(),
+                    setRuntimeAnimation: vi.fn(),
+                },
+            });
+            return { name: modelPath };
+        });
+        const project = createProject({
+            scene: {
+                ...createProject().scene,
+                models: [
+                    {
+                        path: "C:/models/tofu.pmx",
+                        visible: true,
+                        motionImports: [],
+                        externalParent: {
+                            childBoneName: "センター",
+                            parentModelPath: "C:/models/plate.pmx",
+                            parentBoneName: "センター",
+                        },
+                    },
+                    {
+                        path: "C:/models/plate.pmx",
+                        visible: true,
+                        motionImports: [],
+                    },
+                ],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.setModelExternalParent).toHaveBeenCalledWith(0, "センター", 1, "センター");
+    });
+
     it("restores model material pipelines and environment lighting", async () => {
         const host = createHost();
         const legacyPbrModel = {

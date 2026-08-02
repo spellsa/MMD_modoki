@@ -554,6 +554,11 @@ type ModelAssetHost = {
         contactShadowMesh: null;
         castShadow: boolean;
         materialPipeline: MmdMaterialPipelinePreset;
+        externalParent: {
+            childBoneName: string;
+            parentModelPath: string;
+            parentBoneName: string;
+        } | null;
     }>;
     refreshRigidBodyVisualizerTarget(): void;
     syncLuminousGlowLayer?: () => void;
@@ -1547,6 +1552,7 @@ export async function loadPMX(
             contactShadowMesh: null,
             castShadow: true,
             materialPipeline,
+            externalParent: null,
         });
         host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);

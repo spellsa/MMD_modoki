@@ -1,0 +1,21 @@
+export type ModelExternalParentLink = {
+    parentModelIndex: number;
+};
+
+export function wouldCreateModelExternalParentCycle(
+    childModelIndex: number,
+    parentModelIndex: number,
+    linksByChildModelIndex: ReadonlyMap<number, ModelExternalParentLink>,
+): boolean {
+    if (childModelIndex === parentModelIndex) return true;
+
+    const visited = new Set<number>();
+    let cursor: number | null = parentModelIndex;
+    while (cursor !== null) {
+        if (cursor === childModelIndex) return true;
+        if (visited.has(cursor)) return true;
+        visited.add(cursor);
+        cursor = linksByChildModelIndex.get(cursor)?.parentModelIndex ?? null;
+    }
+    return false;
+}

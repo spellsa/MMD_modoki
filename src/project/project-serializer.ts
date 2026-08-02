@@ -190,6 +190,12 @@ type ProjectExportHost = {
     getModelVisibility: (mesh: object) => boolean;
     getModelCastsShadow: (entry: ProjectExportSceneModel) => boolean;
     getSerializedMaterialShaderStates: (entry: ProjectExportSceneModel) => ProjectModelMaterialShaderState[];
+    getModelExternalParent?: (modelIndex: number) => {
+        childBoneName: string;
+        parentModelPath: string;
+        parentBoneName: string;
+        parentModelIndex: number;
+    } | null;
     getSerializedLightDirection?: () => { x?: unknown; y?: unknown; z?: unknown } | null;
     getLightDirection: () => { x?: unknown; y?: unknown; z?: unknown };
     getLightColor: () => { r: number; g: number; b: number };
@@ -237,13 +243,22 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
         getAccessoryTransformKeyframes?: (index: number) => ProjectSerializedAccessoryTransformTrack | null;
     };
 
-    const models = host.sceneModels.map((entry) => ({
+    const models = host.sceneModels.map((entry, modelIndex) => ({
         path: entry.info.path,
         visible: host.getModelVisibility(entry.mesh),
         castsShadow: host.getModelCastsShadow(entry),
         materialPipeline: entry.materialPipeline ?? "mmd-standard",
         motionImports: (host.modelMotionImportsByModel.get(entry.model) ?? []).map((item) => ({ ...item })),
         materialShaders: host.getSerializedMaterialShaderStates(entry),
+        externalParent: (() => {
+            const parent = host.getModelExternalParent?.(modelIndex) ?? null;
+            if (!parent) return null;
+            return {
+                childBoneName: parent.childBoneName,
+                parentModelPath: parent.parentModelPath,
+                parentBoneName: parent.parentBoneName,
+            };
+        })(),
     }));
 
     const accessories: ProjectAccessoryState[] = (accessoryExtension.getLoadedAccessories?.() ?? []).map((entry) => {

@@ -30,6 +30,7 @@ if (started) {
 
 const isDev = Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL);
 const isSmokeMode = process.env.MMD_MODOKI_SMOKE === '1';
+const isE2eMode = process.env.MMD_MODOKI_E2E === '1';
 const forcedRendererBackend =
   process.env.MMD_MODOKI_RENDERER === 'webgpu'
   || process.env.MMD_MODOKI_RENDERER === 'webgl2'
@@ -37,6 +38,9 @@ const forcedRendererBackend =
     : undefined;
 if (isSmokeMode && process.env.MMD_MODOKI_SMOKE_USER_DATA_PATH) {
   app.setPath('userData', process.env.MMD_MODOKI_SMOKE_USER_DATA_PATH);
+}
+if (isE2eMode && process.env.MMD_MODOKI_E2E_USER_DATA_PATH) {
+  app.setPath('userData', process.env.MMD_MODOKI_E2E_USER_DATA_PATH);
 }
 if (isDev) {
   // Keep local file loading behavior while hiding noisy Electron dev warnings.
@@ -511,6 +515,7 @@ const loadEditorWindow = async (
 ): Promise<void> => {
   const effectiveQuery = {
     ...(query ?? {}),
+    ...(isE2eMode ? { e2e: '1' } : {}),
     ...(forcedRendererBackend ? { rendererBackend: forcedRendererBackend } : {}),
   };
   const hasQuery = Object.keys(effectiveQuery).length > 0;
@@ -875,7 +880,7 @@ const createWindow = () => {
   void loadPromise;
 
   // Open DevTools in dev mode
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL && !isSmokeMode) {
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL && !isSmokeMode && !isE2eMode) {
     mainWindow.webContents.openDevTools();
   }
 

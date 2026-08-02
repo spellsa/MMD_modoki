@@ -162,6 +162,29 @@ declare global {
             enableAlphaTextureView: () => boolean;
             disableAlphaTextureView: () => void;
         };
+        mmdModokiE2e?: {
+            loadModel: (filePath: string) => Promise<ModelInfo | null>;
+            getModelBoneRenderedPosition: (
+                modelIndex: number,
+                boneName: string,
+            ) => { x: number; y: number; z: number } | null;
+            getBoneGizmoPosition: () => { x: number; y: number; z: number } | null;
+            getActiveModelIndex: () => number | null;
+            getActiveBoneTransform: (boneName: string) => {
+                position: { x: number; y: number; z: number };
+                rotation: { x: number; y: number; z: number };
+            } | null;
+            setBoneGizmoRotationDrag: (
+                rotation: { x: number; y: number; z: number },
+                dragging: boolean,
+            ) => boolean;
+            getModelExternalParent: (modelIndex: number) => {
+                childBoneName: string;
+                parentModelPath: string;
+                parentBoneName: string;
+                parentModelIndex: number;
+            } | null;
+        };
     }
 }
 
@@ -289,6 +312,11 @@ export interface ProjectModelState {
     motionImports: ProjectMotionImport[];
     materialShaders?: ProjectModelMaterialShaderState[];
     animation?: ProjectSerializedModelAnimation | null;
+    externalParent?: {
+        childBoneName: string;
+        parentModelPath: string;
+        parentBoneName: string;
+    } | null;
 }
 
 export interface ProjectCameraState {

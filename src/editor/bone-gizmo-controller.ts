@@ -28,6 +28,7 @@ type BoneGizmoHost = {
     physicsEnabledBeforeBoneGizmoDrag: boolean | null;
     getActiveModelVisibility: () => boolean;
     getRuntimeBoneByName: (boneName: string) => IMmdRuntimeBone | null;
+    getExternalParentWorldMatrixForBoneToRef: (runtimeBone: IMmdRuntimeBone, target: Matrix) => boolean;
     invalidateBoneVisualizerPose: (runtimeBone: IMmdRuntimeBone, updateTransform?: boolean) => void;
     getPhysicsEnabled: () => boolean;
     setPhysicsEnabled: (enabled: boolean) => void;
@@ -127,6 +128,27 @@ function applyBoneGizmoProxyToRuntimeBone(host: BoneGizmoHost, runtimeBone: IMmd
         host.boneGizmoTempPosition2.copyFrom(host.boneGizmoTempPosition);
     }
 
+    if (host.getExternalParentWorldMatrixForBoneToRef(runtimeBone, host.boneGizmoTempMatrix)) {
+        host.boneGizmoTempMatrix.invertToRef(host.boneGizmoTempMatrix2);
+        Vector3.TransformCoordinatesToRef(
+            host.boneGizmoTempPosition2,
+            host.boneGizmoTempMatrix2,
+            host.boneGizmoTempPosition3
+        );
+        host.boneGizmoTempPosition2.copyFrom(host.boneGizmoTempPosition3);
+
+        host.boneGizmoTempMatrix.decompose(
+            host.boneGizmoTempScale2,
+            host.boneGizmoTempRotation2,
+            host.boneGizmoTempPosition3
+        );
+        Quaternion.InverseToRef(host.boneGizmoTempRotation2, host.boneGizmoTempRotation2);
+        host.boneGizmoTempRotation2.multiplyToRef(
+            host.boneGizmoTempRotation,
+            host.boneGizmoTempRotation
+        );
+    }
+
     let localPositionX = host.boneGizmoTempPosition2.x;
     let localPositionY = host.boneGizmoTempPosition2.y;
     let localPositionZ = host.boneGizmoTempPosition2.z;
@@ -135,6 +157,10 @@ function applyBoneGizmoProxyToRuntimeBone(host: BoneGizmoHost, runtimeBone: IMmd
     const parentBone = runtimeBone.parentBone;
     if (parentBone) {
         parentBone.getWorldMatrixToRef(host.boneGizmoTempMatrix);
+        if (host.getExternalParentWorldMatrixForBoneToRef(runtimeBone, host.boneGizmoTempMatrix2)) {
+            host.boneGizmoTempMatrix2.invert();
+            host.boneGizmoTempMatrix.multiplyToRef(host.boneGizmoTempMatrix2, host.boneGizmoTempMatrix);
+        }
         host.boneGizmoTempMatrix.invertToRef(host.boneGizmoTempMatrix2);
         Vector3.TransformCoordinatesToRef(
             host.boneGizmoTempPosition2,
@@ -225,7 +251,7 @@ export function updateBoneGizmoTarget(host: BoneGizmoHost): void {
     host.invalidateBoneVisualizerPose(runtimeBone, false);
 }
 
-export function handleBoneGizmoBeforeRender(host: BoneGizmoHost): void {
+export function handleBoneGizmoBeforeRender(host: BoneGizmoHost): boolean {
     const boneRuntime = host.boneGizmoRuntimeBone;
     const boneGizmoDragging = host.boneGizmoManager?.isDragging === true && boneRuntime !== null;
     if (boneGizmoDragging && boneRuntime) {
@@ -240,7 +266,7 @@ export function handleBoneGizmoBeforeRender(host: BoneGizmoHost): void {
 
         applyBoneGizmoProxyToRuntimeBone(host, boneRuntime);
         host.invalidateBoneVisualizerPose(boneRuntime);
-        return;
+        return true;
     }
 
     if (host.physicsEnabledBeforeBoneGizmoDrag !== null) {
@@ -257,6 +283,7 @@ export function handleBoneGizmoBeforeRender(host: BoneGizmoHost): void {
     if (boneRuntime) {
         syncBoneGizmoProxyToRuntimeBone(host, boneRuntime);
     }
+    return false;
 }
 
 export function disposeBoneGizmoSystem(host: BoneGizmoHost): void {

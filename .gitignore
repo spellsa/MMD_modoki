@@ -94,6 +94,7 @@ out/
 # Local smoke / UI test artifacts
 artifacts/smoke/
 artifacts/e2e/
+test-results/
 
 # Local reference materials (screenshots, notes, external UI references)
 local-references/

@@ -344,6 +344,31 @@ describe("exportProjectState", () => {
         expect(project.camera.target).toEqual({ x: 4, y: 5, z: 6 });
     });
 
+    it("writes model external parent by model path and bone names", () => {
+        const project = exportProjectState({
+            ...createHost(),
+            sceneModels: [
+                { info: { path: "C:/models/tofu.pmx" }, mesh: {}, model: {} },
+                { info: { path: "C:/models/plate.pmx" }, mesh: {}, model: {} },
+            ],
+            getModelExternalParent: (modelIndex: number) => modelIndex === 0
+                ? {
+                    childBoneName: "センター",
+                    parentModelPath: "C:/models/plate.pmx",
+                    parentBoneName: "センター",
+                    parentModelIndex: 1,
+                }
+                : null,
+        });
+
+        expect(project.scene.models[0]?.externalParent).toEqual({
+            childBoneName: "センター",
+            parentModelPath: "C:/models/plate.pmx",
+            parentBoneName: "センター",
+        });
+        expect(project.scene.models[1]?.externalParent).toBeNull();
+    });
+
     it("writes camera external parent keyframes", () => {
         const project = exportProjectState({
             ...createHost(),

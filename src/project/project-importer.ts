@@ -70,6 +70,12 @@ type ProjectImportHost = {
     syncLuminousGlowLayer?: () => void;
     engine?: { releaseEffects?: () => void };
     setActiveModelByIndex(index: number): void;
+    setModelExternalParent?: (
+        childModelIndex: number,
+        childBoneName: string,
+        parentModelIndex: number | null,
+        parentBoneName: string | null,
+    ) => boolean;
     setActiveModelVisibility(visible: boolean): void;
     applySceneMeshVisibility(mesh: object, visible: boolean): void;
     setModelCastsShadowByIndex?: (modelIndex: number, castsShadow: boolean) => void;
@@ -437,6 +443,44 @@ export async function importProjectState(
                     }
                 }
             }
+        }
+    }
+
+    for (const modelState of data.scene.models) {
+        const parent = modelState?.externalParent;
+        if (!parent || typeof parent !== "object") continue;
+        if (
+            typeof modelState.path !== "string"
+            || typeof parent.parentModelPath !== "string"
+            || typeof parent.childBoneName !== "string"
+            || typeof parent.parentBoneName !== "string"
+        ) {
+            warnings.push("Model external parent data is invalid");
+            continue;
+        }
+
+        const normalizedChildPath = normalizePathForCompare(modelState.path);
+        const childModelIndex = host.sceneModels.findIndex(
+            (entry) => normalizePathForCompare(entry.info.path) === normalizedChildPath,
+        );
+        if (childModelIndex < 0) continue;
+
+        const normalizedParentPath = normalizePathForCompare(parent.parentModelPath);
+        const parentModelIndex = host.sceneModels.findIndex(
+            (entry) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
+        );
+        if (parentModelIndex < 0) {
+            warnings.push(`Model external parent not found: ${parent.parentModelPath} (${modelState.path})`);
+            continue;
+        }
+        const restored = host.setModelExternalParent?.(
+            childModelIndex,
+            parent.childBoneName,
+            parentModelIndex,
+            parent.parentBoneName,
+        );
+        if (restored === false) {
+            warnings.push(`Model external parent restore failed: ${modelState.path}`);
         }
     }
 

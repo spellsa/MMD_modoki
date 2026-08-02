@@ -272,6 +272,7 @@ export function createPanelNumberField(options: PanelNumberFieldOptions): PanelN
     input.value = options.value;
     input.disabled = options.disabled ?? false;
     input.className = mergeClasses(options.legacyInputClass, panelClasses.numberInput);
+    input.dataset.controlKey = options.key;
 
     row.append(label, input);
     return { row, label, input };

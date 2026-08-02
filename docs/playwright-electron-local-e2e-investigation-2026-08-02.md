@@ -22,8 +22,21 @@ Playwright の Electron 対応は公式 API だが、現在も `_electron` と�
 `v14+` には入るものの、Electron / Playwright 更新時には最小起動テストを再確認する。
 
 この文書は導入判断と実装案をまとめたものである。2026-08-02 に
-`@playwright/test 1.62.1` を開発依存へ追加したが、Electron fixture、設定、テストコードは
-まだ追加していない。Playwright 管理ブラウザも未ダウンロードである。
+`@playwright/test 1.62.1`、Electron fixture、設定、モデル外部親E2Eを追加した。
+Electron専用テストのためPlaywright管理ブラウザはダウンロードしていない。
+
+実装ファイル:
+
+- `playwright.config.mjs`
+- `test/e2e/electron-app.mjs`
+- `test/e2e/model-external-parent.spec.mjs`
+- [モデル外部親 実装メモ 2026-08-02](./model-external-parent-implementation-2026-08-02.md)
+
+実行コマンド:
+
+```powershell
+npm.cmd run test:e2e
+```
 
 ## 「ローカルの Playwright」でできること
 
@@ -346,18 +359,18 @@ npx.cmd playwright show-report artifacts/e2e/report
 
 ## 段階的な導入順
 
-### Phase 0: 今回
+### Phase 0: 調査と依存追加（完了）
 
 - 調査結果と方針を文書化する。
 - `@playwright/test 1.62.1` を開発依存へ追加する。（完了）
 - `THIRD_PARTY_NOTICES.md` に Apache-2.0 として記録する。（完了）
-- production code の test hook はまだ追加しない。
+- production code のtest hookはE2E queryで限定公開する方針に変更した。
 
-### Phase 1: 最小 spike
+### Phase 1: 最小 spike（完了）
 
 - `@playwright/test` を追加する。
-- `playwright.config.ts` と Electron fixture を追加する。
-- 起動、title、canvas、主要 UI 1 箇所、正常終了だけを確認する。
+- `playwright.config.mjs` と Electron fixture を追加する。
+- 起動、renderer初期化、主要UI操作、正常終了を確認する。
 - 開発版 Electron 40 と `_electron` の接続、trace 収集可否を実機確認する。
 
 ### Phase 2: 安定した UI 導線
@@ -366,11 +379,11 @@ npx.cmd playwright show-report artifacts/e2e/report
 - role / label が使えない独自 widget だけ `data-testid` を追加する。
 - 日本語と英語 locale の小さい smoke を分ける。
 
-### Phase 3: 外部親登録
+### Phase 3: モデル外部親登録（完了）
 
-- native open dialog stub を fixture 化する。
-- tofu / plate の読み込み、センターボーン選択、外部親登録を UI test にする。
-- world matrix / project serialization は unit test と runtime smoke で別に検証する。
+- native open dialogは操作せず、`e2e=1`のときだけ有効な狭いモデル読み込み口を使う。
+- tofu / plate の読み込み、センターボーン選択、外部親登録、追従、解除をUI testにした。
+- project serialization / restoreと循環判定はVitest、描画ボーン最終行列はPlaywrightで検証する。
 
 ### Phase 4: CI は必要になってから
 
@@ -381,7 +394,8 @@ npx.cmd playwright show-report artifacts/e2e/report
 
 ## 採用判断
 
-現状は **Phase 1 の最小 spike を行う価値がある**。
+現状は **Phase 1とモデル外部親のPhase 3まで完了**。次は安定したUI導線を必要に応じて
+Phase 2へ追加する。CIはまだrelease blockingにしない。
 
 理由:
 

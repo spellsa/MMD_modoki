@@ -87,6 +87,7 @@ import {
     type MmdMaterialPipelinePreset,
     type PbrMaterialShaderPreset,
 } from "./shared/mmd-material-pipeline";
+import { wouldCreateModelExternalParentCycle } from "./shared/model-external-parent";
 import {
     loadCameraVMD as loadCameraVMDImpl,
     loadMP3 as loadMP3Impl,
@@ -826,6 +827,13 @@ type SceneModelEntry = {
     contactShadowMesh: Mesh | null;
     castShadow: boolean;
     materialPipeline: MmdMaterialPipelinePreset;
+    externalParent: ModelExternalParentState | null;
+};
+
+export type ModelExternalParentState = {
+    childBoneName: string;
+    parentModelPath: string;
+    parentBoneName: string;
 };
 
 type CameraExternalParentKeyframe = {
@@ -1541,6 +1549,8 @@ ${beforeFogAppendBlock}
     private currentModel: RuntimeModel | null = null;
     private activeModelInfo: ModelInfo | null = null;
     private sceneModels: SceneModelEntry[] = [];
+    private readonly modelExternalParentMatrix = Matrix.Identity();
+    private readonly modelExternalParentBoneMatrix = Matrix.Identity();
     private mmdMaterialPipelinePresetValue = MmdManager.readMmdMaterialPipelinePresetLocalStorage();
     private _isPlaying = false;
     private _currentFrame = 0;
@@ -2254,6 +2264,118 @@ ${beforeFogAppendBlock}
             active: entry.model === this.currentModel,
             castsShadow: entry.castShadow,
         }));
+    }
+
+    public getModelBoneNames(modelIndex: number): string[] {
+        return [...(this.sceneModels[modelIndex]?.info.boneNames ?? [])];
+    }
+
+    public getModelExternalParent(modelIndex: number): (ModelExternalParentState & { parentModelIndex: number }) | null {
+        const state = this.sceneModels[modelIndex]?.externalParent;
+        if (!state) return null;
+        const parentModelIndex = this.sceneModels.findIndex((entry) => entry.info.path === state.parentModelPath);
+        if (parentModelIndex < 0) return null;
+        return { ...state, parentModelIndex };
+    }
+
+    public setModelExternalParent(
+        childModelIndex: number,
+        childBoneName: string,
+        parentModelIndex: number | null,
+        parentBoneName: string | null,
+    ): boolean {
+        const childEntry = this.sceneModels[childModelIndex];
+        const childBone = childEntry
+            ? this.getRuntimeBoneByNameFromModel(childEntry.model, childBoneName)
+            : null;
+        if (!childEntry || !childBone) {
+            return false;
+        }
+        if (parentModelIndex === null) {
+            childEntry.externalParent = null;
+            return true;
+        }
+
+        const parentEntry = this.sceneModels[parentModelIndex];
+        if (!parentEntry || !parentBoneName || !this.getRuntimeBoneByNameFromModel(parentEntry.model, parentBoneName)) {
+            return false;
+        }
+
+        const linksByChildModelIndex = new Map<number, { parentModelIndex: number }>();
+        for (let index = 0; index < this.sceneModels.length; index += 1) {
+            if (index === childModelIndex) continue;
+            const state = this.sceneModels[index]?.externalParent;
+            if (!state) continue;
+            const resolvedParentIndex = this.sceneModels.findIndex((entry) => entry.info.path === state.parentModelPath);
+            if (resolvedParentIndex >= 0) {
+                linksByChildModelIndex.set(index, { parentModelIndex: resolvedParentIndex });
+            }
+        }
+        if (wouldCreateModelExternalParentCycle(childModelIndex, parentModelIndex, linksByChildModelIndex)) {
+            return false;
+        }
+
+        this.resetModelExternalParentChildBone(childEntry, childBone);
+        childEntry.externalParent = {
+            childBoneName,
+            parentModelPath: parentEntry.info.path,
+            parentBoneName,
+        };
+        if (childEntry.model === this.currentModel) {
+            this.onBoneTransformEdited?.(childBoneName);
+        }
+        return true;
+    }
+
+    private resetModelExternalParentChildBone(
+        childEntry: SceneModelEntry,
+        childBone: EditorRuntimeBone,
+    ): void {
+        const restPosition = childBone.linkedBone.getRestMatrix().getTranslation();
+        childBone.linkedBone.position.copyFrom(restPosition);
+        childBone.linkedBone.setRotationQuaternion(Quaternion.Identity(), Space.LOCAL);
+        const linkedBoneInternal = childBone.linkedBone as unknown as {
+            markAsDirty?: () => void;
+            getSkeleton?: () => Skeleton;
+        };
+        linkedBoneInternal.markAsDirty?.();
+        PhysicsModelController.beforeAndAfterPhysics(childEntry.model);
+        linkedBoneInternal.getSkeleton?.()?.computeAbsoluteMatrices(true);
+        if (childEntry.model === this.currentModel) {
+            this.boneVisualizerTarget?.skeleton?.computeAbsoluteMatrices(true);
+        }
+    }
+
+    public getModelBoneRenderedPosition(modelIndex: number, boneName: string): { x: number; y: number; z: number } | null {
+        const entry = this.sceneModels[modelIndex];
+        const runtimeBone = entry ? this.getRuntimeBoneByNameFromModel(entry.model, boneName) : null;
+        if (!runtimeBone) return null;
+        const position = runtimeBone.linkedBone.getFinalMatrix().getTranslation();
+        return { x: position.x, y: position.y, z: position.z };
+    }
+
+    public getBoneGizmoPosition(): { x: number; y: number; z: number } | null {
+        const position = this.boneGizmoProxyNode?.position;
+        if (!position || this.boneGizmoProxyNode?.isEnabled() !== true) return null;
+        return { x: position.x, y: position.y, z: position.z };
+    }
+
+    public setBoneGizmoRotationDragForE2e(
+        rotation: { x: number; y: number; z: number },
+        dragging: boolean,
+    ): boolean {
+        const proxy = this.boneGizmoProxyNode;
+        const rotationGizmo = this.boneGizmoManager?.gizmos.rotationGizmo;
+        if (!proxy || !rotationGizmo) return false;
+
+        const degToRad = Math.PI / 180;
+        proxy.rotationQuaternion = Quaternion.RotationYawPitchRoll(
+            rotation.y * degToRad,
+            rotation.x * degToRad,
+            rotation.z * degToRad,
+        );
+        rotationGizmo.xGizmo.dragBehavior.dragging = dragging;
+        return true;
     }
 
     public getActiveModelInfo(): ModelInfo | null {
@@ -3268,6 +3390,11 @@ ${beforeFogAppendBlock}
         if (removeIndex < 0) return false;
 
         const removed = this.sceneModels[removeIndex];
+        for (const entry of this.sceneModels) {
+            if (entry.externalParent?.parentModelPath === removed.info.path) {
+                entry.externalParent = null;
+            }
+        }
         removed.castShadow = false;
         this.applyModelShadowCasterState(removed);
 
@@ -4245,8 +4372,29 @@ ${beforeFogAppendBlock}
         return initializeBoneGizmoSystemImpl(this);
     }
 
-    private handleBoneGizmoBeforeRender(): void {
+    private handleBoneGizmoBeforeRender(): boolean {
         return handleBoneGizmoBeforeRenderImpl(this);
+    }
+
+    private getExternalParentWorldMatrixForBoneToRef(runtimeBone: IMmdRuntimeBone, target: Matrix): boolean {
+        const currentEntry = this.sceneModels.find((entry) => entry.model === this.currentModel);
+        const state = currentEntry?.externalParent;
+        if (!currentEntry || !state) return false;
+
+        const externalParentRoot = this.getRuntimeBoneByNameFromModel(currentEntry.model, state.childBoneName);
+        let cursor: IMmdRuntimeBone | null = runtimeBone;
+        while (cursor && cursor !== externalParentRoot) {
+            cursor = cursor.parentBone;
+        }
+        if (!externalParentRoot || cursor !== externalParentRoot) return false;
+
+        const parentEntry = this.sceneModels.find((entry) => entry.info.path === state.parentModelPath);
+        const parentBone = parentEntry
+            ? this.getRuntimeBoneByNameFromModel(parentEntry.model, state.parentBoneName)
+            : null;
+        if (!parentBone) return false;
+        parentBone.getWorldMatrixToRef(target);
+        return true;
     }
 
     private disposeBoneGizmoSystem(): void {
@@ -5839,6 +5987,22 @@ ${beforeFogAppendBlock}
             (enabled) => this.onGlobalIlluminationStateChanged?.(enabled),
         );
 
+        // The runtime backend can be replaced asynchronously during physics initialization.
+        // Apply external parents after every onBeforeRender observer (including the replacement
+        // runtime's after-physics update), but before active mesh/skeleton evaluation begins.
+        this.scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
+            if (this.boneGizmoManager?.isDragging === true) {
+                // Apply the gizmo to the raw runtime pose first. Applying external parents before
+                // and after a parent-bone drag would multiply the same child pose twice for one frame.
+                this.handleBoneGizmoBeforeRender();
+                this.applyModelExternalParentsBeforeRender();
+                return;
+            }
+
+            this.applyModelExternalParentsBeforeRender();
+            this.handleBoneGizmoBeforeRender();
+        });
+
         this.scene.onBeforeRenderObservable.add(() => {
             if (!this.framePerformanceLogEnabled) {
                 if (this.shouldApplyCameraMotionToViewport()) {
@@ -5846,7 +6010,6 @@ ${beforeFogAppendBlock}
                 }
                 this.syncViewportCameraDrivenStateFromNativeInputs();
                 this.syncCameraExternalParentedViewport();
-                this.handleBoneGizmoBeforeRender();
                 this.updateBoneVisualizer();
                 this.updateRigidBodyVisualizer();
                 this.updateCharacterContactShadows();
@@ -5867,9 +6030,6 @@ ${beforeFogAppendBlock}
             sectionStartMs = performance.now();
             this.syncCameraExternalParentedViewport();
             this.recordFramePerformanceSection("cameraExternalParent", performance.now() - sectionStartMs);
-            sectionStartMs = performance.now();
-            this.handleBoneGizmoBeforeRender();
-            this.recordFramePerformanceSection("boneGizmo", performance.now() - sectionStartMs);
             sectionStartMs = performance.now();
             this.updateBoneVisualizer();
             this.recordFramePerformanceSection("boneVisualizer", performance.now() - sectionStartMs);
@@ -11698,6 +11858,61 @@ ${beforeFogAppendBlock}
         }
 
         return null;
+    }
+
+    private applyModelExternalParentsBeforeRender(): void {
+        const appliedModelIndices = new Set<number>();
+        const applyingModelIndices = new Set<number>();
+
+        const applyModel = (modelIndex: number): void => {
+            if (appliedModelIndices.has(modelIndex) || applyingModelIndices.has(modelIndex)) return;
+            const childEntry = this.sceneModels[modelIndex];
+            const state = childEntry?.externalParent;
+            if (!childEntry || !state) {
+                appliedModelIndices.add(modelIndex);
+                return;
+            }
+
+            const parentModelIndex = this.sceneModels.findIndex((entry) => entry.info.path === state.parentModelPath);
+            if (parentModelIndex < 0 || parentModelIndex === modelIndex) {
+                appliedModelIndices.add(modelIndex);
+                return;
+            }
+
+            applyingModelIndices.add(modelIndex);
+            applyModel(parentModelIndex);
+
+            const parentBone = this.getRuntimeBoneByNameFromModel(
+                this.sceneModels[parentModelIndex].model,
+                state.parentBoneName,
+            );
+            const childBone = this.getRuntimeBoneByNameFromModel(childEntry.model, state.childBoneName);
+            if (parentBone && childBone) {
+                parentBone.getWorldMatrixToRef(this.modelExternalParentMatrix);
+                const stack: EditorRuntimeBone[] = [childBone];
+                while (stack.length > 0) {
+                    const runtimeBone = stack.pop();
+                    if (!runtimeBone) continue;
+                    runtimeBone.getWorldMatrixToRef(this.modelExternalParentBoneMatrix);
+                    this.modelExternalParentBoneMatrix.multiplyToRef(
+                        this.modelExternalParentMatrix,
+                        this.modelExternalParentBoneMatrix,
+                    );
+                    this.modelExternalParentBoneMatrix.copyToArray(runtimeBone.worldMatrix);
+                    for (const child of runtimeBone.childBones as readonly EditorRuntimeBone[]) {
+                        stack.push(child);
+                    }
+                }
+                childEntry.mesh.metadata?.skeleton?._markAsDirty?.();
+            }
+
+            applyingModelIndices.delete(modelIndex);
+            appliedModelIndices.add(modelIndex);
+        };
+
+        for (let modelIndex = 0; modelIndex < this.sceneModels.length; modelIndex += 1) {
+            applyModel(modelIndex);
+        }
     }
 
     getBoneTransform(boneName: string): { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number } } | null {

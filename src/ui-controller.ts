@@ -33,6 +33,7 @@ import { LensEffectController } from "./ui/lens-effect-controller";
 import { LutPanelController } from "./ui/lut-panel-controller";
 import { ModelInfoPanelController, MODEL_INFO_CAMERA_SELECT_VALUE, type ModelInfoSelectState } from "./ui/model-info-panel-controller";
 import { ModelEdgeController } from "./ui/model-edge-controller";
+import { ModelExternalParentController } from "./ui/model-external-parent-controller";
 import { installEnterCommitNumberInput } from "./ui/panel-control-helpers";
 import { RuntimeFeatureUiController } from "./ui/runtime-feature-ui-controller";
 import { SceneEnvironmentUiController } from "./ui/scene-environment-ui-controller";
@@ -452,6 +453,7 @@ export class UIController {
     private lensEffectController: LensEffectController | null = null;
     private lutPanelController: LutPanelController | null = null;
     private modelEdgeController: ModelEdgeController | null = null;
+    private modelExternalParentController: ModelExternalParentController | null = null;
     private modelInfoPanelController: ModelInfoPanelController | null = null;
     private runtimeFeatureUiController: RuntimeFeatureUiController | null = null;
     private sceneEnvironmentUiController: SceneEnvironmentUiController | null = null;
@@ -586,6 +588,13 @@ export class UIController {
             onCameraEdited: () => {
                 this.actionDispatcher.dispatch({ type: "edit.cameraTransformChanged", source: "panel" });
             },
+            dispatchAction: (action) => this.actionDispatcher.dispatch(action),
+        });
+        this.modelExternalParentController = new ModelExternalParentController({
+            mmdManager: this.mmdManager,
+            getSelectedBone: () => this.bottomPanel.getSelectedBone(),
+            onChildBoneReset: (boneName) => this.persistExternalParentChildBoneReset(boneName),
+            showToast: (message, type) => this.showToast(message, type),
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
         this.setupActionHandlers();
@@ -993,6 +1002,7 @@ export class UIController {
         };
         this.bottomPanel.onBoneSelectionChanged = (boneName) => {
             this.actionDispatcher.dispatch({ type: "selection.setBone", source: "panel", boneName });
+            this.modelExternalParentController?.refresh();
             this.refreshViewportBottomBar();
         };
         this.bottomPanel.onMorphFrameSelectionChanged = () => {
@@ -2257,6 +2267,9 @@ export class UIController {
         this.actionDispatcher.register("model.deleteActive", () => {
             this.modelInfoPanelController?.deleteActiveModel();
         });
+        this.actionDispatcher.register("model.setExternalParent", () => {
+            this.modelExternalParentController?.setExternalParentFromPanel();
+        });
         this.actionDispatcher.register("shader.selectModelTarget", (action) => {
             this.shaderPanelController?.selectModelTarget(action.value, action.showToast);
         });
@@ -3337,6 +3350,7 @@ export class UIController {
         this.updateInfoActionButtons();
         this.bottomPanelLayoutController?.applyMode("camera");
         this.effectPanelShellController?.setActiveTab("post");
+        this.modelExternalParentController?.refresh();
         this.refreshViewportBottomBar();
     }
 
@@ -3352,6 +3366,7 @@ export class UIController {
         this.syncBottomBoneSelectionFromTimeline(this.timeline.getSelectedTrack());
         this.updateInfoActionButtons();
         this.bottomPanelLayoutController?.applyMode("model");
+        this.modelExternalParentController?.refresh();
         this.refreshViewportBottomBar();
     }
 
@@ -3366,6 +3381,7 @@ export class UIController {
         this.updateInfoActionButtons();
         this.runtimeFeatureUiController?.refreshRigidBodies();
         this.accessoryPanelController?.refresh();
+        this.modelExternalParentController?.refresh();
         this.refreshViewportBottomBar();
     }
 
@@ -6002,6 +6018,15 @@ export class UIController {
 
     private registerAutoKeyForEditedBone(boneName: string): void {
         if (!this.autoKeyEnabled || boneName === "Camera") return;
+        this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "system");
+    }
+
+    private persistExternalParentChildBoneReset(boneName: string): void {
+        const zeroPose: BoneTransformCommandSnapshot = {
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+        };
+        if (!this.applyBoneTransformSnapshotFromCommand(boneName, zeroPose)) return;
         this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "system");
     }
 

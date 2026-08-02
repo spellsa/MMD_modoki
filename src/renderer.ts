@@ -320,6 +320,23 @@ async function initializeApp(): Promise<void> {
     bottomPanel.setMmdManager(mmdManager);
 
     new UIController(mmdManager, timeline, bottomPanel);
+    if (new URLSearchParams(window.location.search).get("e2e") === "1") {
+      window.mmdModokiE2e = {
+        loadModel: (filePath) => mmdManager.loadPMX(filePath),
+        getModelBoneRenderedPosition: (modelIndex, boneName) => (
+          mmdManager.getModelBoneRenderedPosition(modelIndex, boneName)
+        ),
+        getBoneGizmoPosition: () => mmdManager.getBoneGizmoPosition(),
+        getActiveModelIndex: () => (
+          mmdManager.getLoadedModels().find((model) => model.active)?.index ?? null
+        ),
+        getActiveBoneTransform: (boneName) => mmdManager.getBoneTransform(boneName),
+        setBoneGizmoRotationDrag: (rotation, dragging) => (
+          mmdManager.setBoneGizmoRotationDragForE2e(rotation, dragging)
+        ),
+        getModelExternalParent: (modelIndex) => mmdManager.getModelExternalParent(modelIndex),
+      };
+    }
     let environmentLightingProbe: Awaited<ReturnType<typeof mmdManager.runEnvironmentLightingDiagnosticProbe>> | undefined;
     let environmentLightingDiagnostics: ReturnType<typeof mmdManager.getEnvironmentLightingDiagnostics> | undefined;
     if (smokeRenderStabilityDiagnostics) {

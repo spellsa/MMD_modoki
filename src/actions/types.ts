@@ -98,7 +98,8 @@ export type ModelAction =
     | { type: "model.selectTimelineTarget"; source: ActionSource; value: string; showToast: boolean }
     | { type: "model.toggleActiveVisibility"; source: ActionSource }
     | { type: "model.setActiveShadow"; source: ActionSource; castShadow: boolean }
-    | { type: "model.deleteActive"; source: ActionSource };
+    | { type: "model.deleteActive"; source: ActionSource }
+    | { type: "model.setExternalParent"; source: ActionSource };
 
 export type ShaderAction =
     | { type: "shader.selectModelTarget"; source: ActionSource; value: string; showToast: boolean }

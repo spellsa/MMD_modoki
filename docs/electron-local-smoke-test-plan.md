@@ -39,7 +39,8 @@ WebGPU pipeline を壊した回帰を検出するためである。
 2026-08-02 追記:
 
 - Playwright Electron のローカル導入条件を再調査し、最小 spike の実施案を別文書へ整理した。
-- `@playwright/test 1.62.1` は開発依存へ追加済みだが、Electron fixture と E2E test は未実装である。
+- `@playwright/test 1.62.1`、Electron fixture、設定、モデル外部親E2Eを追加した。
+- `npm.cmd run test:e2e` で豆腐 / 皿fixtureの読込、外部親登録、追従、解除を実Electronで確認する。
 - 既存 smoke を WebGPU/runtime、Playwright を UI 操作へ分担する方針である。
 
 目標コマンド:
@@ -318,8 +319,8 @@ v0.2 UI 実装前の次候補。
 
 ### Step 5: Playwright へ拡張
 
-`@playwright/test 1.62.1` の開発依存追加までは完了。smoke script と役割を分けた
-Electron fixture、config、最小 E2E test は未実装である。
+`@playwright/test 1.62.1`、Electron fixture、config、モデル外部親E2Eまで実装済み。
+smoke scriptはruntime起動確認、PlaywrightはUI操作確認として役割を分ける。
 
 Playwright で追加確認したいもの:
 

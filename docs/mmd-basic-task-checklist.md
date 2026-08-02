@@ -293,7 +293,7 @@
 - [x] 重要ロジックの単体テスト追加
 - [x] Electron ローカル起動スモークテスト導線の追加（WebGPU 判定込み） → [electron-local-smoke-test-plan.md](electron-local-smoke-test-plan.md)
 - [x] Playwright Electron のローカル E2E 導入調査と `@playwright/test` の開発依存追加 → [playwright-electron-local-e2e-investigation-2026-08-02.md](playwright-electron-local-e2e-investigation-2026-08-02.md)
-- [ ] Playwright Electron の最小起動 E2E（fixture / config / launch test）
+- [x] Playwright Electron の最小起動 E2E（fixture / config / モデル外部親 test）
 
 ## 参考リンク
 
@@ -353,6 +353,9 @@
   - 2026-06-25 実装: 複数ボーン選択、ビューポート Shift+クリック、タイムライン Shift+クリック、複数ボーン現フレーム登録、下パネル/補間グレーアウト。
   - 詳細: [選択系実装反映メモ 2026-06-25](./selection-implementation-update-2026-06-25.md)
 - [ ] 外部親登録
+  - [x] モデル間のボーン外部親（登録 / 解除 / 循環拒否 / project保存復元 / Playwright E2E） → [モデル外部親 仕様・実装ガイド](./model-external-parent-implementation-2026-08-02.md)
+  - [ ] カメラ外部親のUI公開
+  - [ ] フレーム単位の外部親キー
 - [ ] 照明 / 影 / 重力 / アクセサリのキー登録
 - [ ] VPD / VMD 書き出し（仮）
 - [x] 反転ペースト

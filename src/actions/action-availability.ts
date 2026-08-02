@@ -105,6 +105,7 @@ export function canExecuteEditorAction(
         case "model.toggleActiveVisibility":
         case "model.setActiveShadow":
         case "model.deleteActive":
+        case "model.setExternalParent":
         case "shader.selectModelTarget":
         case "shader.applySelected":
         case "shader.applyAll":
