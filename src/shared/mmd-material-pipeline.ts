@@ -7,6 +7,10 @@ export type MmdMaterialPipelinePreset = typeof MMD_MATERIAL_PIPELINE_PRESETS[num
 
 export const DEFAULT_MMD_MATERIAL_PIPELINE_PRESET: MmdMaterialPipelinePreset = "mmd-standard";
 
+// Keep the PBR implementation and project compatibility available internally,
+// but do not expose the experiment in the regular UI for the next release.
+export const PBR_MATERIAL_UI_ENABLED = false;
+
 export const PBR_MATERIAL_SHADER_PRESETS = [
     "pbr-base",
     "pbr-mmd-like",
@@ -22,6 +26,14 @@ export const DEFAULT_PBR_MATERIAL_SHADER_PRESET: PbrMaterialShaderPreset = "pbr-
 
 export function normalizeMmdMaterialPipelinePreset(value: unknown): MmdMaterialPipelinePreset {
     return value === "pbr-standard" ? value : DEFAULT_MMD_MATERIAL_PIPELINE_PRESET;
+}
+
+export function resolveNextImportMaterialPipelinePreset(
+    value: unknown,
+    pbrUiEnabled = PBR_MATERIAL_UI_ENABLED,
+): MmdMaterialPipelinePreset {
+    const normalized = normalizeMmdMaterialPipelinePreset(value);
+    return pbrUiEnabled ? normalized : DEFAULT_MMD_MATERIAL_PIPELINE_PRESET;
 }
 
 export function isPbrMaterialPipelinePreset(value: unknown): boolean {

@@ -237,6 +237,8 @@
 - [ ] Frame Graph + MirrorTexture の PNG 保存を WebGPU / WebGL2、各 screenshot helper、resize 有無で比較する Playground を作る
 - [ ] 外部 HDR の GPU 生成 irradiance texture 黒化が現行 WebGPU でも再発するか確認し、IBL Shadows の CDF 問題とは分離して記録する
 - [x] `PBR Skin SSS`をElectron / WebGPU実機でStandardと比較し、経路動作と実用不採用の結論を記録
+- [x] PBR読込モードと材質プリセットを次バージョンの通常UIから撤去し、内部実装と旧プロジェクト互換は維持
+- [x] PBR公開停止に合わせ、方向ライト照度上限を200%へ戻し、環境ライト / HDRI / IBL導線を背景メニューから隠す
 - [ ] 高コントラストHDRでPBR IBLのdiffuse / specular寄与を個別確認
 - [x] Babylon.js SSSの対象マスク、40サンプル上限、散乱半径、入力照度、散乱前後差を可視化して経路確認
 - PBR MMD LikeのSSS適用範囲限定とtoon色由来の暗部散乱光源は、現方式の実用不採用により保留

@@ -150,6 +150,7 @@
     "shader.note.wgslUnavailable":  "Available only with WebGPU (WGSL)",
     "shader.note.loadModel":  "Load a model first",
     "shader.note.noMaterial":  "No assignable materials in this model",
+    "shader.note.materialUiUnavailable":  "This model's material pipeline is not editable in the current UI",
     "shader.apply.selected":  "Assign selected",
     "shader.apply.all":  "Assign all materials",
     "shader.visibility.selected.hide":  "Hide selected",

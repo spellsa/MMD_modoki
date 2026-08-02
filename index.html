@@ -101,11 +101,11 @@
           <div class="app-menu-separator" role="separator"></div>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleMedia"><span data-i18n="menu.background.toggleMedia">背景画像/動画を表示</span></button>
           <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleBlack"><span data-i18n="menu.background.toggleBlack">黒背景を表示</span></button>
-          <div class="app-menu-separator" role="separator"></div>
-          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleEnvironmentLighting"><span data-i18n="menu.background.toggleEnvironmentLighting">環境ライトを使用</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.hdriSettings"><span data-i18n="menu.background.hdriSettings">環境ライト詳細...</span></button>
-          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.loadHdri"><span data-i18n="menu.background.loadHdri">HDRIを環境ライトに読み込む...</span></button>
-          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleHdriBackground"><span data-i18n="menu.background.toggleHdriBackground">HDRI背景を表示</span></button>
+          <div class="app-menu-separator" role="separator" hidden data-experiment="environment-lighting"></div>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleEnvironmentLighting" hidden data-experiment="environment-lighting"><span data-i18n="menu.background.toggleEnvironmentLighting">環境ライトを使用</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.hdriSettings" hidden data-experiment="environment-lighting"><span data-i18n="menu.background.hdriSettings">環境ライト詳細...</span></button>
+          <button class="app-menu-item" type="button" role="menuitem" data-menu-command="background.loadHdri" hidden data-experiment="environment-lighting"><span data-i18n="menu.background.loadHdri">HDRIを環境ライトに読み込む...</span></button>
+          <button class="app-menu-item app-menu-item--check" type="button" role="menuitemcheckbox" aria-checked="false" data-menu-command="background.toggleHdriBackground" hidden data-experiment="environment-lighting"><span data-i18n="menu.background.toggleHdriBackground">HDRI背景を表示</span></button>
         </div>
       </div>
       <div class="app-menu-group">
@@ -604,14 +604,6 @@
 
           <section class="effect-panel-view" data-effect-tab-view="materials" hidden>
             <div class="shader-panel-row">
-              <span class="info-label" data-i18n="shader.pipeline.label">モード</span>
-              <select id="shader-material-pipeline-select" class="panel-select">
-                <option value="mmd-standard" data-i18n="shader.pipeline.mmdMode">MMDモード</option>
-                <option value="pbr-standard" data-i18n="shader.pipeline.pbrMode">PBRモード</option>
-              </select>
-            </div>
-            <div class="shader-panel-note" data-i18n="shader.pipeline.note">モードは次に読み込むモデルへ適用されます。PBRでは材質ごとにプリセットを割り当てられます。</div>
-            <div class="shader-panel-row">
               <span class="info-label" data-i18n="label.target">対象</span>
               <select id="shader-model-select" class="panel-select" disabled>
                 <option value="">-</option>
@@ -1008,7 +1000,7 @@
             </div>
             <div class="light-row light-row--shadow">
               <span class="light-label" data-i18n="label.shadowStrength">照度</span>
-              <input type="range" id="light-intensity" class="light-slider" min="0" max="400" value="100" step="1">
+              <input type="range" id="light-intensity" class="light-slider" min="0" max="200" value="100" step="1">
               <span id="light-intensity-val" class="light-value">1.0</span>
             </div>
             <div class="light-row light-row--shadow light-row--always-hidden" hidden>

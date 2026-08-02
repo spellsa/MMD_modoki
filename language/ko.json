@@ -150,6 +150,7 @@
     "shader.note.wgslUnavailable":  "WebGPU(WGSL)에서만 사용 가능합니다",
     "shader.note.loadModel":  "모델을 먼저 불러오세요",
     "shader.note.noMaterial":  "이 모델에는 할당 가능한 재질이 없습니다",
+    "shader.note.materialUiUnavailable":  "이 모델의 재질 방식은 현재 UI에서 편집할 수 없습니다",
     "shader.apply.selected":  "선택에 할당",
     "shader.apply.all":  "전체 재질에 할당",
     "shader.visibility.selected.hide":  "선택 숨기기",

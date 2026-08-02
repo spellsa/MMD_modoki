@@ -101,13 +101,14 @@ describe("shadow projection range", () => {
 });
 
 describe("directional light intensity", () => {
-    it("allows a stronger PBR key light while keeping a finite upper bound", () => {
+    it("uses the MMD-oriented 200 percent upper bound", () => {
         const host = createHost();
 
-        setLightIntensity(host, 3.25);
-        expect(host.dirLight.intensity).toBe(3.25);
+        setLightIntensity(host, 1.75);
+        expect(host.dirLight.intensity).toBe(1.75);
 
         setLightIntensity(host, 100);
+        expect(MAX_DIRECTIONAL_LIGHT_INTENSITY).toBe(2);
         expect(host.dirLight.intensity).toBe(MAX_DIRECTIONAL_LIGHT_INTENSITY);
 
         setLightIntensity(host, -1);

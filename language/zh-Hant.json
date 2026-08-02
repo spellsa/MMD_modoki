@@ -150,6 +150,7 @@
     "shader.note.wgslUnavailable":  "僅在 WebGPU (WGSL) 下可用",
     "shader.note.loadModel":  "請先讀取模型",
     "shader.note.noMaterial":  "此模型沒有可分配的材質",
+    "shader.note.materialUiUnavailable":  "目前介面無法編輯此模型的材質管線",
     "shader.apply.selected":  "分配給選取材質",
     "shader.apply.all":  "分配給全部材質",
     "shader.visibility.selected.hide":  "隱藏選取材質",

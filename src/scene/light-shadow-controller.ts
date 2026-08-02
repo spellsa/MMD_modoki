@@ -140,7 +140,7 @@ function clampShadowPenumbraSize(v: number): number {
 }
 
 const DEFAULT_LIGHT_DIRECTION = new Vector3(0.3, -0.5, 0.5).normalize();
-export const MAX_DIRECTIONAL_LIGHT_INTENSITY = 4;
+export const MAX_DIRECTIONAL_LIGHT_INTENSITY = 2;
 const DEFAULT_CSM_SHADOW_MAX_Z = 1000;
 const MAX_SHADOW_MAX_Z = 10000;
 const DEFAULT_CSM_FRUSTUM_SIZE = 960;

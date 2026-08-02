@@ -150,6 +150,7 @@
     "shader.note.wgslUnavailable":  "WebGPU (WGSL) 時のみ有効",
     "shader.note.loadModel":  "モデルを読み込んでください",
     "shader.note.noMaterial":  "このモデルには割り当て可能な材質がありません",
+    "shader.note.materialUiUnavailable":  "このモデルの材質方式は現在のUIでは編集できません",
     "shader.apply.selected":  "選択へ割り当て",
     "shader.apply.all":  "全材質へ割り当て",
     "shader.visibility.selected.hide":  "選択を非表示",

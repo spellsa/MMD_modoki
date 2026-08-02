@@ -83,6 +83,7 @@ import {
     DEFAULT_MMD_MATERIAL_PIPELINE_PRESET,
     normalizeMmdMaterialPipelinePreset,
     normalizePbrMaterialShaderPreset,
+    resolveNextImportMaterialPipelinePreset,
     type MmdMaterialPipelinePreset,
     type PbrMaterialShaderPreset,
 } from "./shared/mmd-material-pipeline";
@@ -5437,7 +5438,7 @@ ${beforeFogAppendBlock}
 
     private static readMmdMaterialPipelinePresetLocalStorage(): MmdMaterialPipelinePreset {
         try {
-            return normalizeMmdMaterialPipelinePreset(
+            return resolveNextImportMaterialPipelinePreset(
                 globalThis.localStorage?.getItem(MmdManager.MMD_MATERIAL_PIPELINE_STORAGE_KEY),
             );
         } catch {

@@ -1,7 +1,10 @@
 import { t } from "../i18n";
 import type { MmdManager, WgslMaterialShaderPresetId } from "../mmd-manager";
 import type { EditorAction } from "../actions/types";
-import type { PbrMaterialShaderPreset } from "../shared/mmd-material-pipeline";
+import {
+    PBR_MATERIAL_UI_ENABLED,
+    type PbrMaterialShaderPreset,
+} from "../shared/mmd-material-pipeline";
 
 type ToastType = "success" | "error" | "info";
 
@@ -162,6 +165,18 @@ export class ShaderPanelController {
 
         const selectedModel = models.find((model) => model.modelIndex === selectedModelIndex) ?? models[0];
         const isPbrModel = selectedModel.materialPipeline === "pbr-standard";
+        elements.modelSelect.value = String(selectedModel.modelIndex);
+        elements.modelSelect.disabled = false;
+        if (isPbrModel && !PBR_MATERIAL_UI_ENABLED) {
+            elements.presetSelect.innerHTML = '<option value="">-</option>';
+            elements.presetSelect.disabled = true;
+            elements.applySelectedButton.disabled = true;
+            elements.applyAllButton.disabled = true;
+            elements.resetButton.disabled = true;
+            elements.note.textContent = t("shader.note.materialUiUnavailable");
+            elements.materialList.innerHTML = `<div class="panel-empty-state">${t("shader.note.materialUiUnavailable")}</div>`;
+            return;
+        }
         if (!isAvailable && !isPbrModel) {
             elements.modelSelect.innerHTML = '<option value="">-</option>';
             elements.modelSelect.disabled = true;
@@ -214,9 +229,6 @@ export class ShaderPanelController {
                 elements.presetSelect.appendChild(option);
             }
         }
-        elements.modelSelect.value = String(selectedModel.modelIndex);
-        elements.modelSelect.disabled = false;
-
         if (selectedModel.materials.length === 0) {
             elements.presetSelect.disabled = true;
             elements.applySelectedButton.disabled = true;

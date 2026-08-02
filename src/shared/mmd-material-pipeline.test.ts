@@ -4,6 +4,8 @@ import {
     isPbrMaterialPipelinePreset,
     normalizeMmdMaterialPipelinePreset,
     normalizePbrMaterialShaderPreset,
+    PBR_MATERIAL_UI_ENABLED,
+    resolveNextImportMaterialPipelinePreset,
 } from "./mmd-material-pipeline";
 
 describe("mmd material pipeline", () => {
@@ -16,6 +18,12 @@ describe("mmd material pipeline", () => {
         expect(normalizeMmdMaterialPipelinePreset("pbr-standard")).toBe("pbr-standard");
         expect(isPbrMaterialPipelinePreset("pbr-standard")).toBe(true);
         expect(isPbrMaterialPipelinePreset("mmd-standard")).toBe(false);
+    });
+
+    it("keeps PBR internal while forcing the public next-import UI to MMD", () => {
+        expect(PBR_MATERIAL_UI_ENABLED).toBe(false);
+        expect(resolveNextImportMaterialPipelinePreset("pbr-standard")).toBe("mmd-standard");
+        expect(resolveNextImportMaterialPipelinePreset("pbr-standard", true)).toBe("pbr-standard");
     });
 
     it("normalizes per-material PBR shader presets independently", () => {
