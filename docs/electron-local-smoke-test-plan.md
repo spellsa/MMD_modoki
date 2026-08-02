@@ -36,6 +36,11 @@ WebGPU pipeline を壊した回帰を検出するためである。
 - Playwright Electron はローカル E2E 候補として残すが、現時点では未導入。
 - メニューバー / popup / dialog / mode switch の実装が進み、クリック操作の自動確認が必要になった段階で Playwright Electron の spike を検討する。
 
+2026-08-02 追記:
+
+- Playwright Electron のローカル導入条件を再調査し、最小 spike の実施案を別文書へ整理した。
+- この時点ではまだ未導入で、既存 smoke を WebGPU/runtime、Playwright を UI 操作へ分担する方針である。
+
 目標コマンド:
 
 ```powershell
@@ -333,5 +338,6 @@ Playwright で追加確認したいもの:
 ## 関連ドキュメント
 
 - [Electron 起動確認の自動化調査](electron-launch-test-investigation.md)
+- [Playwright Electron ローカル E2E 導入検討 2026-08-02](playwright-electron-local-e2e-investigation-2026-08-02.md)
 - [テスト手法導入検討メモ 2026-04-13](testing-strategy-note-2026-04-13.md)
 - [テスト導入提案](testing-strategy-proposal.md)

@@ -13,6 +13,7 @@
     "make:dmg": "electron-forge make --targets @electron-forge/maker-dmg",
     "publish": "electron-forge publish",
     "generate:luts": "node scripts/generate-builtin-luts.js",
+    "generate:test-models": "node scripts/generate-external-parent-test-models.mjs",
     "smoke:launch": "node scripts/smoke-launch.mjs",
     "log:tail": "node scripts/show-app-log.mjs --latest-session --lines 120",
     "log:errors": "node scripts/show-app-log.mjs --latest-session --level warn,error --lines 200",

@@ -34,6 +34,7 @@
 - [Vite / Vitest バージョン選定メモ 2026-05-17](./vite-vitest-version-security-note-2026-05-17.md)
 - [Electron 起動確認自動化 調査メモ](./electron-launch-test-investigation.md)
 - [Electron ローカル起動スモークテスト方針](./electron-local-smoke-test-plan.md)
+- [Playwright Electron ローカル E2E 導入検討 2026-08-02](./playwright-electron-local-e2e-investigation-2026-08-02.md)
 - [コードレビュー 2026-04](./code-review-2026-04.md)
 - [コードレビュー v0.2 依存更新 2026-06-13](./code-review-v0.2-dependency-upgrade-2026-06-13.md)
 
