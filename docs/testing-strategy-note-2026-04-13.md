@@ -184,7 +184,15 @@ Argos は visual regression testing の候補。MMD_modoki の将来的な描画
 - `npm.cmd run test:unit` を追加
 - `src/lut-file.test.ts` を追加
 - `.cube` / `.3dl` の判定、`.3dl` passthrough、最小 `.cube` 変換、data length mismatch、unsupported extension、empty content を確認
-- `jsdom` / Playwright / Argos / coverage は未導入
+- `jsdom` / Playwright / Argos / coverage は未導入（2026-04-13 時点）
+
+2026-08-02 更新:
+
+- `@playwright/test 1.62.1` を開発依存へ追加した。
+- Playwright 管理ブラウザは未ダウンロードで、Electron fixture / config / E2E test は未実装。
+- ローカル Electron E2E の導入判断と注意点は
+  [Playwright Electron ローカル E2E 導入検討](./playwright-electron-local-e2e-investigation-2026-08-02.md)
+  へ分離した。
 
 補足:
 
@@ -237,10 +245,12 @@ test/assets/
 
 やること:
 
-- Electron 起動方式を調査する
-- 開発起動と packaged app 起動のどちらを主対象にするか決める
-- smoke test の対象画面を決める
-- 失敗時 artifact の保存場所を決める
+- [x] Electron 起動方式を調査する
+- [x] 開発起動と packaged app 起動のどちらを主対象にするか決める
+- [x] smoke test の対象画面を決める
+- [x] 失敗時 artifact の保存場所を決める
+- [x] `@playwright/test` を開発依存へ追加し、ライセンス一覧へ記録する
+- [ ] Electron fixture、Playwright config、最小 launch test を実装する
 
 完了条件:
 
@@ -265,7 +275,8 @@ test/assets/
 
 ## 現時点のおすすめ
 
-現時点で導入済みの自動テストは Vitest の最小構成だけに留める。
+2026-08-02 時点では Vitest の単体テストと既存 Electron smoke に加え、Playwright Test の
+依存追加まで完了している。Playwright E2E 自体はまだ未実装である。
 
 Playwright と Argos は価値が高いが、MMD_modoki では描画・GPU・資産管理の揺れが大きい。先に Vitest で軽い単体テストを作り、次に Playwright の smoke test、最後に Argos の visual regression へ進むのが現実的。
 

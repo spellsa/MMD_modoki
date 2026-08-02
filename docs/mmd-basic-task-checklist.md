@@ -292,6 +292,8 @@
 - [x] 単体テスト基盤の整備（Vitest 導入）
 - [x] 重要ロジックの単体テスト追加
 - [x] Electron ローカル起動スモークテスト導線の追加（WebGPU 判定込み） → [electron-local-smoke-test-plan.md](electron-local-smoke-test-plan.md)
+- [x] Playwright Electron のローカル E2E 導入調査と `@playwright/test` の開発依存追加 → [playwright-electron-local-e2e-investigation-2026-08-02.md](playwright-electron-local-e2e-investigation-2026-08-02.md)
+- [ ] Playwright Electron の最小起動 E2E（fixture / config / launch test）
 
 ## 参考リンク
 

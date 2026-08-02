@@ -33,13 +33,14 @@ WebGPU pipeline を壊した回帰を検出するためである。
 2026-05-30 追記:
 
 - v0.2 UI 実装に入る前に、まず既存 smoke script をスクリーンショット付き起動確認へ拡張する方針にする。
-- Playwright Electron はローカル E2E 候補として残すが、現時点では未導入。
+- Playwright Electron はローカル E2E 候補として残すが、2026-05-30 時点では未導入。
 - メニューバー / popup / dialog / mode switch の実装が進み、クリック操作の自動確認が必要になった段階で Playwright Electron の spike を検討する。
 
 2026-08-02 追記:
 
 - Playwright Electron のローカル導入条件を再調査し、最小 spike の実施案を別文書へ整理した。
-- この時点ではまだ未導入で、既存 smoke を WebGPU/runtime、Playwright を UI 操作へ分担する方針である。
+- `@playwright/test 1.62.1` は開発依存へ追加済みだが、Electron fixture と E2E test は未実装である。
+- 既存 smoke を WebGPU/runtime、Playwright を UI 操作へ分担する方針である。
 
 目標コマンド:
 
@@ -79,7 +80,7 @@ npm.cmd run smoke:launch
 
 Playwright Electron は有効だが、最初の一歩としては既存 smoke script の拡張を優先する。
 
-- `@playwright/test` の追加が必要。
+- `@playwright/test` の追加が必要だった（2026-08-02 に `1.62.1` を追加済み）。
 - Playwright Electron の `_electron` API は experimental support。
 - CI / agent 環境では Xvfb や GPU なし環境の調整が必要。
 - Babylon.js / WebGPU 初期化に依存すると false negative が出やすい。
@@ -317,7 +318,8 @@ v0.2 UI 実装前の次候補。
 
 ### Step 5: Playwright へ拡張
 
-smoke script が安定してから、必要に応じて Playwright Electron を追加する。
+`@playwright/test 1.62.1` の開発依存追加までは完了。smoke script と役割を分けた
+Electron fixture、config、最小 E2E test は未実装である。
 
 Playwright で追加確認したいもの:
 

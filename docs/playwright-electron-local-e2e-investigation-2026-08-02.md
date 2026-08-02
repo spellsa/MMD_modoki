@@ -21,8 +21,9 @@ Playwright の Electron 対応は公式 API だが、現在も `_electron` と�
 **experimental support** である。Electron 40 は公式ページの対応範囲
 `v14+` には入るものの、Electron / Playwright 更新時には最小起動テストを再確認する。
 
-この文書は導入判断と実装案をまとめたものであり、2026-08-02 時点では依存関係や
-テストコードをまだ追加していない。
+この文書は導入判断と実装案をまとめたものである。2026-08-02 に
+`@playwright/test 1.62.1` を開発依存へ追加したが、Electron fixture、設定、テストコードは
+まだ追加していない。Playwright 管理ブラウザも未ダウンロードである。
 
 ## 「ローカルの Playwright」でできること
 
@@ -58,6 +59,8 @@ Playwright 公式の現行要件は Node.js 22.x / 24.x / 26.x と Windows 11 �
 ```powershell
 npm.cmd install --save-dev @playwright/test
 ```
+
+2026-08-02 に `1.62.1` を開発依存として追加済み。
 
 `@playwright/test` は Playwright API とテストランナー、assertion、reporter を含む。
 `playwright` を別に重複追加しない。Electron API は次のように同じパッケージから読む。
@@ -346,7 +349,9 @@ npx.cmd playwright show-report artifacts/e2e/report
 ### Phase 0: 今回
 
 - 調査結果と方針を文書化する。
-- 依存追加や production code の test hook 追加はまだ行わない。
+- `@playwright/test 1.62.1` を開発依存へ追加する。（完了）
+- `THIRD_PARTY_NOTICES.md` に Apache-2.0 として記録する。（完了）
+- production code の test hook はまだ追加しない。
 
 ### Phase 1: 最小 spike
 

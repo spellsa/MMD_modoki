@@ -2,6 +2,14 @@
 
 更新日: 2026-04-15
 
+2026-08-02 追記:
+
+- `@playwright/test 1.62.1` を開発依存へ追加した。
+- Electron fixture、Playwright config、E2E test はまだ未実装。
+- 現在の採用方針、Electron Fuse、native dialog、WebGPU / CI の注意点は
+  [Playwright Electron ローカル E2E 導入検討](playwright-electron-local-e2e-investigation-2026-08-02.md)
+  を参照する。
+
 ## 背景
 
 GitHub Copilot coding agent はモバイルアプリからも指示を出せるようになった。しかし、コード変更後に「アプリが起動するか」をエージェント側で確認する手段がなく、ビルドが通っても実際の起動でクラッシュするリスクを検知できない。

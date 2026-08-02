@@ -3,7 +3,7 @@
 This project includes third-party software.
 Each component remains licensed by its original author under its own license.
 
-Last updated: 2026-07-23
+Last updated: 2026-08-02
 
 ## Runtime dependencies
 
@@ -24,6 +24,7 @@ Last updated: 2026-07-23
 | --- | --- | --- | --- |
 | `@electron-forge/cli` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron-forge/maker-deb` | `7.11.1` | MIT | https://github.com/electron/forge |
+| `@electron-forge/maker-dmg` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron-forge/maker-rpm` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron-forge/maker-squirrel` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron-forge/maker-zip` | `7.11.1` | MIT | https://github.com/electron/forge |
@@ -31,6 +32,7 @@ Last updated: 2026-07-23
 | `@electron-forge/plugin-fuses` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron-forge/plugin-vite` | `7.11.1` | MIT | https://github.com/electron/forge |
 | `@electron/fuses` | `1.8.0` | MIT | https://github.com/electron/fuses |
+| `@playwright/test` | `1.62.1` | Apache-2.0 | https://github.com/microsoft/playwright |
 | `@tailwindcss/vite` | `4.3.0` | MIT | https://github.com/tailwindlabs/tailwindcss |
 | `@types/electron-squirrel-startup` | `1.0.2` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | `@types/node` | `25.2.3` | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
