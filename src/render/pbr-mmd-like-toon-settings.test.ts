@@ -121,22 +121,13 @@ function expectStandardBaseline(material: ReturnType<typeof createMaterial>): vo
 }
 
 describe("PBR material shader presets", () => {
-    it("keeps the experimental SSS filter footprint bounded", () => {
+    it("uses a pure-red final verification SSS profile", () => {
         const relativeRadius = getPbrSkinSssRelativeRadius(
             PBR_SKIN_SSS_METERS_PER_UNIT,
             PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,
         );
-        expect(relativeRadius).toBeCloseTo(0.02);
-        expect(PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[0]).toBeGreaterThan(
-            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[1],
-        );
-        expect(PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[1]).toBeGreaterThan(
-            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[2],
-        );
-        expect(
-            PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[0]
-            / PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB[2],
-        ).toBeLessThan(1.1);
+        expect(relativeRadius).toBeCloseTo(12.5);
+        expect(PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB).toEqual([1, 0, 0]);
         expect(getPbrSkinSssRelativeRadius(
             0,
             PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB,

@@ -1,9 +1,9 @@
-# PBR Skin SSS 赤黒化調査・途中経過
+# PBR Skin SSS 赤黒化調査・解決記録
 
 ## 目的
 
 `PBR Skin SSS`をPMXの肌材質へ割り当てたときに、元のテクスチャより肌が赤黒く見える問題について、
-2026-07-28時点の切り分け結果と次の検証候補を記録する。
+2026-07-28から2026-08-02までの切り分け、対策、実機確認結果を記録する。
 
 白飛び対策の詳細は
 [PBR Skin SSS 白飛び対策・再発防止メモ](./pbr-skin-sss-whiteout-countermeasures-2026-07-28.md)
@@ -13,12 +13,42 @@
 
 - 画面全体の白飛びは解消済み
 - モデル読込時に大量発生していたPBR / WGSL警告も解消済み
-- 肌の赤黒化は未解決
-- 警告が出ない状態でも赤黒化が再現するため、シェーダー登録失敗と肌色の問題は別件
-- PMX材質の`diffuse RGB`だけが原因ではない
-- diffusion profileを白寄りの薄いピンクへ変更しても、赤黒さはほぼ変化しなかった
+- 肌の赤黒化は、2026-08-02のElectron / WebGPU直接出力で解消を確認済み
+- 主因は、SSS対象ピクセルだけLinearの合成結果が最終画面へ残る色空間の不一致だった
+- SSS合成へ後段のImage Processing有無に応じた局所gamma変換を追加し、SSS対象外は変更しない
+- FrameGraph中間RTT固有のPrePass有効化漏れは、RTT用activation passで別途対処した
+- FrameGraph RTT実使用時、Classic、LUT、tone mappingとの組み合わせは未確認だが、実用不採用により追加検証を保留
 
 現状は実験プリセットとして保持し、`PBR Skin`や`PBR Standard`の既定挙動へは昇格させない。
+
+2026-08-02の最終比較では、純赤profileを100%合成すると明確な赤色変化が出たため、
+SSS経路の動作自体は確認できた。一方、等距離profileではStandardとの差がほぼ見えず、
+純赤profileを25%へ下げた場合は肌全体が一様に赤くなった。目的としていた薄い部位の逆光透過や
+光影境界の局所的な彩度上昇とは一致しないため、画面空間Scatteringの実用化調査はここで終了する。
+将来の再検討は、厚み情報または輪郭近似を使う`Skin Backlight / Skin Translucency`として分離する。
+
+## 2026-08-02: 赤黒化解消と実機確認
+
+Babylon.js 9.2.0のPBRシェーダーでは、`SS_SCATTERING`材質は材質内Image Processingを
+スキップし、通常はSSS合成後の全画面Image Processingへ色変換を委ねる。一方、
+本アプリは画面全体の白飛びを防ぐため、SubSurface Configurationの
+`needsImageProcessing`を`false`にしている。この組み合わせにより、SSS対象ピクセルだけが
+Linearのまま表示色空間へ出力され、暗く赤黒く見えていた。
+
+対策として、SSS合成シェーダーへ条件付きの局所gamma変換を追加した。FrameGraphの現在の
+表示色空間経路、またはClassicで最終Image Processingが無い場合だけ有効にし、後段で
+Image ProcessingするClassic経路では無効にする。SSS対象外ピクセルは従来の入力色をそのまま返す。
+
+Electron / WebGPUの実PMXで`body01`と`face01`へ適用した結果、ポストスタックなしの
+直接出力で赤黒い暗化が解消し、元の明るい肌色を保ちながら顔と首へ自然な柔らかさが出た。
+成功時ログでは`compositionUsesLocalGamma: true`、`prePassEnabled: true`、
+`compiledSssCenterBlendPresent: true`を確認した。背景、髪、服の白飛びも再発していない。
+
+詳細とFrameGraph RTT側の公式回答・対処は
+[PBR Skin SSS / FrameGraph中間RTT回避策](./pbr-skin-sss-framegraph-rtt-workaround-2026-08-02.md)
+を参照する。確認に使ったモデルとスクリーンショットはローカル検証用であり、リポジトリへ追加しない。
+
+以下は解決に至るまでの調査履歴として残す。「現在」「次回」などの表現は各記録時点を指す。
 
 ## 2026-07-29: backend比較とPrePass irradiance保持
 
@@ -221,7 +251,7 @@ result = base + albedo * delta
 
 GLSL / WGSL双方について、失敗したベース色保持・差分加算が既に注入された状態から、
 標準PrePass契約と85/15合成へ戻せること、多重適用されないことを単体テストで確認する。
-赤黒化の主因は未解決であり、今後はPrePass各attachmentとSSS合成直前・直後を可視化して、
+この試行時点では赤黒化の主因は未解決であり、PrePass各attachmentとSSS合成直前・直後を可視化して、
 どの段階で元テクスチャまたは照度成分が失われているかを切り分ける必要がある。
 
 ## 2026-07-29: Babylon.js公式情報・フォーラム再調査

@@ -25,10 +25,11 @@ export const PBR_SKIN_MINIMUM_ROUGHNESS = 0.68;
 export const PBR_SKIN_MINIMUM_THICKNESS = 0;
 export const PBR_SKIN_MAXIMUM_THICKNESS = 0.3;
 export const PBR_SKIN_SSS_ENVIRONMENT_INTENSITY = 1;
+export const PBR_SKIN_SSS_DEBUG_VISUALIZATION = "off" as const;
 export const PBR_SKIN_SSS_METERS_PER_UNIT = 0.08;
-// Babylon の値は発光色ではなく、RGB 各成分の散乱距離。
-// 最大距離は維持したまま、赤だけわずかに遠く届く白寄りの薄いピンクにする。
-export const PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB = [0.0016, 0.00152, 0.00148] as const;
+// 最終切り分け用の純赤プロファイル。これでも Standard との差が見えなければ、
+// 現在の描画経路では独立した SSS プリセットとして採用しない。
+export const PBR_SKIN_SSS_DIFFUSION_PROFILE_RGB = [1, 0, 0] as const;
 
 export function getPbrSkinSssRelativeRadius(
     metersPerUnit: number,
@@ -375,8 +376,8 @@ function applyPbrSkinSssSettings(material: PbrPresetMaterialTarget): boolean {
     // Follow Babylon.js' documented screen-space skin scattering setup. MMD
     // models are commonly around 20 units tall, so use roughly 8 cm per unit.
     // The profile channels are scattering distances, not an additive tint.
-    // Keep the relative radius around 0.1 and the RGB distances nearly neutral
-    // so the source albedo remains dominant while SSS adds only subtle warmth.
+    // Keep the relative radius bounded while deliberately separating the RGB
+    // distances so the experimental preset has an unmistakable red SSS response.
     applyPbrSkinBaseSurfaceSettings(material);
     // Match PBR Standard while diagnosing the scattering-only preset. The
     // stable Skin preset intentionally stays at its lower IBL response.

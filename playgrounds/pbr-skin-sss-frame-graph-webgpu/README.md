@@ -49,8 +49,8 @@
 
 | Backend | 1: Direct | 2: FG Copy | 3: FG Image Processing |
 | --- | --- | --- | --- |
-| WebGL2 | 未確認 | 未確認 | 未確認 |
-| WebGPU | 未確認 | 未確認 | 未確認 |
+| WebGL2 | 正常 | Scattering PBRだけほぼ黒 | Scattering PBRだけほぼ黒 |
+| WebGPU | 正常 | Scattering PBRだけほぼ黒 | Scattering PBRだけほぼ黒 |
 
 各セルで追加確認:
 
@@ -74,9 +74,9 @@
   - WGSL、PrePass attachment、Frame Graph外部Texture importの
     WebGPU経路をBabylon.js側の不具合候補として切り出す
 
-## 2026-07-29 実機確認
+## 2026-07-29 / 2026-07-30 実機確認
 
-Babylon.js Playground 9.18.1 の WebGPU で確認した。
+Babylon.js Playground 9.18.2 の WebGPU と WebGL2 で確認した。
 
 - `1: Direct`
   - 通常 PBR と Scattering PBR の両方が描画される
@@ -88,9 +88,12 @@ Babylon.js Playground 9.18.1 の WebGPU で確認した。
   - Frame Graph 側で Image Processing を追加するだけでは復元しない
 - Direct のまま `N` で `needsImageProcessing = false` にすると、
   Scattering PBR が暗い赤へ変化し、背景も黒くなる
+- WebGL2 でも Direct は正常で、`2` と `3` では
+  WebGPU と同じく Scattering PBR だけがほぼ黒になる
 
-この比較では、Frame Graph の実行自体や WebGPU の基本描画は成功している。
+この比較では、Frame Graph の実行自体と両 backend の基本描画は成功している。
 問題は Scattering の最終合成結果を中間 `RenderTargetTexture` から取得する経路に絞り込める。
+WebGL2 でも同じため、WebGPU 固有の WGSL / validation 問題ではない。
 
 現時点の第一候補は、PrePass SSS の最終合成先がメイン backbuffer 側に固定されており、
 `camera.customRenderTargets` へ描画した中間 RT には Scattering 合成済みの色が入っていないこと。
@@ -105,9 +108,24 @@ Babylon.js Playground 9.18.1 の WebGPU で確認した。
 
 ## Playground URL
 
-- 未作成
+- https://playground.babylonjs.com/#63QTUS
+
+確認環境:
+
+- Babylon.js Playground 9.18.2
+- Windows 11 Pro 25H2（OS build 26200.8875）
+- Google Chrome 151.0.7922.72（Official Build、64-bit）
+- NVIDIA GeForce RTX 3070（driver 595.95）
+- 11th Gen Intel Core i9-11900K @ 3.50 GHz
+- RAM 64 GB
+
+投稿用確認画像:
+
+- `スクリーンショット 2026-07-30 101059 - コピー.png`: `1: Direct` の正常状態
+- `スクリーンショット 2026-07-30 101106 - コピー.png`: `2: FG Copy` で右側の SSS 球が黒化した状態
 
 関連:
 
 - [`../pbr-skin-sss-webgpu/README.md`](../pbr-skin-sss-webgpu/README.md)
 - [`../../docs/pbr-skin-sss-red-dark-progress-2026-07-28.md`](../../docs/pbr-skin-sss-red-dark-progress-2026-07-28.md)
+- [`../../docs/babylon-forum-reporting-runbook.md`](../../docs/babylon-forum-reporting-runbook.md)

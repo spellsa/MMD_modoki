@@ -32,6 +32,9 @@ JavaScript欄へそのまま貼り付けられる形にします。
 
 フォーラム投稿の下書きには
 [`templates/forum-report.md`](./templates/forum-report.md)を使います。
+FG-SSS-01 の具体的な貼り付け先と投稿文は
+[`../docs/babylon-forum-reporting-runbook.md`](../docs/babylon-forum-reporting-runbook.md)
+にまとめています。
 
 ## Playgroundへ載せる手順
 

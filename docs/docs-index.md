@@ -151,7 +151,12 @@
 - [Babylon.js Material Plugin 詳細調査 2026-07-28](./babylon-material-plugin-investigation-2026-07-28.md)
 - [PBR Skin 実装メモ 2026-07-23](./pbr-skin-implementation-2026-07-23.md)
 - [PBR Skin SSS 白飛び対策・再発防止メモ 2026-07-28](./pbr-skin-sss-whiteout-countermeasures-2026-07-28.md)
-- [PBR Skin SSS 赤黒化調査・途中経過 2026-07-28](./pbr-skin-sss-red-dark-progress-2026-07-28.md)
+- [PBR Skin SSS 赤黒化調査・解決記録 2026-07-28〜08-02](./pbr-skin-sss-red-dark-progress-2026-07-28.md)
+- [PBR Skin SSS / FrameGraph中間RTT回避策 2026-08-02](./pbr-skin-sss-framegraph-rtt-workaround-2026-08-02.md)
+
+PBR Skin SSSは描画経路の動作と不具合対策まで確認したが、目的とする薄部の逆光透過とは
+一致しなかったため、2026-08-02時点で実用化調査を終了した。再開時は厚み情報を使う
+`Skin Backlight / Skin Translucency`を別実験として扱う。
 - [PBR MMD Like 実装メモ 2026-07-23](./pbr-mmd-like-implementation-2026-07-23.md)
 - [Babylon.js OpenPBR と外部読込の調査 2026-07-21](./babylon-openpbr-external-import-investigation-2026-07-21.md)
 - [WebGPU 不発 / 平坦化の調査メモ](./webgpu-not-working-investigation.md)
@@ -173,6 +178,7 @@
 
 - [ポストエフェクト拡充バックログ](./post-effects-backlog.md)
 - [Babylon.js 公式相談候補台帳 2026-07-29](./babylon-official-consultation-candidates-2026-07-29.md)
+- [Babylon.js Playground / 公式フォーラム投稿手順書](./babylon-forum-reporting-runbook.md)
 - [FrameGraph / PostFX 危険メモ 2026-07-01](./framegraph-postfx-risk-note-2026-07-01.md)
 - [Frame Graph post effects plan](./frame-graph-post-effects-plan-2026-04-28.md)
 - [Frame Graph post effects progress](./frame-graph-post-effects-progress-2026-04-28.md)

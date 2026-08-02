@@ -184,7 +184,13 @@ Electron / WebGPU実機確認を根拠とする。
 今回の確認で完了したのは「SSS対象外を含む画面全体の白飛び」の対策である。
 次は別問題として扱う。
 
-- PBR Standardより暗く見える条件
+PBR Standardより暗く見える問題は、2026-08-02にSSS合成の色空間不一致を修正し、
+Electron / WebGPUの直接出力で解消を確認した。詳細は
+[PBR Skin SSS 赤黒化調査・解決記録](./pbr-skin-sss-red-dark-progress-2026-07-28.md)と
+[FrameGraph中間RTT回避策](./pbr-skin-sss-framegraph-rtt-workaround-2026-08-02.md)を参照する。
+
+引き続き別途評価する項目:
+
 - 散乱色と肌色の適正値
 - 影の二重輪郭や影ぶれ
 - IBL ON / OFFでの散乱差

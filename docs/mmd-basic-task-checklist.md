@@ -215,7 +215,7 @@
 ## シェーダー / 材質拡張メモ
 
 - [ ] シェーダープリセットの拡充
-- [ ] 疑似サブサーフェススキャッタリング（肌向け soft / back-light wrap）
+- [ ] 疑似サブサーフェススキャッタリング（肌向け soft / back-light wrap。PBR調査終了につき保留）
 - [ ] 疑似メタリック表現（ハイライト / sphere / toon 応答の調整）
 - [ ] 材質タイプ別プリセット整理（肌 / 髪 / 布 / 金属）
 - [x] PBR IBLの実寄与をモデルなしPBR MMD Like合成球の画素輝度差で確認
@@ -226,7 +226,7 @@
 - [x] `PBR Skin SSS`の追加Image Processingを無効化し、全画面白飛びの解消をElectron / WebGPU実機確認
 - [x] Babylon.js 公式相談候補を質問 / 不具合 / 機能要望へ分類し、投稿前台帳を作成
 - [x] docs 横断で Frame Graph / WebGPU の公式相談候補を棚卸しし、現行候補 / 旧版再検証 / アプリ側解決へ分類
-- [ ] PrePass SSSの最終合成をFrame Graphへ渡す正式経路について、保存済みPlayground URL付きで公式へ相談
+- [x] PrePass SSSの最終合成をFrame Graphへ渡す正式経路について公式へ相談し、RTT用activation passの回避策を反映
 - [ ] FrameGraph ImageProcessing task の LUT 非反映を Babylon.js 9.18.1 単体 Playground で再現確認
 - [ ] Frame Graph の task parameter / 接続 / imported texture 更新に必要な再 build 境界を公式 API と最小再現で確認
 - [ ] Babylon.js 8.45.3 時代の SSAO2 / PrePass / MRT WebGPU 事象を現行版で再確認し、再発時だけ相談候補へ昇格
@@ -236,11 +236,11 @@
 - [ ] IBL Shadows の `r32float` validation を現行 Babylon.js で再確認し、`float32-filterable` の有無と `enableAllFeatures` ON / OFF を記録する
 - [ ] Frame Graph + MirrorTexture の PNG 保存を WebGPU / WebGL2、各 screenshot helper、resize 有無で比較する Playground を作る
 - [ ] 外部 HDR の GPU 生成 irradiance texture 黒化が現行 WebGPU でも再発するか確認し、IBL Shadows の CDF 問題とは分離して記録する
-- [ ] `PBR Skin SSS`をElectron / WebGPU実機で比較し、暗化・影ぶれの有無を記録
+- [x] `PBR Skin SSS`をElectron / WebGPU実機でStandardと比較し、経路動作と実用不採用の結論を記録
 - [ ] 高コントラストHDRでPBR IBLのdiffuse / specular寄与を個別確認
-- [ ] PBR MMD LikeのSSS適用範囲をキャラクター / 材質別へ限定し、影ブレを解消
-- [ ] Babylon.js SSSの40サンプル上限、散乱半径、PrePass再合成回数を可視化して二重影を切り分け
-- [ ] PBR MMD Likeへtoon色由来の暗部散乱光源を追加し、SSS色の効きを比較
+- [x] Babylon.js SSSの対象マスク、40サンプル上限、散乱半径、入力照度、散乱前後差を可視化して経路確認
+- PBR MMD LikeのSSS適用範囲限定とtoon色由来の暗部散乱光源は、現方式の実用不採用により保留
+- 将来再開する場合は、厚み情報または輪郭近似を使う`Skin Backlight / Skin Translucency`として別設計にする
 
 ## UI / 設定画面メモ
 

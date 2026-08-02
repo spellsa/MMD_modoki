@@ -17,6 +17,7 @@ MMD_modoki では Frame Graph、PrePass、SSS、WebGPU、Electron、PMX 材質�
 ## 状態の意味
 
 - `投稿準備中`: 最小再現があり、本文と Playground URL を整えれば相談できる
+- `投稿済み`: 公式フォーラムへ投稿済みで、回答または追加確認を追跡する
 - `要追加再現`: MMD_modoki では発生するが、Babylon.js 単体の最小再現がない
 - `要現行版再検証`: 古い Babylon.js では記録があるが、現在使用中の版で未確認
 - `アプリ側解決`: MMD_modoki 側の原因が判明しており、現時点では公式へ出さない
@@ -54,7 +55,7 @@ required attachment の付け忘れは、まずアプリ側の graph 配線を�
 
 | ID | 相談候補 | 種別 | 優先度 | 状態 |
 |---|---|---|---:|---|
-| FG-SSS-01 | PrePass SSS の最終合成が中間 RenderTarget 経由で Frame Graph へ渡らない | 正式経路の質問 / 機能要望候補 | 高 | 投稿準備中 |
+| FG-SSS-01 | PrePass SSS の最終合成が中間 RenderTarget 経由で Frame Graph へ渡らない | 正式経路の質問 / 機能要望候補 | 高 | 投稿済み |
 | FG-GEO-02 | WebGPU の FrameGraph GeometryRenderer で fragment output と color target の不一致警告が出る | 使用法の質問 / 不具合候補 | 中 | 要追加再現 |
 | SSS-COLOR-03 | PBR Skin SSS が赤黒くなり、元テクスチャの色が弱く見える | 使用法の質問 / 不具合候補 | 中 | 要追加再現 |
 | SSS-SHADOW-04 | SSS 適用時に影が柔らかくなるのではなく、ずれた二重影のように見える | 使用法の質問 / 不具合候補 | 中 | 要追加再現 |
@@ -73,23 +74,26 @@ required attachment の付け忘れは、まずアプリ側の graph 配線を�
 
 ### 現象
 
-Babylon.js Playground 9.18.1 の WebGPU で、同じ PBR 設定の球を二つ表示し、
+Babylon.js Playground 9.18.2 の WebGPU と WebGL2 で、同じ PBR 設定の球を二つ表示し、
 片方だけ `subSurface.isScatteringEnabled = true` にする。
 
 - scene から画面へ直接描画すると、通常 PBR 球と SSS 球はどちらも正常に表示される
 - scene を中間 `RenderTargetTexture` へ描画し、その texture を Frame Graph へ import して
   copy すると、通常 PBR 球は正常だが SSS 球だけほぼ黒くなる
 - Frame Graph 側へ Image Processing task を追加しても復元しない
+- WebGPU と WebGL2 の両方で同じ結果になる
 - Electron、PMX、babylon-mmd、MMD_modoki 固有 Material Plugin を使わない最小構成でも再現する
 - console warning / error は出ない
 
 再現コード:
 
 - [PBR Skin SSS + Frame Graph WebGPU Playground](../playgrounds/pbr-skin-sss-frame-graph-webgpu/README.md)
+- 保存済み Playground: https://playground.babylonjs.com/#63QTUS
 
 ### 現時点の解釈
 
-これは「SSS 自体が WebGPU で壊れている」という再現ではない。直接描画では SSS が正常だからである。
+これは「SSS 自体または WebGPU だけが壊れている」という再現ではない。
+両 backend の直接描画では SSS が正常だからである。
 
 現在の再現は、PrePass の SSS 最終合成を `camera.customRenderTargets` による中間 RT へ出し、
 その RT を別の Frame Graph post stack へ取り込むハイブリッド経路で起きる。
@@ -113,15 +117,23 @@ Babylon.js のメンテナーは、Frame Graph 使用時には scene / camera �
 
 ### 投稿タイトル案
 
-`PrePass SSS output is missing from a RenderTargetTexture imported into FrameGraph on WebGPU — what is the supported integration path?`
+`PBR subsurface scattering becomes black with an intermediate RenderTargetTexture and Frame Graph`
 
-### 投稿前に残っている作業
+### 投稿状況
 
-- Playground を Save し、再現 URL と revision を記録する
-- WebGPU と WebGL2 の両方で同じキー操作・設定を比較する
-- Direct / intermediate RT + copy / intermediate RT + Image Processing の三状態を本文へ記載する
-- `setCustomOutput()` を使った場合の結果を一つ追加する
-- OS、browser、GPU、Babylon.js version を記載する
+- Playground は保存済み。再現 URL は `https://playground.babylonjs.com/#63QTUS`
+- WebGPU と WebGL2 の両方で同様の現象を確認済み
+- Direct / intermediate RT + copy / intermediate RT + Image Processing の三状態を再現コードへ収録済み
+- OS、browser、GPU、GPU driver、CPU、RAM、Babylon.js version を記録済み
+- 投稿画像は `スクリーンショット 2026-07-30 101059 - コピー.png`（Direct 正常）と `スクリーンショット 2026-07-30 101106 - コピー.png`（FG Copy で SSS 球が黒化）を選定済み
+- Chrome バージョンの記録画像は `スクリーンショット 2026-07-30 101125 - コピー.png`。確認環境は Google Chrome 151.0.7922.72（Official Build、64-bit）
+- 2026-07-30 に Babylon.js Forum へ投稿済み
+- 投稿: [PBR subsurface scattering becomes black with an intermediate RenderTargetTexture and Frame Graph](https://forum.babylonjs.com/t/pbr-subsurface-scattering-becomes-black-with-an-intermediate-rendertargettexture-and-frame-graph/63870)
+- `setCustomOutput()` 経路の比較は、必要に応じたフォローアップとして残す
+
+具体的な貼り付け先と投稿本文:
+
+- [Babylon.js Playground / 公式フォーラム投稿手順書](./babylon-forum-reporting-runbook.md)
 
 ### 関連する一次情報
 
@@ -674,7 +686,7 @@ WebGPU では reverse depth buffer を使えるため、すべての PBR 材質�
 
 ## 相談の推奨順
 
-1. `FG-SSS-01` を質問 / feature request 候補として投稿する。
+1. `FG-SSS-01` は投稿済み。回答と追加再現依頼を追跡する。
 2. `FG-GEO-02` の Babylon.js 単体最小再現を作る。
 3. `WEBGPU-MORPH-08` を現行版と WebGL2 で再検証し、まず babylon-mmd 側へ相談する。
 4. `WEBGPU-IBLSHADOW-11` を現行版、optional feature、browser で再検証する。

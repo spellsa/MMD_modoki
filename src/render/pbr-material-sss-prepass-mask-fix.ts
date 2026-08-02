@@ -8,7 +8,8 @@ import "@babylonjs/core/ShadersWGSL/subSurfaceScattering.fragment";
 import "@babylonjs/core/Shaders/ShadersInclude/pbrBlockPrePass";
 import "@babylonjs/core/ShadersWGSL/ShadersInclude/pbrBlockPrePass";
 
-export const PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH = 0.15;
+export const PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH = 0.25;
+const PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH = 0.15;
 
 const GLSL_MARKER =
     "writeGeometryInfo*scatteringDiffusionProfile/255.";
@@ -48,36 +49,178 @@ const GLSL_SSS_FALLBACK_MARKER =
     "gl_FragColor=vec4(inputColor.rgb+albedo*centerIrradiance,1.0);";
 const GLSL_SSS_FALLBACK_REPLACEMENT =
     "gl_FragColor=vec4(inputColor.rgb,1.0);";
+const GLSL_SSS_FALLBACK_PREVIOUS_LOCAL_GAMMA_REPLACEMENT = [
+    "vec3 composedColor=inputColor.rgb+albedo*centerIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpace(composedColor);",
+    "#endif",
+    "gl_FragColor=vec4(composedColor,1.0);",
+].join("\n");
+const GLSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT = [
+    "#ifdef MMD_MODOKI_SSS_DEBUG_IRRADIANCE_SPLIT",
+    "vec3 debugInputIrradiance=centerIrradiance/(vec3(1.0)+centerIrradiance);",
+    "vec3 debugFallbackDifference=vec3(0.0,1.0,0.0);",
+    "vec3 debugColor=mix(debugInputIrradiance,debugFallbackDifference,step(0.5,vUV.x));",
+    "float debugDivider=1.0-step(texelSize.x*1.5,abs(vUV.x-0.5));",
+    "debugColor=mix(debugColor,vec3(1.0,0.0,1.0),debugDivider);",
+    "gl_FragColor=vec4(debugColor,1.0);",
+    "#else",
+    "#ifdef MMD_MODOKI_SSS_DEBUG_SCATTERING_DELTA",
+    "gl_FragColor=vec4(0.0,1.0,0.0,1.0);",
+    "#else",
+    "vec3 composedColor=inputColor.rgb+albedo*centerIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpace(composedColor);",
+    "#endif",
+    "gl_FragColor=vec4(composedColor,1.0);",
+    "#endif",
+    "#endif",
+].join("\n") + "\n";
 const WGSL_SSS_FALLBACK_MARKER =
     "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*centerIrradiance,1.0);";
 const WGSL_SSS_FALLBACK_REPLACEMENT =
     "fragmentOutputs.color=vec4f(inputColor.rgb,1.0);";
+const WGSL_SSS_FALLBACK_PREVIOUS_LOCAL_GAMMA_REPLACEMENT = [
+    "var composedColor=inputColor.rgb+albedo*centerIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpaceVec3(composedColor);",
+    "#endif",
+    "fragmentOutputs.color=vec4f(composedColor,1.0);",
+].join("\n");
+const WGSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT = [
+    "#ifdef MMD_MODOKI_SSS_DEBUG_IRRADIANCE_SPLIT",
+    "let debugInputIrradiance=centerIrradiance/(vec3f(1.0)+centerIrradiance);",
+    "let debugFallbackDifference=vec3f(0.0,1.0,0.0);",
+    "var debugColor=mix(debugInputIrradiance,debugFallbackDifference,step(0.5,fragmentInputs.vUV.x));",
+    "let debugDivider=1.0-step(uniforms.texelSize.x*1.5,abs(fragmentInputs.vUV.x-0.5));",
+    "debugColor=mix(debugColor,vec3f(1.0,0.0,1.0),debugDivider);",
+    "fragmentOutputs.color=vec4f(debugColor,1.0);",
+    "#else",
+    "#ifdef MMD_MODOKI_SSS_DEBUG_SCATTERING_DELTA",
+    "fragmentOutputs.color=vec4f(0.0,1.0,0.0,1.0);",
+    "#else",
+    "var composedColor=inputColor.rgb+albedo*centerIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpaceVec3(composedColor);",
+    "#endif",
+    "fragmentOutputs.color=vec4f(composedColor,1.0);",
+    "#endif",
+    "#endif",
+].join("\n") + "\n";
 const GLSL_SSS_COMPOSITION_MARKER =
     "gl_FragColor=vec4(inputColor.rgb+albedo*max(totalIrradiance/totalWeight,vec3(0.0)),1.);";
-const GLSL_SSS_CENTER_BLEND_REPLACEMENT = [
+const GLSL_SSS_CENTER_BLEND_LEGACY_REPLACEMENT = [
+    "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
+    "vec3 scatteredIrradiance=max(totalIrradiance/totalWeight,vec3(0.0));",
+    `vec3 composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH.toFixed(2)});`,
+    "gl_FragColor=vec4(inputColor.rgb+albedo*composedIrradiance,1.);",
+].join("");
+const GLSL_SSS_PREVIOUS_CENTER_BLEND_REPLACEMENT = [
+    "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
+    "vec3 scatteredIrradiance=max(totalIrradiance/totalWeight,vec3(0.0));",
+    `vec3 composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH.toFixed(2)});`,
+    "vec3 composedColor=inputColor.rgb+albedo*composedIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpace(composedColor);",
+    "#endif",
+    "gl_FragColor=vec4(composedColor,1.);",
+].join("\n");
+const GLSL_SSS_CURRENT_CENTER_BLEND_NO_DEBUG_REPLACEMENT = [
     "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
     "vec3 scatteredIrradiance=max(totalIrradiance/totalWeight,vec3(0.0));",
     `vec3 composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH.toFixed(2)});`,
-    "gl_FragColor=vec4(inputColor.rgb+albedo*composedIrradiance,1.);",
-].join("");
+    "vec3 composedColor=inputColor.rgb+albedo*composedIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpace(composedColor);",
+    "#endif",
+    "gl_FragColor=vec4(composedColor,1.);",
+].join("\n");
+const GLSL_SSS_CENTER_BLEND_REPLACEMENT = [
+    "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
+    "vec3 scatteredIrradiance=max(totalIrradiance/totalWeight,vec3(0.0));",
+    "#ifdef MMD_MODOKI_SSS_DEBUG_IRRADIANCE_SPLIT",
+    "vec3 debugInputIrradiance=unscatteredIrradiance/(vec3(1.0)+unscatteredIrradiance);",
+    "vec3 scatteringDifference=clamp(abs(scatteredIrradiance-unscatteredIrradiance)*32.0,vec3(0.0),vec3(1.0));",
+    "vec3 debugColor=mix(debugInputIrradiance,scatteringDifference,step(0.5,vUV.x));",
+    "float debugDivider=1.0-step(texelSize.x*1.5,abs(vUV.x-0.5));",
+    "debugColor=mix(debugColor,vec3(1.0,0.0,1.0),debugDivider);",
+    "gl_FragColor=vec4(debugColor,1.0);",
+    "#else",
+    "#ifdef MMD_MODOKI_SSS_DEBUG_SCATTERING_DELTA",
+    "vec3 scatteringDifference=abs(scatteredIrradiance-unscatteredIrradiance);",
+    "gl_FragColor=vec4(clamp(scatteringDifference*32.0,vec3(0.0),vec3(1.0)),1.0);",
+    "#else",
+    `vec3 composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH.toFixed(2)});`,
+    "vec3 composedColor=inputColor.rgb+albedo*composedIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpace(composedColor);",
+    "#endif",
+    "gl_FragColor=vec4(composedColor,1.);",
+    "#endif",
+    "#endif",
+].join("\n") + "\n";
 const GLSL_SSS_DELTA_COMPOSITION_REPLACEMENT = [
     "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
     "vec3 scatteredIrradiance=max(totalIrradiance/totalWeight,vec3(0.0));",
-    `vec3 scatteringDelta=max(scatteredIrradiance-unscatteredIrradiance,vec3(0.0))*${PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH.toFixed(2)};`,
+    `vec3 scatteringDelta=max(scatteredIrradiance-unscatteredIrradiance,vec3(0.0))*${PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH.toFixed(2)};`,
     "gl_FragColor=vec4(inputColor.rgb+albedo*scatteringDelta,1.);",
 ].join("");
 const WGSL_SSS_COMPOSITION_MARKER =
     "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*max(totalIrradiance/totalWeight,vec3f(0.0)),1.);";
-const WGSL_SSS_CENTER_BLEND_REPLACEMENT = [
+const WGSL_SSS_CENTER_BLEND_LEGACY_REPLACEMENT = [
+    "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
+    "let scatteredIrradiance=max(totalIrradiance/totalWeight,vec3f(0.0));",
+    `let composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH.toFixed(2)});`,
+    "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*composedIrradiance,1.);",
+].join("");
+const WGSL_SSS_PREVIOUS_CENTER_BLEND_REPLACEMENT = [
+    "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
+    "let scatteredIrradiance=max(totalIrradiance/totalWeight,vec3f(0.0));",
+    `let composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH.toFixed(2)});`,
+    "var composedColor=inputColor.rgb+albedo*composedIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpaceVec3(composedColor);",
+    "#endif",
+    "fragmentOutputs.color=vec4f(composedColor,1.);",
+].join("\n");
+const WGSL_SSS_CURRENT_CENTER_BLEND_NO_DEBUG_REPLACEMENT = [
     "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
     "let scatteredIrradiance=max(totalIrradiance/totalWeight,vec3f(0.0));",
     `let composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH.toFixed(2)});`,
-    "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*composedIrradiance,1.);",
-].join("");
+    "var composedColor=inputColor.rgb+albedo*composedIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpaceVec3(composedColor);",
+    "#endif",
+    "fragmentOutputs.color=vec4f(composedColor,1.);",
+].join("\n");
+const WGSL_SSS_CENTER_BLEND_REPLACEMENT = [
+    "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
+    "let scatteredIrradiance=max(totalIrradiance/totalWeight,vec3f(0.0));",
+    "#ifdef MMD_MODOKI_SSS_DEBUG_IRRADIANCE_SPLIT",
+    "let debugInputIrradiance=unscatteredIrradiance/(vec3f(1.0)+unscatteredIrradiance);",
+    "let scatteringDifference=clamp(abs(scatteredIrradiance-unscatteredIrradiance)*32.0,vec3f(0.0),vec3f(1.0));",
+    "var debugColor=mix(debugInputIrradiance,scatteringDifference,step(0.5,fragmentInputs.vUV.x));",
+    "let debugDivider=1.0-step(uniforms.texelSize.x*1.5,abs(fragmentInputs.vUV.x-0.5));",
+    "debugColor=mix(debugColor,vec3f(1.0,0.0,1.0),debugDivider);",
+    "fragmentOutputs.color=vec4f(debugColor,1.0);",
+    "#else",
+    "#ifdef MMD_MODOKI_SSS_DEBUG_SCATTERING_DELTA",
+    "let scatteringDifference=abs(scatteredIrradiance-unscatteredIrradiance);",
+    "fragmentOutputs.color=vec4f(clamp(scatteringDifference*32.0,vec3f(0.0),vec3f(1.0)),1.0);",
+    "#else",
+    `let composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,${PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH.toFixed(2)});`,
+    "var composedColor=inputColor.rgb+albedo*composedIrradiance;",
+    "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+    "composedColor=toGammaSpaceVec3(composedColor);",
+    "#endif",
+    "fragmentOutputs.color=vec4f(composedColor,1.);",
+    "#endif",
+    "#endif",
+].join("\n") + "\n";
 const WGSL_SSS_DELTA_COMPOSITION_REPLACEMENT = [
     "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
     "let scatteredIrradiance=max(totalIrradiance/totalWeight,vec3f(0.0));",
-    `let scatteringDelta=max(scatteredIrradiance-unscatteredIrradiance,vec3f(0.0))*${PBR_MATERIAL_SSS_SCATTERING_BLEND_STRENGTH.toFixed(2)};`,
+    `let scatteringDelta=max(scatteredIrradiance-unscatteredIrradiance,vec3f(0.0))*${PBR_MATERIAL_SSS_PREVIOUS_BLEND_STRENGTH.toFixed(2)};`,
     "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*scatteringDelta,1.);",
 ].join("");
 
@@ -225,8 +368,44 @@ export function injectPbrMaterialSssCenterWeightedBlend(
                 GLSL_SSS_FALLBACK_MARKER,
             );
         }
+        if (
+            !patched.includes(GLSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT)
+            && patched.includes(GLSL_SSS_FALLBACK_PREVIOUS_LOCAL_GAMMA_REPLACEMENT)
+        ) {
+            patched = patched.replace(
+                GLSL_SSS_FALLBACK_PREVIOUS_LOCAL_GAMMA_REPLACEMENT,
+                GLSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT,
+            );
+        }
+        if (
+            !patched.includes(GLSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT)
+            && patched.includes(GLSL_SSS_FALLBACK_MARKER)
+        ) {
+            patched = patched.replace(
+                GLSL_SSS_FALLBACK_MARKER,
+                GLSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT,
+            );
+        }
         if (patched.includes(GLSL_SSS_CENTER_BLEND_REPLACEMENT)) {
             return patched;
+        }
+        if (patched.includes(GLSL_SSS_CURRENT_CENTER_BLEND_NO_DEBUG_REPLACEMENT)) {
+            return patched.replace(
+                GLSL_SSS_CURRENT_CENTER_BLEND_NO_DEBUG_REPLACEMENT,
+                GLSL_SSS_CENTER_BLEND_REPLACEMENT,
+            );
+        }
+        if (patched.includes(GLSL_SSS_PREVIOUS_CENTER_BLEND_REPLACEMENT)) {
+            return patched.replace(
+                GLSL_SSS_PREVIOUS_CENTER_BLEND_REPLACEMENT,
+                GLSL_SSS_CENTER_BLEND_REPLACEMENT,
+            );
+        }
+        if (patched.includes(GLSL_SSS_CENTER_BLEND_LEGACY_REPLACEMENT)) {
+            return patched.replace(
+                GLSL_SSS_CENTER_BLEND_LEGACY_REPLACEMENT,
+                GLSL_SSS_CENTER_BLEND_REPLACEMENT,
+            );
         }
         if (patched.includes(GLSL_SSS_DELTA_COMPOSITION_REPLACEMENT)) {
             return patched.replace(
@@ -248,8 +427,44 @@ export function injectPbrMaterialSssCenterWeightedBlend(
             WGSL_SSS_FALLBACK_MARKER,
         );
     }
+    if (
+        !patched.includes(WGSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT)
+        && patched.includes(WGSL_SSS_FALLBACK_PREVIOUS_LOCAL_GAMMA_REPLACEMENT)
+    ) {
+        patched = patched.replace(
+            WGSL_SSS_FALLBACK_PREVIOUS_LOCAL_GAMMA_REPLACEMENT,
+            WGSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT,
+        );
+    }
+    if (
+        !patched.includes(WGSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT)
+        && patched.includes(WGSL_SSS_FALLBACK_MARKER)
+    ) {
+        patched = patched.replace(
+            WGSL_SSS_FALLBACK_MARKER,
+            WGSL_SSS_FALLBACK_LOCAL_GAMMA_REPLACEMENT,
+        );
+    }
     if (patched.includes(WGSL_SSS_CENTER_BLEND_REPLACEMENT)) {
         return patched;
+    }
+    if (patched.includes(WGSL_SSS_CURRENT_CENTER_BLEND_NO_DEBUG_REPLACEMENT)) {
+        return patched.replace(
+            WGSL_SSS_CURRENT_CENTER_BLEND_NO_DEBUG_REPLACEMENT,
+            WGSL_SSS_CENTER_BLEND_REPLACEMENT,
+        );
+    }
+    if (patched.includes(WGSL_SSS_PREVIOUS_CENTER_BLEND_REPLACEMENT)) {
+        return patched.replace(
+            WGSL_SSS_PREVIOUS_CENTER_BLEND_REPLACEMENT,
+            WGSL_SSS_CENTER_BLEND_REPLACEMENT,
+        );
+    }
+    if (patched.includes(WGSL_SSS_CENTER_BLEND_LEGACY_REPLACEMENT)) {
+        return patched.replace(
+            WGSL_SSS_CENTER_BLEND_LEGACY_REPLACEMENT,
+            WGSL_SSS_CENTER_BLEND_REPLACEMENT,
+        );
     }
     if (patched.includes(WGSL_SSS_DELTA_COMPOSITION_REPLACEMENT)) {
         return patched.replace(

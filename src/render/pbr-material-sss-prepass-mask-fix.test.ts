@@ -113,7 +113,7 @@ describe("PBR material SSS prepass mask compatibility", () => {
             .toBe(patched);
     });
 
-    it("restores the restrained GLSL center blend after the delta experiment", () => {
+    it("upgrades the GLSL center blend after the delta experiment", () => {
         const source = [
             "gl_FragColor=vec4(inputColor.rgb,1.0);",
             "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
@@ -127,19 +127,35 @@ describe("PBR material SSS prepass mask compatibility", () => {
         );
 
         expect(patched).toContain(
-            "gl_FragColor=vec4(inputColor.rgb+albedo*centerIrradiance,1.0)",
+            "composedColor=inputColor.rgb+albedo*centerIrradiance",
         );
         expect(patched).toContain(
-            "mix(unscatteredIrradiance,scatteredIrradiance,0.15)",
+            "mix(unscatteredIrradiance,scatteredIrradiance,0.25)",
         );
         expect(patched).toContain(
             "inputColor.rgb+albedo*composedIrradiance",
         );
+        expect(patched).toContain("#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA");
+        expect(patched).toContain("toGammaSpace(composedColor)");
+        expect(patched).toContain(
+            "#ifdef MMD_MODOKI_SSS_DEBUG_SCATTERING_DELTA",
+        );
+        expect(patched).toContain(
+            "#ifdef MMD_MODOKI_SSS_DEBUG_IRRADIANCE_SPLIT",
+        );
+        expect(patched).toContain(
+            "debugInputIrradiance=unscatteredIrradiance/(vec3(1.0)+unscatteredIrradiance)",
+        );
+        expect(patched).toContain("step(0.5,vUV.x)");
+        expect(patched).toContain(
+            "scatteringDifference=abs(scatteredIrradiance-unscatteredIrradiance)",
+        );
+        expect(patched).toContain("scatteringDifference*32.0");
         expect(injectPbrMaterialSssCenterWeightedBlend(patched, "glsl"))
             .toBe(patched);
     });
 
-    it("restores the restrained WGSL center blend after the delta experiment", () => {
+    it("upgrades the WGSL center blend after the delta experiment", () => {
         const source = [
             "fragmentOutputs.color=vec4f(inputColor.rgb,1.0);",
             "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
@@ -153,16 +169,105 @@ describe("PBR material SSS prepass mask compatibility", () => {
         );
 
         expect(patched).toContain(
-            "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*centerIrradiance,1.0)",
+            "composedColor=inputColor.rgb+albedo*centerIrradiance",
         );
         expect(patched).toContain(
-            "mix(unscatteredIrradiance,scatteredIrradiance,0.15)",
+            "mix(unscatteredIrradiance,scatteredIrradiance,0.25)",
         );
         expect(patched).toContain(
             "inputColor.rgb+albedo*composedIrradiance",
         );
+        expect(patched).toContain("#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA");
+        expect(patched).toContain("toGammaSpaceVec3(composedColor)");
+        expect(patched).toContain(
+            "#ifdef MMD_MODOKI_SSS_DEBUG_SCATTERING_DELTA",
+        );
+        expect(patched).toContain(
+            "#ifdef MMD_MODOKI_SSS_DEBUG_IRRADIANCE_SPLIT",
+        );
+        expect(patched).toContain(
+            "debugInputIrradiance=unscatteredIrradiance/(vec3f(1.0)+unscatteredIrradiance)",
+        );
+        expect(patched).toContain("step(0.5,fragmentInputs.vUV.x)");
+        expect(patched).toContain(
+            "scatteringDifference=abs(scatteredIrradiance-unscatteredIrradiance)",
+        );
+        expect(patched).toContain("scatteringDifference*32.0");
         expect(injectPbrMaterialSssCenterWeightedBlend(patched, "wgsl"))
             .toBe(patched);
+    });
+
+    it("keeps WGSL statements after debug preprocessor blocks", () => {
+        const source = [
+            "if (sampleCount<1){",
+            "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*centerIrradiance,1.0);",
+            "return fragmentOutputs;}",
+            "fragmentOutputs.color=vec4f(inputColor.rgb+albedo*max(totalIrradiance/totalWeight,vec3f(0.0)),1.);",
+            "}",
+        ].join("");
+
+        const patched = injectPbrMaterialSssCenterWeightedBlend(
+            source,
+            "wgsl",
+        );
+
+        expect(patched).toContain("#endif\nreturn fragmentOutputs;}");
+        expect(patched).toContain("#endif\n}");
+    });
+
+    it("upgrades the previous local-gamma center blend strength", () => {
+        const glslSource = [
+            "vec3 composedColor=inputColor.rgb+albedo*centerIrradiance;",
+            "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+            "composedColor=toGammaSpace(composedColor);",
+            "#endif",
+            "gl_FragColor=vec4(composedColor,1.0);",
+            "vec3 unscatteredIrradiance=max(centerIrradiance,vec3(0.0));",
+            "vec3 scatteredIrradiance=max(totalIrradiance/totalWeight,vec3(0.0));",
+            "vec3 composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,0.15);",
+            "vec3 composedColor=inputColor.rgb+albedo*composedIrradiance;",
+            "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+            "composedColor=toGammaSpace(composedColor);",
+            "#endif",
+            "gl_FragColor=vec4(composedColor,1.);",
+        ].join("\n");
+        const wgslSource = [
+            "var composedColor=inputColor.rgb+albedo*centerIrradiance;",
+            "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+            "composedColor=toGammaSpaceVec3(composedColor);",
+            "#endif",
+            "fragmentOutputs.color=vec4f(composedColor,1.0);",
+            "let unscatteredIrradiance=max(centerIrradiance,vec3f(0.0));",
+            "let scatteredIrradiance=max(totalIrradiance/totalWeight,vec3f(0.0));",
+            "let composedIrradiance=mix(unscatteredIrradiance,scatteredIrradiance,0.15);",
+            "var composedColor=inputColor.rgb+albedo*composedIrradiance;",
+            "#ifdef MMD_MODOKI_SSS_LOCAL_GAMMA",
+            "composedColor=toGammaSpaceVec3(composedColor);",
+            "#endif",
+            "fragmentOutputs.color=vec4f(composedColor,1.);",
+        ].join("\n");
+
+        const patchedGlsl = injectPbrMaterialSssCenterWeightedBlend(
+            glslSource,
+            "glsl",
+        );
+        const patchedWgsl = injectPbrMaterialSssCenterWeightedBlend(
+            wgslSource,
+            "wgsl",
+        );
+
+        expect(patchedGlsl).toContain(
+            "mix(unscatteredIrradiance,scatteredIrradiance,0.25)",
+        );
+        expect(patchedGlsl).not.toContain(
+            "mix(unscatteredIrradiance,scatteredIrradiance,0.15)",
+        );
+        expect(patchedWgsl).toContain(
+            "mix(unscatteredIrradiance,scatteredIrradiance,0.25)",
+        );
+        expect(patchedWgsl).not.toContain(
+            "mix(unscatteredIrradiance,scatteredIrradiance,0.15)",
+        );
     });
 
     it("patches the installed Babylon PBR prepass includes", () => {
