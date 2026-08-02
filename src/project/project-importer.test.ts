@@ -80,6 +80,7 @@ function createHost() {
         setActiveModelVisibility: vi.fn(),
         setModelCastsShadowByIndex: vi.fn(),
         setModelExternalParent: vi.fn(() => true),
+        setModelExternalParentKeyframes: vi.fn(() => true),
         setModelMotionImports: vi.fn(),
         applyImportedMaterialShaderStates: vi.fn(),
         setPbrMaterialShaderPreset: vi.fn(),
@@ -208,7 +209,61 @@ describe("importProjectState", () => {
 
         await importProjectState(host, project);
 
-        expect(host.setModelExternalParent).toHaveBeenCalledWith(0, "センター", 1, "センター");
+        expect(host.setModelExternalParentKeyframes).toHaveBeenCalledWith([{
+            modelPath: "C:/models/tofu.pmx",
+            frameNumbers: [0],
+            childBoneNames: ["センター"],
+            parentModelPaths: ["C:/models/plate.pmx"],
+            parentBoneNames: ["センター"],
+        }]);
+        expect(host.setModelExternalParent).not.toHaveBeenCalled();
+    });
+
+    it("restores frame-based model external parent keys after all models are loaded", async () => {
+        const host = createHost();
+        host.loadPMX.mockImplementation(async (modelPath: string) => {
+            host.sceneModels.push({
+                info: { path: modelPath },
+                mesh: {},
+                model: {
+                    createRuntimeAnimation: vi.fn(),
+                    setRuntimeAnimation: vi.fn(),
+                },
+            });
+            return { name: modelPath };
+        });
+        const project = createProject({
+            scene: {
+                ...createProject().scene,
+                models: [
+                    { path: "C:/models/tofu.pmx", visible: true, motionImports: [] },
+                    { path: "C:/models/plate.pmx", visible: true, motionImports: [] },
+                ],
+            },
+            keyframes: {
+                modelAnimations: [],
+                cameraAnimation: null,
+                modelExternalParents: [{
+                    modelPath: "c:/MODELS/tofu.pmx",
+                    frameNumbers: [0, 30],
+                    childBoneNames: ["センター", "センター"],
+                    parentModelPaths: ["c:/MODELS/plate.pmx", null],
+                    parentBoneNames: ["センター", null],
+                }],
+            },
+        });
+
+        await importProjectState(host, project);
+
+        expect(host.loadPMX).toHaveBeenCalledTimes(2);
+        expect(host.setModelExternalParentKeyframes).toHaveBeenCalledWith([{
+            modelPath: "C:/models/tofu.pmx",
+            frameNumbers: [0, 30],
+            childBoneNames: ["センター", "センター"],
+            parentModelPaths: ["C:/models/plate.pmx", null],
+            parentBoneNames: ["センター", null],
+        }]);
+        expect(host.setModelExternalParent).not.toHaveBeenCalled();
     });
 
     it("restores model material pipelines and environment lighting", async () => {

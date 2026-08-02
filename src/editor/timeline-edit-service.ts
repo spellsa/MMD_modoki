@@ -1,6 +1,7 @@
 import { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import { MmdBoneAnimationTrack, MmdCameraAnimationTrack, MmdMorphAnimationTrack, MmdMovableBoneAnimationTrack, MmdPropertyAnimationTrack } from "babylon-mmd/esm/Loader/Animation/mmdAnimationTrack";
 import type { KeyframeTrack, ModelInfo, TrackCategory } from "../types";
+import type { ModelExternalParentKeyframePayload } from "../shared/model-external-parent";
 import { addFrameNumber, classifyBone, createTrackKey, hasFrameNumber, mergeFrameNumbers, moveFrameNumber, parseTrackKey, removeFrameNumber } from "../shared/timeline-helpers";
 
 const EMPTY_KEYFRAME_FRAMES = new Uint32Array(0);
@@ -109,6 +110,10 @@ type TimelineEditHost = {
     upsertCameraExternalParentKeyframe?: (frame: number, payload: CameraExternalParentKeyframePayload) => boolean;
     removeCameraExternalParentKeyframes?: (frames: readonly number[]) => boolean;
     moveCameraExternalParentKeyframe?: (fromFrame: number, toFrame: number) => boolean;
+    readModelExternalParentKeyframe?: (frame: number, childBoneName: string) => ModelExternalParentKeyframePayload | null;
+    upsertModelExternalParentKeyframe?: (frame: number, payload: ModelExternalParentKeyframePayload) => boolean;
+    removeModelExternalParentKeyframes?: (frames: readonly number[], childBoneName: string) => boolean;
+    moveModelExternalParentKeyframe?: (fromFrame: number, toFrame: number, childBoneName: string) => boolean;
 };
 
 export type BoneKeyframePayload = {
@@ -116,6 +121,7 @@ export type BoneKeyframePayload = {
     rotations: number[];
     rotationInterpolations: number[];
     physicsToggles: number[];
+    externalParent?: ModelExternalParentKeyframePayload;
 };
 
 export type MovableBoneKeyframePayload = {
@@ -125,6 +131,7 @@ export type MovableBoneKeyframePayload = {
     rotations: number[];
     rotationInterpolations: number[];
     physicsToggles: number[];
+    externalParent?: ModelExternalParentKeyframePayload;
 };
 
 export type MorphKeyframePayload = {
@@ -925,6 +932,7 @@ export function removeTimelineKeyframe(host: TimelineEditHost, track: Pick<Keyfr
     const nextFrames = removeFrameNumber(currentFrames, normalized);
     if (nextFrames === currentFrames) return false;
     frameMap.set(key, nextFrames);
+    host.removeModelExternalParentKeyframes?.([normalized], track.name);
     emitMergedKeyframeTracks(host);
     return true;
 }
@@ -954,6 +962,7 @@ export function moveTimelineKeyframe(
     const nextFrames = moveFrameNumber(currentFrames, normalizedFrom, normalizedTo);
     if (nextFrames === currentFrames) return false;
     frameMap.set(key, nextFrames);
+    host.moveModelExternalParentKeyframe?.(normalizedFrom, normalizedTo, track.name);
     emitMergedKeyframeTracks(host);
     return true;
 }
@@ -1014,6 +1023,9 @@ export function readTimelineKeyframePayload(
             rotations: readFloatFrameBlock(movableTrack.rotations, frameIndex, 4),
             rotationInterpolations: readUint8FrameBlock(movableTrack.rotationInterpolations, frameIndex, 4),
             physicsToggles: readUint8FrameBlock(movableTrack.physicsToggles, frameIndex, 1),
+            ...(host.readModelExternalParentKeyframe?.(normalized, track.name)
+                ? { externalParent: host.readModelExternalParentKeyframe(normalized, track.name) ?? undefined }
+                : {}),
         };
     }
 
@@ -1025,6 +1037,9 @@ export function readTimelineKeyframePayload(
                 rotations: readFloatFrameBlock(boneTrack.rotations, frameIndex, 4),
                 rotationInterpolations: readUint8FrameBlock(boneTrack.rotationInterpolations, frameIndex, 4),
                 physicsToggles: readUint8FrameBlock(boneTrack.physicsToggles, frameIndex, 1),
+                ...(host.readModelExternalParentKeyframe?.(normalized, track.name)
+                    ? { externalParent: host.readModelExternalParentKeyframe(normalized, track.name) ?? undefined }
+                    : {}),
             };
         }
     }
@@ -1039,6 +1054,9 @@ export function readTimelineKeyframePayload(
         rotations: readFloatFrameBlock(movableTrack.rotations, frameIndex, 4),
         rotationInterpolations: readUint8FrameBlock(movableTrack.rotationInterpolations, frameIndex, 4),
         physicsToggles: readUint8FrameBlock(movableTrack.physicsToggles, frameIndex, 1),
+        ...(host.readModelExternalParentKeyframe?.(normalized, track.name)
+            ? { externalParent: host.readModelExternalParentKeyframe(normalized, track.name) ?? undefined }
+            : {}),
     };
 }
 
@@ -1124,6 +1142,7 @@ export function removeTimelineKeyframePayloads(
         movableTrack.rotations = removeFloatValuesByIndexes(movableTrack.rotations, 4, frameEdit.removedIndexes);
         movableTrack.rotationInterpolations = removeUint8ValuesByIndexes(movableTrack.rotationInterpolations, 4, frameEdit.removedIndexes);
         movableTrack.physicsToggles = removeUint8ValuesByIndexes(movableTrack.physicsToggles, 1, frameEdit.removedIndexes);
+        host.removeModelExternalParentKeyframes?.([...normalizedFrames], track.name);
         refreshAnimationFrameRange(animation);
         syncModelFrameMapFromTrack(host, track, movableTrack.frameNumbers);
         emitMergedKeyframeTracks(host);
@@ -1140,6 +1159,7 @@ export function removeTimelineKeyframePayloads(
     boneTrack.rotations = removeFloatValuesByIndexes(boneTrack.rotations, 4, frameEdit.removedIndexes);
     boneTrack.rotationInterpolations = removeUint8ValuesByIndexes(boneTrack.rotationInterpolations, 4, frameEdit.removedIndexes);
     boneTrack.physicsToggles = removeUint8ValuesByIndexes(boneTrack.physicsToggles, 1, frameEdit.removedIndexes);
+    host.removeModelExternalParentKeyframes?.([...normalizedFrames], track.name);
     refreshAnimationFrameRange(animation);
     syncModelFrameMapFromTrack(host, track, boneTrack.frameNumbers);
     emitMergedKeyframeTracks(host);
@@ -1202,10 +1222,12 @@ function applyMovableBoneKeyframePayload(
             rotations: payload.rotations,
             rotationInterpolations: payload.rotationInterpolations,
             physicsToggles: payload.physicsToggles,
+            externalParent: payload.externalParent,
         });
     }
 
     if (!host.currentModel || !ensureModelAnimationForEditing(host, track)) return false;
+    if (!applyModelExternalParentKeyframePayload(host, track, frame, payload.externalParent)) return false;
     const animation = getCurrentModelAnimation(host);
     const sourceMovableTrack = animation?.movableBoneTracks.find((candidate) => candidate.name === track.name);
     if (!sourceMovableTrack) return false;
@@ -1236,6 +1258,7 @@ function applyBoneKeyframePayload(
         animation = getCurrentModelAnimation(host);
     }
     if (!animation) return false;
+    if (!applyModelExternalParentKeyframePayload(host, track, frame, payload.externalParent)) return false;
 
     let sourceBoneTrack = animation.boneTracks.find((candidate) => candidate.name === track.name);
     if (!sourceBoneTrack) {
@@ -1253,6 +1276,18 @@ function applyBoneKeyframePayload(
     syncModelFrameMapFromTrack(host, track, boneTrack.frameNumbers);
     emitMergedKeyframeTracks(host);
     return true;
+}
+
+function applyModelExternalParentKeyframePayload(
+    host: TimelineEditHost,
+    track: Pick<KeyframeTrack, "name" | "category">,
+    frame: number,
+    payload: ModelExternalParentKeyframePayload | undefined,
+): boolean {
+    if (payload) {
+        return host.upsertModelExternalParentKeyframe?.(frame, payload) ?? false;
+    }
+    return host.removeModelExternalParentKeyframes?.([frame], track.name) ?? true;
 }
 
 function removeTimelineKeyframePayload(
@@ -1312,6 +1347,7 @@ function removeTimelineKeyframePayload(
         movableTrack.rotations = removeFloatValues(movableTrack.rotations, 4, frameIndex);
         movableTrack.rotationInterpolations = removeUint8Values(movableTrack.rotationInterpolations, 4, frameIndex);
         movableTrack.physicsToggles = removeUint8Values(movableTrack.physicsToggles, 1, frameIndex);
+        host.removeModelExternalParentKeyframes?.([normalized], track.name);
         refreshAnimationFrameRange(animation);
         syncModelFrameMapFromTrack(host, track, movableTrack.frameNumbers);
         emitMergedKeyframeTracks(host);
@@ -1327,6 +1363,7 @@ function removeTimelineKeyframePayload(
     boneTrack.rotations = removeFloatValues(boneTrack.rotations, 4, frameIndex);
     boneTrack.rotationInterpolations = removeUint8Values(boneTrack.rotationInterpolations, 4, frameIndex);
     boneTrack.physicsToggles = removeUint8Values(boneTrack.physicsToggles, 1, frameIndex);
+    host.removeModelExternalParentKeyframes?.([normalized], track.name);
     refreshAnimationFrameRange(animation);
     syncModelFrameMapFromTrack(host, track, boneTrack.frameNumbers);
     emitMergedKeyframeTracks(host);

@@ -54,6 +54,7 @@ import { buildBoneTransformCommand } from "./actions/bone-transform-command-buil
 import { buildCameraTransformCommand } from "./actions/camera-transform-command-builder";
 import type { BoneTransformCommandSnapshot, BuiltCommand, CameraTransformCommandSnapshot, CommandTrackRef } from "./actions/command-types";
 import type { BoneKeyframePayload, CameraKeyframePayload, MovableBoneKeyframePayload, TimelineKeyframePayload } from "./editor/timeline-edit-service";
+import type { ModelExternalParentKeyframePayload } from "./shared/model-external-parent";
 import {
     buildMirrorPasteItems,
     type MirrorPasteClipboardItem,
@@ -593,7 +594,13 @@ export class UIController {
         this.modelExternalParentController = new ModelExternalParentController({
             mmdManager: this.mmdManager,
             getSelectedBone: () => this.bottomPanel.getSelectedBone(),
-            onChildBoneReset: (boneName) => this.persistExternalParentChildBoneReset(boneName),
+            registerKeyframe: (childModelIndex, childBoneName, parentModelIndex, parentBoneName) =>
+                this.registerModelExternalParentKeyframe(
+                    childModelIndex,
+                    childBoneName,
+                    parentModelIndex,
+                    parentBoneName,
+                ),
             showToast: (message, type) => this.showToast(message, type),
             dispatchAction: (action) => this.actionDispatcher.dispatch(action),
         });
@@ -1488,6 +1495,9 @@ export class UIController {
             this.timeline.setCurrentFrame(frame, { lightweight: this.mmdManager.isPlaying });
             const frameChanged = this.lastObservedFrame !== frame;
             this.lastObservedFrame = frame;
+            if (frameChanged) {
+                this.modelExternalParentController?.refresh();
+            }
 
             if (this.mmdManager.isPlaying) {
                 this.refreshPlaybackFrameBar();
@@ -6021,13 +6031,62 @@ export class UIController {
         this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "system");
     }
 
-    private persistExternalParentChildBoneReset(boneName: string): void {
-        const zeroPose: BoneTransformCommandSnapshot = {
-            position: { x: 0, y: 0, z: 0 },
-            rotation: { x: 0, y: 0, z: 0 },
+    private registerModelExternalParentKeyframe(
+        childModelIndex: number,
+        childBoneName: string,
+        parentModelIndex: number | null,
+        parentBoneName: string | null,
+    ): boolean {
+        const activeModel = this.mmdManager.getLoadedModels().find((model) => model.active) ?? null;
+        if (!activeModel || activeModel.index !== childModelIndex) return false;
+        const track = this.resolveBottomPanelBoneCommandTrack();
+        if (!track || track.name !== childBoneName) return false;
+
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const currentPose = this.captureCurrentBonePoseSnapshot(childBoneName);
+        if (!currentPose) return false;
+        const pose = parentModelIndex === null
+            ? currentPose
+            : {
+                ...currentPose,
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+            };
+        const parentModelPath = parentModelIndex === null
+            ? null
+            : this.mmdManager.getLoadedModels().find((model) => model.index === parentModelIndex)?.path ?? null;
+        if (parentModelIndex !== null && (!parentModelPath || !parentBoneName)) return false;
+
+        const externalParent: ModelExternalParentKeyframePayload = {
+            childBoneName,
+            parentModelPath,
+            parentBoneName: parentModelPath ? parentBoneName : null,
         };
-        if (!this.applyBoneTransformSnapshotFromCommand(boneName, zeroPose)) return;
-        this.registerBoneKeyframeForBoneAtCurrentFrame(boneName, "system");
+        const curves = this.captureInterpolationCurveSnapshot({ ...track, frames: new Uint32Array() }, frame);
+        const before = this.mmdManager.readTimelineKeyframePayload(track, frame);
+        const after = this.createBoneKeyframePayload(
+            track,
+            pose,
+            curves,
+            this.physicsKeyframeInputMode,
+            externalParent,
+        );
+        const command = this.createKeyframePasteCommand(
+            track,
+            frame,
+            before,
+            after,
+            `${parentModelPath ? "Register" : "Clear"} model external parent at frame ${frame}`,
+        );
+        const registered = executeCommand(command, "apply", this.createCommandExecutionContext({ seekToFrame: false }));
+        if (!registered) return false;
+
+        this.commandHistory.push(command);
+        this.clearRegisteredKeySelection();
+        this.refreshSelectedTrackRotationOverlay();
+        this.updateTimelineEditState();
+        this.updateSectionKeyframeButtons();
+        return true;
     }
 
     private registerAutoKeyForEditedMorph(morph: { frameIndex: number; name: string; value: number }): void {
@@ -8523,6 +8582,10 @@ export class UIController {
         poseSnapshot: SelectedBonePoseSnapshot,
         curves: ReadonlyMap<string, InterpolationCurve>,
         physicsToggle: 0 | 1,
+        externalParent: ModelExternalParentKeyframePayload | undefined = this.mmdManager.readModelExternalParentKeyframe(
+            this.mmdManager.currentFrame,
+            track.name,
+        ) ?? undefined,
     ): BoneKeyframePayload | MovableBoneKeyframePayload {
         const rotations = this.rotationDegreesToQuaternionBlock(
             poseSnapshot.rotation.x,
@@ -8538,6 +8601,7 @@ export class UIController {
                 rotations,
                 rotationInterpolations,
                 physicsToggles: [physicsToggle],
+                externalParent,
             };
         }
         return {
@@ -8545,6 +8609,7 @@ export class UIController {
             rotations,
             rotationInterpolations,
             physicsToggles: [physicsToggle],
+            externalParent,
         };
     }
 
@@ -9522,6 +9587,7 @@ export class UIController {
                     rotations: [...payload.rotations],
                     rotationInterpolations: [...payload.rotationInterpolations],
                     physicsToggles: [...payload.physicsToggles],
+                    externalParent: payload.externalParent ? { ...payload.externalParent } : undefined,
                 };
             case "bone":
                 return {
@@ -9529,6 +9595,7 @@ export class UIController {
                     rotations: [...payload.rotations],
                     rotationInterpolations: [...payload.rotationInterpolations],
                     physicsToggles: [...payload.physicsToggles],
+                    externalParent: payload.externalParent ? { ...payload.externalParent } : undefined,
                 };
             case "morph":
                 return {

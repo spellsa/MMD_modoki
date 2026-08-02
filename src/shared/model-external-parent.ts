@@ -2,6 +2,29 @@ export type ModelExternalParentLink = {
     parentModelIndex: number;
 };
 
+export type ModelExternalParentKeyframePayload = {
+    childBoneName: string;
+    parentModelPath: string | null;
+    parentBoneName: string | null;
+};
+
+export type ModelExternalParentKeyframeLike = ModelExternalParentKeyframePayload & {
+    frame: number;
+};
+
+export function selectModelExternalParentKeyframeAtFrame<T extends ModelExternalParentKeyframeLike>(
+    keyframes: readonly T[],
+    frame: number,
+): T | null {
+    const normalized = Math.max(0, Math.floor(frame));
+    let selected: T | null = null;
+    for (const entry of keyframes) {
+        if (entry.frame > normalized) break;
+        selected = entry;
+    }
+    return selected;
+}
+
 export function wouldCreateModelExternalParentCycle(
     childModelIndex: number,
     parentModelIndex: number,

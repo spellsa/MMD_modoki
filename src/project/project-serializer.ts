@@ -5,6 +5,7 @@ import type {
     ProjectModelMaterialShaderState,
     ProjectMotionImport,
     ProjectSerializedCameraExternalParentTrack,
+    ProjectSerializedModelExternalParentTrack,
     ProjectSerializedAccessoryTransformTrack,
     SsgiBlendMode,
 } from "../types";
@@ -46,6 +47,7 @@ type ProjectExportHost = {
     modelSourceAnimationsByModel: WeakMap<object, unknown>;
     cameraSourceAnimation: { cameraTrack?: unknown } | null;
     getCameraExternalParentKeyframes?: () => ProjectSerializedCameraExternalParentTrack | null;
+    getModelExternalParentKeyframes?: () => ProjectSerializedModelExternalParentTrack[];
     lightIntensity: number;
     ambientIntensity: number;
     lightColorTemperature: number;
@@ -283,6 +285,7 @@ export function exportProjectState(host: ProjectExportHost): MmdModokiProjectFil
             animation: serializeModelAnimation(host.modelSourceAnimationsByModel.get(entry.model)),
         })),
         cameraAnimation: serializeCameraTrack(host.cameraSourceAnimation?.cameraTrack),
+        modelExternalParents: host.getModelExternalParentKeyframes?.() ?? [],
         cameraExternalParents: host.getCameraExternalParentKeyframes?.() ?? null,
     };
 

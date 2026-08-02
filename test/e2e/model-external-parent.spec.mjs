@@ -7,7 +7,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const tofuPath = resolve(repoRoot, "test/fixtures/external-parent/tofu.pmx");
 const platePath = resolve(repoRoot, "test/fixtures/external-parent/plate.pmx");
 
-test("豆腐モデルを皿モデルのセンターボーンへ登録し、追従と解除を確認する", async () => {
+test("豆腐モデルの外部親をフレーム単位で登録・解除できる", async () => {
   const launched = await launchMmdModoki(repoRoot);
   try {
     const page = await launched.app.firstWindow();
@@ -49,7 +49,11 @@ test("豆腐モデルを皿モデルのセンターボーンへ登録し、追�
     const parentYInput = page.locator("#bone-controls input[data-control-key='ty']");
     await parentYInput.fill("5");
     await parentYInput.press("Enter");
-    await page.waitForTimeout(250);
+    await page.waitForFunction(() => {
+      const child = window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター");
+      const parent = window.mmdModokiE2e.getModelBoneRenderedPosition(1, "センター");
+      return child && parent && Math.abs(parent.y - 5) < 0.1 && Math.abs(child.y - parent.y) < 0.1;
+    });
 
     const positions = await page.evaluate(() => ({
       activeModelIndex: window.mmdModokiE2e.getActiveModelIndex(),
@@ -65,7 +69,11 @@ test("豆腐モデルを皿モデルのセンターボーンへ登録し、追�
     expect(await page.evaluate(() => (
       window.mmdModokiE2e.setBoneGizmoRotationDrag({ x: 25, y: 40, z: 0 }, true)
     ))).toBe(true);
-    await page.waitForTimeout(250);
+    await page.waitForFunction(() => {
+      const child = window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター");
+      const parent = window.mmdModokiE2e.getModelBoneRenderedPosition(1, "センター");
+      return child && parent && Math.abs(child.y - parent.y) < 0.1;
+    });
     const duringParentRotationDrag = await page.evaluate(() => ({
       child: window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター"),
       parent: window.mmdModokiE2e.getModelBoneRenderedPosition(1, "センター"),
@@ -74,10 +82,17 @@ test("豆腐モデルを皿モデルのセンターボーンへ登録し、追�
     expect(await page.evaluate(() => (
       window.mmdModokiE2e.setBoneGizmoRotationDrag({ x: 25, y: 40, z: 0 }, false)
     ))).toBe(true);
-    await page.waitForTimeout(250);
 
     await modelSelect.selectOption("0");
-    await page.waitForTimeout(250);
+    await page.waitForFunction(() => {
+      const child = window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター");
+      const gizmo = window.mmdModokiE2e.getBoneGizmoPosition();
+      return child
+        && gizmo
+        && Math.abs(gizmo.x - child.x) < 0.1
+        && Math.abs(gizmo.y - child.y) < 0.1
+        && Math.abs(gizmo.z - child.z) < 0.1;
+    });
     const gizmoState = await page.evaluate(() => ({
       child: window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター"),
       gizmo: window.mmdModokiE2e.getBoneGizmoPosition(),
@@ -87,15 +102,42 @@ test("豆腐モデルを皿モデルのセンターボーンへ登録し、追�
     expect(gizmoState.gizmo?.y).toBeCloseTo(gizmoState.child.y, 2);
     expect(gizmoState.gizmo?.z).toBeCloseTo(gizmoState.child.z, 2);
 
+    const currentFrameInput = page.locator("#current-frame");
+    await currentFrameInput.fill("30");
+    await currentFrameInput.press("Enter");
+    await expect(currentFrameInput).toHaveValue("30");
     await parentModelSelect.selectOption("");
     await page.locator("[data-testid='model-external-parent-register']").click();
-    await page.waitForTimeout(250);
+    await page.waitForFunction(() => {
+      const child = window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター");
+      return window.mmdModokiE2e.getModelExternalParent(0) === null
+        && child
+        && Math.abs(child.y) < 0.1;
+    });
 
-    expect(await page.evaluate(() => window.mmdModokiE2e.getModelExternalParent(0))).toBeNull();
-    const detachedChild = await page.evaluate(() => (
-      window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター")
-    ));
+    const detachedChild = await page.evaluate(() => window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター"));
     expect(detachedChild?.y).toBeCloseTo(0, 2);
+
+    await currentFrameInput.fill("29");
+    await currentFrameInput.press("Enter");
+    await page.waitForFunction(() => {
+      const relation = window.mmdModokiE2e.getModelExternalParent(0);
+      const child = window.mmdModokiE2e.getModelBoneRenderedPosition(0, "センター");
+      const parent = window.mmdModokiE2e.getModelBoneRenderedPosition(1, "センター");
+      return relation?.parentModelIndex === 1
+        && child
+        && parent
+        && Math.abs(child.y - parent.y) < 0.1;
+    });
+
+    await currentFrameInput.fill("30");
+    await currentFrameInput.press("Enter");
+    await page.waitForFunction(() => window.mmdModokiE2e.getModelExternalParent(0) === null);
+
+    await page.locator("[data-menu-command='edit.undo']").first().click();
+    await page.waitForFunction(() => window.mmdModokiE2e.getModelExternalParent(0)?.parentModelIndex === 1);
+    await page.locator("[data-menu-command='edit.redo']").first().click();
+    await page.waitForFunction(() => window.mmdModokiE2e.getModelExternalParent(0) === null);
   } finally {
     await launched.close();
   }

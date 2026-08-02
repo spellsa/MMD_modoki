@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { MmdAnimation } from "babylon-mmd/esm/Loader/Animation/mmdAnimation";
 import {
@@ -193,6 +193,41 @@ describe("timeline edit service model animation tracks", () => {
         expect(Array.from(animation.boneTracks[0].frameNumbers)).toEqual([0, 30]);
         expect(animation.startFrame).toBe(0);
         expect(animation.endFrame).toBe(30);
+    });
+
+    it("keeps model external parent state coupled to the child bone key", () => {
+        const { host, model } = createHost(createModelInfo([{ name: "センター", movable: true }]));
+        const animation = createAnimation();
+        host.modelSourceAnimationsByModel.set(model, animation);
+        const upsertModelExternalParentKeyframe = vi.fn(() => true);
+        const removeModelExternalParentKeyframes = vi.fn(() => true);
+        const editableHost = Object.assign(host, {
+            upsertModelExternalParentKeyframe,
+            removeModelExternalParentKeyframes,
+        });
+        const track: Pick<KeyframeTrack, "name" | "category"> = { name: "センター", category: "root" };
+
+        expect(applyTimelineKeyframePayload(editableHost, track, 15, {
+            kind: "movableBone",
+            positions: [0, 0, 0],
+            positionInterpolations: Array.from({ length: 12 }, () => 20),
+            rotations: [0, 0, 0, 1],
+            rotationInterpolations: [20, 20, 107, 107],
+            physicsToggles: [1],
+            externalParent: {
+                childBoneName: "センター",
+                parentModelPath: "plate.pmx",
+                parentBoneName: "センター",
+            },
+        })).toBe(true);
+        expect(upsertModelExternalParentKeyframe).toHaveBeenCalledWith(15, {
+            childBoneName: "センター",
+            parentModelPath: "plate.pmx",
+            parentBoneName: "センター",
+        });
+
+        expect(removeTimelineKeyframePayloads(editableHost, track, [15])).toBe(true);
+        expect(removeModelExternalParentKeyframes).toHaveBeenCalledWith([15], "センター");
     });
 
     it("hides physics-only bone rows until timeline physics bone display is enabled", () => {

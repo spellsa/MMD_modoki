@@ -386,6 +386,22 @@ describe("exportProjectState", () => {
         });
     });
 
+    it("writes frame-based model external parent keys", () => {
+        const modelExternalParents = [{
+            modelPath: "C:/models/tofu.pmx",
+            frameNumbers: [0, 30],
+            childBoneNames: ["センター", "センター"],
+            parentModelPaths: ["C:/models/plate.pmx", null],
+            parentBoneNames: ["センター", null],
+        }];
+        const project = exportProjectState({
+            ...createHost(),
+            getModelExternalParentKeyframes: () => modelExternalParents,
+        });
+
+        expect(project.keyframes?.modelExternalParents).toEqual(modelExternalParents);
+    });
+
     it("writes model edge color settings", () => {
         const project = exportProjectState({
             ...createHost(),

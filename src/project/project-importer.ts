@@ -5,6 +5,7 @@ import type {
     ProjectMotionImport,
     ProjectSerializedAccessoryTransformTrack,
     ProjectSerializedCameraExternalParentTrack,
+    ProjectSerializedModelExternalParentTrack,
     ProjectSerializedModelAnimation,
     SsgiBlendMode,
 } from "../types";
@@ -75,6 +76,9 @@ type ProjectImportHost = {
         childBoneName: string,
         parentModelIndex: number | null,
         parentBoneName: string | null,
+    ) => boolean;
+    setModelExternalParentKeyframes?: (
+        tracks: readonly ProjectSerializedModelExternalParentTrack[] | null,
     ) => boolean;
     setActiveModelVisibility(visible: boolean): void;
     applySceneMeshVisibility(mesh: object, visible: boolean): void;
@@ -446,41 +450,94 @@ export async function importProjectState(
         }
     }
 
-    for (const modelState of data.scene.models) {
-        const parent = modelState?.externalParent;
-        if (!parent || typeof parent !== "object") continue;
-        if (
-            typeof modelState.path !== "string"
-            || typeof parent.parentModelPath !== "string"
-            || typeof parent.childBoneName !== "string"
-            || typeof parent.parentBoneName !== "string"
-        ) {
-            warnings.push("Model external parent data is invalid");
-            continue;
+    const modelExternalParentTracks = data.keyframes?.modelExternalParents;
+    if (Array.isArray(modelExternalParentTracks)) {
+        const normalizedTracks: ProjectSerializedModelExternalParentTrack[] = [];
+        for (const track of modelExternalParentTracks) {
+            if (!track || typeof track.modelPath !== "string") {
+                warnings.push("Model external parent keyframe data is invalid");
+                continue;
+            }
+            const childEntry = host.sceneModels.find((entry) =>
+                normalizePathForCompare(entry.info.path) === normalizePathForCompare(track.modelPath)
+            );
+            if (!childEntry) {
+                warnings.push(`Model external parent keyframe model not found: ${track.modelPath}`);
+                continue;
+            }
+            const parentModelPaths = (track.parentModelPaths ?? []).map((parentPath) => {
+                if (!parentPath) return null;
+                const parentEntry = host.sceneModels.find((entry) =>
+                    normalizePathForCompare(entry.info.path) === normalizePathForCompare(parentPath)
+                );
+                if (!parentEntry) {
+                    warnings.push(`Model external parent keyframe parent not found: ${parentPath}`);
+                    return null;
+                }
+                return parentEntry.info.path;
+            });
+            normalizedTracks.push({
+                ...track,
+                modelPath: childEntry.info.path,
+                parentModelPaths,
+            });
         }
-
-        const normalizedChildPath = normalizePathForCompare(modelState.path);
-        const childModelIndex = host.sceneModels.findIndex(
-            (entry) => normalizePathForCompare(entry.info.path) === normalizedChildPath,
-        );
-        if (childModelIndex < 0) continue;
-
-        const normalizedParentPath = normalizePathForCompare(parent.parentModelPath);
-        const parentModelIndex = host.sceneModels.findIndex(
-            (entry) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
-        );
-        if (parentModelIndex < 0) {
-            warnings.push(`Model external parent not found: ${parent.parentModelPath} (${modelState.path})`);
-            continue;
+        if (host.setModelExternalParentKeyframes?.(normalizedTracks) === false) {
+            warnings.push("Model external parent keyframe restore failed");
         }
-        const restored = host.setModelExternalParent?.(
-            childModelIndex,
-            parent.childBoneName,
-            parentModelIndex,
-            parent.parentBoneName,
-        );
-        if (restored === false) {
-            warnings.push(`Model external parent restore failed: ${modelState.path}`);
+    } else {
+        const legacyTracks: ProjectSerializedModelExternalParentTrack[] = [];
+        for (const modelState of data.scene.models) {
+            const parent = modelState?.externalParent;
+            if (!parent || typeof parent !== "object") continue;
+            if (
+                typeof modelState.path !== "string"
+                || typeof parent.parentModelPath !== "string"
+                || typeof parent.childBoneName !== "string"
+                || typeof parent.parentBoneName !== "string"
+            ) {
+                warnings.push("Model external parent data is invalid");
+                continue;
+            }
+
+            const normalizedChildPath = normalizePathForCompare(modelState.path);
+            const childModelIndex = host.sceneModels.findIndex(
+                (entry) => normalizePathForCompare(entry.info.path) === normalizedChildPath,
+            );
+            if (childModelIndex < 0) continue;
+
+            const normalizedParentPath = normalizePathForCompare(parent.parentModelPath);
+            const parentModelIndex = host.sceneModels.findIndex(
+                (entry) => normalizePathForCompare(entry.info.path) === normalizedParentPath,
+            );
+            if (parentModelIndex < 0) {
+                warnings.push(`Model external parent not found: ${parent.parentModelPath} (${modelState.path})`);
+                continue;
+            }
+
+            if (host.setModelExternalParentKeyframes) {
+                legacyTracks.push({
+                    modelPath: host.sceneModels[childModelIndex].info.path,
+                    frameNumbers: [0],
+                    childBoneNames: [parent.childBoneName],
+                    parentModelPaths: [host.sceneModels[parentModelIndex].info.path],
+                    parentBoneNames: [parent.parentBoneName],
+                });
+                continue;
+            }
+
+            const restored = host.setModelExternalParent?.(
+                childModelIndex,
+                parent.childBoneName,
+                parentModelIndex,
+                parent.parentBoneName,
+            );
+            if (restored === false) {
+                warnings.push(`Model external parent restore failed: ${modelState.path}`);
+            }
+        }
+        if (legacyTracks.length > 0 && host.setModelExternalParentKeyframes?.(legacyTracks) === false) {
+            warnings.push("Model external parent restore failed");
         }
     }
 

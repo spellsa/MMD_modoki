@@ -5,7 +5,12 @@ import { t } from "../i18n";
 type ModelExternalParentControllerDeps = {
     mmdManager: MmdManager;
     getSelectedBone: () => string | null;
-    onChildBoneReset: (boneName: string) => void;
+    registerKeyframe: (
+        childModelIndex: number,
+        childBoneName: string,
+        parentModelIndex: number | null,
+        parentBoneName: string | null,
+    ) => boolean;
     showToast: (message: string, type: "success" | "error" | "info") => void;
     dispatchAction?: (action: EditorAction) => boolean;
 };
@@ -15,7 +20,7 @@ const DEFAULT_PARENT_BONE_NAMES = ["センター", "center", "Center"];
 export class ModelExternalParentController {
     private readonly mmdManager: MmdManager;
     private readonly getSelectedBone: () => string | null;
-    private readonly onChildBoneReset: ModelExternalParentControllerDeps["onChildBoneReset"];
+    private readonly registerKeyframe: ModelExternalParentControllerDeps["registerKeyframe"];
     private readonly showToast: ModelExternalParentControllerDeps["showToast"];
     private readonly dispatchAction: ModelExternalParentControllerDeps["dispatchAction"];
     private readonly container = document.querySelector(".bone-parent-controls") as HTMLElement | null;
@@ -27,7 +32,7 @@ export class ModelExternalParentController {
     constructor(deps: ModelExternalParentControllerDeps) {
         this.mmdManager = deps.mmdManager;
         this.getSelectedBone = deps.getSelectedBone;
-        this.onChildBoneReset = deps.onChildBoneReset;
+        this.registerKeyframe = deps.registerKeyframe;
         this.showToast = deps.showToast;
         this.dispatchAction = deps.dispatchAction;
 
@@ -74,7 +79,7 @@ export class ModelExternalParentController {
 
         const parentModelIndex = this.readParentModelIndex();
         const parentBoneName = parentModelIndex === null ? null : this.parentBoneSelect?.value || null;
-        const ok = this.mmdManager.setModelExternalParent(
+        const ok = this.registerKeyframe(
             childModel.index,
             childBoneName,
             parentModelIndex,
@@ -85,11 +90,14 @@ export class ModelExternalParentController {
             return;
         }
 
-        if (parentModelIndex !== null) {
-            this.onChildBoneReset(childBoneName);
-        }
         this.refresh();
-        this.showToast(parentModelIndex === null ? "モデル外部親を解除しました" : "モデル外部親を登録しました", "success");
+        const frame = this.mmdManager.currentFrame;
+        this.showToast(
+            parentModelIndex === null
+                ? `Frame ${frame}: モデル外部親の解除キーを登録しました`
+                : `Frame ${frame}: モデル外部親キーを登録しました`,
+            "success",
+        );
     }
 
     private readParentModelIndex(): number | null {

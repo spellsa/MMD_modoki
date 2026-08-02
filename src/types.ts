@@ -599,6 +599,14 @@ export interface ProjectSerializedCameraExternalParentTrack {
     boneNames: Array<string | null>;
 }
 
+export interface ProjectSerializedModelExternalParentTrack {
+    modelPath: string;
+    frameNumbers: ProjectNumberArray;
+    childBoneNames: string[];
+    parentModelPaths: Array<string | null>;
+    parentBoneNames: Array<string | null>;
+}
+
 export interface ProjectPackedArray {
     encoding: "u8-b64" | "f32-b64" | "u32-delta-varint-b64";
     length: number;
@@ -623,6 +631,7 @@ export interface ProjectKeyframeModelAnimation {
 export interface ProjectKeyframeBundle {
     modelAnimations: ProjectKeyframeModelAnimation[];
     cameraAnimation: ProjectSerializedCameraTrack | null;
+    modelExternalParents?: ProjectSerializedModelExternalParentTrack[];
     cameraExternalParents?: ProjectSerializedCameraExternalParentTrack | null;
     accessoryTransformAnimations?: Array<ProjectSerializedAccessoryTransformTrack | null>;
 }

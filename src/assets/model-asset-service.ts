@@ -559,6 +559,12 @@ type ModelAssetHost = {
             parentModelPath: string;
             parentBoneName: string;
         } | null;
+        externalParentKeyframes: Array<{
+            frame: number;
+            childBoneName: string;
+            parentModelPath: string | null;
+            parentBoneName: string | null;
+        }>;
     }>;
     refreshRigidBodyVisualizerTarget(): void;
     syncLuminousGlowLayer?: () => void;
@@ -1553,6 +1559,7 @@ export async function loadPMX(
             castShadow: true,
             materialPipeline,
             externalParent: null,
+            externalParentKeyframes: [],
         });
         host.normalizeRuntimeBoneEvaluationOrder?.(mmdModel);
         host.applyPhysicsStateToModel(mmdModel);

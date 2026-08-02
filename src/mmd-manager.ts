@@ -63,6 +63,7 @@ import type {
     ProjectPackedArray,
     ProjectCameraState,
     ProjectSerializedCameraExternalParentTrack,
+    ProjectSerializedModelExternalParentTrack,
     ProjectModelMaterialShaderState,
     KeyframeTrack,
     MirroringFloorShape,
@@ -87,7 +88,11 @@ import {
     type MmdMaterialPipelinePreset,
     type PbrMaterialShaderPreset,
 } from "./shared/mmd-material-pipeline";
-import { wouldCreateModelExternalParentCycle } from "./shared/model-external-parent";
+import {
+    selectModelExternalParentKeyframeAtFrame,
+    wouldCreateModelExternalParentCycle,
+    type ModelExternalParentKeyframePayload,
+} from "./shared/model-external-parent";
 import {
     loadCameraVMD as loadCameraVMDImpl,
     loadMP3 as loadMP3Impl,
@@ -828,12 +833,17 @@ type SceneModelEntry = {
     castShadow: boolean;
     materialPipeline: MmdMaterialPipelinePreset;
     externalParent: ModelExternalParentState | null;
+    externalParentKeyframes: ModelExternalParentKeyframe[];
 };
 
 export type ModelExternalParentState = {
     childBoneName: string;
     parentModelPath: string;
     parentBoneName: string;
+};
+
+type ModelExternalParentKeyframe = ModelExternalParentKeyframePayload & {
+    frame: number;
 };
 
 type CameraExternalParentKeyframe = {
@@ -2271,11 +2281,209 @@ ${beforeFogAppendBlock}
     }
 
     public getModelExternalParent(modelIndex: number): (ModelExternalParentState & { parentModelIndex: number }) | null {
+        this.applyModelExternalParentKeyframesAtFrame(this._currentFrame);
         const state = this.sceneModels[modelIndex]?.externalParent;
         if (!state) return null;
         const parentModelIndex = this.sceneModels.findIndex((entry) => entry.info.path === state.parentModelPath);
         if (parentModelIndex < 0) return null;
         return { ...state, parentModelIndex };
+    }
+
+    public readModelExternalParentKeyframe(
+        frame: number,
+        childBoneName: string,
+    ): ModelExternalParentKeyframePayload | null {
+        const entry = this.sceneModels.find((candidate) => candidate.model === this.currentModel);
+        if (!entry) return null;
+        const normalized = Math.max(0, Math.floor(frame));
+        const keyframe = entry.externalParentKeyframes.find((candidate) =>
+            candidate.frame === normalized && candidate.childBoneName === childBoneName
+        );
+        if (!keyframe) return null;
+        return {
+            childBoneName: keyframe.childBoneName,
+            parentModelPath: keyframe.parentModelPath,
+            parentBoneName: keyframe.parentBoneName,
+        };
+    }
+
+    public upsertModelExternalParentKeyframe(
+        frame: number,
+        payload: ModelExternalParentKeyframePayload,
+    ): boolean {
+        const childModelIndex = this.sceneModels.findIndex((entry) => entry.model === this.currentModel);
+        const childEntry = this.sceneModels[childModelIndex];
+        if (!childEntry || !this.getRuntimeBoneByNameFromModel(childEntry.model, payload.childBoneName)) {
+            return false;
+        }
+
+        const normalizedPayload: ModelExternalParentKeyframe = {
+            frame: Math.max(0, Math.floor(frame)),
+            childBoneName: payload.childBoneName,
+            parentModelPath: payload.parentModelPath || null,
+            parentBoneName: payload.parentModelPath ? payload.parentBoneName || null : null,
+        };
+        if (normalizedPayload.parentModelPath) {
+            const parentModelIndex = this.sceneModels.findIndex((entry) => entry.info.path === normalizedPayload.parentModelPath);
+            const parentEntry = this.sceneModels[parentModelIndex];
+            if (
+                !parentEntry
+                || !normalizedPayload.parentBoneName
+                || !this.getRuntimeBoneByNameFromModel(parentEntry.model, normalizedPayload.parentBoneName)
+            ) {
+                return false;
+            }
+        }
+
+        const nextKeyframes = childEntry.externalParentKeyframes.filter((entry) => entry.frame !== normalizedPayload.frame);
+        nextKeyframes.push(normalizedPayload);
+        nextKeyframes.sort((a, b) => a.frame - b.frame);
+        if (!this.validateModelExternalParentTimeline(childModelIndex, nextKeyframes)) {
+            return false;
+        }
+
+        childEntry.externalParentKeyframes = nextKeyframes;
+        this.applyModelExternalParentKeyframesAtFrame(this._currentFrame);
+        return true;
+    }
+
+    public removeModelExternalParentKeyframes(frames: readonly number[], childBoneName: string): boolean {
+        const childEntry = this.sceneModels.find((entry) => entry.model === this.currentModel);
+        if (!childEntry) return false;
+        const targets = new Set(frames.map((frame) => Math.max(0, Math.floor(frame))));
+        childEntry.externalParentKeyframes = childEntry.externalParentKeyframes.filter((entry) =>
+            !targets.has(entry.frame) || entry.childBoneName !== childBoneName
+        );
+        this.applyModelExternalParentKeyframesAtFrame(this._currentFrame);
+        return true;
+    }
+
+    public moveModelExternalParentKeyframe(
+        fromFrame: number,
+        toFrame: number,
+        childBoneName: string,
+    ): boolean {
+        const childEntry = this.sceneModels.find((entry) => entry.model === this.currentModel);
+        if (!childEntry) return false;
+        const from = Math.max(0, Math.floor(fromFrame));
+        const to = Math.max(0, Math.floor(toFrame));
+        const keyframe = childEntry.externalParentKeyframes.find((entry) =>
+            entry.frame === from && entry.childBoneName === childBoneName
+        );
+        if (!keyframe) return true;
+        const nextKeyframes = childEntry.externalParentKeyframes.filter((entry) => entry !== keyframe && entry.frame !== to);
+        nextKeyframes.push({ ...keyframe, frame: to });
+        nextKeyframes.sort((a, b) => a.frame - b.frame);
+        const childModelIndex = this.sceneModels.indexOf(childEntry);
+        if (!this.validateModelExternalParentTimeline(childModelIndex, nextKeyframes)) return false;
+        childEntry.externalParentKeyframes = nextKeyframes;
+        this.applyModelExternalParentKeyframesAtFrame(this._currentFrame);
+        return true;
+    }
+
+    public getModelExternalParentKeyframes(): ProjectSerializedModelExternalParentTrack[] {
+        return this.sceneModels
+            .filter((entry) => entry.externalParentKeyframes.length > 0)
+            .map((entry) => ({
+                modelPath: entry.info.path,
+                frameNumbers: this.packFrameNumbers(new Uint32Array(entry.externalParentKeyframes.map((keyframe) => keyframe.frame))),
+                childBoneNames: entry.externalParentKeyframes.map((keyframe) => keyframe.childBoneName),
+                parentModelPaths: entry.externalParentKeyframes.map((keyframe) => keyframe.parentModelPath),
+                parentBoneNames: entry.externalParentKeyframes.map((keyframe) => keyframe.parentBoneName),
+            }));
+    }
+
+    public setModelExternalParentKeyframes(
+        tracks: readonly ProjectSerializedModelExternalParentTrack[] | null | undefined,
+    ): boolean {
+        for (const entry of this.sceneModels) {
+            entry.externalParentKeyframes = [];
+            entry.externalParent = null;
+        }
+        if (!tracks) return true;
+
+        for (const track of tracks) {
+            const childModelIndex = this.sceneModels.findIndex((entry) => entry.info.path === track.modelPath);
+            const childEntry = this.sceneModels[childModelIndex];
+            if (!childEntry || !Array.isArray(track.childBoneNames)) return false;
+            const frameCount = track.childBoneNames.length;
+            const frames = new Uint32Array(frameCount);
+            this.copyProjectArrayToUint32(track.frameNumbers, frames);
+            const keyframes: ModelExternalParentKeyframe[] = [];
+            for (let index = 0; index < frameCount; index += 1) {
+                const childBoneName = track.childBoneNames[index];
+                if (!childBoneName || !this.getRuntimeBoneByNameFromModel(childEntry.model, childBoneName)) return false;
+                const parentModelPath = typeof track.parentModelPaths?.[index] === "string" && track.parentModelPaths[index]
+                    ? track.parentModelPaths[index]
+                    : null;
+                const parentBoneName = parentModelPath && typeof track.parentBoneNames?.[index] === "string"
+                    ? track.parentBoneNames[index] || null
+                    : null;
+                if (parentModelPath) {
+                    const parentEntry = this.sceneModels.find((entry) => entry.info.path === parentModelPath);
+                    if (!parentEntry || !parentBoneName || !this.getRuntimeBoneByNameFromModel(parentEntry.model, parentBoneName)) {
+                        return false;
+                    }
+                }
+                keyframes.push({
+                    frame: Math.max(0, Math.floor(Number(frames[index] ?? 0))),
+                    childBoneName,
+                    parentModelPath,
+                    parentBoneName,
+                });
+            }
+            childEntry.externalParentKeyframes = keyframes
+                .sort((a, b) => a.frame - b.frame)
+                .filter((entry, index, array) => index === array.findIndex((candidate) => candidate.frame === entry.frame));
+        }
+
+        for (let childModelIndex = 0; childModelIndex < this.sceneModels.length; childModelIndex += 1) {
+            const keyframes = this.sceneModels[childModelIndex].externalParentKeyframes;
+            if (!this.validateModelExternalParentTimeline(childModelIndex, keyframes)) {
+                for (const entry of this.sceneModels) {
+                    entry.externalParentKeyframes = [];
+                    entry.externalParent = null;
+                }
+                return false;
+            }
+        }
+        this.applyModelExternalParentKeyframesAtFrame(this._currentFrame);
+        return true;
+    }
+
+    private validateModelExternalParentTimeline(
+        candidateChildModelIndex: number,
+        candidateKeyframes: readonly ModelExternalParentKeyframe[],
+    ): boolean {
+        const frames = new Set<number>([0, this._currentFrame]);
+        for (let modelIndex = 0; modelIndex < this.sceneModels.length; modelIndex += 1) {
+            const keyframes = modelIndex === candidateChildModelIndex
+                ? candidateKeyframes
+                : this.sceneModels[modelIndex].externalParentKeyframes;
+            for (const keyframe of keyframes) frames.add(keyframe.frame);
+        }
+
+        for (const frame of frames) {
+            const links = new Map<number, { parentModelIndex: number }>();
+            for (let modelIndex = 0; modelIndex < this.sceneModels.length; modelIndex += 1) {
+                const entry = this.sceneModels[modelIndex];
+                const keyframes = modelIndex === candidateChildModelIndex
+                    ? candidateKeyframes
+                    : entry.externalParentKeyframes;
+                const selected = selectModelExternalParentKeyframeAtFrame(keyframes, frame);
+                const state = keyframes.length > 0
+                    ? selected
+                    : entry.externalParent;
+                if (!state?.parentModelPath) continue;
+                const parentModelIndex = this.sceneModels.findIndex((candidate) => candidate.info.path === state.parentModelPath);
+                if (parentModelIndex < 0 || parentModelIndex === modelIndex) return false;
+                links.set(modelIndex, { parentModelIndex });
+            }
+            for (const [childModelIndex, link] of links) {
+                if (wouldCreateModelExternalParentCycle(childModelIndex, link.parentModelIndex, links)) return false;
+            }
+        }
+        return true;
     }
 
     public setModelExternalParent(
@@ -3394,6 +3602,11 @@ ${beforeFogAppendBlock}
             if (entry.externalParent?.parentModelPath === removed.info.path) {
                 entry.externalParent = null;
             }
+            entry.externalParentKeyframes = entry.externalParentKeyframes.map((keyframe) =>
+                keyframe.parentModelPath === removed.info.path
+                    ? { ...keyframe, parentModelPath: null, parentBoneName: null }
+                    : keyframe
+            );
         }
         removed.castShadow = false;
         this.applyModelShadowCasterState(removed);
@@ -5991,6 +6204,7 @@ ${beforeFogAppendBlock}
         // Apply external parents after every onBeforeRender observer (including the replacement
         // runtime's after-physics update), but before active mesh/skeleton evaluation begins.
         this.scene.onBeforeActiveMeshesEvaluationObservable.add(() => {
+            this.applyModelExternalParentKeyframesAtFrame(this._currentFrame);
             if (this.boneGizmoManager?.isDragging === true) {
                 // Apply the gizmo to the raw runtime pose first. Applying external parents before
                 // and after a parent-bone drag would multiply the same child pose twice for one frame.
@@ -11912,6 +12126,29 @@ ${beforeFogAppendBlock}
 
         for (let modelIndex = 0; modelIndex < this.sceneModels.length; modelIndex += 1) {
             applyModel(modelIndex);
+        }
+    }
+
+    private applyModelExternalParentKeyframesAtFrame(frame: number): void {
+        for (const entry of this.sceneModels) {
+            if (entry.externalParentKeyframes.length === 0) continue;
+            const selected = selectModelExternalParentKeyframeAtFrame(entry.externalParentKeyframes, frame);
+            if (!selected?.parentModelPath || !selected.parentBoneName) {
+                entry.externalParent = null;
+                continue;
+            }
+            const parentEntry = this.sceneModels.find((candidate) => candidate.info.path === selected.parentModelPath);
+            const childBone = this.getRuntimeBoneByNameFromModel(entry.model, selected.childBoneName);
+            const parentBone = parentEntry
+                ? this.getRuntimeBoneByNameFromModel(parentEntry.model, selected.parentBoneName)
+                : null;
+            entry.externalParent = childBone && parentBone
+                ? {
+                    childBoneName: selected.childBoneName,
+                    parentModelPath: selected.parentModelPath,
+                    parentBoneName: selected.parentBoneName,
+                }
+                : null;
         }
     }
 
