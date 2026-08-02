@@ -221,11 +221,12 @@ npm.cmd run lint
 
 ## E2E / UI 動作確認方針
 
-UI を実際に動かさないと確認しづらい変更では、現行の `smoke:launch` と必要に応じた手動確認で補ってください。
+UI を実際に動かさないと確認しづらい変更では、Playwright Electron E2E、現行の `smoke:launch`、必要に応じた手動確認で補ってください。
 
 現行で使える確認:
 
 - 既存の `smoke:launch`
+- `npm.cmd run test:e2e`（対象を絞る場合は `npm.cmd run test:e2e -- <spec名>`）
 - 必要に応じた手動確認チェックリスト
 
 確認したい対象:
@@ -250,9 +251,12 @@ UI を実際に動かさないと確認しづらい変更では、現行の `smo
 方針:
 
 - UI 動作確認は `lint` / `test:unit` / `smoke:launch` の代替ではなく追加確認として扱う。
+- Playwright は role / label を優先し、独自widgetだけ `data-testid` を使う。固定 `sleep` ではなく観測可能なready / stateを待つ。
+- E2E専用hookは明示的なtest modeだけで公開し、productionへ出さない。
+- Babylon runtimeは途中状態ではなく、skeleton評価後に描画へ使われるfinal matrixを検証する。
 - 自動化できない UI 導線は、手動確認結果を `docs/` に残すだけでもよい。
 - file dialog は直接自動操作の対象にしない。
-- 詳細な E2E 導入検討は [docs/electron-local-smoke-test-plan.md](./docs/electron-local-smoke-test-plan.md) を参照する。
+- 実装時の詳細は [Playwright Electron E2E 実装・運用ガイド](./docs/playwright-electron-e2e-operation-guide.md)、導入経緯は [Playwright Electron ローカル E2E 導入検討](./docs/playwright-electron-local-e2e-investigation-2026-08-02.md) を参照する。
 
 ## コードベースの主要箇所
 

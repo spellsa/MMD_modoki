@@ -424,6 +424,7 @@ UI 回帰検出を埋もれさせる。
 
 ## 関連資料
 
+- [Playwright Electron E2E 実装・運用ガイド](./playwright-electron-e2e-operation-guide.md)
 - [Electron ローカル起動スモークテスト方針](./electron-local-smoke-test-plan.md)
 - [Electron 起動確認自動化 調査メモ](./electron-launch-test-investigation.md)
 - [テスト導入提案](./testing-strategy-proposal.md)
