@@ -66,19 +66,8 @@
 
 ## 外部公式情報の確認
 
-Babylon.js / babylon-mmd / Electron / WebGPU など、外部ライブラリや実行基盤に関わる作業では、記憶や推測だけで進めず、必要に応じて検索して公式ドキュメントや一次情報を確認してください。
-
-特に Babylon.js と babylon-mmd は公式ドキュメント・API リファレンス・サンプルが充実しているため、以下のような作業では積極的に参照してください。Babylon.js については、公式フォーラムにも実装者やメンテナーによる不具合調査、制約、回避策、Playground 例が多いため、調査対象に含めてよいです。
-
-- Frame Graph、Rendering Pipeline、Post Process、Material、Shader、WebGPU まわりの実装や調査
-- babylon-mmd の runtime、loader、physics、MMD material、outline、animation に関わる変更
-- Babylon.js / babylon-mmd のバージョン差による API 変更や非推奨 API の確認
-- 公式 task / helper / recommended path が存在するかどうかの確認
-- 独自実装を入れる前に、既存の公式機能で置き換えられるか判断する場面
-
-フォーラムの情報は、回答時点の Babylon.js バージョン、回答者、再現用 Playground、後続の修正状況を確認してください。フォーラム投稿だけで現行仕様と断定せず、可能な範囲で公式ドキュメント、API、ソースコード、リリースノート、現在使用中のバージョンの実挙動と照合してください。
-
-調査で得た重要な知見や、公式ドキュメントと実装上の差分・制約が見つかった場合は、必要に応じて `docs/` に短い調査メモを残してください。
+外部ライブラリ・実行基盤は記憶や推測で判断せず、公式ドキュメント・一次情報・現行バージョンの実挙動を照合する。重要な差分や制約は `docs/` に残す。
+詳細は [外部公式情報の確認](./docs/external-official-info-verification-policy.md) を参照する。
 
 ## 確認コマンド
 
@@ -102,6 +91,8 @@ npm.cmd run typecheck
 [docs/review-v020/07-typecheck-baseline.md](./docs/review-v020/07-typecheck-baseline.md)
 を参照する。
 
+`npm.cmd run typecheck:critical` は `typecheck` を実行したうえで、`TS2304` / `TS2552` の未定義名参照を抽出する。CIではblockingなcritical gateとして扱い、通常の `typecheck` は `continue-on-error: true` の非ブロッキングなベースライン確認とする。コード変更時、特に型・runtime・exporter経路に関わる変更では、両方を可能な範囲で実行する。
+
 ただし、`TS2304` / `TS2552` のような未定義名参照は実バグ候補として優先確認する。
 特に WebM exporter の `request` スコープ問題のような catch 経路の破損は、lint では拾えず
 `typecheck` で初めて見えるため、関係するファイルを触った場合は可能な範囲で確認する。
@@ -111,6 +102,7 @@ npm.cmd run typecheck
 - 純ロジック変更では、可能なら `npm.cmd run test:unit` も実行する
 - 起動導線、`src/main.ts`、`src/preload.ts`、`src/renderer.ts`、初期化処理、WebGPU 起動条件に関わる変更では、可能なら `npm.cmd run smoke:launch` も実行する
 - `smoke:launch` は lint の代替ではなく追加確認として扱う
+- UI 導線、メニュー、モード切替、登録操作に関わる変更では、可能なら `npm.cmd run test:e2e` も実行する。対象を絞る場合は `npm.cmd run test:e2e -- <spec名>` を使う。`test:e2e` は `lint` / `smoke:launch` の代替ではない。詳細は [Playwright Electron E2E 実装・運用ガイド](./docs/playwright-electron-e2e-operation-guide.md) を参照する
 - `smoke:launch` の成功条件は、Electron が起動し、renderer runtime が初期化され、`engine=WebGPU` まで到達することとする
 - `smoke:launch` は UI 操作、描画品質、PMX/VMD 実読み込みの確認までは含まない
 
@@ -143,65 +135,6 @@ button / shortcut / timeline
   -> same undo / redo behavior
 ```
 
-## Lint warning 再発防止メモ
-
-今回の warning 解消で多かった原因は、service / controller 切り出し時の `host: any`、Babylon / MMD runtime まわりの `any`、DOM / canvas の non-null assertion、コメントアウト済み debug 関数の未使用化だった。
-
-今後の方針:
-
-- 新規または切り出し service / controller では、`host: any` を原則使わず、同じファイル先頭に最低限の `XxxHost` 型を置く。
-- Babylon / babylon-mmd の実体を完全に型付けしづらい場合は、広い `any` ではなく、小さい `Like` 型、`unknown`、`Record<string, unknown>`、または局所的な internal 型に隔離する。
-- `effect: any`、`material: any`、`model: any`、`mesh: any` が出たら、必要なプロパティだけを持つ局所型へ寄せる。
-- `!` による non-null assertion は増やさず、必要なら `getRequiredElement()` や canvas context helper のような小さい取得関数に寄せる。
-- 調査用 debug 関数は、残すなら feature flag や明示的な呼び出し導線を置く。コメントアウト呼び出しだけになった debug 関数は削除候補にする。
-- debug log / debug flag は、残す場合でも設定、feature flag、明示的な debug mode に寄せる。常時 `true` の調査フラグや大量の `console.log` / `console.table` は、削除または隔離候補として扱う。
-- コメントは処理の逐語説明より、制約、外部ライブラリ都合、描画順、副作用、過去に壊れた理由を書く。
-- 文字化けはコメントだけでなく UI 文言、docs、ログ文言も確認対象にする。意味を復元できないものは、挙動影響を確認して削除または置換する。
-- Frame Graph / PostFX と editor overlay / gizmo / utility layer を触る場合は、最終出力後に overlay が上書きされないか、描画順と実機表示を確認する。
-- lint warning は 20 件程度を超えたら小掃除回を入れ、数百件まで溜めない。
-- warning 対応後は `npm.cmd run lint` を必ず実行し、pure helper / project state / action まわりに触った場合は `npm.cmd run test:unit` も実行する。
-
-## TypeScript 型検査 再発防止メモ
-
-`tsc --noEmit` の初回ベースラインでは 479 件の既存エラーが出ているため、現時点で
-全体の型検査を blocking CI にするのは現実的ではない。
-
-当面の方針:
-
-- `npm.cmd run typecheck` は非ブロッキングのベースライン確認として扱う。
-- `TS2304` / `TS2552` の未定義名参照は、既存の Babylon / host 型ズレとは別枠の実バグ候補として優先して直す。
-- 新規コードや修正コードで `TS2304` / `TS2552` を増やさない。
-- 型検査エラー総数は段階的に減らし、十分減ったら CI の `continue-on-error` を外す。
-- `@ts-ignore` は原則使わず、必要なら理由付きの `@ts-expect-error` にする。
-
-型エラーを減らすときの優先順:
-
-1. 未定義名参照など、実行時クラッシュに直結しやすいもの。
-2. 少数ファイルに出ている実装ミス候補。
-3. `tsconfig` / module resolution 由来の設定問題。
-4. `timeline-edit-service.ts` の readonly mutation など、データ整合に近いもの。
-5. host 型 / Babylon private 型 / test mock 型の大きな整理。
-
-特に守る短いルール:
-
-```text
-新規/切り出し service では any host 禁止。
-最低限の XxxHost 型を同じファイル先頭に置く。
-未定義名参照(TS2304/TS2552)は新規に増やさない。
-```
-
-## ログ / エラーハンドリング運用
-
-- 新しい `console.*` や `catch` を追加するときは、ユーザー通知、app log、runtime diagnostic、debug trace、silent ignore のどれに分類するか決める。
-- ユーザーに見せる失敗は短い通知にし、原因調査に必要な file path / backend / stack などは `app-logger` / `writeAppLog` の structured data に残す。
-- recoverable fallback や機能 disable は、原則 `logWarn` と runtime diagnostic に残し、即時 toast は作業を止めるものに限定する。
-- `console.log` / `console.table` / per-frame trace は一時調査または debug flag ON の用途に限定し、通常操作で常時出るログを増やさない。
-- `catch {}` の silent ignore は cleanup や browser API の benign failure に限定し、理由コメントを残す。
-- IPC / file IO では、cancel / invalid input / not found / actual failure をできるだけ区別する。新規 IPC では typed result も検討する。
-- 不具合調査では、まず `npm.cmd run log:errors` で warning/error を確認し、流れを見る必要があれば `npm.cmd run log:tail` を使う。
-- scope を絞る場合は `node scripts/show-app-log.mjs --scope asset --lines 200` のように直接実行してよい。
-- Windows の開発ターミナルでは electron-log の console transport が日本語 file name を文字化けさせることがあるため、通常は console transport を使わず log file を読む。必要な場合だけ `MMD_MODOKI_CONSOLE_LOG=1` で有効化する。
-
 TDD 的に進められる範囲では、t-wada 氏の TDD の考え方を参考にしてよいです。ただし、実験機能や描画調査では無理に完全な Red-Green-Refactor を押し切らず、次のように軽量に適用してください。
 
 - まずテストリストを短く書く。
@@ -219,44 +152,25 @@ npm.cmd run lint
 
 起動導線や runtime 初期化に触った場合は、追加で `npm.cmd run smoke:launch` も確認してください。
 
+## Lint warning 再発防止メモ
+
+新規 service / controller は広い `any` host、non-null assertion、常時 debug log を増やさず、局所型・取得 helper・feature flagへ寄せる。warning 対応後は lint と必要な unit test を再実行する。
+詳細は [Lint warning 再発防止メモ](./docs/lint-warning-prevention.md) を参照する。
+
+## TypeScript 型検査 再発防止メモ
+
+`typecheck` は非ブロッキングのベースライン、`TS2304` / `TS2552` は実バグ候補として扱い、新規コードで増やさない。新規 service では広い `any host` を避け、局所型を置く。
+詳細は [TypeScript 型検査 再発防止メモ](./docs/typescript-baseline-policy.md) を参照する。
+
+## ログ / エラーハンドリング運用
+
+新しいログ・`catch`・IPC / file IOでは、通知・診断・debug・silent ignoreを分類し、ユーザー向け通知とstructuredな調査情報を分ける。silent ignoreはbenignな場合に限る。
+詳細は [ログ / エラーハンドリング運用](./docs/logging-error-handling-policy.md) を参照する。
+
 ## E2E / UI 動作確認方針
 
-UI を実際に動かさないと確認しづらい変更では、Playwright Electron E2E、現行の `smoke:launch`、必要に応じた手動確認で補ってください。
-
-現行で使える確認:
-
-- 既存の `smoke:launch`
-- `npm.cmd run test:e2e`（対象を絞る場合は `npm.cmd run test:e2e -- <spec名>`）
-- 必要に応じた手動確認チェックリスト
-
-確認したい対象:
-
-- HTML / CSS メニューバーの表示
-- popup / dialog / drawer の表示
-- Model Mode / Camera Mode の切替
-- 下パネルや Effect panel の表示切替
-- Help / Keyboard Shortcuts / Preferences / Export Settings の表示
-- 初期 disabled 状態や `canUndo` / `canRedo` 表示
-- locale 切替後のメニュー / dialog 文言
-- アプリだけで完結する UI 導線
-
-無理に自動確認しない対象:
-
-- 実 PMX / PMD / VMD 読み込みの品質
-- ボーン操作やカメラ操作の手触り
-- WebGPU 描画品質
-- 物理挙動の品質
-- OS のファイルダイアログそのもの
-
-方針:
-
-- UI 動作確認は `lint` / `test:unit` / `smoke:launch` の代替ではなく追加確認として扱う。
-- Playwright は role / label を優先し、独自widgetだけ `data-testid` を使う。固定 `sleep` ではなく観測可能なready / stateを待つ。
-- E2E専用hookは明示的なtest modeだけで公開し、productionへ出さない。
-- Babylon runtimeは途中状態ではなく、skeleton評価後に描画へ使われるfinal matrixを検証する。
-- 自動化できない UI 導線は、手動確認結果を `docs/` に残すだけでもよい。
-- file dialog は直接自動操作の対象にしない。
-- 実装時の詳細は [Playwright Electron E2E 実装・運用ガイド](./docs/playwright-electron-e2e-operation-guide.md)、導入経緯は [Playwright Electron ローカル E2E 導入検討](./docs/playwright-electron-local-e2e-investigation-2026-08-02.md) を参照する。
+UI導線の変更では、可能なら `test:e2e` を実行し、`lint` / `smoke:launch` の代替にはしない。role / label、観測可能なready/state、test mode限定hookを優先し、file dialogや描画品質は無理に自動化しない。
+詳細は [E2E / UI 動作確認方針](./docs/e2e-ui-verification-policy.md) を参照する。
 
 ## コードベースの主要箇所
 
