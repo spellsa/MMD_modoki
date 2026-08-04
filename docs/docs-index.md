@@ -106,6 +106,7 @@
 - [カメラ実装仕様](./camera-implementation-spec.md)
 - [カメラ用ポストエフェクト現行仕様](./camera-postfx-current-spec.md)
 - [カメラVMD対応メモ](./camera-vmd.md)
+- [モーション補間・自動補完・カメラ追従の構想メモ 2026-08-04](./motion-interpolation-camera-follow-concept-2026-08-04.md)
 - [タイムライン仕様](./timeline-spec.md)
 - [タイムライン データフロー](./data-flow-timeline.md)
 - [MMD timeline track scope note](./mmd-timeline-track-scope-note-2026-04-20.md)
