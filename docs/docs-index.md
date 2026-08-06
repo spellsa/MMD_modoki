@@ -43,6 +43,7 @@
 - [Electron ローカル起動スモークテスト方針](./electron-local-smoke-test-plan.md)
 - [Playwright Electron ローカル E2E 導入検討 2026-08-02](./playwright-electron-local-e2e-investigation-2026-08-02.md)
 - [Playwright Electron E2E 実装・運用ガイド](./playwright-electron-e2e-operation-guide.md)
+- [現行確認スナップショット 2026-08-06](./current-state-audit-2026-08-06.md)
 - [モデル外部親 仕様・実装ガイド](./model-external-parent-implementation-2026-08-02.md)
 - [コードレビュー 2026-04](./code-review-2026-04.md)
 - [コードレビュー v0.2 依存更新 2026-06-13](./code-review-v0.2-dependency-upgrade-2026-06-13.md)
