@@ -102,7 +102,6 @@
 - [ui-controller.ts 分割方針メモ](./ui-controller-split-plan.md)
 - [Tailwind v0.2 UI component plan](./tailwind-v0.2-ui-component-plan-2026-06-07.md)
 - [多言語 UI 計画](./multilingual-ui-plan.md)
-- [左パネル UI 案メモ](./left-panel-ui-ideas-2026-04-18.md)
 - [設定画面メモ](./settings-screen-note-2026-04-18.md)
 - [数値入力 interaction policy](./numeric-input-interaction-policy-2026-06-22.md)
 - [MMD 本家メニュー popup 参照](./mmd-original-menu-popup-reference-2026-05-30.md)
@@ -128,7 +127,6 @@
 - [カメラ用ポストエフェクト現行仕様](./camera-postfx-current-spec.md)
 - [カメラVMD対応メモ](./camera-vmd.md)
 - [カメラ外部親 / フォローカメラ再設計メモ 2026-07-13](./camera-external-parent-follow-design-note-2026-07-13.md)
-- [モーション補間・自動補完・カメラ追従の構想メモ 2026-08-04](./motion-interpolation-camera-follow-concept-2026-08-04.md)
 - [タイムライン仕様](./timeline-spec.md)
 - [タイムライン再生時パフォーマンス最適化メモ 2026-07-09](./timeline-playback-performance-note-2026-07-09.md)
 - [タイムライン データフロー](./data-flow-timeline.md)
@@ -152,7 +150,6 @@
 - [複数ボーン選択設計](./multi-bone-selection-design-2026-06-25.md)
 - [選択実装更新メモ](./selection-implementation-update-2026-06-25.md)
 - [ボーン操作仕様](./bone-operation-spec.md)
-- [Motion asset translator concept](./motion-asset-translator-concept-2026-06-15.md)
 - [VMD / VPD 読み込み挙動](./import-behavior-vmd-vpd.md)
 - [再生・シーク・物理ポリシー](./playback-seek-physics-policy.md)
 
@@ -193,7 +190,6 @@ PBR Skin SSSは描画経路の動作と不具合対策まで確認したが、�
 - [WGSL シェーダーでできること / できないこと](./wgsl-shader-capabilities.md)
 - [LUT / WGSL 外部ファイル運用仕様](./lut-wgsl-file-handling.md)
 - [LUT cube implementation note](./lut-cube-implementation-note.md)
-- [外部 WGSL shader loading concept](./external-wgsl-shader-loading-concept-2026-06-12.md)
 - [床・背景・巨大平面の描画安定化調査](./floor-render-stability-investigation-2026-06-26.md)
 - [デフォルト空 / HDRI / BackgroundMaterial 調査メモ 2026-07-20](./default-sky-hdri-background-material-investigation-2026-07-20.md)
 - [IBL / 外部 HDRI 現行仕様・調査記録 2026-07-21](./external-hdri-environment-lighting-2026-07-21.md)
@@ -240,21 +236,16 @@ PBR Skin SSSは描画経路の動作と不具合対策まで確認したが、�
 - [影品質の調査メモ](./shadow-quality-investigation.md)
 - [光・影実装メモ（Toon分離 + フラット光）](./light-shadow-implementation.md)
 - [ライト / フェイス回りの調査メモ](./full-light-face-investigation-2026-03-13.md)
-- [Lighting effects concept](./lighting-effects-concept-2026-06-12.md)
 - [現行MMD AutoLuminous 調査メモ](./mmd-autoluminous-research.md)
 - [AutoLuminous GlowLayer implementation note](./autoluminous-glowlayer-implementation-note-2026-04-23.md)
-- [Emissive Light Assist concept](./emissive-light-assist-concept-2026-06-12.md)
-- [Node particle effects concept](./node-particle-effects-concept-2026-06-12.md)
 - [Blob shadow contact plan](./blob-shadow-contact-plan-2026-05-08.md)
 - [セルフ影の横縞メモ](./self-shadow-horizontal-banding-note.md)
 - [IBL shadows investigation](./ibl-shadows-investigation-2026-05-07.md)
 - [Babylon RSM GI メモ](./babylon-rsm-gi-notes.md)
 - [MirroringFloor 実装検討メモ](./mirroring-floor-plan-2026-05-11.md)
-- [床・ステージ表面構想メモ 2026-07-30](./stage-surface-design-note-2026-07-30.md)
 
 ## Effect Panel
 
-- [Effect panel organization concept](./effect-panel-organization-concept-2026-06-12.md)
 - [Effect panel UI implementation plan](./effect-panel-ui-implementation-plan-2026-06-12.md)
 
 ## 物理
@@ -280,9 +271,30 @@ PBR Skin SSSは描画経路の動作と不具合対策まで確認したが、�
 - [WebCodecs + MediaBunny WebM 調査](./webcodecs-mediabunny-webm-research.md)
 - [WebGPU WebM Capture 実装メモ 2026-04-22](./webgpu-webm-capture-implementation-note-2026-04-22.md)
 - [WebGPU VP8 Encoder Experiment Note 2026-04-22](./webgpu-vp8-encoder-experiment-note-2026-04-22.md)
+- [出力改善計画](./output-improvement-plan-2026-08-04.md)
+- [WebGPU 動画書き出し Phase 0 計測・Phase 1 RGBA→YUV GPU 前処理作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)
 - [WebM 出力の物理状態引き継ぎ仕様](./webm-export-physics-state-spec-2026-07-06.md)
 - [WebM 出力の物理状態引き継ぎ調査メモ](./webm-export-physics-state-handoff-2026-07-06.md)
 
 ## 実験 / その他
 
 - [SQLite WASM 実験メモ](./sqlite-wasm-experiment-note.md)
+
+## 構想 / アイデア
+
+明確に未実装の機能構想、UI案、技術コンセプトをまとめた分類です。実装計画・現行仕様・調査・進捗メモは各領域の分類に残します。
+
+- [Effect Panel 整理構想メモ](./effect-panel-organization-concept-2026-06-12.md)
+- [UI テーマ・拡大率・レイアウト構想メモ](./ui-theme-scale-layout-concept-2026-08-05.md)
+- [入力まわり構想メモ（ショートカット・ゲームパッド・MIDI・アプリ設定の保存）](./input-and-app-settings-concept-2026-08-05.md)
+- [左パネル UI 案メモ](./left-panel-ui-ideas-2026-04-18.md)
+- [グラフエディタ・タイムライン クローズアップ表示構想メモ](./graph-editor-timeline-closeup-concept-2026-08-04.md)
+- [Motion Asset / Motion Translator 構想メモ](./motion-asset-translator-concept-2026-06-15.md)
+- [モーション補間・自動補完・カメラ追従の構想メモ](./motion-interpolation-camera-follow-concept-2026-08-04.md)
+- [Lighting Effects 構想メモ](./lighting-effects-concept-2026-06-12.md)
+- [Emissive Light Assist 構想メモ](./emissive-light-assist-concept-2026-06-12.md)
+- [外部 WGSL シェーダー読み込み構想メモ](./external-wgsl-shader-loading-concept-2026-06-12.md)
+- [Node Particle Effects 構想メモ](./node-particle-effects-concept-2026-06-12.md)
+- [アクセサリ構想メモ（対象セレクタ統合と対応形式の拡張）](./accessory-target-selector-and-format-expansion-concept-2026-08-04.md)
+- [床・ステージ表面構想メモ](./stage-surface-design-note-2026-07-30.md)
+- [VMDU（Unicode 版 VMD）構想メモ](./vmdu-unicode-vmd-concept-2026-08-04.md)
