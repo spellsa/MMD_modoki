@@ -82,6 +82,7 @@
 - 連番 PNG は 100 フレーム出力に成功しましたが、wall-clock は 103156.0ms、capture は 100375.8ms（1003.8ms/frame）で、capture が支配的でした。PNG は WebM の webgpu-copy ではなく、Babylon の RenderTargetTexture / readPixels 経路を使います。
 - Phase 1 の RGBA→I420 は未実装です。WebM では CPU 変換部分が短縮対象になり得ますが、GPU readback が残るため、I420 だけでは主ボトルネック全体は解消しない見込みです。
 - 判断としては、RGBA→I420 の GPU 前処理は実装価値があります。CPU pixel transform 約 10ms/frame の削減と、I420 化による readback データ量の削減が期待できますが、GPU readback 約 10ms/frame は残るため、単独で決定打にはなりません。対象はまず WebM の webgpu-copy 経路に限定し、compute / staging / map を含む総時間で評価します。
+- 30fps・1920x1080 の 3 分動画（5400 フレーム）では、GPU swizzle のみなら理論上約 54 秒、I420 化まで行えば readback 削減込みで理論最大約 88 秒の短縮余地があります。compute / staging / map の追加コストを含めた実用上の期待値は 45〜80 秒程度と仮置きし、試作して確認する価値があると判断します。
 - 計測中に Destroyed texture ... used in a submit の WebGPU validation warning が出たため、値は現行空シーンの基準値として扱い、cleanup race は別途確認します。
 
 詳細: [WebGPU 動画書き出し Phase 0 / Phase 1 事前調査メモ](./webgpu-yuv-preinvestigation-2026-08-06.md)

@@ -137,6 +137,8 @@ VMD 出力は別軸だが、静止画側の出口は VMD を待たずに開け�
 
 今回の空シーン計測では、WebM の webgpu-copy に CPU pixel transform 約 10ms/frame と GPU readback 約 10ms/frame が見えているため、出力経路の改善余地はあると判断する。RGBA→I420 の GPU 前処理は実装価値があるが、readback が残るため単独で決定打にはならない。compute / staging / map / VideoSample のコピーを含む総時間で、RGBA baseline を下回るか確認してから採用する。詳細は [作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)。
 
+30fps・1920×1080 の 3 分動画では、GPU swizzle のみで理論約 54 秒、I420 化による readback 削減まで含めた理論最大で約 88 秒の短縮余地がある。追加コストを含む実用上の期待値は 45〜80 秒程度と仮置きできるため、Phase 1 は試す価値がある。ただし、これは空シーンの 100 フレーム計測からの見積もりであり、readback のデータ量依存性と代表モデルでの効果は未確認である。
+
 環境依存がないため、動く環境なら全ユーザーが同じだけ速くなるという利点がある。
 
 ### 段階6: 動画形式の拡張（先送り）

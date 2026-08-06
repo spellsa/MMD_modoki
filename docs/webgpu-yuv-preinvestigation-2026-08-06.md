@@ -238,6 +238,8 @@ PNG の capture は Babylon の CreateScreenshotUsingRenderTargetAsync と Rende
 3. PNG は WebM と capture 経路が別で、1003.8 ms/frame の capture が支配的だった。連番 PNG の高速化では、まず WebGPU copy 相当の capture adapter または render target の再利用を検討する。
 4. I420 VideoSample の Electron encode smoke、compute → staging → CPU map の prototype、代表モデル・モーションでの再計測は未実施のまま残す。
 
+30fps・1920×1080 の 3 分動画は 5400 フレームになる。現行の CPU pixel transform 約 10 ms/frame を完全に除去できる GPU swizzle だけなら、短縮幅は理論上約 54 秒である。さらに I420 の tight-packed readback が RGBA のデータ量に比例して短くなると仮定すると、readback から追加で約 34 秒、合計で理論最大約 88 秒の短縮になる。compute、staging copy、map、VideoSample のコピーを考慮した試作前の期待値は 45〜80 秒程度と置く。この見積もりは readback の実測がデータ量に比例することを前提にしておらず、実装の採否は 100 フレームの A/B 計測で決める。
+
 計測中、WebGPU の Destroyed texture ... used in a submit validation warning が出た。出力自体は完了したが、export window の終了・render target dispose 付近の順序問題の可能性があるため、計測値を製品版の絶対値とみなす前に cleanup race を確認する。
 
 ## 実装タスク候補
