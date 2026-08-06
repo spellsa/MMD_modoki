@@ -39,7 +39,7 @@ export interface ElectronAPI {
         height: number,
         directoryPath: string,
         fileName: string,
-    ) => Promise<string | null>;
+    ) => Promise<PngRgbaFileSaveResult | null>;
     saveWebmFileToPath: (bytes: Uint8Array, filePath: string) => Promise<string | null>;
     beginWebmStreamSave: (filePath: string) => Promise<{ saveId: string; filePath: string } | null>;
     writeWebmStreamChunk: (saveId: string, bytes: Uint8Array, position: number) => Promise<boolean>;
@@ -50,6 +50,7 @@ export interface ElectronAPI {
     ) => Promise<PngSequenceExportLaunchResult | null>;
     takePngSequenceExportJob: (jobId: string) => Promise<PngSequenceExportRequest | null>;
     reportPngSequenceExportProgress: (progress: PngSequenceExportProgress) => void;
+    completePngSequenceExport: (progress: PngSequenceExportProgress) => Promise<boolean>;
     onPngSequenceExportState: (callback: (state: PngSequenceExportState) => void) => () => void;
     onPngSequenceExportProgress: (callback: (progress: PngSequenceExportProgress) => void) => () => void;
     startWebmExportWindow: (
@@ -121,6 +122,13 @@ export interface SmokeRendererReadyPayload {
         environmentIntensity: number;
     };
     scenario?: AppLogData;
+}
+
+export interface PngRgbaFileSaveResult {
+    path: string;
+    byteLength: number;
+    encodeMs: number;
+    saveMs: number;
 }
 
 export interface SmokeRendererFailurePayload {
@@ -675,6 +683,16 @@ export interface PngSequenceExportRequest {
     outputHeight: number;
 }
 
+export interface PngSequenceExportDiagnostics {
+    wallClockMs: number;
+    frameCount: number;
+    seekMs: number;
+    captureMs: number;
+    saveIpcMs: number;
+    encodeMs: number;
+    saveMs: number;
+}
+
 export interface PngSequenceExportLaunchResult {
     jobId: string;
 }
@@ -692,6 +710,7 @@ export interface PngSequenceExportProgress {
     frame: number;
     startFrame?: number;
     endFrame?: number;
+    diagnostics?: PngSequenceExportDiagnostics;
 }
 
 export interface WebmPhysicsRigidBodySnapshot {

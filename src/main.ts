@@ -1450,13 +1450,21 @@ ipcMain.handle(
       if (!directoryPath || !fileName) return null;
       const safeFileName = path.basename(fileName);
       if (!safeFileName.toLowerCase().endsWith('.png')) return null;
+      const encodeStartedAt = performance.now();
       const pngBytes = encodeRgbaToPngBytes(rgbaData, width, height);
       if (!pngBytes) return null;
+      const encodeMs = performance.now() - encodeStartedAt;
 
+      const saveStartedAt = performance.now();
       await ensureDirectoryExists(directoryPath);
       const filePath = path.join(directoryPath, safeFileName);
       await fs.promises.writeFile(filePath, pngBytes);
-      return filePath;
+      return {
+        path: filePath,
+        byteLength: pngBytes.byteLength,
+        encodeMs,
+        saveMs: performance.now() - saveStartedAt,
+      };
     } catch (err) {
       writeAppLog('error', 'ipc', 'failed to save RGBA PNG to path', {
         directoryPath,
@@ -1653,12 +1661,29 @@ ipcMain.handle('export:takePngSequenceJob', async (_event, jobId: string): Promi
   return job;
 });
 
-ipcMain.on('export:pngSequenceProgress', (_event, progress: PngSequenceExportProgress) => {
-  if (!progress || typeof progress !== 'object') return;
-  if (typeof progress.jobId !== 'string' || progress.jobId.length === 0) return;
-  if (!pngSequenceExportOwnerByJobId.has(progress.jobId)) return;
+const acceptPngSequenceExportProgress = (progress: PngSequenceExportProgress): boolean => {
+  if (!progress || typeof progress !== 'object') return false;
+  if (typeof progress.jobId !== 'string' || progress.jobId.length === 0) return false;
+  if (progress.diagnostics) {
+    writeAppLog('info', 'performance', 'png sequence exporter completed', {
+      jobId: progress.jobId,
+      exportedFrames: progress.saved,
+      totalFrames: progress.total,
+      diagnostics: progress.diagnostics,
+    });
+  }
+  if (!pngSequenceExportOwnerByJobId.has(progress.jobId)) return false;
   sendPngSequenceExportProgressToOwner(progress.jobId, progress);
+  return true;
+};
+
+ipcMain.on('export:pngSequenceProgress', (_event, progress: PngSequenceExportProgress) => {
+  acceptPngSequenceExportProgress(progress);
 });
+
+ipcMain.handle('export:pngSequenceCompleted', async (_event, progress: PngSequenceExportProgress) => (
+  acceptPngSequenceExportProgress(progress)
+));
 
 ipcMain.handle(
   'export:startWebmWindow',

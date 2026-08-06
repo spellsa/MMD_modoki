@@ -2,16 +2,18 @@ import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
 import { CreateScreenshotUsingRenderTargetAsync } from "@babylonjs/core/Misc/screenshotTools";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
-import type { PngSequenceExportRequest } from "./types";
+import type { PngSequenceExportDiagnostics, PngSequenceExportRequest } from "./types";
 
 export interface PngSequenceExportCallbacks {
     onStatus?: (message: string) => void;
     onProgress?: (saved: number, total: number, frame: number, captured: number) => void;
+    onCompleted?: (result: PngSequenceExportResult) => void | Promise<void>;
 }
 
 export interface PngSequenceExportResult {
     exportedFrames: number;
     totalFrames: number;
+    diagnostics: PngSequenceExportDiagnostics;
 }
 
 type ExportQueueItem = {
@@ -110,6 +112,7 @@ export async function runPngSequenceExportJob(
     callbacks: PngSequenceExportCallbacks = {},
     enginePreference: RenderEnginePreference = "auto",
 ): Promise<PngSequenceExportResult> {
+    const jobStartedAt = performance.now();
     const startFrame = Math.max(0, Math.floor(request.startFrame));
     const endFrame = Math.max(startFrame, Math.floor(request.endFrame));
     const step = Math.max(1, Math.floor(request.step));
@@ -171,6 +174,11 @@ export async function runPngSequenceExportJob(
         let savedCount = 0;
         let producerDone = false;
         let fatalError: Error | null = null;
+        let seekMsTotal = 0;
+        let captureMsTotal = 0;
+        let saveIpcMsTotal = 0;
+        let encodeMsTotal = 0;
+        let saveMsTotal = 0;
 
         const reportProgress = (frame: number): void => {
             callbacks.onStatus?.(
@@ -188,17 +196,21 @@ export async function runPngSequenceExportJob(
                     continue;
                 }
 
-                const savedPath = await window.electronAPI.savePngRgbaFileToPath(
+                const saveStartedAt = performance.now();
+                const saveResult = await window.electronAPI.savePngRgbaFileToPath(
                     item.rgbaData,
                     item.width,
                     item.height,
                     request.outputDirectoryPath,
                     item.fileName
                 );
-                if (!savedPath) {
+                saveIpcMsTotal += performance.now() - saveStartedAt;
+                if (!saveResult) {
                     fatalError = new Error(`Failed to save frame ${item.frame}`);
                     break;
                 }
+                encodeMsTotal += saveResult.encodeMs;
+                saveMsTotal += saveResult.saveMs;
 
                 savedCount += 1;
                 reportProgress(item.frame);
@@ -223,13 +235,17 @@ export async function runPngSequenceExportJob(
                 if (fatalError) break;
 
                 const frame = frameList[i];
+                const seekStartedAt = performance.now();
                 mmdManager.seekTo(frame);
+                seekMsTotal += performance.now() - seekStartedAt;
 
+                const captureStartedAt = performance.now();
                 const capturedFrame = await captureFrameRgbaAsync(
                     screenshotInternals,
                     captureWidth,
                     captureHeight,
                 );
+                captureMsTotal += performance.now() - captureStartedAt;
                 if (!capturedFrame) {
                     fatalError = new Error(`Failed to capture frame ${frame}`);
                     break;
@@ -254,10 +270,21 @@ export async function runPngSequenceExportJob(
             throw fatalError;
         }
 
-        return {
+        const result: PngSequenceExportResult = {
             exportedFrames: savedCount,
             totalFrames,
+            diagnostics: {
+                wallClockMs: performance.now() - jobStartedAt,
+                frameCount: savedCount,
+                seekMs: seekMsTotal,
+                captureMs: captureMsTotal,
+                saveIpcMs: saveIpcMsTotal,
+                encodeMs: encodeMsTotal,
+                saveMs: saveMsTotal,
+            },
         };
+        await callbacks.onCompleted?.(result);
+        return result;
     } finally {
         mmdManager.setAutoRenderEnabled(true);
         mmdManager.dispose();

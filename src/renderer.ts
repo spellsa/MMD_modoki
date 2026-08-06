@@ -498,6 +498,16 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
           });
         }
       },
+      onCompleted: (completed) => window.electronAPI.completePngSequenceExport({
+        jobId,
+        saved: completed.exportedFrames,
+        captured: completed.diagnostics.frameCount,
+        total: completed.totalFrames,
+        frame: request.endFrame,
+        startFrame: request.startFrame,
+        endFrame: request.endFrame,
+        diagnostics: completed.diagnostics,
+      }),
     }, rendererBackend);
 
     setStatus(`Done: ${result.exportedFrames} frame(s)`);
@@ -640,6 +650,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       jobId,
       encodedFrames: result.encodedFrames,
       codec: result.codec,
+      diagnostics: result.diagnostics,
     });
     encodedFrames = result.encodedFrames;
     currentFrame = request.endFrame;

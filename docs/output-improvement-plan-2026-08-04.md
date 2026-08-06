@@ -72,7 +72,14 @@ VMD 出力は別軸だが、静止画側の出口は VMD を待たずに開け�
 2. **連番PNG の内訳計測を実装する** — capture / encode / save を別々に ms 表示する。これは連番PNG仕様メモの「今後の改善候補4」として半年前から未着手のまま残っている項目である
 3. **連番PNG が WebGPU copy 経路に乗っているか、コードを読んで確認する**
 
-3 について: 連番PNG仕様メモは 2026-02-24 更新で、WebGPU copy 経路の導入（2026-04-22）より前である。実装が当時のスクリーンショット取得のままなら、**WebM のために作った高速キャプチャ経路を連番PNGが使っていないことになる。** 確認事項であり、まだ事実ではない。
+3 について: 連番PNG仕様メモは 2026-02-24 更新で、WebGPU copy 経路の導入（2026-04-22）より前である。実装確認の結果、連番PNGは当時の Babylon の RenderTargetTexture / readPixels 経路のままで、**WebM のために作った webgpu-copy 経路を使っていないことが確認できた。**
+
+### 2026-08-06 実測追記
+
+- WebM は空シーン・1920×1080・100フレームで、webgpu-copy の exporter wall-clock が 4118.7 ms、readpixels が 19431.3 ms。readback と CPU pixel transform を分離して記録できた。
+- 連番 PNG は同条件で 100 フレーム出力に成功した。wall-clock は 103156.0 ms、capture は 100375.8 ms、PNG encode は 6551.3 ms。capture が支配的である。
+- 連番 PNG は WebM の webgpu-copy を使わず、Babylon の RenderTargetTexture / readPixels 経路を使っていることをコード確認した。
+- 詳細なログ値と判定は [2026-08-06 実測結果](./webgpu-yuv-preinvestigation-2026-08-06.md#2026-08-06-実測結果) に記録した。I420 prototype と代表モデル・モーションの計測は未着手。
 
 ### 段階2: 静止画の高解像度・アルファ書き出し（v0.2.2 候補）
 
@@ -128,7 +135,7 @@ VMD 出力は別軸だが、静止画側の出口は VMD を待たずに開け�
 
 ### 段階5: RGBA→YUV の GPU 前処理（Phase 1）
 
-段階1の判定が「出力経路の改善が効く」だった場合のみ。詳細は [作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)。
+今回の空シーン計測では、WebM の webgpu-copy に CPU pixel transform 約 10ms/frame と GPU readback 約 10ms/frame が見えているため、出力経路の改善余地はあると判断する。RGBA→I420 の GPU 前処理は実装価値があるが、readback が残るため単独で決定打にはならない。compute / staging / map / VideoSample のコピーを含む総時間で、RGBA baseline を下回るか確認してから採用する。詳細は [作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)。
 
 環境依存がないため、動く環境なら全ユーザーが同じだけ速くなるという利点がある。
 

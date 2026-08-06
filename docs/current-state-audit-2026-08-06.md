@@ -18,7 +18,7 @@
 - 既存キーの補間編集はすでに実装されています。補間曲線のコピー・貼り付け・線形化・ハンドル編集はありますが、モーションから不足キーを推定して自動生成する機能は別タスクです。
 - 音声波形は AudioBuffer から振幅ピークを作ってタイムラインへ表示する経路があります。一方、拍・BPM 推定、拍マーカー、母音推定、Meyda / Essentia.js の導入は確認できませんでした。
 - 設定値は複数の localStorage キーに分散しています。現行の src スキャンでは、アプリ設定を一括管理する settings.json / state.json の参照は見つかりませんでした。
-- WebM 出力は現状 RGBA サンプル入力です。I420 / YUV 前処理の実装は確認できず、Phase 1 の GPU 前処理はまだ計測・実装対象です。
+- WebM 出力は現状 RGBA サンプル入力で、空シーン 100 フレームの Phase 0 計測を完了しました。I420 / YUV 前処理は未実装・未検証で、代表モデル / モーションの出力基準値も未取得です。
 - シェーダー / エフェクトパネルの表示切替は toolbar と Action 経路に実装されています。ただし、View メニュー側の該当項目は hidden です。1280x720 / 1920x1080 の見た目と操作感は別途手動確認が必要です。
 - アクセサリの明示的な現行経路は .x と .glb です。OBJ / PLY の専用読み込み経路は確認できませんでした。
 - モデル間の一般的なリターゲット用の alias map は存在しますが、身長差・低等身モデル向けの床補正や足・腕の選択ボーン補正までは確認できませんでした。
@@ -74,7 +74,17 @@
 - src/webm-exporter.ts の現行 WebM 経路は VideoSample に format=RGBA を渡します。
 - I420 / YUV / VideoFrame を使った GPU 前処理経路は確認できませんでした。
 - PNG には RGBA データを IPC で保存する経路と、capturePage(...).toPNG() を使うキャンバススナップショット経路があります。
-- 空シーン、軽量モデル、重いモデルを使った 100 フレーム程度の実測と、RGBA / 将来の YUV 経路の比較は未実施です。
+
+#### 2026-08-06 出力計測の要約
+
+- 空シーン、1920x1080、100 フレーム、30fps、VP8、WebGPU、ポストエフェクト OFF で実測しました。
+- WebM は webgpu-copy が 4118.7ms（41.2ms/frame）、readpixels が 19431.3ms（194.3ms/frame）でした。差の中心は GPU readback で、CPU pixel transform は両経路とも約 10ms/frame でした。
+- 連番 PNG は 100 フレーム出力に成功しましたが、wall-clock は 103156.0ms、capture は 100375.8ms（1003.8ms/frame）で、capture が支配的でした。PNG は WebM の webgpu-copy ではなく、Babylon の RenderTargetTexture / readPixels 経路を使います。
+- Phase 1 の RGBA→I420 は未実装です。WebM では CPU 変換部分が短縮対象になり得ますが、GPU readback が残るため、I420 だけでは主ボトルネック全体は解消しない見込みです。
+- 判断としては、RGBA→I420 の GPU 前処理は実装価値があります。CPU pixel transform 約 10ms/frame の削減と、I420 化による readback データ量の削減が期待できますが、GPU readback 約 10ms/frame は残るため、単独で決定打にはなりません。対象はまず WebM の webgpu-copy 経路に限定し、compute / staging / map を含む総時間で評価します。
+- 計測中に Destroyed texture ... used in a submit の WebGPU validation warning が出たため、値は現行空シーンの基準値として扱い、cleanup race は別途確認します。
+
+詳細: [WebGPU 動画書き出し Phase 0 / Phase 1 事前調査メモ](./webgpu-yuv-preinvestigation-2026-08-06.md)
 
 関連: [出力改善計画](./output-improvement-plan-2026-08-04.md)、[WebGPU YUV Phase 1 作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)
 
@@ -111,8 +121,10 @@
 - [ ] Playwright で 1280x720 / 1920x1080 の初期レイアウトとパネル開閉を確認する
 - [ ] runtime mode、物理 backend、Auto Key、描画 backend、locale の再起動後保持を確認する
 - [ ] project save / load とアプリ設定保存を分けて、保存対象と復元対象を確認する
-- [ ] WebM を空シーン・軽量モデル・重いモデルで 100 フレーム出力し、RGBA 経路の基準値を取る
-- [ ] PNG の RGBA IPC 経路と capturePage 経路の性能・色差・アルファ挙動を確認する
+- [x] WebM を空シーンで 100 フレーム出力し、RGBA 経路の基準値を取る
+- [ ] WebM を軽量モデル・重いモデルで 100 フレーム出力し、代表基準値を取る
+- [x] PNG 連番の RGBA IPC 経路を 100 フレーム実測する
+- [ ] PNG の capturePage 経路との性能・色差・アルファ挙動を比較する
 - [ ] 既存キーの補間編集と、新規キー自動生成を別々の E2E / unit test 対象として定義する
 - [ ] 波形に拍・BPM・テンポ変化を重ねる場合の推定精度と失敗時 UI を確認する
 - [ ] 物理を無視した通常ボーン限定の床補正について、対象ボーン、優先順位、IK との境界を試作する

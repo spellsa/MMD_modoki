@@ -90,6 +90,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     reportPngSequenceExportProgress: (progress: PngSequenceExportProgress) => {
         ipcRenderer.send('export:pngSequenceProgress', progress);
     },
+    completePngSequenceExport: (progress: PngSequenceExportProgress) =>
+        ipcRenderer.invoke('export:pngSequenceCompleted', progress),
     onPngSequenceExportState: (callback: (state: PngSequenceExportState) => void) => {
         const listener = (_event: Electron.IpcRendererEvent, state: PngSequenceExportState) => {
             callback(state);
