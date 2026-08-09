@@ -131,9 +131,12 @@ VMD 出力は別軸だが、静止画側の出口は VMD を待たずに開け�
 作業内容は、新規実装がほとんどない。
 
 1. WebGPU copy 経路への繋ぎ変え（段階1-3 の確認結果次第）
-2. **PNG エンコードを main プロセスから追い出す** — 現状 `nativeImage.toPNG()` を main で実行している。`ioWorkerCount = 4` は `fs.write` の並列化であり、エンコード自体は main のイベントループを直列で塞いでいる可能性がある。main が詰まると IPC も進捗通知も止まるため、体感の悪さにも寄与しうる。`utility process` か `worker_threads` へ
-3. **圧縮レベルの選択**（高速 / 標準 / 小さい）。連番PNGはフレーム間に依存がないため並列化が最も効く。後で再エンコードする前提なら多くの人は高速を選ぶ
+2. **PNG エンコードを main プロセスから追い出す** — hidden exporter rendererのWeb Workerで、RGBA8からfilter None固定のscanlineを作り、`CompressionStream("deflate")`でPNG化する。圧縮済みPNGだけをmainへ送り、mainは保存に専念する。これによりmainの同期encodeとraw RGBA IPCを同時に取り除く
+3. **初期版はfilter None固定** — PNG filterは画質を変えない可逆前処理であり、NoneでもRGBA8は完全一致する。連番PNGは容量より速度・単純性を優先し、圧縮設定UIは設けない。容量重視の軽量出力はWebMを使う
 4. 出力解像度の可変化（段階2と共通）
+
+Web Worker化の責務分割、`CompressionStream`、buffer transfer、backpressure、性能合格基準は
+[連番 PNG Web Worker エンコード実装計画](./png-sequence-worker-encoding-plan-2026-08-09.md)へ分離した。
 
 ### 段階5: RGBA→YUV の GPU 前処理（Phase 1）
 
