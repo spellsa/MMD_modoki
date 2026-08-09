@@ -109,7 +109,8 @@ MirroringFloor は `MirrorTexture` が内部で反射用 render target を持つ
 
 2026-08-09 以降の単発 PNG 保存は、連番 PNG / WebM と同じ `ExportRenderSurface`
 (`rgba8unorm`) へ FrameGraph または Classic の最終出力を描画し、RGBA readback を
-`file:savePngRgba` IPC へ渡す。`BrowserWindow.webContents.capturePage()` は単発 PNG 経路から削除した。
+1本のrenderer Web Workerで直接PNG化する。mainへは圧縮済みPNGだけを`file:savePngBytes`で渡す。
+`BrowserWindow.webContents.capturePage()` は単発 PNG 経路から削除した。
 
 保存直前の `MmdManager.setCaptureEditorOverlaysSuppressed(true)` と2フレーム待機は維持している。
 surface 自体は scene の最終色だけを受けるため DOM overlay は含まず、キャプチャ後は surface を

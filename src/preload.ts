@@ -50,12 +50,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('file:listBundledWgslFiles'),
     writeTextFileToPath: (filePath: string, content: string) =>
         ipcRenderer.invoke('file:writeTextToPath', filePath, content),
-    savePngRgbaFile: (
-        rgbaData: Uint8Array,
-        width: number,
-        height: number,
+    savePngBytesFile: (
+        pngBytes: Uint8Array,
         defaultFileName?: string,
-    ) => ipcRenderer.invoke('file:savePngRgba', rgbaData, width, height, defaultFileName),
+    ) => ipcRenderer.invoke('file:savePngBytes', pngBytes, defaultFileName),
     savePngRgbaFileToPath: (
         rgbaData: Uint8Array,
         width: number,

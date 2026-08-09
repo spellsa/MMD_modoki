@@ -62,9 +62,9 @@ PNG encoderとWebM encoderは引き続き別責務とする。
 Babylon RTTのreadbackはbottom-to-topとして扱い、`normalizeExportRgbaRows()` が
 行単位で上下を反転した新しい配列を作る。RGBAのchannel並べ替えは行わない。
 
-Electron `nativeImage.createFromBitmap()` へ渡すPNG保存adapterではplatform bitmap境界の
-都合でRGBAからBGRAへ変換する。この変換はrenderer coreの契約ではなく、
-`src/main.ts` のPNG encoder adapter内だけに閉じ込めている。
+通常のPNG出力はrenderer Web WorkerがRGBA8を直接PNG化する。比較用の旧main-thread
+fallbackだけが`nativeImage.createFromBitmap()`のplatform bitmap境界でRGBAからBGRAへ変換する。
+この変換はrenderer coreの標準契約ではない。
 
 ## `ExportRenderSurface`
 
@@ -147,7 +147,8 @@ editor overlay抑止
   -> renderOnceForCapture(0)
   -> RGBA readback
   -> release surface
-  -> file:savePngRgba
+  -> 1 Web Workerでfilter None + deflate
+  -> file:savePngBytes
 ```
 
 旧backbuffer `engine.readPixels()`、WebGPU BGRA swizzle、Canvas 2D拡縮、ScreenshotTools、
@@ -161,13 +162,13 @@ hidden exporterのcanvasを出力サイズに合わせ、project import後にsur
 各フレームは次だけを繰り返す。
 
 ```text
-seek -> renderOnceForCapture -> surface readback -> save queue
+seek -> renderOnceForCapture -> surface readback -> 2 Web Workers -> save queue
 ```
 
 旧経路の `CreateScreenshotUsingRenderTargetAsync()` は、フレームごとにscreenshot用RTTを
 生成・再描画・readback・破棄していた。新経路ではRTT lifecycleをジョブ単位へ移し、
-PNG encoder IPCと4 consumerの保存queueは維持した。capture改善とencoder改善を混ぜず、
-どこが速くなったかを分離して評価できる構成である。
+後続実装でPNG encoderを2 Web Workersへ移し、raw RGBA IPCと4 consumerの旧保存queueも整理した。
+旧main-thread経路は性能比較flag指定時だけ残している。
 
 ### WebM
 
@@ -220,8 +221,8 @@ captureが70倍でも、PNG encodeとfile saveは残る。新経路の100フレ�
 
 さらに新PNGの合計サイズは約53.0MBで、旧計測の約10.9MBより約4.87倍大きい。
 画像内容と圧縮率が同一ではないためencoder部分は完全なA/Bではないが、より大きい出力を
-保存しながらwall-clockが73.8%短縮した。現在の次のボトルネックはcaptureではなく、
-main processの `nativeImage.toPNG()`、IPC、file saveである。
+保存しながらwall-clockが73.8%短縮した。この評価時点の次のボトルネックだった
+main processの`nativeImage.toPNG()`は後続実装でrenderer Web Workerへ移し、さらに約2.06倍改善した。
 
 ## WebMの改善が約18%に留まる理由
 

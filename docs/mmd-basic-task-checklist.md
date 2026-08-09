@@ -56,7 +56,8 @@
 - [x] 豆腐＋皿＋SSGI＋DoFの代表シーンで1080p・100フレーム性能と反復時readback安定性を測定（[代表シーン性能評価](./export-rgba-representative-scene-evaluation-2026-08-09.md)）
 - [x] 連番PNGをrenderer Web Worker＋`CompressionStream("deflate")`へ移し、filter None固定の直接RGBA encoderへ統合（[実装・性能評価](./png-sequence-web-worker-implementation-evaluation-2026-08-09.md)）
 - [ ] 連番PNG Web Workerを500〜1000frame・4K / 8K・slow diskでhardeningし、旧main-thread fallbackを削除
-- [ ] 単発PNGを連番PNGと同じWeb Worker encoderへ統合
+- [x] 単発PNGを連番PNGと同じWeb Worker encoderへ統合（単発は1 worker固定）
+- [ ] 単発8K PNG向けにscanlineを分割投入し、filter済み全量バッファを削減
 - [ ] 共通 RGBA Surface に背景透過 PNG 連番 mode を追加し、straight alpha を検証
 - [x] UI 非表示モード
 - [x] デフォルト空を `BackgroundMaterial` 化し、単色 / studio gradient・色・明るさ・保存復元に対応

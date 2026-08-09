@@ -20,6 +20,22 @@ const readPngChunks = (pngBytes) => {
   return chunks;
 };
 
+const expectNoneFilteredRgbaPng = (pngPath, width, height) => {
+  const pngBytes = readFileSync(pngPath);
+  const pngChunks = readPngChunks(pngBytes);
+  const ihdr = pngChunks.get("IHDR");
+  const idat = pngChunks.get("IDAT");
+  expect([...pngBytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(ihdr).toBeDefined();
+  expect(idat).toBeDefined();
+  expect([...ihdr.subarray(8)]).toEqual([8, 6, 0, 0, 0]);
+  const filtered = inflateSync(idat);
+  expect(filtered.byteLength).toBe((width * 4 + 1) * height);
+  for (let row = 0; row < height; row += 1) {
+    expect(filtered[row * (width * 4 + 1)]).toBe(0);
+  }
+};
+
 test("FrameGraphの最終出力を共通RGBA surfaceから取得できる", async () => {
   const launched = await launchMmdModoki(repoRoot);
   try {
@@ -81,12 +97,7 @@ test("PNG連番とWebMが共通RGBA surfaceから書き出せる", async () => {
     expect(ihdr).toBeDefined();
     expect(idat).toBeDefined();
     if (expectRendererWorkerPng) {
-      expect([...ihdr.subarray(8)]).toEqual([8, 6, 0, 0, 0]);
-      const filtered = inflateSync(idat);
-      expect(filtered.byteLength).toBe((320 * 4 + 1) * 180);
-      for (let row = 0; row < 180; row += 1) {
-        expect(filtered[row * (320 * 4 + 1)]).toBe(0);
-      }
+      expectNoneFilteredRgbaPng(pngPath, 320, 180);
     } else {
       expect(ihdr[8]).toBe(8);
       expect([2, 6]).toContain(ihdr[9]);
@@ -139,6 +150,7 @@ test("単発PNGを共通RGBA surfaceから書き出して通常描画へ戻せ�
     expect(result.byteLength).toBeGreaterThan(100);
     expect(existsSync(result.path)).toBe(true);
     expect(statSync(result.path).size).toBe(result.byteLength);
+    expectNoneFilteredRgbaPng(result.path, 320, 180);
   } finally {
     await launched.close();
   }

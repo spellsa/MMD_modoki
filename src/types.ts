@@ -19,10 +19,8 @@ export interface ElectronAPI {
     ) => Promise<string | null>;
     listBundledWgslFiles: () => Promise<{ name: string; path: string }[]>;
     writeTextFileToPath: (filePath: string, content: string) => Promise<boolean>;
-    savePngRgbaFile: (
-        rgbaData: Uint8Array,
-        width: number,
-        height: number,
+    savePngBytesFile: (
+        pngBytes: Uint8Array,
         defaultFileName?: string,
     ) => Promise<string | null>;
     savePngRgbaFileToPath: (

@@ -13,6 +13,7 @@ import { BottomPanel } from "./bottom-panel";
 import { UIController } from "./ui-controller";
 import { enhanceBottomPanelControls } from "./ui/panel-control-helpers";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
+import { PngEncoderWebWorkerPool } from "./output/png-encoder-web-worker-pool";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 import { isDebugLogEnabled, logDebug, logError, logInfo, toLogErrorData } from "./app-logger";
@@ -371,23 +372,27 @@ async function initializeApp(): Promise<void> {
           if (!frame) {
             throw new Error("Single PNG RGBA surface capture failed");
           }
-          const saved = await window.electronAPI.savePngRgbaFileToPath(
-            frame.rgbaData,
-            frame.width,
-            frame.height,
-            outputDirectoryPath,
-            "single_rgba_surface_e2e.png",
-          );
-          if (!saved) {
-            throw new Error("Single PNG RGBA surface save failed");
+          const encoderPool = new PngEncoderWebWorkerPool({ size: 1 });
+          try {
+            const encoded = await encoderPool.encode(frame.rgbaData, frame.width, frame.height);
+            const saved = await window.electronAPI.savePngBytesFileToPath(
+              encoded.pngBuffer,
+              outputDirectoryPath,
+              "single_rgba_surface_e2e.png",
+            );
+            if (!saved) {
+              throw new Error("Single PNG RGBA surface save failed");
+            }
+            return {
+              path: saved.path,
+              byteLength: saved.byteLength,
+              width: frame.width,
+              height: frame.height,
+              surfaceReleased: mmdManager.getExportRenderSurfaceDiagnostics() === null,
+            };
+          } finally {
+            encoderPool.terminate();
           }
-          return {
-            path: saved.path,
-            byteLength: saved.byteLength,
-            width: frame.width,
-            height: frame.height,
-            surfaceReleased: mmdManager.getExportRenderSurfaceDiagnostics() === null,
-          };
         },
       };
     }

@@ -1300,46 +1300,6 @@ function encodeRgbaToPngBytes(rgbaData: Uint8Array, width: number, height: numbe
 }
 
 ipcMain.handle(
-  'file:savePngRgba',
-  async (
-    _event,
-    rgbaData: Uint8Array,
-    width: number,
-    height: number,
-    defaultFileName?: string,
-  ) => {
-    try {
-      const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
-        ? defaultFileName
-        : `${defaultFileName ?? 'mmd_capture'}.png`;
-      const pngBytes = encodeRgbaToPngBytes(rgbaData, width, height);
-      if (!pngBytes) return null;
-
-      const result = await dialog.showSaveDialog({
-        title: 'Save PNG Image',
-        defaultPath: path.join(app.getPath('pictures'), safeName),
-        filters: [{ name: 'PNG Image', extensions: ['png'] }],
-      });
-
-      if (result.canceled || !result.filePath) {
-        return null;
-      }
-
-      await fs.promises.writeFile(result.filePath, pngBytes);
-      return result.filePath;
-    } catch (err) {
-      writeAppLog('error', 'ipc', 'failed to save RGBA PNG', {
-        defaultFileName,
-        width,
-        height,
-        ...createLogErrorData(err),
-      });
-      return null;
-    }
-  },
-);
-
-ipcMain.handle(
   'file:savePngRgbaToPath',
   async (
     _event,
@@ -1386,6 +1346,39 @@ const hasPngSignature = (bytes: Uint8Array): boolean => {
   return bytes.byteLength >= signature.length
     && signature.every((value, index) => bytes[index] === value);
 };
+
+ipcMain.handle(
+  'file:savePngBytes',
+  async (
+    _event,
+    pngBytes: Uint8Array,
+    defaultFileName?: string,
+  ) => {
+    try {
+      if (!(pngBytes instanceof Uint8Array) || !hasPngSignature(pngBytes)) return null;
+      const requestedName = defaultFileName?.trim() || 'mmd_capture.png';
+      const baseName = path.basename(requestedName);
+      const safeName = baseName.toLowerCase().endsWith('.png')
+        ? baseName
+        : `${baseName}.png`;
+      const result = await dialog.showSaveDialog({
+        title: 'Save PNG Image',
+        defaultPath: path.join(app.getPath('pictures'), safeName),
+        filters: [{ name: 'PNG Image', extensions: ['png'] }],
+      });
+
+      if (result.canceled || !result.filePath) return null;
+      await fs.promises.writeFile(result.filePath, pngBytes);
+      return result.filePath;
+    } catch (err) {
+      writeAppLog('error', 'ipc', 'failed to save encoded PNG', {
+        defaultFileName,
+        ...createLogErrorData(err),
+      });
+      return null;
+    }
+  },
+);
 
 ipcMain.handle(
   'file:savePngBytesToPath',

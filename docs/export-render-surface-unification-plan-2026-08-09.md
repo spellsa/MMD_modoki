@@ -1,7 +1,7 @@
 # 出力レンダリング経路 共通 RGBA Surface 統合計画
 
 作成日: 2026-08-09
-状態: Phase 1〜3・単発 PNG・空シーン性能検証済み / 透過・代表シーン検証は未着手
+状態: Phase 1〜3・5〜6、単発 PNG、空・代表シーン性能検証済み / 透過・高解像度hardeningは未着手
 
 ## 2026-08-09 実装状況
 
@@ -16,12 +16,13 @@
 - WebM の通常経路を `rgba-surface` へ変更し、CPU の BGRA to RGBA swizzle を通さない。
   旧 `webgpu-copy` は比較用として残している。
 - 連番 PNG の毎フレーム `CreateScreenshotUsingRenderTargetAsync()` と RTT lifecycle を撤去し、
-  共通 surface のフレームを既存 PNG encoder IPC へ渡すようにした。
+  共通 surface のフレームを2 Web Workersへ渡すようにした。
 - hidden exporter の canvas / engine render size を出力解像度と一致させた。
 - WebGPU + FrameGraph の実 readback と、1フレームの PNG / WebM 実ファイル生成を E2E で確認した。
 - 単発 PNG も同じ surface の `prepare -> render -> readback -> release` 経路へ移し、
   backbuffer BGRA readback、Canvas 拡縮、ScreenshotTools、compositor snapshot の旧経路を削除した。
 - 単発 PNG の保存後に surface を解放して FrameGraph の通常 backbuffer 出力へ戻ることを E2E で確認した。
+- 単発 PNG も同じWeb Worker encoderへ統合し、pool size 1で圧縮済みPNGだけをmainへ渡す。
 - 1920×1080・100フレーム・空シーンを3回計測した。中央値で連番PNGは旧経路比3.81倍、
   captureは約70倍、WebMは同一ビルドの旧 `webgpu-copy` 比1.22倍となった。
   詳細は[性能評価](./export-rgba-performance-evaluation-2026-08-09.md)を参照。
@@ -329,11 +330,13 @@ BGRA PoC は小さい比較対象として先に実施してよいが、BGRA bac
 
 ### Phase 5: PNG encode の worker 化
 
-- capture 経路の改善後に、残った PNG encode 時間を再評価する。
-- `nativeImage.toPNG()` を main event loop から外す。
-- `worker_threads` または utility process でフレーム単位に並列化する。
-- 圧縮プリセットを高速 / 標準 / 小容量に分ける。
-- IPC と worker queue の backpressure、キャンセル、失敗伝播を統一する。
+2026-08-09にrenderer Web Workerと`CompressionStream("deflate")`で実装済み。
+
+- [x] `nativeImage.toPNG()` を通常経路のmain event loopから外す。
+- [x] 連番を2 workers、単発を1 workerで同じencoderへ接続する。
+- [x] filter None固定のRGBA8直接encoderへ統合する。
+- [x] IPCとworker queueのbackpressure、失敗伝播、終了処理を整理する。
+- [ ] 4K / 8Kと500〜1000frameでmemory・worker数をhardeningする。
 
 ### Phase 6: 単発 PNG と legacy 経路の整理
 
@@ -342,6 +345,7 @@ BGRA PoC は小さい比較対象として先に実施してよいが、BGRA bac
 - [x] 単発 PNG も共通 surface へ移す。
 - [x] compositor snapshot、legacy screenshot RTT、backbuffer BGRA readback の用途を棚卸しする。
 - [x] 単発 PNG と同じ機能を持つ古い経路を削除する。
+- [x] 単発 PNG のエンコードも連番と同じWeb Workerへ統合する。
 - stable / experimental の恒久的な二本立てを避ける。
 
 ## 検証

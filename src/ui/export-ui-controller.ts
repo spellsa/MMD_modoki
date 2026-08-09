@@ -7,6 +7,7 @@
 import { t } from "../i18n";
 import { logError, logInfo } from "../app-logger";
 import type { MmdManager } from "../mmd-manager";
+import { PngEncoderWebWorkerPool } from "../output/png-encoder-web-worker-pool";
 import type { EditorAction } from "../actions/types";
 import type {
     MmdModokiProjectFileV1,
@@ -398,6 +399,7 @@ export class ExportUiController {
         const fileName = `mmd_capture_${captureWidth}x${captureHeight}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
 
         let savedPath: string | null = null;
+        const encoderPool = new PngEncoderWebWorkerPool({ size: 1 });
         try {
             document.body.classList.add("png-capture-mode");
             this.mmdManager.setCaptureEditorOverlaysSuppressed(true);
@@ -409,18 +411,22 @@ export class ExportUiController {
             if (!capturedFrame) {
                 throw new Error("PNG framebuffer capture returned no data");
             }
-            savedPath = await window.electronAPI.savePngRgbaFile(
+            const encoded = await encoderPool.encode(
                 capturedFrame.rgbaData,
                 capturedFrame.width,
                 capturedFrame.height,
+            );
+            savedPath = await window.electronAPI.savePngBytesFile(
+                encoded.pngBuffer,
                 fileName,
             );
         } catch (error: unknown) {
-            logError("ui", "PNG snapshot save IPC failed", { error: error instanceof Error ? error.message : String(error) });
+            logError("ui", "PNG snapshot encode or save failed", { error: error instanceof Error ? error.message : String(error) });
             this.setStatus("PNG export failed", false);
             this.showToast("PNG export failed", "error");
             return;
         } finally {
+            encoderPool.terminate();
             this.mmdManager.setCaptureEditorOverlaysSuppressed(false);
             document.body.classList.remove("png-capture-mode");
         }

@@ -1,7 +1,7 @@
 # 連番 PNG Web Worker 実装・性能評価 2026-08-09
 
 実装日: 2026-08-09
-状態: 連番 PNG production 接続・初期性能評価完了 / hardening・単発 PNG 統合は未完
+状態: 連番・単発 PNG production 接続完了 / 長尺・高解像度hardeningは未完
 
 ## 結論
 
@@ -18,6 +18,21 @@ scanlineを作成し、`CompressionStream("deflate")`でzlib圧縮してPNGを�
 
 初期adoption gateの空シーン16秒以下、代表シーン7秒以下、旧経路比30%以上短縮を満たした。
 worker再生成は全runで0だった。
+
+## 単発PNG統合
+
+単発PNGも連番と同じ`PngEncoderWebWorkerPool`へ接続した。単発は同時に1枚しか処理しないため
+pool sizeを1に固定し、共通RGBA SurfaceからreadbackしたRGBA8をworkerへtransferする。
+mainへraw RGBAを渡す`file:savePngRgba`は削除し、圧縮済みPNGだけを`file:savePngBytes`へ渡す。
+mainの責務はPNG signatureとfilenameの検証、保存ダイアログ、非同期file writeである。
+
+E2Eでは単発PNGについてもPNG signature、RGBA8 IHDR、全scanline filter None、IDAT zlib decode、
+保存後のsurface解放を確認した。
+
+8K UHD（7680×4320）のraw RGBAは1枚約126.6MiBになる。現在のencoderは同程度の
+filter済みscanline全量バッファも作るため、単発8Kの実機評価前にscanlineを分割して
+`CompressionStream`へ投入する方式を検討する。単発ではworker数を増やしても1 taskしかなく、
+高速化にはならない。
 
 ## 実装構成
 
@@ -146,7 +161,7 @@ typecheck全体には既知のnon-critical baseline errorが残る。
 - forced worker error / timeoutのproduction E2E
 - macOS / Linux package確認
 - main event-loop delay p95 / maxの追加計測
-- 単発PNGの同じWeb Worker encoderへの統合
+- 単発8K向けscanline分割投入とpeak memory削減
 - 旧main-thread encoderとfeature flagの削除
 - 背景透過modeとstraight alpha確認
 

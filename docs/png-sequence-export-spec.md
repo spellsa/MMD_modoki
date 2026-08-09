@@ -49,9 +49,9 @@
 - 入力値をサニタイズ後、`jobId` を発行してジョブを Map に保持。
 - `mode=exporter&jobId=...` でエクスポート専用レンダラーを起動する。
 - オーナーウィンドウごとに activeCount を持ち、状態/進捗を通知する。
-- 通常経路のPNG保存は `file:savePngBytesToPath` で行う。
+- 単発PNGは `file:savePngBytes`、連番PNGは `file:savePngBytesToPath` で保存する。
   - renderer Web Workerが生成した圧縮済みPNGだけを受け取る。
-  - mainはPNG signature、filename、pathを検証し、非同期file writeだけを行う。
+  - mainはPNG signature、filename、pathを検証し、保存ダイアログと非同期file writeだけを行う。
 - 比較用旧経路として `file:savePngRgbaToPath` と `nativeImage.toPNG()` を一時的に残す。
   - `MMD_MODOKI_PNG_ENCODER=main`指定時だけ使用する。
 
@@ -71,6 +71,8 @@
   - PNG signature / IHDR / IDAT / IEND / CRC32をrenderer側で構築
 - raw RGBAはWeb Workerへ`ArrayBuffer` transferし、main IPCへは送らない。
 - 進捗は一定間隔で main UI に report する。
+
+単発PNGも同じencoderを使用するが、1枚だけなのでpool sizeは1固定とする。連番PNGはdefault 2 workers。
 
 `CreateScreenshotUsingRenderTargetAsync()` による毎フレームの RTT 作成・再描画・破棄は
 2026-08-09 に撤去した。readback 後の renderer 内契約は top-to-bottom / RGBA / 8bit / sRGB。
@@ -111,7 +113,6 @@
 4. 背景透過 mode と straight alpha の合成確認は未実装。
 5. hidden exporter の終了時 resource cleanup は window teardown に依存している。
 6. 500〜1000frame、4K / 8K、slow diskのhardeningは未完。
-7. 単発PNGはまだmain-thread `nativeImage.toPNG()`を使う。
 
 ## 今後の改善候補
 
@@ -120,7 +121,8 @@
 3. 出力プリセット（1080p/1440p/4K、開始/終了範囲）をUIから選択可能にする。
 4. main event-loop delayを追加計測し、500〜1000frameと4K / 8Kでmemoryを確認する。
 5. opaque / transparent mode、clear alpha、非対応 PostFX の警告を追加する。
-6. 単発PNGを同じWeb Worker encoderへ統合し、旧main-thread経路を削除する。
+6. 単発8K PNG向けにscanlineを分割して`CompressionStream`へ投入し、filter済み全量バッファをなくす。
+7. 長尺・高解像度確認後に旧main-thread比較fallbackを削除する。
 
 Web Worker実装と1920×1080・100frame性能結果は
 [連番 PNG Web Worker 実装・性能評価](./png-sequence-web-worker-implementation-evaluation-2026-08-09.md)を参照。
