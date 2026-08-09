@@ -15,7 +15,12 @@ import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import type { Scene } from "@babylonjs/core/scene";
 import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
-import type { WebmCaptureMode, WebmExportPhase, WebmExportRequest } from "./types";
+import type {
+    WebmCaptureMode,
+    WebmExportDiagnostics,
+    WebmExportPhase,
+    WebmExportRequest,
+} from "./types";
 
 export interface WebmExportCallbacks {
     onStatus?: (message: string, phase: WebmExportPhase) => void;
@@ -28,22 +33,6 @@ export interface WebmExportResult {
     codec: "vp9" | "vp8";
     outputBytes: number;
     diagnostics: WebmExportDiagnostics;
-}
-
-export interface WebmExportDiagnostics {
-    wallClockMs: number;
-    frameCount: number;
-    renderMs: number;
-    captureMs: number;
-    captureReadbackMs: number;
-    capturePixelTransformMs: number;
-    sampleCreationMs: number;
-    encodeWaitMs: number;
-    queueLimit: number;
-    queuePeakLength: number;
-    queueWaitMs: number;
-    queueWaitCount: number;
-    finalizeMs: number;
 }
 
 const updateStatus = (
@@ -756,7 +745,9 @@ export async function runWebmExportJob(
             );
         }
 
-        mmdManager.prepareExportRenderSurface(outputWidth, outputHeight);
+        if (captureMode === "rgba-surface") {
+            mmdManager.prepareExportRenderSurface(outputWidth, outputHeight);
+        }
 
         mmdManager.setTimelineTarget("camera");
         await waitForAnimationFrames(1);

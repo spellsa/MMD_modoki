@@ -1,7 +1,7 @@
 # 出力レンダリング経路 共通 RGBA Surface 統合計画
 
 作成日: 2026-08-09
-状態: Phase 1〜3・単発 PNG 移行済み / 透過・性能検証は未着手
+状態: Phase 1〜3・単発 PNG・空シーン性能検証済み / 透過・代表シーン検証は未着手
 
 ## 2026-08-09 実装状況
 
@@ -22,8 +22,13 @@
 - 単発 PNG も同じ surface の `prepare -> render -> readback -> release` 経路へ移し、
   backbuffer BGRA readback、Canvas 拡縮、ScreenshotTools、compositor snapshot の旧経路を削除した。
 - 単発 PNG の保存後に surface を解放して FrameGraph の通常 backbuffer 出力へ戻ることを E2E で確認した。
+- 1920×1080・100フレーム・空シーンを3回計測した。中央値で連番PNGは旧経路比3.81倍、
+  captureは約70倍、WebMは同一ビルドの旧 `webgpu-copy` 比1.22倍となった。
+  詳細は[性能評価](./export-rgba-performance-evaluation-2026-08-09.md)を参照。
+- 現在のclass責務、backend接続、consumer別フロー、性能改善理由は
+  [実装メモ](./export-render-surface-implementation-note-2026-08-09.md)へ分離して記録した。
 
-未完了項目は Phase 4 以降に残す。背景透過モード、100フレームの性能再計測、比較用として
+未完了項目は Phase 4 以降に残す。背景透過モード、代表モデル・モーションでの性能再計測、比較用として
 残した WebM legacy capture mode の削除はこの初期実装には含めない。PNG exporter は保存完了後の
 同期的な Babylon / physics dispose が hidden window で停止する場合があるため、現時点では
 window teardown に回収を委ねている。この制約は cleanup 経路の再調査対象とする。
@@ -443,6 +448,8 @@ readback / encoder / save queue の完了後に surface を破棄し、その後
 
 ## 関連
 
+- [共通 RGBA Surface 出力 実装メモ](./export-render-surface-implementation-note-2026-08-09.md)
+- [共通 RGBA Surface 出力 性能評価](./export-rgba-performance-evaluation-2026-08-09.md)
 - [出力改善計画](./output-improvement-plan-2026-08-04.md)
 - [WebGPU 動画書き出し Phase 0 / Phase 1 事前調査メモ](./webgpu-yuv-preinvestigation-2026-08-06.md)
 - [WebGPU 動画書き出し Phase 0 計測 / Phase 1 作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)

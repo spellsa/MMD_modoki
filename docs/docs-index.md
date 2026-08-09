@@ -274,6 +274,8 @@ PBR Skin SSSは描画経路の動作と不具合対策まで確認したが、�
 - [WebGPU VP8 Encoder Experiment Note 2026-04-22](./webgpu-vp8-encoder-experiment-note-2026-04-22.md)
 - [出力改善計画](./output-improvement-plan-2026-08-04.md)
 - [出力レンダリング経路 共通 RGBA Surface 統合計画 2026-08-09](./export-render-surface-unification-plan-2026-08-09.md)
+- [共通 RGBA Surface 出力 実装メモ 2026-08-09](./export-render-surface-implementation-note-2026-08-09.md)
+- [共通 RGBA Surface 出力 性能評価 2026-08-09](./export-rgba-performance-evaluation-2026-08-09.md)
 - [WebGPU 動画書き出し Phase 0 計測・Phase 1 RGBA→YUV GPU 前処理作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)
 - [WebGPU 動画書き出し Phase 0 / Phase 1 事前調査メモ 2026-08-06](./webgpu-yuv-preinvestigation-2026-08-06.md)
 - [WebM 出力の物理状態引き継ぎ仕様](./webm-export-physics-state-spec-2026-07-06.md)

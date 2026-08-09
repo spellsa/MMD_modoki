@@ -179,6 +179,9 @@ MMD タイムラインは 30fps 基準で扱う。
   - CPU BGRA to RGBA swizzle を含む
   - WebGL / 非 WebGPU 環境では使えない
 
+共通surfaceのbackend接続、旧経路との責務差、性能差の理由は
+[共通 RGBA Surface 出力 実装メモ](./export-render-surface-implementation-note-2026-08-09.md)を参照。
+
 ## 9. 保存方式
 対象:
 

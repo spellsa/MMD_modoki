@@ -67,6 +67,8 @@
 
 `CreateScreenshotUsingRenderTargetAsync()` による毎フレームの RTT 作成・再描画・破棄は
 2026-08-09 に撤去した。readback 後の renderer 内契約は top-to-bottom / RGBA / 8bit / sRGB。
+共通surfaceのclass責務と約70倍になったcapture改善の説明は
+[共通 RGBA Surface 出力 実装メモ](./export-render-surface-implementation-note-2026-08-09.md)を参照。
 
 ## 保存処理（速度優先）
 

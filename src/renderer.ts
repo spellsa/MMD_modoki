@@ -16,7 +16,13 @@ import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { runWebmExportJob } from "./webm-exporter";
 import { applyI18nToDom, getLocale, initializeI18n, setLocale, t } from "./i18n";
 import { isDebugLogEnabled, logDebug, logError, logInfo, toLogErrorData } from "./app-logger";
-import type { AppLogData, SmokeRendererReadyPayload, WebmExportPhase, WebmExportRequest } from "./types";
+import type {
+  AppLogData,
+  SmokeRendererReadyPayload,
+  WebmExportDiagnostics,
+  WebmExportPhase,
+  WebmExportRequest,
+} from "./types";
 import { POST_EFFECT_BACKEND_STORAGE_KEY } from "./render/post-effect-backend";
 
 let shaderRequestTraceInstalled = false;
@@ -649,7 +655,12 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       preferredVideoCodec: request.preferredVideoCodec,
       queueLimit: request.diagnosticQueueLimit ?? 16,
     });
-    const emitWebmProgress = (phase: string, message: string, force = false): void => {
+    const emitWebmProgress = (
+      phase: string,
+      message: string,
+      force = false,
+      diagnostics?: WebmExportDiagnostics,
+    ): void => {
       const now = performance.now();
       const shouldReport = force || now - lastProgressReportAt >= 1000;
       if (!shouldReport) return;
@@ -665,6 +676,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
         captured: capturedFrames,
         message,
         timestampMs: Date.now(),
+        diagnostics,
       });
     };
 
@@ -703,7 +715,12 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
     });
     encodedFrames = result.encodedFrames;
     currentFrame = request.endFrame;
-    emitWebmProgress("completed", `Done: ${result.encodedFrames} frame(s) ${result.codec}`, true);
+    emitWebmProgress(
+      "completed",
+      `Done: ${result.encodedFrames} frame(s) ${result.codec}`,
+      true,
+      result.diagnostics,
+    );
     setStatus("Completing WebM export job...");
     emitWebmProgress("finishing-job", "Completing WebM export job...", true);
     const finished = await window.electronAPI.finishWebmExportJob(jobId);

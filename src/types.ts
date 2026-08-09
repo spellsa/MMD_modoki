@@ -787,6 +787,22 @@ export type WebmExportPhase =
     | "completed"
     | "failed";
 
+export interface WebmExportDiagnostics {
+    wallClockMs: number;
+    frameCount: number;
+    renderMs: number;
+    captureMs: number;
+    captureReadbackMs: number;
+    capturePixelTransformMs: number;
+    sampleCreationMs: number;
+    encodeWaitMs: number;
+    queueLimit: number;
+    queuePeakLength: number;
+    queueWaitMs: number;
+    queueWaitCount: number;
+    finalizeMs: number;
+}
+
 export interface WebmExportProgress {
     jobId: string;
     phase: WebmExportPhase;
@@ -798,4 +814,5 @@ export interface WebmExportProgress {
     captured?: number;
     message?: string;
     timestampMs: number;
+    diagnostics?: WebmExportDiagnostics;
 }
