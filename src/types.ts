@@ -745,6 +745,7 @@ export interface WebmExportRequest {
     preferredVideoCodec?: "auto" | "vp8" | "vp9";
     captureMode?: WebmCaptureMode;
     initialPhysicsState?: WebmInitialPhysicsState | null;
+    diagnosticQueueLimit?: number;
 }
 
 export type WebmCaptureMode = "readpixels" | "canvas" | "webgpu-copy";

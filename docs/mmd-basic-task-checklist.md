@@ -50,6 +50,7 @@
 - [x] FrameGraph 効果スタックで Bloom / DoF / LUT / SSR / SSAO / Luminous / Offset Shadow / Offset Rim などを追加 / 並べ替え / 保存復元
 - [x] PNG 出力
 - [x] WebM 出力
+- [ ] 単発 PNG / 連番 PNG / WebM の出力レンダリング経路を共通 RGBA Surface へ統合（[計画](./export-render-surface-unification-plan-2026-08-09.md)）
 - [x] UI 非表示モード
 - [x] デフォルト空を `BackgroundMaterial` 化し、単色 / studio gradient・色・明るさ・保存復元に対応
 - [x] 背景画像インポート

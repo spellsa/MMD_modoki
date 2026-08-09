@@ -79,6 +79,8 @@ VMD 出力は別軸だが、静止画側の出口は VMD を待たずに開け�
 - WebM は空シーン・1920×1080・100フレームで、webgpu-copy の exporter wall-clock が 4118.7 ms、readpixels が 19431.3 ms。readback と CPU pixel transform を分離して記録できた。
 - 連番 PNG は同条件で 100 フレーム出力に成功した。wall-clock は 103156.0 ms、capture は 100375.8 ms、PNG encode は 6551.3 ms。capture が支配的である。
 - 連番 PNG は WebM の webgpu-copy を使わず、Babylon の RenderTargetTexture / readPixels 経路を使っていることをコード確認した。
+- 追加の経路診断では、WebM は current render pass の `bgra8unorm` color attachment（usage 17）を `engine.readPixels` で読み、PNG は `rgba8unorm` の `screenShot` RenderTargetTexture（usage 23）を生成・readback・破棄していた。PNG の遅さを WebM と同じ BGRA→RGBA swizzle の問題として扱う根拠はない。
+- キュー上限の比較では queue limit 16 の実ピークが 1 で、queue limit 1 は 720p / 1080p とも wall-clock と readback を悪化させた。キュー拡大より、WebM は swizzle/readback、PNG は RTT lifecycle の調査を優先する。
 - 詳細なログ値と判定は [2026-08-06 実測結果](./webgpu-yuv-preinvestigation-2026-08-06.md#2026-08-06-実測結果) に記録した。I420 prototype と代表モデル・モーションの計測は未着手。
 
 ### 段階2: 静止画の高解像度・アルファ書き出し（v0.2.2 候補）

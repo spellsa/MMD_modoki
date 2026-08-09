@@ -599,6 +599,7 @@ async function initializeWebmExporter(searchParams: URLSearchParams): Promise<vo
       outputHeight: request.outputHeight,
       includeAudio: request.includeAudio === true,
       preferredVideoCodec: request.preferredVideoCodec,
+      queueLimit: request.diagnosticQueueLimit ?? 16,
     });
     const emitWebmProgress = (phase: string, message: string, force = false): void => {
       const now = performance.now();

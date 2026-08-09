@@ -2,6 +2,7 @@ import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
 import { CreateScreenshotUsingRenderTargetAsync } from "@babylonjs/core/Misc/screenshotTools";
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
+import type { Scene } from "@babylonjs/core/scene";
 import type { PngSequenceExportDiagnostics, PngSequenceExportRequest } from "./types";
 
 export interface PngSequenceExportCallbacks {
@@ -27,6 +28,108 @@ type ExportQueueItem = {
 type ScreenshotInternals = {
     engine: AbstractEngine;
     camera: Camera;
+    scene: Scene;
+};
+
+type ReadTexturePixelsEngine = {
+    _readTexturePixels?: (...args: unknown[]) => Promise<ArrayBufferView>;
+    _currentRenderTarget?: unknown;
+    isWebGPU: boolean;
+};
+
+const isCaptureDiagnosticsEnabled = (): boolean => (
+    new URLSearchParams(window.location.search).get("e2e") === "1"
+);
+
+const readScalarDiagnosticValue = (value: unknown): string | number | null => {
+    if (typeof value === "string" || typeof value === "number") {
+        return value;
+    }
+    return null;
+};
+
+const readNumberDiagnosticValue = (value: unknown): number | null => (
+    typeof value === "number" && Number.isFinite(value) ? value : null
+);
+
+const readObjectDiagnosticValue = (value: unknown, key: string): unknown => {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    return (value as Record<string, unknown>)[key] ?? null;
+};
+
+const installPngCaptureDiagnostics = (
+    screenshotInternals: ScreenshotInternals,
+    outputWidth: number,
+    outputHeight: number,
+): () => void => {
+    if (!isCaptureDiagnosticsEnabled()) {
+        return () => undefined;
+    }
+
+    const route = screenshotInternals.scene.frameGraph
+        ? "frame-graph-screenshot"
+        : "legacy-render-target-screenshot";
+    const engine = screenshotInternals.engine as ReadTexturePixelsEngine;
+    const originalReadTexturePixels = engine._readTexturePixels;
+    let readbackLogged = false;
+
+    window.electronAPI.logInfo("performance", "png capture route diagnostics", {
+        screenshotApi: "CreateScreenshotUsingRenderTargetAsync",
+        route,
+        sceneFrameGraphActive: Boolean(screenshotInternals.scene.frameGraph),
+        expectedBabylonPath: screenshotInternals.scene.frameGraph
+            ? "CreateScreenshotForFrameGraphAsync"
+            : "RenderTargetTexture-create-read-dispose",
+        engineBackend: screenshotInternals.engine.isWebGPU ? "webgpu" : "other",
+        outputWidth,
+        outputHeight,
+        currentRenderTargetBound: Boolean(engine._currentRenderTarget),
+        readTexturePixelsHookInstalled: Boolean(originalReadTexturePixels),
+    });
+
+    if (!originalReadTexturePixels) {
+        return () => undefined;
+    }
+
+    engine._readTexturePixels = (...args: unknown[]): Promise<ArrayBufferView> => {
+        const requestedWidth = readNumberDiagnosticValue(args[1]);
+        const requestedHeight = readNumberDiagnosticValue(args[2]);
+        const isScreenshotSizedReadback = requestedWidth === outputWidth
+            && requestedHeight === outputHeight;
+        if (!readbackLogged && isScreenshotSizedReadback) {
+            readbackLogged = true;
+            const internalTexture = args[0];
+            const hardwareTexture = readObjectDiagnosticValue(internalTexture, "_hardwareTexture");
+            const gpuTexture = readObjectDiagnosticValue(hardwareTexture, "underlyingResource");
+            window.electronAPI.logInfo("performance", "png capture readback texture diagnostics", {
+                route,
+                readbackMethod: "engine._readTexturePixels",
+                babylonTextureFormat: readScalarDiagnosticValue(
+                    readObjectDiagnosticValue(internalTexture, "format"),
+                ),
+                hardwareTextureFormat: readScalarDiagnosticValue(
+                    readObjectDiagnosticValue(hardwareTexture, "format"),
+                ),
+                gpuTextureLabel: readScalarDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "label")),
+                gpuTextureFormat: readScalarDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "format")),
+                gpuTextureUsage: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "usage")),
+                gpuTextureWidth: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "width")),
+                gpuTextureHeight: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "height")),
+                requestedWidth,
+                requestedHeight,
+                flushRenderer: args[6] === true,
+                noDataConversion: args[7] === true,
+                currentRenderTargetBound: Boolean(engine._currentRenderTarget),
+            });
+        }
+        return originalReadTexturePixels.apply(engine, args);
+    };
+
+    return () => {
+        engine._readTexturePixels = originalReadTexturePixels;
+    };
 };
 
 const waitForAnimationFrame = async (): Promise<void> => {
@@ -140,6 +243,7 @@ export async function runPngSequenceExportJob(
 
     callbacks.onStatus?.("Initializing export renderer...");
     const mmdManager = await MmdManager.create(canvas, enginePreference);
+    let restoreCaptureDiagnostics = (): void => undefined;
 
     try {
         callbacks.onStatus?.("Loading project into export renderer...");
@@ -166,6 +270,11 @@ export async function runPngSequenceExportJob(
         mmdManager.setAutoRenderEnabled(false);
         mmdManager.seekTo(startFrame);
         const screenshotInternals = mmdManager as unknown as ScreenshotInternals;
+        restoreCaptureDiagnostics = installPngCaptureDiagnostics(
+            screenshotInternals,
+            captureWidth,
+            captureHeight,
+        );
 
         const padDigits = Math.max(4, String(endFrame).length);
         const totalFrames = frameList.length;
@@ -286,6 +395,7 @@ export async function runPngSequenceExportJob(
         await callbacks.onCompleted?.(result);
         return result;
     } finally {
+        restoreCaptureDiagnostics();
         mmdManager.setAutoRenderEnabled(true);
         mmdManager.dispose();
     }

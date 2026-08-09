@@ -7,7 +7,7 @@
 これは恒久的な仕様書ではありません。後日もう一度確認するときは、新しい日付のスナップショットを作成し、実装の変化と確認条件を分けて記録します。
 
 - 確認日: 2026-08-06（JST）
-- 対象コミット: 4f1df01
+- 対象コミット: fb834e9 + 2026-08-06 capture 診断の追記差分
 - 対象ブランチ: main
 - 状態: 自動確認済み / 一部の実機・性能確認は未実施
 
@@ -84,6 +84,13 @@
 - 判断としては、RGBA→I420 の GPU 前処理は実装価値があります。CPU pixel transform 約 10ms/frame の削減と、I420 化による readback データ量の削減が期待できますが、GPU readback 約 10ms/frame は残るため、単独で決定打にはなりません。対象はまず WebM の webgpu-copy 経路に限定し、compute / staging / map を含む総時間で評価します。
 - 30fps・1920x1080 の 3 分動画（5400 フレーム）では、GPU swizzle のみなら理論上約 54 秒、I420 化まで行えば readback 削減込みで理論最大約 88 秒の短縮余地があります。compute / staging / map の追加コストを含めた実用上の期待値は 45〜80 秒程度と仮置きし、試作して確認する価値があると判断します。
 - 計測中に Destroyed texture ... used in a submit の WebGPU validation warning が出たため、値は現行空シーンの基準値として扱い、cleanup race は別途確認します。
+
+#### 2026-08-06 capture 経路・キュー追加確認
+
+- WebM の `webgpu-copy` は current render pass の `bgra8unorm` color attachment を `engine.readPixels` で読み出していました。GPU texture usage は 17（`COPY_SRC + RENDER_ATTACHMENT`）で、明示的な flush と `readPixels` の renderer flush が有効です。したがって CPU BGRA→RGBA swizzle は実在し、GPU swizzle の検証対象になります。
+- 連番 PNG は WebM と別経路で、今回の `scene.frameGraph=false` では legacy screenshot API がフレームごとに `rgba8unorm` の `screenShot` RenderTargetTexture を生成・readback・破棄していました。usage は 23（`COPY_SRC + COPY_DST + TEXTURE_BINDING + RENDER_ATTACHMENT`）です。PNG capture の支配時間は、まず RTT lifecycle / readback 経路の問題として扱います。
+- キュー上限 16 の実ピークは 720p / 1080p とも 1 で待ち時間は 0、上限 1 では 99 回の待ちが発生し、wall-clock と readback が悪化しました。キューの拡大は今回の主な打ち手ではありません。
+- 詳細な経路ログ、usage、追加計測値は [capture 経路・テクスチャ・キューの追加調査](./webgpu-yuv-preinvestigation-2026-08-06.md#2026-08-06-追加調査-capture-経路テクスチャキュー) を参照してください。
 
 詳細: [WebGPU 動画書き出し Phase 0 / Phase 1 事前調査メモ](./webgpu-yuv-preinvestigation-2026-08-06.md)
 

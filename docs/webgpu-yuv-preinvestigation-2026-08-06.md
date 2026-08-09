@@ -242,6 +242,41 @@ PNG の capture は Babylon の CreateScreenshotUsingRenderTargetAsync と Rende
 
 計測中、WebGPU の Destroyed texture ... used in a submit validation warning が出た。出力自体は完了したが、export window の終了・render target dispose 付近の順序問題の可能性があるため、計測値を製品版の絶対値とみなす前に cleanup race を確認する。
 
+## 2026-08-06 追加調査: capture 経路・テクスチャ・キュー
+
+### capture 経路とテクスチャ
+
+WebGPU の E2E 診断ログを一時的に有効化し、WebM 1 フレーム（640×360）と連番 PNG 2 フレーム（640×360）を確認した。診断は E2E 用の opt-in ログだけで、通常の書き出し時には出力しない。
+
+| 出力 | 実際の経路 | format | usage | 補足 |
+| --- | --- | --- | --- | --- |
+| WebM / webgpu-copy | `engine.readPixels` が現在の render pass の color attachment を読む | `bgra8unorm` | `17 = COPY_SRC + RENDER_ATTACHMENT` | current render target は未バインド。`flushFramebuffer` と `readPixels(..., flushRenderer=true)` を使用 |
+| 連番 PNG | legacy screenshot API → `RenderTargetTexture` を生成 → readPixels → dispose | `rgba8unorm` | `23 = COPY_SRC + COPY_DST + TEXTURE_BINDING + RENDER_ATTACHMENT` | `scene.frameGraph=false` の実行。640×360 の `screenShot` RTT readback を確認 |
+
+PNG の実装経路は WebM の `webgpu-copy` とは異なり、フレームごとの RenderTargetTexture の生成・readback・破棄を含む。最初の診断では Babylon 内部の 1×1 テクスチャ readback を先に捕捉したが、出力サイズと一致する readback だけを対象にして再計測し、`screenShot` RTT の `rgba8unorm` を確認した。したがって、PNG の約 1 秒/frame は BGRA→RGBA の CPU swizzle が主因とは判断しない。
+
+WebM では `bgra8unorm` の現在の color attachment を直接読んでいるため、現行の CPU BGRA→RGBA 変換は実際の経路に存在する。GPU swizzle はこの変換を対象にできる。ただし、現行の明示的な flush と readback 自体の待ち時間は残るため、swizzle だけで GPU readback 全体が消えるわけではない。
+
+### キュー上限の追加比較
+
+同じ空シーン・WebGPU・VP8・音声なし・100 フレームの診断実行で、exporter のキュー上限を 16 と 1 に切り替えた。値は各解像度内の比較用であり、既存の Phase 0 代表値との絶対値比較ではなく、同一条件の対比較として扱う。
+
+| 解像度 | queue limit | wall-clock | GPU readback | capture | queue peak | queue wait |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1280×720 | 16 | 3954.07 ms | 1611.03 ms | 1988.05 ms | 1 | 0 ms / 0 回 |
+| 1280×720 | 1 | 8387.21 ms | 6648.43 ms | 7068.99 ms | 1 | 155.24 ms / 99 回 |
+| 1920×1080 | 16 | 10754.90 ms | 8761.77 ms | 9552.09 ms | 1 | 0 ms / 0 回 |
+| 1920×1080 | 1 | 17235.37 ms | 15112.07 ms | 15839.24 ms | 1 | 202.19 ms / 99 回 |
+
+queue limit 16 でも実際のピークは 1 で、キューは飽和しなかった。limit 1 では待ち回数が発生し、wall-clock、readback、capture が明確に悪化した。この条件では、キュー上限を増やすことが主な改善策ではなく、readback 経路と CPU pixel transform を先に調べる判断を支持する。
+
+### 追加調査の判定
+
+- WebM は BGRA8 の current render pass attachment を直接 readback している。CPU swizzle は実在するボトルネック候補であり、GPU swizzle の A/B は続ける価値がある。
+- 連番 PNG は RGBA8 の legacy RenderTargetTexture 経路で、フレームごとの RTT lifecycle が capture 支配の候補である。まず persistent RTT、または出力専用の再利用可能な capture target を比較する。
+- PNG の FrameGraph 経路は今回の `scene.frameGraph=false` の実行では通っていない。FrameGraph を有効にした構成は別ケースとして確認する。
+- 追加の PNG 計測後にも swapchain 系の `Destroyed texture ... used in a submit` validation warning が 1 件出た。出力は完了したが、export window 終了時の cleanup race の候補として、性能改善とは分けて追跡する。
+
 ## 実装タスク候補
 
 - [x] capture mode、codec、解像度、FPS、フレーム数、GPU、Electron/Chromium を記録する Phase 0 ケースを定義する
@@ -250,7 +285,10 @@ PNG の capture は Babylon の CreateScreenshotUsingRenderTargetAsync と Rende
 - [x] readpixels との色、上下方向、速度を比較する
 - [ ] MediaBunny I420 VideoSample の Electron encode smoke を追加する
 - [ ] I420 の CPU reference と既知色 pattern の比較を追加する
-- [ ] capture texture の format / usage を調査する
+- [x] capture texture の format / usage を調査する
+- [x] WebM と連番 PNG の capture API / readback 経路をログとコードで確認する
+- [ ] 連番 PNG の RenderTargetTexture を再利用する prototype を比較する
+- [ ] FrameGraph 有効時の PNG capture 経路を別ケースで確認する
 - [ ] compute → storage buffer → staging buffer → CPU map の最小 prototype を作る
 - [ ] RGBA baseline と I420 prototype の wall-clock、p95、出力品質、メモリ使用量を比較する
 - [ ] 改善が確認できた場合だけ experimental flag 付きの exporter adapter に進む

@@ -39,6 +39,10 @@ export interface WebmExportDiagnostics {
     capturePixelTransformMs: number;
     sampleCreationMs: number;
     encodeWaitMs: number;
+    queueLimit: number;
+    queuePeakLength: number;
+    queueWaitMs: number;
+    queueWaitCount: number;
     finalizeMs: number;
 }
 
@@ -70,6 +74,78 @@ type ExportRuntimeInternals = {
         playAnimation: () => Promise<void>;
         pauseAnimation: () => void;
     };
+};
+
+type WebGpuCaptureEngineInternals = {
+    _getCurrentRenderPassWrapper?: () => unknown;
+    _currentRenderTarget?: unknown;
+    _colorFormat?: unknown;
+    getRenderWidth: (useScreen?: boolean) => number;
+    getRenderHeight: (useScreen?: boolean) => number;
+};
+
+const isCaptureDiagnosticsEnabled = (): boolean => (
+    new URLSearchParams(window.location.search).get("e2e") === "1"
+);
+
+const readScalarDiagnosticValue = (value: unknown): string | number | null => {
+    if (typeof value === "string" || typeof value === "number") {
+        return value;
+    }
+    return null;
+};
+
+const readNumberDiagnosticValue = (value: unknown): number | null => (
+    typeof value === "number" && Number.isFinite(value) ? value : null
+);
+
+const readObjectDiagnosticValue = (value: unknown, key: string): unknown => {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    return (value as Record<string, unknown>)[key] ?? null;
+};
+
+const getWebGpuCaptureSourceDiagnostics = (
+    engine: WebGPUEngine,
+    requestedWidth: number,
+    requestedHeight: number,
+): Record<string, unknown> => {
+    try {
+        const engineInternals = engine as unknown as WebGpuCaptureEngineInternals;
+        const renderPassWrapper = engineInternals._getCurrentRenderPassWrapper?.() ?? null;
+        const attachments = readObjectDiagnosticValue(renderPassWrapper, "colorAttachmentGPUTextures");
+        const hardwareTexture = Array.isArray(attachments) ? attachments[0] ?? null : null;
+        const gpuTexture = readObjectDiagnosticValue(hardwareTexture, "underlyingResource");
+        const renderWidth = engine.getRenderWidth(true);
+        const renderHeight = engine.getRenderHeight(true);
+        return {
+            source: "engine.readPixels.current-render-pass-color-attachment",
+            currentRenderTargetBound: Boolean(engineInternals._currentRenderTarget),
+            renderPassWrapperAvailable: Boolean(renderPassWrapper),
+            colorAttachmentCount: Array.isArray(attachments) ? attachments.length : null,
+            engineColorFormat: readScalarDiagnosticValue(engineInternals._colorFormat),
+            hardwareTextureFormat: readScalarDiagnosticValue(
+                readObjectDiagnosticValue(hardwareTexture, "format"),
+            ),
+            gpuTextureLabel: readScalarDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "label")),
+            gpuTextureFormat: readScalarDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "format")),
+            gpuTextureUsage: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "usage")),
+            gpuTextureWidth: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "width")),
+            gpuTextureHeight: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "height")),
+            engineRenderWidth: Number.isFinite(renderWidth) ? renderWidth : null,
+            engineRenderHeight: Number.isFinite(renderHeight) ? renderHeight : null,
+            requestedWidth,
+            requestedHeight,
+        };
+    } catch (error: unknown) {
+        return {
+            source: "engine.readPixels.current-render-pass-color-attachment",
+            requestedWidth,
+            requestedHeight,
+            diagnosticsError: error instanceof Error ? error.message : String(error),
+        };
+    }
 };
 
 type ExportQueueItem = {
@@ -310,6 +386,8 @@ const createWebGpuCopyFrameCapture = (
 
     const bufferByteLength = width * height * 4;
     const freeRgbaBuffers: Uint8Array[] = [];
+    const captureDiagnosticsEnabled = isCaptureDiagnosticsEnabled();
+    let captureSourceLogged = false;
 
     const acquireRgbaBuffer = (): Uint8Array => {
         const existing = freeRgbaBuffers.pop();
@@ -324,6 +402,16 @@ const createWebGpuCopyFrameCapture = (
         captureFrameAsync: async (frame: number, timestamp: number, duration: number): Promise<ExportQueueItem | null> => {
             const readbackStartedAt = performance.now();
             engine.flushFramebuffer();
+            if (captureDiagnosticsEnabled && !captureSourceLogged) {
+                captureSourceLogged = true;
+                window.electronAPI.logInfo("performance", "webm capture source diagnostics", {
+                    captureMode: "webgpu-copy",
+                    frame,
+                    explicitFlushBeforeReadPixels: true,
+                    readPixelsFlushRenderer: true,
+                    ...getWebGpuCaptureSourceDiagnostics(engine, width, height),
+                });
+            }
             try {
                 const sourcePixels = await withTimeout(
                     engine.readPixels(0, 0, width, height, true, true, null).then((data) => {
@@ -599,7 +687,10 @@ export async function runWebmExportJob(
         ? request.captureMode
         : "webgpu-copy";
 
-    const maxQueueLength = 16;
+    const maxQueueLength = typeof request.diagnosticQueueLimit === "number"
+        && Number.isFinite(request.diagnosticQueueLimit)
+        ? Math.max(1, Math.min(64, Math.floor(request.diagnosticQueueLimit)))
+        : 16;
     const frameDuration = 1 / fps;
 
     updateStatus(callbacks, "Initializing WebM export renderer...", "initializing");
@@ -771,6 +862,9 @@ export async function runWebmExportJob(
         let capturePixelTransformMsTotal = 0;
         let sampleCreationMsTotal = 0;
         let encodeWaitMsTotal = 0;
+        let queuePeakLength = 0;
+        let queueWaitMsTotal = 0;
+        let queueWaitCount = 0;
 
         const reportProgress = (frame: number): void => {
             const now = performance.now();
@@ -850,10 +944,16 @@ export async function runWebmExportJob(
                 for (let outputFrameIndex = 0; outputFrameIndex < totalFrames; outputFrameIndex += 1) {
                     if (fatalError) break;
 
-                    while (queue.length >= maxQueueLength && !fatalError) {
-                        await sleepMs(1);
+                    if (queue.length >= maxQueueLength) {
+                        const queueWaitStartedAt = performance.now();
+                        queueWaitCount += 1;
+                        while (queue.length >= maxQueueLength && !fatalError) {
+                            await sleepMs(1);
+                        }
+                        queueWaitMsTotal += performance.now() - queueWaitStartedAt;
                     }
                     if (fatalError) break;
+                    queuePeakLength = Math.max(queuePeakLength, queue.length);
 
                     const frame = Math.min(
                         endFrame,
@@ -897,6 +997,7 @@ export async function runWebmExportJob(
                     }
                     if (capturedItem) {
                         queue.push(capturedItem);
+                        queuePeakLength = Math.max(queuePeakLength, queue.length);
                         capturedFrames += 1;
                     }
                 }
@@ -906,6 +1007,7 @@ export async function runWebmExportJob(
                         const pendingItems = await frameCapture.flushPendingAsync();
                         for (const pendingItem of pendingItems) {
                             queue.push(pendingItem);
+                            queuePeakLength = Math.max(queuePeakLength, queue.length);
                             capturedFrames += 1;
                         }
                     } catch (error: unknown) {
@@ -948,6 +1050,10 @@ export async function runWebmExportJob(
                     capturePixelTransformMs: capturePixelTransformMsTotal,
                     sampleCreationMs: sampleCreationMsTotal,
                     encodeWaitMs: encodeWaitMsTotal,
+                    queueLimit: maxQueueLength,
+                    queuePeakLength,
+                    queueWaitMs: queueWaitMsTotal,
+                    queueWaitCount,
                     finalizeMs,
                 },
             };

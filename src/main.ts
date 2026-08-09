@@ -486,6 +486,11 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
     || request.captureMode === 'readpixels'
     ? request.captureMode
     : 'readpixels';
+  const diagnosticQueueLimit = isE2eMode
+    && typeof request.diagnosticQueueLimit === 'number'
+    && Number.isFinite(request.diagnosticQueueLimit)
+    ? Math.max(1, Math.min(64, Math.floor(request.diagnosticQueueLimit)))
+    : undefined;
   const audioFilePath = includeAudio && typeof request.audioFilePath === 'string' && request.audioFilePath.trim().length > 0
     ? request.audioFilePath
     : null;
@@ -506,6 +511,7 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
     preferredVideoCodec,
     captureMode,
     initialPhysicsState: sanitizeWebmInitialPhysicsState(request.initialPhysicsState),
+    diagnosticQueueLimit,
   };
 };
 
