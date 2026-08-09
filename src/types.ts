@@ -19,20 +19,12 @@ export interface ElectronAPI {
     ) => Promise<string | null>;
     listBundledWgslFiles: () => Promise<{ name: string; path: string }[]>;
     writeTextFileToPath: (filePath: string, content: string) => Promise<boolean>;
-    savePngFile: (dataUrl: string, defaultFileName?: string) => Promise<string | null>;
     savePngRgbaFile: (
         rgbaData: Uint8Array,
         width: number,
         height: number,
         defaultFileName?: string,
     ) => Promise<string | null>;
-    saveCanvasSnapshotPngFile: (
-        rect: { x: number; y: number; width: number; height: number },
-        outputWidth: number,
-        outputHeight: number,
-        defaultFileName?: string,
-    ) => Promise<string | null>;
-    savePngFileToPath: (dataUrl: string, directoryPath: string, fileName: string) => Promise<string | null>;
     savePngRgbaFileToPath: (
         rgbaData: Uint8Array,
         width: number,
@@ -171,6 +163,7 @@ declare global {
             disableAlphaTextureView: () => void;
         };
         mmdModokiE2e?: {
+            exportProjectState: () => MmdModokiProjectFileV1;
             loadModel: (filePath: string) => Promise<ModelInfo | null>;
             getModelBoneRenderedPosition: (
                 modelIndex: number,
@@ -192,6 +185,29 @@ declare global {
                 parentBoneName: string;
                 parentModelIndex: number;
             } | null;
+            captureExportSurfaceProbe: (width: number, height: number) => Promise<{
+                backend: string;
+                ready: boolean;
+                width: number;
+                height: number;
+                byteLength: number;
+                nonZeroByteCount: number;
+                format: "RGBA";
+                rowOrder: "top-to-bottom";
+                surfaceFormat: "rgba8unorm";
+                readbackCount: number;
+            }>;
+            captureSinglePngSurfaceToPath: (
+                outputDirectoryPath: string,
+                width: number,
+                height: number,
+            ) => Promise<{
+                path: string;
+                byteLength: number;
+                width: number;
+                height: number;
+                surfaceReleased: boolean;
+            }>;
         };
     }
 }
@@ -748,7 +764,7 @@ export interface WebmExportRequest {
     diagnosticQueueLimit?: number;
 }
 
-export type WebmCaptureMode = "readpixels" | "canvas" | "webgpu-copy";
+export type WebmCaptureMode = "rgba-surface" | "readpixels" | "canvas" | "webgpu-copy";
 
 export interface WebmExportLaunchResult {
     jobId: string;

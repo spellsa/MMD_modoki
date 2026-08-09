@@ -88,8 +88,8 @@ PoC として以下を実装した。
 - `MirrorTexture` は反射対象をもう一度描画するため、PMX の skinning / morph / material 描画が重い場合は FPS に影響する。
 - 初期対象は PMX / PMD モデルのみ。`.x` アクセサリやステージ内の任意平面反射は後続課題。
 - 反射用 render target には通常 post effects は入らない。最終画面の post effects とは見た目が完全一致しない可能性がある。
-- Frame Graph backend 有効時の PNG 保存では、Babylon.js の FrameGraph render target screenshot 経路と `MirrorTexture` の render target が WebGPU で競合し、destroyed texture warning や黒画像が出ることがあった。`engine.readPixels()` に寄せても swap buffer 破棄の影響で黒画像になるケースがあったため、単発 PNG 保存は Electron main process の `webContents.capturePage()` で表示中の canvas 矩形を切り出す経路へ切り替えた。
-- 上記回避策により、MirroringFloor 有効時の PNG は画面に見えている反射床を優先して保存する。一方で、任意解像度への完全な再レンダリングではなくページ表示のスクリーンショットをスケーリングするため、通常の render target capture と品質・アスペクトの扱いが完全一致しない可能性がある。
+- Frame Graph backend 有効時の旧 screenshot 経路では、`MirrorTexture` の render target と競合し、destroyed texture warning や黒画像が出ることがあった。`engine.readPixels()` でも swap buffer 由来の黒画像が残ったため、一時期は Electron main process の `webContents.capturePage()` を回避策として使用していた。
+- 2026-08-09 に単発 PNG を共通 `ExportRenderSurface` へ移行した。MirrorTexture を含む代表シーンでの新経路の実機確認は別途必要。
 - 透明材質、outline、toon、shadow、BlobShadow との重なりは実機で確認が必要。
 
 ## PNG 保存との関係
@@ -107,16 +107,21 @@ MirroringFloor は `MirrorTexture` が内部で反射用 render target を持つ
 - `webContents.capturePage()`
   - 表示中の canvas 矩形を Electron main process 側で撮る方式。MirroringFloor 表示込みの PNG 保存ができることを確認した。
 
-現在の単発 PNG 保存は `src/ui/export-ui-controller.ts` から `window.electronAPI.saveCanvasSnapshotPngFile(...)` を呼び、`src/main.ts` の `file:saveCanvasSnapshotPng` IPC で `BrowserWindow.webContents.capturePage()` を実行する。
+2026-08-09 以降の単発 PNG 保存は、連番 PNG / WebM と同じ `ExportRenderSurface`
+(`rgba8unorm`) へ FrameGraph または Classic の最終出力を描画し、RGBA readback を
+`file:savePngRgba` IPC へ渡す。`BrowserWindow.webContents.capturePage()` は単発 PNG 経路から削除した。
 
-この方式は「最終表示を撮る」ため MirroringFloor との相性はよい。一方で DOM オーバーレイも写るため、保存直前に `MmdManager.setCaptureEditorOverlaysSuppressed(true)` を呼び、2フレーム待ってからキャプチャする。これによりボーン表示などの編集用 2D オーバーレイは PNG に含めない。
+保存直前の `MmdManager.setCaptureEditorOverlaysSuppressed(true)` と2フレーム待機は維持している。
+surface 自体は scene の最終色だけを受けるため DOM overlay は含まず、キャプチャ後は surface を
+解放して通常 viewport の backbuffer 出力へ戻す。
 
-確認済み:
+旧 compositor snapshot 経路で確認済みだった項目:
 
 - MirroringFloor 有効時に黒画像ではなく PNG が保存される。
 - ボーン表示オーバーレイは PNG 保存時に抑止される。
-- `npm.cmd run lint` は既存 warning のみで通過。
-- `npm.cmd run smoke:launch` は WebGPU 初期化まで通過。
+
+共通 surface 移行後は空シーンの単発 PNG 実ファイル生成、surface 解放、WebGPU 起動を
+自動確認している。MirroringFloor を含む見た目は未確認。
 
 ## 確認観点
 

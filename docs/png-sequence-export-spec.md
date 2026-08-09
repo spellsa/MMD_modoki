@@ -1,6 +1,6 @@
 # 連番PNG出力 仕様・実装メモ
 
-更新日: 2026-02-24
+更新日: 2026-08-09
 
 ## 目的
 
@@ -51,6 +51,7 @@
 - オーナーウィンドウごとに activeCount を持ち、状態/進捗を通知する。
 - PNG保存は `file:savePngRgbaToPath` で行う。
   - RGBA -> BGRA に並べ替えて `nativeImage.toPNG()` で保存。
+  - この変換は Electron の platform bitmap 境界にのみ残し、renderer core の標準形式にはしない。
 
 ### 3. Exporter renderer
 
@@ -58,9 +59,14 @@
 - `takePngSequenceJob(jobId)` でジョブを1回取得。
 - `runPngSequenceExportJob()` を実行。
   - 新規 `MmdManager` を作成
-  - project state を import
-  - フレームごと `seekTo(frame)` -> スクリーンショット取得 -> 保存キュー投入
+  - project state を export 用として import
+  - ジョブ寿命の `ExportRenderSurface` (`rgba8unorm`) を1枚作成
+  - FrameGraph / Classic の最終出力を同じ surface へ接続
+  - フレームごと `seekTo(frame)` -> render -> surface readback -> 保存キュー投入
 - 進捗は一定間隔で main UI に report する。
+
+`CreateScreenshotUsingRenderTargetAsync()` による毎フレームの RTT 作成・再描画・破棄は
+2026-08-09 に撤去した。readback 後の renderer 内契約は top-to-bottom / RGBA / 8bit / sRGB。
 
 ## 保存処理（速度優先）
 
@@ -85,6 +91,8 @@
 1. `fps` / `precision` はリクエストにはあるが、時間進行制御に未使用。
 2. エクスポート用ウィンドウは内部実行向け設定（`show: false`）で、基本は非表示運用。
 3. 高負荷シーンではGPUキャプチャ側が律速になり、IO/GPU使用率が低く見えても速度が伸びにくい場合がある。
+4. 背景透過 mode と straight alpha の合成確認は未実装。
+5. hidden exporter の終了時 resource cleanup は window teardown に依存している。
 
 ## 今後の改善候補
 
@@ -92,3 +100,4 @@
 2. `precision` パラメータの意味を明確化して有効化する。
 3. 出力プリセット（1080p/1440p/4K、開始/終了範囲）をUIから選択可能にする。
 4. プロファイル計測（capture/save別のms表示）を追加してボトルネック可視化する。
+5. opaque / transparent mode、clear alpha、非対応 PostFX の警告を追加する。

@@ -79,7 +79,7 @@ export const OUTPUT_FPS_OPTIONS: ReadonlyArray<{ value: string; label: string }>
     { value: "60", label: "60" },
 ];
 
-const FIXED_WEBM_CAPTURE_MODE: WebmCaptureMode = "webgpu-copy";
+const FIXED_WEBM_CAPTURE_MODE: WebmCaptureMode = "rgba-surface";
 
 type ToastType = "success" | "error" | "info";
 
@@ -196,7 +196,7 @@ export class ExportUiController {
         fps: 30,
         includeAudio: false,
         preferredVideoCodec: "vp8",
-        captureMode: "webgpu-copy",
+        captureMode: "rgba-surface",
         usePlaybackRange: false,
         startFrame: 0,
         endFrame: 0,

@@ -322,6 +322,7 @@ async function initializeApp(): Promise<void> {
     new UIController(mmdManager, timeline, bottomPanel);
     if (new URLSearchParams(window.location.search).get("e2e") === "1") {
       window.mmdModokiE2e = {
+        exportProjectState: () => mmdManager.exportProjectState(),
         loadModel: (filePath) => mmdManager.loadPMX(filePath),
         getModelBoneRenderedPosition: (modelIndex, boneName) => (
           mmdManager.getModelBoneRenderedPosition(modelIndex, boneName)
@@ -335,6 +336,53 @@ async function initializeApp(): Promise<void> {
           mmdManager.setBoneGizmoRotationDragForE2e(rotation, dragging)
         ),
         getModelExternalParent: (modelIndex) => mmdManager.getModelExternalParent(modelIndex),
+        captureExportSurfaceProbe: async (width, height) => {
+          mmdManager.setAutoRenderEnabled(false);
+          mmdManager.postEffectExposure = 1.05;
+          const surface = mmdManager.prepareExportRenderSurface(width, height);
+          const ready = await mmdManager.waitForPostEffectBackendReadyForCapture();
+          mmdManager.renderOnceForCapture(0);
+          const frame = await mmdManager.readExportRenderFrameAsync();
+          let nonZeroByteCount = 0;
+          for (const value of frame.pixels) {
+            if (value !== 0) nonZeroByteCount += 1;
+          }
+          return {
+            backend: mmdManager.getPostEffectBackend(),
+            ready,
+            width: frame.width,
+            height: frame.height,
+            byteLength: frame.pixels.byteLength,
+            nonZeroByteCount,
+            format: frame.format,
+            rowOrder: frame.rowOrder,
+            surfaceFormat: surface.format,
+            readbackCount: mmdManager.getExportRenderSurfaceDiagnostics()?.readbackCount ?? 0,
+          };
+        },
+        captureSinglePngSurfaceToPath: async (outputDirectoryPath, width, height) => {
+          const frame = await mmdManager.capturePngRgbaData({ width, height });
+          if (!frame) {
+            throw new Error("Single PNG RGBA surface capture failed");
+          }
+          const saved = await window.electronAPI.savePngRgbaFileToPath(
+            frame.rgbaData,
+            frame.width,
+            frame.height,
+            outputDirectoryPath,
+            "single_rgba_surface_e2e.png",
+          );
+          if (!saved) {
+            throw new Error("Single PNG RGBA surface save failed");
+          }
+          return {
+            path: saved.path,
+            byteLength: saved.byteLength,
+            width: frame.width,
+            height: frame.height,
+            surfaceReleased: mmdManager.getExportRenderSurfaceDiagnostics() === null,
+          };
+        },
       };
     }
     let environmentLightingProbe: Awaited<ReturnType<typeof mmdManager.runEnvironmentLightingDiagnosticProbe>> | undefined;

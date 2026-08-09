@@ -34,7 +34,6 @@ import { ColorGradingTexture } from "@babylonjs/core/Materials/Textures/colorGra
 import { Effect } from "@babylonjs/core/Materials/effect";
 import { ShaderStore } from "@babylonjs/core/Engines/shaderStore";
 import { ShaderLanguage } from "@babylonjs/core/Materials/shaderLanguage";
-import { CreateScreenshotUsingRenderTargetAsync } from "@babylonjs/core/Misc/screenshotTools";
 import { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 import { PassPostProcess } from "@babylonjs/core/PostProcesses/passPostProcess";
 import { FxaaPostProcess } from "@babylonjs/core/PostProcesses/fxaaPostProcess";
@@ -267,6 +266,11 @@ import {
     FrameGraphPostEffectsController,
     type FrameGraphPostEffectsSettings,
 } from "./render/frame-graph-post-effects-controller";
+import {
+    ExportRenderSurface,
+    type ExportRenderSurfaceDiagnostics,
+    type RenderedExportFrame,
+} from "./render/export-render-surface";
 import { buildFrameGraphResourcePlan } from "./render/frame-graph-resource-plan";
 import {
     addFrameGraphPostEffectId,
@@ -1867,6 +1871,7 @@ ${beforeFogAppendBlock}
     private readonly materialHiddenByMaterial = new WeakMap<object, boolean>();
     private externalWgslToonShaderPathValue: string | null = null;
     private colorCorrectionPostProcess: PostProcess | null = null;
+    private exportRenderSurface: ExportRenderSurface | null = null;
     private frameGraphPostEffectsSceneColorTarget: RenderTargetTexture | null = null;
     private frameGraphPostEffectsSceneColorPrePassActivationPass: PassPostProcess | null = null;
     private subSurfaceCompositionUsesLocalGamma: boolean | null = null;
@@ -9245,6 +9250,7 @@ ${beforeFogAppendBlock}
             this.camera,
             this.getFrameGraphPostEffectRuntimeOrder(),
             luminousMaskTexture?.getInternalTexture() ?? null,
+            this.exportRenderSurface?.getInternalTexture() ?? null,
         );
         if (!activated) {
             this.disposeFrameGraphPostEffectsSceneColorTarget();
@@ -10043,71 +10049,6 @@ ${beforeFogAppendBlock}
         this.runtimeDiagnostics.add(message);
     }
 
-    private copyBgraToRgba(source: Uint8Array, target: Uint8Array, width: number, height: number): void {
-        const pixelCount = width * height;
-        for (let i = 0; i < pixelCount; i += 1) {
-            const offset = i * 4;
-            target[offset + 0] = source[offset + 2];
-            target[offset + 1] = source[offset + 1];
-            target[offset + 2] = source[offset + 0];
-            target[offset + 3] = source[offset + 3];
-        }
-    }
-
-    private async captureCurrentFramebufferPngRgbaData(
-        width: number | null,
-        height: number | null,
-    ): Promise<{ width: number; height: number; rgbaData: Uint8Array } | null> {
-        const sourceWidth = Math.max(1, Math.floor(this.engine.getRenderWidth(true) || this.renderingCanvas.width || 1));
-        const sourceHeight = Math.max(1, Math.floor(this.engine.getRenderHeight(true) || this.renderingCanvas.height || 1));
-        const outputWidth = width ?? sourceWidth;
-        const outputHeight = height ?? sourceHeight;
-        const engine = this.engine as typeof this.engine & {
-            readPixels: (
-                x: number,
-                y: number,
-                width: number,
-                height: number,
-                hasAlpha?: boolean,
-                flushRenderer?: boolean,
-                data?: Uint8Array | null,
-            ) => Promise<ArrayBufferView>;
-            flushFramebuffer?: () => void;
-        };
-
-        engine.flushFramebuffer?.();
-        const pixelData = await engine.readPixels(0, 0, sourceWidth, sourceHeight, true, true, null);
-        const source = pixelData instanceof Uint8Array
-            ? pixelData
-            : new Uint8Array(pixelData.buffer, pixelData.byteOffset, pixelData.byteLength);
-        const rgbaData = new Uint8Array(source.byteLength);
-        if (this.engine instanceof WebGPUEngine) {
-            this.copyBgraToRgba(source, rgbaData, sourceWidth, sourceHeight);
-        } else {
-            rgbaData.set(source);
-        }
-
-        const sourceCanvas = document.createElement("canvas");
-        sourceCanvas.width = sourceWidth;
-        sourceCanvas.height = sourceHeight;
-        const sourceContext = sourceCanvas.getContext("2d");
-        if (!sourceContext) return null;
-        sourceContext.putImageData(new ImageData(new Uint8ClampedArray(rgbaData.buffer), sourceWidth, sourceHeight), 0, 0);
-
-        const outputCanvas = document.createElement("canvas");
-        outputCanvas.width = outputWidth;
-        outputCanvas.height = outputHeight;
-        const outputContext = outputCanvas.getContext("2d");
-        if (!outputContext) return null;
-        outputContext.drawImage(sourceCanvas, 0, 0, sourceWidth, sourceHeight, 0, 0, outputWidth, outputHeight);
-        const outputImage = outputContext.getImageData(0, 0, outputWidth, outputHeight);
-        return {
-            width: outputWidth,
-            height: outputHeight,
-            rgbaData: new Uint8Array(outputImage.data),
-        };
-    }
-
     async capturePngRgbaData(
         precisionOrOptions: number | { precision?: number; width?: number; height?: number } = 1
     ): Promise<{ width: number; height: number; rgbaData: Uint8Array } | null> {
@@ -10125,74 +10066,25 @@ ${beforeFogAppendBlock}
                 ? Math.max(180, Math.min(8192, Math.floor(requestedHeight)))
                 : Math.max(180, Math.min(8192, Math.floor(this.engine.getRenderHeight(true) * clampedPrecision)));
 
-            return await this.captureCurrentFramebufferPngRgbaData(width, height);
+            this.prepareExportRenderSurface(width, height);
+            const postEffectReady = await this.waitForPostEffectBackendReadyForCapture();
+            if (!postEffectReady) {
+                throw new Error("Post effects were not ready for PNG capture");
+            }
+            this.renderOnceForCapture(0);
+            const renderedFrame = await this.readExportRenderFrameAsync();
+            return {
+                width: renderedFrame.width,
+                height: renderedFrame.height,
+                rgbaData: renderedFrame.pixels,
+            };
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             console.error("Failed to capture PNG RGBA:", message);
             this.onError?.(`PNG RGBA capture error: ${message}`);
             return null;
-        }
-    }
-
-    getRenderingCanvasClientRect(): { x: number; y: number; width: number; height: number } {
-        const rect = this.renderingCanvas.getBoundingClientRect();
-        return {
-            x: rect.left,
-            y: rect.top,
-            width: rect.width,
-            height: rect.height,
-        };
-    }
-
-    /** Capture current viewport as PNG data URL */
-    async capturePngDataUrl(
-        precisionOrOptions: number | { precision?: number; width?: number; height?: number } = 1
-    ): Promise<string | null> {
-        try {
-            const options = typeof precisionOrOptions === "number"
-                ? { precision: precisionOrOptions }
-                : (precisionOrOptions ?? {});
-            const clampedPrecision = Math.max(0.25, Math.min(4, options.precision ?? 1));
-            const requestedWidth = options.width;
-            const requestedHeight = options.height;
-            const width = typeof requestedWidth === "number" && Number.isFinite(requestedWidth)
-                ? Math.max(320, Math.min(8192, Math.floor(requestedWidth)))
-                : null;
-            const height = typeof requestedHeight === "number" && Number.isFinite(requestedHeight)
-                ? Math.max(180, Math.min(8192, Math.floor(requestedHeight)))
-                : null;
-            const screenshotSize = width !== null && height !== null
-                ? { width, height }
-                : { precision: clampedPrecision };
-
-            if (this.mirroringFloorEnabledValue && this.scene.frameGraph) {
-                // Babylon's screenshot helpers can conflict with MirrorTexture + FrameGraph
-                // on WebGPU. Read the visible framebuffer directly, matching the WebM
-                // webgpu-copy capture path.
-                const rgbaFrame = await this.captureCurrentFramebufferPngRgbaData(width, height);
-                if (!rgbaFrame) return null;
-                const canvas = document.createElement("canvas");
-                canvas.width = rgbaFrame.width;
-                canvas.height = rgbaFrame.height;
-                const context = canvas.getContext("2d");
-                if (!context) return null;
-                context.putImageData(new ImageData(new Uint8ClampedArray(rgbaFrame.rgbaData), rgbaFrame.width, rgbaFrame.height), 0, 0);
-                return canvas.toDataURL("image/png");
-            }
-
-            return await CreateScreenshotUsingRenderTargetAsync(
-                this.engine,
-                this.camera,
-                screenshotSize,
-                "image/png",
-                1,
-                true
-            );
-        } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error("Failed to capture PNG:", message);
-            this.onError?.(`PNG capture error: ${message}`);
-            return null;
+        } finally {
+            this.releaseExportRenderSurface();
         }
     }
     get volume(): number {
@@ -12074,6 +11966,18 @@ ${beforeFogAppendBlock}
         return null;
     }
 
+    private syncExportRenderSurfaceTarget(): void {
+        const surface = this.exportRenderSurface;
+        if (!surface) {
+            return;
+        }
+        const frameGraphWritesSurface = this.postEffectBackend === "frameGraph"
+            && this.shouldExecuteFrameGraphPostEffects();
+        this.camera.outputRenderTarget = frameGraphWritesSurface
+            ? null
+            : surface.renderTarget;
+    }
+
     private applyModelExternalParentsBeforeRender(): void {
         const appliedModelIndices = new Set<number>();
         const applyingModelIndices = new Set<number>();
@@ -13357,6 +13261,86 @@ ${beforeFogAppendBlock}
         return this.isPostEffectBackendReadyForCapture();
     }
 
+    public prepareExportRenderSurface(
+        width: number,
+        height: number,
+    ): ExportRenderSurfaceDiagnostics {
+        const normalizedWidth = Math.max(1, Math.floor(width));
+        const normalizedHeight = Math.max(1, Math.floor(height));
+        const currentSurface = this.exportRenderSurface;
+        if (
+            currentSurface
+            && currentSurface.width === normalizedWidth
+            && currentSurface.height === normalizedHeight
+        ) {
+            this.syncExportRenderSurfaceTarget();
+            return currentSurface.getDiagnostics();
+        }
+
+        const rebuildFrameGraph = this.frameGraphPostEffectsController !== null;
+        if (rebuildFrameGraph) {
+            this.disposeFrameGraphPostEffectsController();
+        }
+        if (this.camera.outputRenderTarget === currentSurface?.renderTarget) {
+            this.camera.outputRenderTarget = null;
+        }
+        currentSurface?.dispose();
+
+        this.exportRenderSurface = new ExportRenderSurface(
+            this.scene,
+            this.camera,
+            normalizedWidth,
+            normalizedHeight,
+        );
+        if (rebuildFrameGraph) {
+            this.initializePostEffectBackend();
+        }
+        this.syncExportRenderSurfaceTarget();
+        const diagnostics = this.exportRenderSurface.getDiagnostics();
+        logInfo("performance", "export render surface prepared", {
+            ...diagnostics,
+            engine: this.getEngineType(),
+            postEffectBackend: this.postEffectBackend,
+        });
+        return diagnostics;
+    }
+
+    public async readExportRenderFrameAsync(): Promise<RenderedExportFrame> {
+        const surface = this.exportRenderSurface;
+        if (!surface) {
+            throw new Error("Export render surface is not prepared");
+        }
+        return await surface.readFrameAsync("opaque");
+    }
+
+    public releaseExportRenderSurface(): void {
+        const surface = this.exportRenderSurface;
+        if (!surface) {
+            return;
+        }
+
+        const rebuildFrameGraph = this.frameGraphPostEffectsController !== null;
+        if (rebuildFrameGraph) {
+            this.disposeFrameGraphPostEffectsController();
+        }
+        if (this.camera.outputRenderTarget === surface.renderTarget) {
+            this.camera.outputRenderTarget = null;
+        }
+        surface.dispose();
+        this.exportRenderSurface = null;
+        if (rebuildFrameGraph) {
+            this.initializePostEffectBackend();
+        }
+        logInfo("performance", "export render surface released", {
+            engine: this.getEngineType(),
+            postEffectBackend: this.postEffectBackend,
+        });
+    }
+
+    public getExportRenderSurfaceDiagnostics(): ExportRenderSurfaceDiagnostics | null {
+        return this.exportRenderSurface?.getDiagnostics() ?? null;
+    }
+
     public renderOnce(deltaMs = 1000 / 30): void {
         const clampedDeltaMs = Math.max(0, Math.min(100, deltaMs));
         const now = performance.now();
@@ -13390,6 +13374,7 @@ ${beforeFogAppendBlock}
         engineWithDelta._deltaTime = clampedDeltaMs;
         const advancedManualPlayback = this.advanceManualPlaybackWithoutAudio(clampedDeltaMs);
 
+        this.syncExportRenderSurfaceTarget();
         this.syncFrameGraphRenderTargetState();
         this.updateSimpleMotionBlurState(clampedDeltaMs);
         this.syncBackgroundVideoFrame();
@@ -13490,6 +13475,11 @@ ${beforeFogAppendBlock}
         this.sceneInstrumentation?.dispose();
         this.sceneInstrumentation = null;
         this.shutdownPostEffectBackend();
+        if (this.camera.outputRenderTarget === this.exportRenderSurface?.renderTarget) {
+            this.camera.outputRenderTarget = null;
+        }
+        this.exportRenderSurface?.dispose();
+        this.exportRenderSurface = null;
         if (this.defaultRenderingPipeline) {
             this.defaultRenderingPipeline.dispose();
             this.defaultRenderingPipeline = null;

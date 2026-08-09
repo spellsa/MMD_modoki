@@ -1,7 +1,32 @@
 # 出力レンダリング経路 共通 RGBA Surface 統合計画
 
 作成日: 2026-08-09
-状態: 計画 / 未着手
+状態: Phase 1〜3・単発 PNG 移行済み / 透過・性能検証は未着手
+
+## 2026-08-09 実装状況
+
+今回の初期実装では、連番 PNG と WebM の描画・readback を共通の
+`ExportRenderSurface` へ移した。
+
+- export job の間保持する `rgba8unorm` / 1 sample の `RenderTargetTexture` を追加した。
+- FrameGraph は最終 effect 出力を imported texture へ copy し、Classic は
+  `camera.outputRenderTarget` を同じ surface へ接続する。
+- CPU 側の契約を top-to-bottom / RGBA / 8bit / sRGB とし、row order の正規化を
+  surface 内へ集約した。
+- WebM の通常経路を `rgba-surface` へ変更し、CPU の BGRA to RGBA swizzle を通さない。
+  旧 `webgpu-copy` は比較用として残している。
+- 連番 PNG の毎フレーム `CreateScreenshotUsingRenderTargetAsync()` と RTT lifecycle を撤去し、
+  共通 surface のフレームを既存 PNG encoder IPC へ渡すようにした。
+- hidden exporter の canvas / engine render size を出力解像度と一致させた。
+- WebGPU + FrameGraph の実 readback と、1フレームの PNG / WebM 実ファイル生成を E2E で確認した。
+- 単発 PNG も同じ surface の `prepare -> render -> readback -> release` 経路へ移し、
+  backbuffer BGRA readback、Canvas 拡縮、ScreenshotTools、compositor snapshot の旧経路を削除した。
+- 単発 PNG の保存後に surface を解放して FrameGraph の通常 backbuffer 出力へ戻ることを E2E で確認した。
+
+未完了項目は Phase 4 以降に残す。背景透過モード、100フレームの性能再計測、比較用として
+残した WebM legacy capture mode の削除はこの初期実装には含めない。PNG exporter は保存完了後の
+同期的な Babylon / physics dispose が hidden window で停止する場合があるため、現時点では
+window teardown に回収を委ねている。この制約は cleanup 経路の再調査対象とする。
 
 ## 目的
 
@@ -307,9 +332,11 @@ BGRA PoC は小さい比較対象として先に実施してよいが、BGRA bac
 
 ### Phase 6: 単発 PNG と legacy 経路の整理
 
-- 単発 PNG も共通 surface へ移す。
-- compositor snapshot、legacy screenshot RTT、backbuffer BGRA readback の用途を棚卸しする。
-- 同じ機能を持つ古い経路を削除する。
+2026-08-09 に単発 PNG の共通 surface 移行を実施済み。
+
+- [x] 単発 PNG も共通 surface へ移す。
+- [x] compositor snapshot、legacy screenshot RTT、backbuffer BGRA readback の用途を棚卸しする。
+- [x] 単発 PNG と同じ機能を持つ古い経路を削除する。
 - stable / experimental の恒久的な二本立てを避ける。
 
 ## 検証

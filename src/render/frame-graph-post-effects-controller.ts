@@ -15,6 +15,7 @@ import { FrameGraphSSRRenderingPipelineTask } from "@babylonjs/core/FrameGraph/T
 import { FrameGraphGeometryRendererTask } from "@babylonjs/core/FrameGraph/Tasks/Rendering/geometryRendererTask";
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
+import { FrameGraphCopyToTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToTextureTask";
 import type { FrameGraphTextureHandle } from "@babylonjs/core/FrameGraph/frameGraphTypes";
 import type { FrameGraphRenderPass } from "@babylonjs/core/FrameGraph/Passes/renderPass";
 import type { FrameGraphRenderContext } from "@babylonjs/core/FrameGraph/frameGraphRenderContext";
@@ -68,6 +69,10 @@ export type FrameGraphPostEffectsInfo = {
     event: "activated" | "ready" | "ssgi-ready";
     details?: Record<string, unknown>;
 };
+
+type FrameGraphPostEffectsOutputTask =
+    | FrameGraphCopyToBackbufferColorTask
+    | FrameGraphCopyToTextureTask;
 
 type EffectWrapperReadyLike = {
     effect?: {
@@ -1927,7 +1932,7 @@ export class FrameGraphPostEffectsController {
     private sharpenTask: FrameGraphSharpenTask | null = null;
     private fxaaEffect: ThinFXAAPostProcess | null = null;
     private fxaaTask: FrameGraphFXAATask | null = null;
-    private outputTask: FrameGraphCopyToBackbufferColorTask | null = null;
+    private outputTask: FrameGraphPostEffectsOutputTask | null = null;
     private baseOutputTexture: FrameGraphTextureHandle | null = null;
     private frameGraph: FrameGraph | null = null;
     private activeScene: Scene | null = null;
@@ -2112,6 +2117,7 @@ export class FrameGraphPostEffectsController {
         camera?: Camera | null,
         effectOrder: readonly FrameGraphPostEffectId[] = FRAME_GRAPH_POST_EFFECT_IDS,
         luminousTexture?: InternalTexture | null,
+        outputTexture?: InternalTexture | null,
     ): boolean {
         if (this.active) {
             return true;
@@ -2792,10 +2798,15 @@ export class FrameGraphPostEffectsController {
         frameGraph.addTask(fxaaTask);
         this.fxaaTask = fxaaTask;
 
-        const outputTask = new FrameGraphCopyToBackbufferColorTask(
-            "frameGraphPostEffectsOutput",
-            frameGraph,
-        );
+        const outputTask: FrameGraphPostEffectsOutputTask = outputTexture
+            ? new FrameGraphCopyToTextureTask("frameGraphPostEffectsExportOutput", frameGraph)
+            : new FrameGraphCopyToBackbufferColorTask("frameGraphPostEffectsOutput", frameGraph);
+        if (outputTask instanceof FrameGraphCopyToTextureTask && outputTexture) {
+            outputTask.targetTexture = frameGraph.textureManager.importTexture(
+                "mmdModokiExportRenderSurface",
+                outputTexture,
+            );
+        }
         frameGraph.addTask(outputTask);
         this.outputTask = outputTask;
         this.baseOutputTexture = imageProcessingTask.outputTexture;
@@ -2993,7 +3004,7 @@ export class FrameGraphPostEffectsController {
 
     private connectPostEffectOrder(
         baseTexture: FrameGraphTextureHandle,
-        outputTask: FrameGraphCopyToBackbufferColorTask,
+        outputTask: FrameGraphPostEffectsOutputTask,
         effectOrder: readonly FrameGraphPostEffectId[],
     ): void {
         let currentTexture = baseTexture;

@@ -1,5 +1,5 @@
 # WebM 出力 現行仕様 / 実装
-更新日: 2026-03-13
+更新日: 2026-08-09
 
 ## 1. 概要
 - `出力 > WebM動画` から `.webm` を保存する
@@ -7,7 +7,8 @@
 - `音声あり` を ON にすると、読み込み済み音声を mux する
 - codec 選択 UI は通常表示しない
 - 内部既定 codec は `VP8`
-- キャプチャ方式は `readPixels (stable) / canvas / VideoFrame / WebGPU copy` を切り替え可能
+- 通常のキャプチャ方式は共通 `RGBA Surface`
+- `readPixels / canvas / WebGPU copy` は比較・診断用 legacy 経路として内部に残す
 - 出力中は main UI を lock し、busy overlay に簡略進捗を表示する
 
 ## 2. UI
@@ -32,8 +33,8 @@
 - `PNG Seq` は UI から外している
 - codec 選択 UI も外している
 - 新規既定値では内部的に `VP8` を使う
-- キャプチャ方式の既定値は `readPixels (stable)`
-- `canvas / VideoFrame` と `WebGPU copy` は実験扱い
+- キャプチャ方式の既定値は `rgba-surface`
+- legacy 経路は通常 UI から選択しない
 
 ## 3. タイムライン基準
 MMD タイムラインは 30fps 基準で扱う。
@@ -91,21 +92,24 @@ MMD タイムラインは 30fps 基準で扱う。
 ## 5. 出力手順
 1. hidden exporter window で `MmdManager.create(canvas)`
 2. `importProjectState(project, { forExport: true })`
-3. `setTimelineTarget("camera")`
-4. `pause()`, `setAutoRenderEnabled(false)`
-5. `seekTo(startFrame)`
-6. codec / bitrate を決定
-7. 必要なら音声を decode / slice
-8. `Output + WebMOutputFormat + StreamTarget` を生成
-9. フレームごとに render / capture / encode
-10. `close -> finalize -> finishWebmExportJob`
+3. 出力解像度の `ExportRenderSurface` (`rgba8unorm`) を準備
+4. `setTimelineTarget("camera")`
+5. `pause()`, `setAutoRenderEnabled(false)`
+6. `seekTo(startFrame)`
+7. codec / bitrate を決定
+8. 必要なら音声を decode / slice
+9. `Output + WebMOutputFormat + StreamTarget` を生成
+10. フレームごとに render / surface readback / encode
+11. `close -> finalize -> finishWebmExportJob`
 
 ## 6. capture 経路
-現行は安定性優先で以下を使う。
+現行の通常経路は連番 PNG と同じ以下の surface を使う。
 
-- reusable `RenderTargetTexture`
+- export job lifetime の reusable `ExportRenderSurface` (`rgba8unorm`)
+- FrameGraph 最終出力または Classic camera 最終出力
 - `readPixels()`
-- `VideoSample(RGBA)`
+- top-to-bottom / RGBA へ row order を正規化
+- `VideoSample(RGBA)`。BGRA to RGBA の CPU channel swizzle は行わない
 
 不採用:
 
@@ -163,13 +167,16 @@ MMD タイムラインは 30fps 基準で扱う。
 
 キャプチャ方式:
 
-- `readpixels`
+- `rgba-surface`
   - 既定値
-  - `RenderTargetTexture.readPixels()` で RGBA を取得する stable 経路
+  - PNG 連番と共通の最終出力 surface から RGBA を取得する
+- `readpixels`
+  - 旧 `RenderTargetTexture.readPixels()` 経路
 - `canvas`
   - `canvas / VideoFrame` を直接 `VideoSample` 化する experimental 経路
 - `webgpu-copy`
-  - `GPUTexture.copyTextureToBuffer()` を使う WebGPU 専用 experimental 経路
+  - backbuffer の `GPUTexture.copyTextureToBuffer()` を使う旧 WebGPU 比較経路
+  - CPU BGRA to RGBA swizzle を含む
   - WebGL / 非 WebGPU 環境では使えない
 
 ## 9. 保存方式

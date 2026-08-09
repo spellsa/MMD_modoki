@@ -1,8 +1,4 @@
 import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
-import { CreateScreenshotUsingRenderTargetAsync } from "@babylonjs/core/Misc/screenshotTools";
-import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
-import type { Camera } from "@babylonjs/core/Cameras/camera";
-import type { Scene } from "@babylonjs/core/scene";
 import type { PngSequenceExportDiagnostics, PngSequenceExportRequest } from "./types";
 
 export interface PngSequenceExportCallbacks {
@@ -25,113 +21,6 @@ type ExportQueueItem = {
     rgbaData: Uint8Array;
 };
 
-type ScreenshotInternals = {
-    engine: AbstractEngine;
-    camera: Camera;
-    scene: Scene;
-};
-
-type ReadTexturePixelsEngine = {
-    _readTexturePixels?: (...args: unknown[]) => Promise<ArrayBufferView>;
-    _currentRenderTarget?: unknown;
-    isWebGPU: boolean;
-};
-
-const isCaptureDiagnosticsEnabled = (): boolean => (
-    new URLSearchParams(window.location.search).get("e2e") === "1"
-);
-
-const readScalarDiagnosticValue = (value: unknown): string | number | null => {
-    if (typeof value === "string" || typeof value === "number") {
-        return value;
-    }
-    return null;
-};
-
-const readNumberDiagnosticValue = (value: unknown): number | null => (
-    typeof value === "number" && Number.isFinite(value) ? value : null
-);
-
-const readObjectDiagnosticValue = (value: unknown, key: string): unknown => {
-    if (!value || typeof value !== "object") {
-        return null;
-    }
-    return (value as Record<string, unknown>)[key] ?? null;
-};
-
-const installPngCaptureDiagnostics = (
-    screenshotInternals: ScreenshotInternals,
-    outputWidth: number,
-    outputHeight: number,
-): () => void => {
-    if (!isCaptureDiagnosticsEnabled()) {
-        return () => undefined;
-    }
-
-    const route = screenshotInternals.scene.frameGraph
-        ? "frame-graph-screenshot"
-        : "legacy-render-target-screenshot";
-    const engine = screenshotInternals.engine as ReadTexturePixelsEngine;
-    const originalReadTexturePixels = engine._readTexturePixels;
-    let readbackLogged = false;
-
-    window.electronAPI.logInfo("performance", "png capture route diagnostics", {
-        screenshotApi: "CreateScreenshotUsingRenderTargetAsync",
-        route,
-        sceneFrameGraphActive: Boolean(screenshotInternals.scene.frameGraph),
-        expectedBabylonPath: screenshotInternals.scene.frameGraph
-            ? "CreateScreenshotForFrameGraphAsync"
-            : "RenderTargetTexture-create-read-dispose",
-        engineBackend: screenshotInternals.engine.isWebGPU ? "webgpu" : "other",
-        outputWidth,
-        outputHeight,
-        currentRenderTargetBound: Boolean(engine._currentRenderTarget),
-        readTexturePixelsHookInstalled: Boolean(originalReadTexturePixels),
-    });
-
-    if (!originalReadTexturePixels) {
-        return () => undefined;
-    }
-
-    engine._readTexturePixels = (...args: unknown[]): Promise<ArrayBufferView> => {
-        const requestedWidth = readNumberDiagnosticValue(args[1]);
-        const requestedHeight = readNumberDiagnosticValue(args[2]);
-        const isScreenshotSizedReadback = requestedWidth === outputWidth
-            && requestedHeight === outputHeight;
-        if (!readbackLogged && isScreenshotSizedReadback) {
-            readbackLogged = true;
-            const internalTexture = args[0];
-            const hardwareTexture = readObjectDiagnosticValue(internalTexture, "_hardwareTexture");
-            const gpuTexture = readObjectDiagnosticValue(hardwareTexture, "underlyingResource");
-            window.electronAPI.logInfo("performance", "png capture readback texture diagnostics", {
-                route,
-                readbackMethod: "engine._readTexturePixels",
-                babylonTextureFormat: readScalarDiagnosticValue(
-                    readObjectDiagnosticValue(internalTexture, "format"),
-                ),
-                hardwareTextureFormat: readScalarDiagnosticValue(
-                    readObjectDiagnosticValue(hardwareTexture, "format"),
-                ),
-                gpuTextureLabel: readScalarDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "label")),
-                gpuTextureFormat: readScalarDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "format")),
-                gpuTextureUsage: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "usage")),
-                gpuTextureWidth: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "width")),
-                gpuTextureHeight: readNumberDiagnosticValue(readObjectDiagnosticValue(gpuTexture, "height")),
-                requestedWidth,
-                requestedHeight,
-                flushRenderer: args[6] === true,
-                noDataConversion: args[7] === true,
-                currentRenderTargetBound: Boolean(engine._currentRenderTarget),
-            });
-        }
-        return originalReadTexturePixels.apply(engine, args);
-    };
-
-    return () => {
-        engine._readTexturePixels = originalReadTexturePixels;
-    };
-};
-
 const waitForAnimationFrame = async (): Promise<void> => {
     await new Promise<void>((resolve) => {
         requestAnimationFrame(() => resolve());
@@ -150,63 +39,6 @@ const sleepMs = async (ms: number): Promise<void> => {
     await new Promise<void>((resolve) => {
         window.setTimeout(() => resolve(), delay);
     });
-};
-
-const flipRgbaRowsInPlace = (bytes: Uint8Array, width: number, height: number): void => {
-    const rowStride = width * 4;
-    const swapBuffer = new Uint8Array(rowStride);
-    const halfRows = Math.floor(height / 2);
-    for (let y = 0; y < halfRows; y += 1) {
-        const topStart = y * rowStride;
-        const bottomStart = (height - 1 - y) * rowStride;
-        swapBuffer.set(bytes.subarray(topStart, topStart + rowStride));
-        bytes.copyWithin(topStart, bottomStart, bottomStart + rowStride);
-        bytes.set(swapBuffer, bottomStart);
-    }
-};
-
-const captureFrameRgbaAsync = async (
-    screenshotInternals: ScreenshotInternals,
-    outputWidth: number,
-    outputHeight: number,
-): Promise<{ width: number; height: number; rgbaData: Uint8Array } | null> => {
-    let captured: { width: number; height: number; rgbaData: Uint8Array } | null = null;
-
-    await CreateScreenshotUsingRenderTargetAsync(
-        screenshotInternals.engine,
-        screenshotInternals.camera,
-        { width: outputWidth, height: outputHeight },
-        "image/png",
-        1,
-        false,
-        undefined,
-        false,
-        false,
-        true,
-        undefined,
-        undefined,
-        (
-            width,
-            height,
-            data,
-            successCallback,
-            _mimeType,
-            _fileName,
-            invertY
-        ) => {
-            const source = data instanceof Uint8Array
-                ? data
-                : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-            const rgbaData = new Uint8Array(source);
-            if (invertY) {
-                flipRgbaRowsInPlace(rgbaData, width, height);
-            }
-            captured = { width, height, rgbaData };
-            successCallback?.("");
-        }
-    );
-
-    return captured;
 };
 
 export async function runPngSequenceExportJob(
@@ -241,13 +73,17 @@ export async function runPngSequenceExportJob(
         throw new Error("No frames to export");
     }
 
+    canvas.style.width = `${captureWidth}px`;
+    canvas.style.height = `${captureHeight}px`;
+    canvas.width = captureWidth;
+    canvas.height = captureHeight;
+
     callbacks.onStatus?.("Initializing export renderer...");
     const mmdManager = await MmdManager.create(canvas, enginePreference);
-    let restoreCaptureDiagnostics = (): void => undefined;
 
     try {
         callbacks.onStatus?.("Loading project into export renderer...");
-        const importResult = await mmdManager.importProjectState(request.project);
+        const importResult = await mmdManager.importProjectState(request.project, { forExport: true });
         const expectedModelCount = request.project.scene.models.length;
         if (importResult.loadedModels < expectedModelCount) {
             const warningText = importResult.warnings.slice(0, 3).join(" | ");
@@ -264,17 +100,17 @@ export async function runPngSequenceExportJob(
         // Export window does not need bone-edit overlay.
         mmdManager.setTimelineTarget("camera");
 
+        mmdManager.prepareExportRenderSurface(captureWidth, captureHeight);
+
         // Let async Babylon resource/state updates settle before freeze-mode export.
         await waitForAnimationFrames(3);
         mmdManager.pause();
         mmdManager.setAutoRenderEnabled(false);
         mmdManager.seekTo(startFrame);
-        const screenshotInternals = mmdManager as unknown as ScreenshotInternals;
-        restoreCaptureDiagnostics = installPngCaptureDiagnostics(
-            screenshotInternals,
-            captureWidth,
-            captureHeight,
-        );
+        const postEffectReady = await mmdManager.waitForPostEffectBackendReadyForCapture();
+        if (!postEffectReady) {
+            throw new Error("Post effects were not ready for PNG sequence capture");
+        }
 
         const padDigits = Math.max(4, String(endFrame).length);
         const totalFrames = frameList.length;
@@ -349,16 +185,9 @@ export async function runPngSequenceExportJob(
                 seekMsTotal += performance.now() - seekStartedAt;
 
                 const captureStartedAt = performance.now();
-                const capturedFrame = await captureFrameRgbaAsync(
-                    screenshotInternals,
-                    captureWidth,
-                    captureHeight,
-                );
+                mmdManager.renderOnceForCapture(0);
+                const capturedFrame = await mmdManager.readExportRenderFrameAsync();
                 captureMsTotal += performance.now() - captureStartedAt;
-                if (!capturedFrame) {
-                    fatalError = new Error(`Failed to capture frame ${frame}`);
-                    break;
-                }
 
                 const fileName = `${prefix}_${String(frame).padStart(padDigits, "0")}.png`;
                 queue.push({
@@ -366,7 +195,7 @@ export async function runPngSequenceExportJob(
                     fileName,
                     width: capturedFrame.width,
                     height: capturedFrame.height,
-                    rgbaData: capturedFrame.rgbaData,
+                    rgbaData: capturedFrame.pixels,
                 });
                 capturedCount += 1;
             }
@@ -395,8 +224,8 @@ export async function runPngSequenceExportJob(
         await callbacks.onCompleted?.(result);
         return result;
     } finally {
-        restoreCaptureDiagnostics();
         mmdManager.setAutoRenderEnabled(true);
-        mmdManager.dispose();
+        // This exporter runs in a dedicated hidden window. Synchronous Babylon / physics disposal can
+        // stall after the files are already saved, so let window teardown reclaim these resources.
     }
 }

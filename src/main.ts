@@ -482,10 +482,11 @@ const sanitizeWebmExportRequest = (request: WebmExportRequest): WebmExportReques
     ? request.preferredVideoCodec
     : 'auto';
   const captureMode: WebmCaptureMode = request.captureMode === 'canvas'
+    || request.captureMode === 'rgba-surface'
     || request.captureMode === 'webgpu-copy'
     || request.captureMode === 'readpixels'
     ? request.captureMode
-    : 'readpixels';
+    : 'rgba-surface';
   const diagnosticQueueLimit = isE2eMode
     && typeof request.diagnosticQueueLimit === 'number'
     && Number.isFinite(request.diagnosticQueueLimit)
@@ -1272,35 +1273,6 @@ ipcMain.handle('file:writeTextToPath', async (_event, filePath: string, content:
   }
 });
 
-ipcMain.handle('file:savePng', async (_event, dataUrl: string, defaultFileName?: string) => {
-  try {
-    const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
-      ? defaultFileName
-      : `${defaultFileName ?? 'mmd_capture'}.png`;
-
-    const result = await dialog.showSaveDialog({
-      title: 'PNG画像を保存',
-      defaultPath: path.join(app.getPath('pictures'), safeName),
-      filters: [{ name: 'PNG Image', extensions: ['png'] }],
-    });
-
-    if (result.canceled || !result.filePath) {
-      return null;
-    }
-
-    const prefix = 'data:image/png;base64,';
-    const base64 = dataUrl.startsWith(prefix) ? dataUrl.slice(prefix.length) : dataUrl;
-    fs.writeFileSync(result.filePath, base64, 'base64');
-    return result.filePath;
-  } catch (err) {
-    writeAppLog('error', 'ipc', 'failed to save PNG', {
-      defaultFileName,
-      ...createLogErrorData(err),
-    });
-    return null;
-  }
-});
-
 function encodeRgbaToPngBytes(rgbaData: Uint8Array, width: number, height: number): Buffer | null {
   if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
 
@@ -1363,84 +1335,6 @@ ipcMain.handle(
     }
   },
 );
-
-ipcMain.handle(
-  'file:saveCanvasSnapshotPng',
-  async (
-    event,
-    rect: { x: number; y: number; width: number; height: number },
-    outputWidth: number,
-    outputHeight: number,
-    defaultFileName?: string,
-  ) => {
-    try {
-      const ownerWindow = BrowserWindow.fromWebContents(event.sender);
-      if (!ownerWindow) return null;
-
-      const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.png'))
-        ? defaultFileName
-        : `${defaultFileName ?? 'mmd_capture'}.png`;
-      const captureRect = {
-        x: Math.max(0, Math.floor(rect?.x ?? 0)),
-        y: Math.max(0, Math.floor(rect?.y ?? 0)),
-        width: Math.max(1, Math.floor(rect?.width ?? 1)),
-        height: Math.max(1, Math.floor(rect?.height ?? 1)),
-      };
-      const pngWidth = Math.max(1, Math.floor(outputWidth));
-      const pngHeight = Math.max(1, Math.floor(outputHeight));
-
-      const snapshot = await ownerWindow.webContents.capturePage(captureRect);
-      const outputImage = pngWidth !== captureRect.width || pngHeight !== captureRect.height
-        ? snapshot.resize({ width: pngWidth, height: pngHeight, quality: 'best' })
-        : snapshot;
-      const pngBytes = outputImage.toPNG();
-
-      const result = await dialog.showSaveDialog(ownerWindow, {
-        title: 'Save PNG Image',
-        defaultPath: path.join(app.getPath('pictures'), safeName),
-        filters: [{ name: 'PNG Image', extensions: ['png'] }],
-      });
-
-      if (result.canceled || !result.filePath) {
-        return null;
-      }
-
-      await fs.promises.writeFile(result.filePath, pngBytes);
-      return result.filePath;
-    } catch (err) {
-      writeAppLog('error', 'ipc', 'failed to save canvas snapshot PNG', {
-        defaultFileName,
-        outputWidth,
-        outputHeight,
-        ...createLogErrorData(err),
-      });
-      return null;
-    }
-  },
-);
-
-ipcMain.handle('file:savePngToPath', async (_event, dataUrl: string, directoryPath: string, fileName: string) => {
-  try {
-    if (!directoryPath || !fileName) return null;
-    const safeFileName = path.basename(fileName);
-    if (!safeFileName.toLowerCase().endsWith('.png')) return null;
-
-    await ensureDirectoryExists(directoryPath);
-    const filePath = path.join(directoryPath, safeFileName);
-
-    const prefix = 'data:image/png;base64,';
-    const base64 = dataUrl.startsWith(prefix) ? dataUrl.slice(prefix.length) : dataUrl;
-    await fs.promises.writeFile(filePath, base64, 'base64');
-    return filePath;
-  } catch (err) {
-    writeAppLog('error', 'ipc', 'failed to save PNG to path', {
-      directoryPath,
-      fileName,
-      ...createLogErrorData(err),
-    });
-    return null;
-  }
-});
 
 ipcMain.handle(
   'file:savePngRgbaToPath',

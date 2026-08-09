@@ -235,7 +235,7 @@ export class WebmExportDialogController implements PopupContentController {
         if (this.usePlaybackRangeInput) this.output.setUsePlaybackRange(this.usePlaybackRangeInput.checked);
         if (this.startFrameInput) this.output.setStartFrame(this.parseNumberInput(this.startFrameInput, 0));
         if (this.endFrameInput) this.output.setEndFrame(this.parseNumberInput(this.endFrameInput, 0));
-        this.output.setCaptureMode("webgpu-copy");
+        this.output.setCaptureMode("rgba-surface");
         this.dispatchAction({ type: "output.sanitizeFrameRange", source: "menu", boundary: "end" });
     }
 

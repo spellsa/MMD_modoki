@@ -58,8 +58,10 @@ const formatCaptureModeLabel = (mode: WebmCaptureMode): string => {
     switch (mode) {
         case "canvas":
             return "Canvas";
+        case "rgba-surface":
+            return "RGBA統合";
         case "webgpu-copy":
-            return "速度優先";
+            return "旧WebGPU copy";
         case "readpixels":
         default:
             return "安定";
@@ -357,6 +359,41 @@ const createCanvasFrameCapture = (
     };
 };
 
+const createRgbaSurfaceFrameCapture = (
+    mmdManager: MmdManager,
+): FrameCapture => {
+    return {
+        modeLabel: "rgba-surface",
+        captureFrameAsync: async (frame: number, timestamp: number, duration: number): Promise<ExportQueueItem> => {
+            const readbackStartedAt = performance.now();
+            const renderedFrame = await mmdManager.readExportRenderFrameAsync();
+            const readbackMs = performance.now() - readbackStartedAt;
+            const sampleCreationStartedAt = performance.now();
+            const videoSample = createRawRgbaVideoSample(
+                renderedFrame.pixels,
+                renderedFrame.width,
+                renderedFrame.height,
+                timestamp,
+                duration,
+            );
+            return {
+                frame,
+                videoSample,
+                release: null,
+                captureTiming: {
+                    readbackMs,
+                    pixelTransformMs: 0,
+                    sampleCreationMs: performance.now() - sampleCreationStartedAt,
+                },
+            };
+        },
+        flushPendingAsync: async (): Promise<ExportQueueItem[]> => [],
+        dispose: () => {
+            // ExportRenderSurface is owned by MmdManager.
+        },
+    };
+};
+
 const createWebGpuCopyFrameCapture = (
     callbacks: WebmExportCallbacks,
     exportInternals: ExportRuntimeInternals,
@@ -460,6 +497,7 @@ const createFrameCapture = (
     callbacks: WebmExportCallbacks,
     captureMode: WebmCaptureMode,
     canvas: HTMLCanvasElement,
+    mmdManager: MmdManager,
     exportInternals: ExportRuntimeInternals,
     width: number,
     height: number,
@@ -467,6 +505,8 @@ const createFrameCapture = (
     switch (captureMode) {
         case "canvas":
             return createCanvasFrameCapture(callbacks, canvas);
+        case "rgba-surface":
+            return createRgbaSurfaceFrameCapture(mmdManager);
         case "webgpu-copy":
             return createWebGpuCopyFrameCapture(callbacks, exportInternals, width, height);
         case "readpixels":
@@ -682,10 +722,11 @@ export async function runWebmExportJob(
     const totalFrames = Math.max(1, Math.round((timelineFrameCount / TIMELINE_FPS) * fps));
     const exportDurationSeconds = totalFrames / fps;
     const captureMode: WebmCaptureMode = request.captureMode === "canvas"
+        || request.captureMode === "rgba-surface"
         || request.captureMode === "webgpu-copy"
         || request.captureMode === "readpixels"
         ? request.captureMode
-        : "webgpu-copy";
+        : "rgba-surface";
 
     const maxQueueLength = typeof request.diagnosticQueueLimit === "number"
         && Number.isFinite(request.diagnosticQueueLimit)
@@ -714,6 +755,8 @@ export async function runWebmExportJob(
                 `Project load incomplete (${importResult.loadedModels}/${expectedModelCount}). ${warningText}`
             );
         }
+
+        mmdManager.prepareExportRenderSurface(outputWidth, outputHeight);
 
         mmdManager.setTimelineTarget("camera");
         await waitForAnimationFrames(1);
@@ -785,6 +828,7 @@ export async function runWebmExportJob(
             callbacks,
             captureMode,
             canvas,
+            mmdManager,
             exportRuntimeInternals,
             outputWidth,
             outputHeight,
