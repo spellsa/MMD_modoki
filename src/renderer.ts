@@ -489,10 +489,11 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
   const viewportOverlay = document.getElementById("viewport-overlay");
   const statusText = document.getElementById("status-text");
 
+  let documentTitlePrefix = "PNG Export";
   const setStatus = (message: string): void => {
     if (statusText) statusText.textContent = message;
     if (busyText) busyText.textContent = message;
-    document.title = `PNG Sequence Export - ${message}`;
+    document.title = `${documentTitlePrefix} - ${message}`;
   };
 
   const closeExporterWindowSoon = (): void => {
@@ -530,6 +531,7 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
       closeExporterWindowSoon();
       return;
     }
+    documentTitlePrefix = request.exportKind === "single" ? "PNG Export" : "PNG Sequence Export";
 
     let lastProgressReportAt = 0;
     const rendererBackendParam = searchParams.get("rendererBackend");
@@ -554,6 +556,7 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
             frame,
             startFrame: request.startFrame,
             endFrame: request.endFrame,
+            exportKind: request.exportKind ?? "sequence",
           });
         }
       },
@@ -566,6 +569,7 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
           frame: request.endFrame,
           startFrame: request.startFrame,
           endFrame: request.endFrame,
+          exportKind: request.exportKind ?? "sequence",
           diagnostics: completed.diagnostics,
         });
       },

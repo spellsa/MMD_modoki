@@ -10,6 +10,7 @@ import { IblShadowSettingsDialogController } from "./ibl-shadow-settings-dialog-
 import { LightingShadowSettingsDialogController } from "./lighting-shadow-settings-dialog-controller";
 import { MirrorFloorSettingsDialogController } from "./mirror-floor-settings-dialog-controller";
 import { PhysicsSettingsDialogController } from "./physics-settings-dialog-controller";
+import { PngExportDialogController } from "./png-export-dialog-controller";
 import { PopupDialogController } from "./popup-dialog-controller";
 import type { WebmExportSettingsAdapter } from "./export-ui-controller";
 import { WebmExportDialogController } from "./webm-export-dialog-controller";
@@ -27,7 +28,7 @@ type AppMenuControllerDeps = {
     refreshModelEdgeUi: () => void;
     refreshLightingUi: () => void;
     refreshMaterialUi: () => void;
-    createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
+    createExportSettingsAdapter: () => WebmExportSettingsAdapter;
 };
 
 type DialogKind = "about" | "shortcuts" | "preferences";
@@ -63,7 +64,7 @@ export class AppMenuController {
     private readonly refreshModelEdgeUi: () => void;
     private readonly refreshLightingUi: () => void;
     private readonly refreshMaterialUi: () => void;
-    private readonly createWebmExportSettingsAdapter: () => WebmExportSettingsAdapter;
+    private readonly createExportSettingsAdapter: () => WebmExportSettingsAdapter;
     private readonly popupDialogController: PopupDialogController;
     private openGroup: HTMLElement | null = null;
 
@@ -79,7 +80,7 @@ export class AppMenuController {
         this.refreshModelEdgeUi = deps.refreshModelEdgeUi;
         this.refreshLightingUi = deps.refreshLightingUi;
         this.refreshMaterialUi = deps.refreshMaterialUi;
-        this.createWebmExportSettingsAdapter = deps.createWebmExportSettingsAdapter;
+        this.createExportSettingsAdapter = deps.createExportSettingsAdapter;
         this.popupDialogController = new PopupDialogController();
         this.setupMenuEvents();
     }
@@ -320,7 +321,7 @@ export class AppMenuController {
                 this.dispatchAction({ type: "project.save", source: "menu", forceChoosePath: true });
                 return;
             case "file.exportPng":
-                this.dispatchAction({ type: "project.exportPng", source: "menu" });
+                this.openPngExportDialog(invoker ?? null);
                 return;
             case "file.webmExportSettings":
                 this.openWebmExportDialog(invoker ?? null);
@@ -700,7 +701,24 @@ export class AppMenuController {
             restoreFocusTo: invoker,
             content: new WebmExportDialogController({
                 dispatchAction: (action) => this.dispatchAction(action),
-                output: this.createWebmExportSettingsAdapter(),
+                output: this.createExportSettingsAdapter(),
+                close: () => {
+                    this.popupDialogController.close();
+                },
+            }),
+        });
+    }
+
+    private openPngExportDialog(invoker: HTMLElement | null): void {
+        this.popupDialogController.open({
+            id: "png-export",
+            surface: "modal",
+            title: t("dialog.pngExport.title"),
+            size: "sm",
+            restoreFocusTo: invoker,
+            content: new PngExportDialogController({
+                dispatchAction: (action) => this.dispatchAction(action),
+                output: this.createExportSettingsAdapter(),
                 close: () => {
                     this.popupDialogController.close();
                 },

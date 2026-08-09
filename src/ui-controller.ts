@@ -633,7 +633,7 @@ export class UIController {
             refreshModelEdgeUi: () => this.modelEdgeController?.refresh(),
             refreshLightingUi: () => this.refreshLightingUiFromRuntime(),
             refreshMaterialUi: () => this.shaderPanelController?.refresh(),
-            createWebmExportSettingsAdapter: () => this.exportUiController?.createWebmExportSettingsAdapter() ?? {
+            createExportSettingsAdapter: () => this.exportUiController?.createExportSettingsAdapter() ?? {
                 getState: () => ({
                     aspectPreset: "16:9",
                     sizePreset: "1920",
@@ -653,6 +653,7 @@ export class UIController {
                 setSizePreset: () => undefined,
                 setWidth: () => undefined,
                 setHeight: () => undefined,
+                setQualityScale: () => undefined,
                 setFps: () => undefined,
                 setIncludeAudio: () => undefined,
                 setUsePlaybackRange: () => undefined,
@@ -2213,7 +2214,11 @@ export class UIController {
             void this.saveProject(action.forceChoosePath ?? false);
         });
         this.actionDispatcher.register("project.load", () => this.loadProject());
-        this.actionDispatcher.register("project.exportPng", () => {
+        this.actionDispatcher.register("project.exportPng", (action) => {
+            if (action.renderMode === "detached") {
+                void this.exportUiController?.exportPNGDetached();
+                return;
+            }
             void this.exportUiController?.exportPNG();
         });
         this.actionDispatcher.register("project.exportPngSequence", () => {

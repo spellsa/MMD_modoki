@@ -137,22 +137,40 @@ FrameGraphがsurfaceへ書く場合は二重出力を避けるため `camera.out
 
 ### 単発 PNG
 
-実装: `src/ui/export-ui-controller.ts`、`src/mmd-manager.ts`
+実装: `src/ui/export-ui-controller.ts`、`src/png-sequence-exporter.ts`、`src/mmd-manager.ts`
+
+単発PNGには目的の異なる2経路を残す。
+
+| 導線 | 描画場所 | 用途 |
+| --- | --- | --- |
+| メニューバーの`PNG出力...` | 非表示の専用exporter window | 4K / 8Kを含む高解像度・最終成果物 |
+| シークバーのスクリーンショット、ショートカット | editor viewport | 現在表示の素早いスナップショット |
+
+メニューバー経路は保存先を選んだ後、現在フレームだけのhidden PNG jobを起動する。専用canvasを
+指定した幅×高さにしてから`MmdManager`を生成・project importするため、scene color、depth、PostFXを
+含む描画系全体が出力解像度で構築される。viewport解像度の中間画像を4Kへ引き伸ばす経路ではない。
 
 ```text
-editor overlay抑止
-  -> 2 animation frames待機
-  -> prepare surface
-  -> PostFX ready待機
-  -> renderOnceForCapture(0)
-  -> RGBA readback
-  -> release surface
+詳細ダイアログ（比率 / 長辺 / 幅×高さ）
+  -> 保存先を確定
+  -> hidden exporter windowを起動
+  -> 指定解像度でproject import / PostFX準備
+  -> 現在フレームを1回render
+  -> 共通RGBA Surface readback
   -> 1 Web Workerでfilter None + deflate
-  -> file:savePngBytes
+  -> 指定ファイルへ保存
 ```
 
+単発hidden jobは連番PNGの実装を再利用するが、`exportKind: "single"`と保存ファイル名を明示し、
+encoder poolは1 worker固定とする。選択値は既存のproject output stateへ同期され、プロジェクト
+保存・読込の対象になる。
+
+シークバー側は即時性を優先し、editor viewport上の共通RGBA Surfaceから取得する。出力ピクセル数を
+大きく指定してもviewport側のscene color / depth / PostFX中間解像度までは再構築しないため、
+高解像度の成果物にはメニューバー経路を使う。
+
 旧backbuffer `engine.readPixels()`、WebGPU BGRA swizzle、Canvas 2D拡縮、ScreenshotTools、
-`webContents.capturePage()` の単発PNG経路は削除した。
+`webContents.capturePage()` の単発PNG経路は削除済み。
 
 ### 連番 PNG
 

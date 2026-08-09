@@ -43,12 +43,16 @@ export type OutputFormState = {
     endFrame: number;
 };
 
-export type WebmExportSettingsAdapter = {
+export type OutputSizeSettingsAdapter = {
     getState: () => OutputFormState;
     setAspectPreset: (value: string) => void;
     setSizePreset: (value: string) => void;
     setWidth: (value: number) => void;
     setHeight: (value: number) => void;
+    setQualityScale: (value: number) => void;
+};
+
+export type WebmExportSettingsAdapter = OutputSizeSettingsAdapter & {
     setFps: (value: number) => void;
     setIncludeAudio: (value: boolean) => void;
     setUsePlaybackRange: (value: boolean) => void;
@@ -72,6 +76,11 @@ export const OUTPUT_SIZE_PRESET_OPTIONS: ReadonlyArray<{ value: string; labelKey
     { value: "1920", labelKey: "output.sizePreset.fullhd" },
     { value: "2560", labelKey: "output.sizePreset.qhd" },
     { value: "3840", labelKey: "output.sizePreset.k4" },
+];
+
+export const PNG_OUTPUT_SIZE_PRESET_OPTIONS: ReadonlyArray<{ value: string; labelKey: string }> = [
+    ...OUTPUT_SIZE_PRESET_OPTIONS,
+    { value: "7680", labelKey: "output.sizePreset.k8" },
 ];
 
 export const OUTPUT_FPS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -394,9 +403,7 @@ export class ExportUiController {
         const outputSettings = this.getOutputSettings();
         const captureWidth = Math.max(320, Math.round(outputSettings.width * outputSettings.qualityScale));
         const captureHeight = Math.max(180, Math.round(outputSettings.height * outputSettings.qualityScale));
-        const now = new Date();
-        const pad = (value: number): string => String(value).padStart(2, "0");
-        const fileName = `mmd_capture_${captureWidth}x${captureHeight}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+        const fileName = this.buildPngFileName(captureWidth, captureHeight);
 
         let savedPath: string | null = null;
         const encoderPool = new PngEncoderWebWorkerPool({ size: 1 });
@@ -439,6 +446,59 @@ export class ExportUiController {
         const basename = savedPath.replace(/^.*[\\/]/, "");
         this.setStatus("PNG saved", false);
         this.showToast(`Saved PNG: ${basename}`, "success");
+    }
+
+    public async exportPNGDetached(): Promise<void> {
+        const outputSettings = this.getOutputSettings();
+        const outputWidth = outputSettings.width;
+        const outputHeight = outputSettings.height;
+        const defaultFileName = this.buildPngFileName(outputWidth, outputHeight);
+        const saveTarget = await window.electronAPI.choosePngSaveTarget(defaultFileName);
+        if (!saveTarget) {
+            this.setStatus("Ready", false);
+            this.showToast("PNG export canceled", "info");
+            return;
+        }
+
+        const frame = Math.max(0, Math.floor(this.mmdManager.currentFrame));
+        const project = this.buildProjectState();
+        project.assets.audioPath = null;
+
+        logInfo("ui", "detached PNG export launching", {
+            frame,
+            outputWidth,
+            outputHeight,
+            fileName: saveTarget.fileName,
+        });
+        this.setStatus("Launching high-resolution PNG export...", true);
+        const result = await window.electronAPI.startPngSequenceExportWindow({
+            project,
+            outputDirectoryPath: saveTarget.directoryPath,
+            startFrame: frame,
+            endFrame: frame,
+            step: 1,
+            prefix: "mmd_capture",
+            fps: outputSettings.fps,
+            precision: 1,
+            outputWidth,
+            outputHeight,
+            exportKind: "single",
+            singleFileName: saveTarget.fileName,
+        });
+
+        if (!result) {
+            logError("ui", "detached PNG export launch failed", {
+                outputWidth,
+                outputHeight,
+                fileName: saveTarget.fileName,
+            });
+            this.setStatus("PNG export launch failed", false);
+            this.showToast("Failed to start high-resolution PNG export", "error");
+            return;
+        }
+
+        this.setStatus("PNG export started", false);
+        this.showToast(`PNG export started: ${saveTarget.fileName}`, "success");
     }
 
     private async waitForNextPaint(): Promise<void> {
@@ -623,6 +683,13 @@ export class ExportUiController {
         return this.sanitizeFileNameSegment(`${prefix}_${timestamp}_${startFrame}-${endFrame}_s${step}`);
     }
 
+    private buildPngFileName(width: number, height: number): string {
+        const now = new Date();
+        const pad = (value: number): string => String(value).padStart(2, "0");
+        const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        return `${this.sanitizeFileNameSegment(`mmd_capture_${width}x${height}_${timestamp}`)}.png`;
+    }
+
     private buildWebmFileName(width: number, height: number, startFrame: number, endFrame: number): string {
         const now = new Date();
         const pad = (value: number): string => String(value).padStart(2, "0");
@@ -728,7 +795,7 @@ export class ExportUiController {
         return { ...this.outputState };
     }
 
-    public createWebmExportSettingsAdapter(): WebmExportSettingsAdapter {
+    public createExportSettingsAdapter(): WebmExportSettingsAdapter {
         return {
             getState: () => this.getOutputFormState(),
             setAspectPreset: (value) => {
@@ -742,6 +809,9 @@ export class ExportUiController {
             },
             setHeight: (value) => {
                 this.outputState.height = this.clampOutputHeight(value);
+            },
+            setQualityScale: (value) => {
+                this.outputState.qualityScale = this.clampOutputQuality(value);
             },
             setFps: (value) => {
                 this.outputState.fps = this.clampOutputFps(value);
@@ -921,7 +991,7 @@ export class ExportUiController {
     }
 
     private isOutputSizePreset(value: string): boolean {
-        return OUTPUT_SIZE_PRESET_OPTIONS.some((option) => option.value === value);
+        return PNG_OUTPUT_SIZE_PRESET_OPTIONS.some((option) => option.value === value);
     }
 
     private setupPngSequenceExportStateBridge(): void {
@@ -1068,7 +1138,9 @@ export class ExportUiController {
                 busyText.textContent = t("busy.webmExportActive", { count: this.pngSequenceExportActiveCount });
                 return;
             }
-            busyText.textContent = t("busy.exportingPngSequence");
+            busyText.textContent = progress?.exportKind === "sequence"
+                ? t("busy.exportingPngSequence")
+                : t("busy.exportingPng");
         }
     }
 }

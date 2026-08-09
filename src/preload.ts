@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('dialog:openFile', filters),
     openDirectoryDialog: () =>
         ipcRenderer.invoke('dialog:openDirectory'),
+    choosePngSaveTarget: (defaultFileName?: string) =>
+        ipcRenderer.invoke('dialog:savePngTarget', defaultFileName),
     saveWebmDialog: (defaultFileName?: string) =>
         ipcRenderer.invoke('dialog:saveWebm', defaultFileName),
     snapMainWindowContentAspect: (aspectRatio: number) =>

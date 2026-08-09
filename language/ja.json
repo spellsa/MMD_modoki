@@ -382,6 +382,7 @@
     "output.sizePreset.fullhd":  "FullHD",
     "output.sizePreset.qhd":  "QHD",
     "output.sizePreset.k4":  "4K",
+    "output.sizePreset.k8":  "8K",
     "output.quality.standard":  "標準 x1.0",
     "output.quality.high":  "高画質 x1.5",
     "output.quality.ultra":  "超高画質 x2.0",
@@ -393,6 +394,7 @@
     "button.sectionKeyframe.morph":  "モーフ欄のキーフレーム登録",
     "button.sectionKeyframe.accessory":  "アクセサリー欄のキーフレーム登録",
     "busy.exportingPngSequence":  "PNGシーケンスを書き出し中...",
+    "busy.exportingPng":  "PNGを書き出し中...",
     "busy.backgroundExportFinished":  "バックグラウンド出力が完了しました",
     "busy.webmExportLaunching":  "WebM出力ウィンドウを起動中...",
     "busy.webmExportRunning":  "WebM出力中",
@@ -692,5 +694,12 @@
     "dialog.webmExport.captureModeStable": "安定",
     "dialog.webmExport.captureModeSpeed": "速度優先",
     "dialog.webmExport.cancel": "キャンセル",
-    "dialog.webmExport.export": "WebM出力"
+    "dialog.webmExport.export": "WebM出力",
+    "dialog.pngExport.title": "PNG画像出力",
+    "dialog.pngExport.aspect": "比率",
+    "dialog.pngExport.longSide": "長辺",
+    "dialog.pngExport.size": "サイズ",
+    "dialog.pngExport.memoryNote": "8Kなどの大型出力は多くのメモリを使用します。",
+    "dialog.pngExport.cancel": "キャンセル",
+    "dialog.pngExport.export": "PNG出力"
 }

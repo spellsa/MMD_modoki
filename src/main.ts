@@ -14,6 +14,7 @@ import type {
   PngSequenceExportProgress,
   PngSequenceExportRequest,
   PngSequenceExportState,
+  PngSaveTarget,
   WebmCaptureMode,
   WebmExportLaunchResult,
   WebmExportProgress,
@@ -377,11 +378,24 @@ const sanitizePngSequenceExportRequest = (request: PngSequenceExportRequest): Pn
   const step = Number.isFinite(request.step) ? Math.max(1, Math.floor(request.step)) : 1;
   const fps = Number.isFinite(request.fps) ? Math.max(1, Math.floor(request.fps)) : 30;
   const precision = Number.isFinite(request.precision) ? Math.max(0.25, Math.min(4, request.precision)) : 1;
-  const outputWidth = Number.isFinite(request.outputWidth) ? Math.max(320, Math.floor(request.outputWidth)) : 1920;
-  const outputHeight = Number.isFinite(request.outputHeight) ? Math.max(180, Math.floor(request.outputHeight)) : 1080;
+  const outputWidth = Number.isFinite(request.outputWidth)
+    ? Math.max(320, Math.min(8192, Math.floor(request.outputWidth)))
+    : 1920;
+  const outputHeight = Number.isFinite(request.outputHeight)
+    ? Math.max(180, Math.min(8192, Math.floor(request.outputHeight)))
+    : 1080;
   const prefix = typeof request.prefix === 'string' && request.prefix.trim().length > 0
     ? request.prefix.trim()
     : 'mmd_seq';
+  const exportKind = request.exportKind === 'single' ? 'single' : 'sequence';
+  let singleFileName: string | undefined;
+  if (exportKind === 'single') {
+    const candidate = typeof request.singleFileName === 'string'
+      ? path.basename(request.singleFileName.trim())
+      : '';
+    if (!candidate || !candidate.toLowerCase().endsWith('.png')) return null;
+    singleFileName = candidate;
+  }
 
   return {
     project: request.project,
@@ -394,6 +408,8 @@ const sanitizePngSequenceExportRequest = (request: PngSequenceExportRequest): Pn
     precision,
     outputWidth,
     outputHeight,
+    exportKind,
+    singleFileName,
   };
 };
 
@@ -995,6 +1011,39 @@ ipcMain.handle('dialog:openDirectory', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('dialog:savePngTarget', async (_event, defaultFileName?: string): Promise<PngSaveTarget | null> => {
+  try {
+    const requestedName = defaultFileName?.trim() || 'mmd_capture.png';
+    const baseName = path.basename(requestedName);
+    const safeName = baseName.toLowerCase().endsWith('.png')
+      ? baseName
+      : `${baseName}.png`;
+    if (isE2eMode) {
+      return {
+        directoryPath: app.getPath('userData'),
+        fileName: safeName,
+      };
+    }
+
+    const result = await dialog.showSaveDialog({
+      title: 'Save PNG Image',
+      defaultPath: path.join(app.getPath('pictures'), safeName),
+      filters: [{ name: 'PNG Image', extensions: ['png'] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    const selectedPath = result.filePath.toLowerCase().endsWith('.png')
+      ? result.filePath
+      : `${result.filePath}.png`;
+    return {
+      directoryPath: path.dirname(selectedPath),
+      fileName: path.basename(selectedPath),
+    };
+  } catch (err) {
+    writeAppLog('error', 'ipc', 'failed to choose PNG save path', createLogErrorData(err));
+    return null;
+  }
+});
+
 ipcMain.handle('dialog:saveWebm', async (_event, defaultFileName?: string) => {
   try {
     const safeName = (defaultFileName && defaultFileName.toLowerCase().endsWith('.webm'))
@@ -1361,6 +1410,12 @@ ipcMain.handle(
       const safeName = baseName.toLowerCase().endsWith('.png')
         ? baseName
         : `${baseName}.png`;
+      if (isE2eMode) {
+        const e2eFilePath = path.join(app.getPath('userData'), safeName);
+        await ensureDirectoryExists(path.dirname(e2eFilePath));
+        await fs.promises.writeFile(e2eFilePath, pngBytes);
+        return e2eFilePath;
+      }
       const result = await dialog.showSaveDialog({
         title: 'Save PNG Image',
         defaultPath: path.join(app.getPath('pictures'), safeName),

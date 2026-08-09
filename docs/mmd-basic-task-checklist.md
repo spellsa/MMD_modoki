@@ -57,6 +57,7 @@
 - [x] 連番PNGをrenderer Web Worker＋`CompressionStream("deflate")`へ移し、filter None固定の直接RGBA encoderへ統合（[実装・性能評価](./png-sequence-web-worker-implementation-evaluation-2026-08-09.md)）
 - [ ] 連番PNG Web Workerを500〜1000frame・4K / 8K・slow diskでhardeningし、旧main-thread fallbackを削除
 - [x] 単発PNGを連番PNGと同じWeb Worker encoderへ統合（単発は1 worker固定）
+- [x] メニューバーの単発PNG出力に比率・長辺プリセット・幅×高さの詳細ダイアログを追加し、指定解像度で描くhidden exporterへ接続（8Kプリセット含む。シークバーの即時スクリーンショットはviewport経路を維持）
 - [ ] 単発8K PNG向けにscanlineを分割投入し、filter済み全量バッファを削減
 - [ ] 共通 RGBA Surface に背景透過 PNG 連番 mode を追加し、straight alpha を検証
 - [x] UI 非表示モード

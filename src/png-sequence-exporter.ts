@@ -83,7 +83,7 @@ export async function runPngSequenceExportJob(
     callbacks.onStatus?.("Initializing export renderer...");
     const mmdManager = await MmdManager.create(canvas, enginePreference);
     const encoderPool = encoderMode === "renderer-worker"
-        ? new PngEncoderWebWorkerPool()
+        ? new PngEncoderWebWorkerPool(request.exportKind === "single" ? { size: 1 } : undefined)
         : null;
 
     try {
@@ -247,7 +247,9 @@ export async function runPngSequenceExportJob(
                 const capturedFrame = await mmdManager.readExportRenderFrameAsync();
                 captureMsTotal += performance.now() - captureStartedAt;
 
-                const fileName = `${prefix}_${String(frame).padStart(padDigits, "0")}.png`;
+                const fileName = request.exportKind === "single" && request.singleFileName
+                    ? request.singleFileName
+                    : `${prefix}_${String(frame).padStart(padDigits, "0")}.png`;
                 queue.push({
                     frame,
                     fileName,

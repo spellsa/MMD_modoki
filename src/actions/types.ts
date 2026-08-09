@@ -75,7 +75,7 @@ export type ProjectAction =
     | { type: "project.openAudio"; source: ActionSource }
     | { type: "project.save"; source: ActionSource; forceChoosePath?: boolean }
     | { type: "project.load"; source: ActionSource }
-    | { type: "project.exportPng"; source: ActionSource }
+    | { type: "project.exportPng"; source: ActionSource; renderMode?: "viewport" | "detached" }
     | { type: "project.exportPngSequence"; source: ActionSource }
     | { type: "project.exportWebm"; source: ActionSource };
 

@@ -26,6 +26,11 @@ pool sizeを1に固定し、共通RGBA SurfaceからreadbackしたRGBA8をworker
 mainへraw RGBAを渡す`file:savePngRgba`は削除し、圧縮済みPNGだけを`file:savePngBytes`へ渡す。
 mainの責務はPNG signatureとfilenameの検証、保存ダイアログ、非同期file writeである。
 
+メニューバーの詳細PNGは、連番用hidden exporterを`exportKind: "single"`で再利用する。保存先を
+先に確定し、現在フレーム1枚だけを指定解像度のcanvas / scene color / depth / PostFXで描くため、
+viewport由来の中間画像を4K / 8Kへ拡大する経路を避けられる。シークバーの即時スクリーンショットは
+操作レスポンスを優先して従来のeditor viewport経路を維持する。
+
 E2Eでは単発PNGについてもPNG signature、RGBA8 IHDR、全scanline filter None、IDAT zlib decode、
 保存後のsurface解放を確認した。
 

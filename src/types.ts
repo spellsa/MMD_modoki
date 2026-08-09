@@ -4,6 +4,7 @@ import type { MmdMaterialPipelinePreset } from "./shared/mmd-material-pipeline";
 export interface ElectronAPI {
     openFileDialog: (filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
     openDirectoryDialog: () => Promise<string | null>;
+    choosePngSaveTarget: (defaultFileName?: string) => Promise<PngSaveTarget | null>;
     saveWebmDialog: (defaultFileName?: string) => Promise<string | null>;
     snapMainWindowContentAspect: (aspectRatio: number) => Promise<boolean>;
     getPathForDroppedFile: (file: File) => string | null;
@@ -130,6 +131,11 @@ export interface PngBytesFileSaveResult {
     path: string;
     byteLength: number;
     saveMs: number;
+}
+
+export interface PngSaveTarget {
+    directoryPath: string;
+    fileName: string;
 }
 
 export interface SmokeRendererFailurePayload {
@@ -706,6 +712,8 @@ export interface PngSequenceExportRequest {
     precision: number;
     outputWidth: number;
     outputHeight: number;
+    exportKind?: "sequence" | "single";
+    singleFileName?: string;
 }
 
 export interface PngSequenceExportDiagnostics {
@@ -746,6 +754,7 @@ export interface PngSequenceExportProgress {
     frame: number;
     startFrame?: number;
     endFrame?: number;
+    exportKind?: "sequence" | "single";
     diagnostics?: PngSequenceExportDiagnostics;
 }
 
