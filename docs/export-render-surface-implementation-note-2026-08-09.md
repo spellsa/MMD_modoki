@@ -242,6 +242,12 @@ row order正規化は `readback` 区間に含まれる。
 npm.cmd run benchmark:export-rgba -- 3
 ```
 
+豆腐＋皿＋SSGI＋DoFの代表シーン:
+
+```powershell
+npm.cmd run benchmark:export-rgba -- 5 tofu-plate-ssgi-dof
+```
+
 実装: `scripts/benchmark-export-rgba.mjs`
 
 - hidden PNG / WebM exporterを実際に起動する。
@@ -265,7 +271,8 @@ npm.cmd run benchmark:export-rgba -- 3
   intermediateが同じ解像度とは限らない。高解像度品質は別途確認が必要。
 - MirroringFloorを含む実モデルでの新単発PNG経路は手動確認が必要。
 - Classic / WebGL2を含む全backendの見た目比較は未完了。
-- 代表モデル、モーション、物理、主要PostFX入りの性能再測定は未実施。
+- 豆腐＋皿＋SSGI＋DoFの代表シーンは測定済み。モーション、物理、テクスチャ付きMMDモデルを
+  含む性能再測定は未実施。
 - PNG hidden exporterの明示dispose停止問題はwindow teardown依存のまま残る。
 - WebM legacy modeは比較終了後に削除予定。
 
@@ -273,5 +280,6 @@ npm.cmd run benchmark:export-rgba -- 3
 
 - [共通 RGBA Surface 統合計画](./export-render-surface-unification-plan-2026-08-09.md)
 - [共通 RGBA Surface 性能評価](./export-rgba-performance-evaluation-2026-08-09.md)
+- [共通 RGBA Surface 代表シーン性能評価](./export-rgba-representative-scene-evaluation-2026-08-09.md)
 - [連番 PNG 出力仕様](./png-sequence-export-spec.md)
 - [WebM 出力 現行仕様](./webm-export-current-spec-2026-03-13.md)

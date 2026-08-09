@@ -146,6 +146,7 @@ WebM は比較用に残した旧 `webgpu-copy` と新 `rgba-surface` を同一�
 ## 関連
 
 - [共通 RGBA Surface 出力 実装メモ](./export-render-surface-implementation-note-2026-08-09.md)
+- [共通 RGBA Surface 代表シーン性能評価](./export-rgba-representative-scene-evaluation-2026-08-09.md)
 - [出力レンダリング経路 共通 RGBA Surface 統合計画](./export-render-surface-unification-plan-2026-08-09.md)
 - [WebGPU WebM / PNG 出力事前調査](./webgpu-yuv-preinvestigation-2026-08-06.md)
 - [出力改善計画](./output-improvement-plan-2026-08-04.md)
