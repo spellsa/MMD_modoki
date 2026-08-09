@@ -63,6 +63,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         directoryPath: string,
         fileName: string,
     ) => ipcRenderer.invoke('file:savePngRgbaToPath', rgbaData, width, height, directoryPath, fileName),
+    savePngBytesFileToPath: (
+        pngBytes: Uint8Array,
+        directoryPath: string,
+        fileName: string,
+    ) => ipcRenderer.invoke('file:savePngBytesToPath', pngBytes, directoryPath, fileName),
     saveWebmFileToPath: (bytes: Uint8Array, filePath: string) =>
         ipcRenderer.invoke('file:saveWebmToPath', bytes, filePath),
     beginWebmStreamSave: (filePath: string) =>

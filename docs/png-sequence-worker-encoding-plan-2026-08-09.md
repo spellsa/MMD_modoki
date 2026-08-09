@@ -1,7 +1,10 @@
 # 連番 PNG Web Worker エンコード実装計画 2026-08-09
 
 作成日: 2026-08-09
-状態: 計画 / 未着手
+状態: Phase 0〜3完了 / Phase 4〜5未着手
+
+実装・性能評価結果は
+[連番 PNG Web Worker 実装・性能評価 2026-08-09](./png-sequence-web-worker-implementation-evaluation-2026-08-09.md)を参照。
 
 ## 結論
 

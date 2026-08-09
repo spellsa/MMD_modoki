@@ -49,9 +49,11 @@
 - 入力値をサニタイズ後、`jobId` を発行してジョブを Map に保持。
 - `mode=exporter&jobId=...` でエクスポート専用レンダラーを起動する。
 - オーナーウィンドウごとに activeCount を持ち、状態/進捗を通知する。
-- PNG保存は `file:savePngRgbaToPath` で行う。
-  - RGBA -> BGRA に並べ替えて `nativeImage.toPNG()` で保存。
-  - この変換は Electron の platform bitmap 境界にのみ残し、renderer core の標準形式にはしない。
+- 通常経路のPNG保存は `file:savePngBytesToPath` で行う。
+  - renderer Web Workerが生成した圧縮済みPNGだけを受け取る。
+  - mainはPNG signature、filename、pathを検証し、非同期file writeだけを行う。
+- 比較用旧経路として `file:savePngRgbaToPath` と `nativeImage.toPNG()` を一時的に残す。
+  - `MMD_MODOKI_PNG_ENCODER=main`指定時だけ使用する。
 
 ### 3. Exporter renderer
 
@@ -62,7 +64,12 @@
   - project state を export 用として import
   - ジョブ寿命の `ExportRenderSurface` (`rgba8unorm`) を1枚作成
   - FrameGraph / Classic の最終出力を同じ surface へ接続
-  - フレームごと `seekTo(frame)` -> render -> surface readback -> 保存キュー投入
+  - フレームごと `seekTo(frame)` -> render -> surface readback -> Web Worker queue投入
+- 2本のWeb WorkerでRGBA8を直接PNG化する。
+  - color type 6 / 8bit / filter None / non-interlace
+  - `CompressionStream("deflate")`
+  - PNG signature / IHDR / IDAT / IEND / CRC32をrenderer側で構築
+- raw RGBAはWeb Workerへ`ArrayBuffer` transferし、main IPCへは送らない。
 - 進捗は一定間隔で main UI に report する。
 
 `CreateScreenshotUsingRenderTargetAsync()` による毎フレームの RTT 作成・再描画・破棄は
@@ -70,13 +77,18 @@
 共通surfaceのclass責務と約70倍になったcapture改善の説明は
 [共通 RGBA Surface 出力 実装メモ](./export-render-surface-implementation-note-2026-08-09.md)を参照。
 
-## 保存処理（速度優先）
+## 保存処理（Web Worker / 速度優先）
 
-- キャプチャ生産者 + 保存消費者のキュー方式。
+- キャプチャ生産者 + Web Worker encoder pool + 保存消費者のキュー方式。
 - 現在の固定値:
-  - `maxQueueLength = 24`
-  - `ioWorkerCount = 4`
-- 保存は `savePngRgbaFileToPath()` を並列実行してIO待ちを隠蔽する。
+  - default worker数: 2
+  - capture queue: `poolSize * 2`
+  - queued + active raw byte budget: 256MiB
+  - worker timeout: 120秒
+- Web Workerから返ったPNG bytesを `savePngBytesFileToPath()` で保存する。
+- filter Noneは無圧縮ではなく、その後にdeflate可逆圧縮を行う。
+- worker error / message error / timeout時はtaskを失敗させ、workerを再生成する。
+- hidden exporter終了時はpending taskをrejectしてworkerを`terminate()`する。
 
 ## データ型
 
@@ -87,6 +99,9 @@
   - `active`, `activeCount`
 - `PngSequenceExportProgress`
   - `jobId`, `saved`, `captured`, `total`, `frame`
+- `PngSequenceExportDiagnostics`
+  - capture / encode / filter / deflate / assemble / save IPC / write時間
+  - worker pool数、raw bytes peak、worker再生成回数、encoded bytes
 
 ## 現状の制限
 
@@ -95,11 +110,17 @@
 3. 高負荷シーンではGPUキャプチャ側が律速になり、IO/GPU使用率が低く見えても速度が伸びにくい場合がある。
 4. 背景透過 mode と straight alpha の合成確認は未実装。
 5. hidden exporter の終了時 resource cleanup は window teardown に依存している。
+6. 500〜1000frame、4K / 8K、slow diskのhardeningは未完。
+7. 単発PNGはまだmain-thread `nativeImage.toPNG()`を使う。
 
 ## 今後の改善候補
 
 1. `fps` を実際の時間進行・物理更新ステップに反映する。
 2. `precision` パラメータの意味を明確化して有効化する。
 3. 出力プリセット（1080p/1440p/4K、開始/終了範囲）をUIから選択可能にする。
-4. プロファイル計測（capture/save別のms表示）を追加してボトルネック可視化する。
+4. main event-loop delayを追加計測し、500〜1000frameと4K / 8Kでmemoryを確認する。
 5. opaque / transparent mode、clear alpha、非対応 PostFX の警告を追加する。
+6. 単発PNGを同じWeb Worker encoderへ統合し、旧main-thread経路を削除する。
+
+Web Worker実装と1920×1080・100frame性能結果は
+[連番 PNG Web Worker 実装・性能評価](./png-sequence-web-worker-implementation-evaluation-2026-08-09.md)を参照。

@@ -1,4 +1,5 @@
 import { MmdManager, type RenderEnginePreference } from "./mmd-manager";
+import { PngEncoderWebWorkerPool } from "./output/png-encoder-web-worker-pool";
 import type { PngSequenceExportDiagnostics, PngSequenceExportRequest } from "./types";
 
 export interface PngSequenceExportCallbacks {
@@ -11,6 +12,10 @@ export interface PngSequenceExportResult {
     exportedFrames: number;
     totalFrames: number;
     diagnostics: PngSequenceExportDiagnostics;
+}
+
+export interface PngSequenceExportOptions {
+    encoderMode?: "main" | "renderer-worker";
 }
 
 type ExportQueueItem = {
@@ -46,6 +51,7 @@ export async function runPngSequenceExportJob(
     request: PngSequenceExportRequest,
     callbacks: PngSequenceExportCallbacks = {},
     enginePreference: RenderEnginePreference = "auto",
+    options: PngSequenceExportOptions = {},
 ): Promise<PngSequenceExportResult> {
     const jobStartedAt = performance.now();
     const startFrame = Math.max(0, Math.floor(request.startFrame));
@@ -58,12 +64,8 @@ export async function runPngSequenceExportJob(
     const captureWidth = Math.max(320, Math.min(8192, Math.round(outputWidth * qualityScale)));
     const captureHeight = Math.max(180, Math.min(8192, Math.round(outputHeight * qualityScale)));
     const prefix = request.prefix?.trim() || "mmd_seq";
-    // Speed-priority export tuning:
-    // - keep a larger capture queue
-    // - save files in parallel workers
-    // - disable screenshot antialiasing
-    const maxQueueLength = 24;
-    const ioWorkerCount = 4;
+    const encoderMode = options.encoderMode ?? "renderer-worker";
+    const rawByteBudget = 256 * 1024 * 1024;
 
     const frameList: number[] = [];
     for (let frame = startFrame; frame <= endFrame; frame += step) {
@@ -80,6 +82,9 @@ export async function runPngSequenceExportJob(
 
     callbacks.onStatus?.("Initializing export renderer...");
     const mmdManager = await MmdManager.create(canvas, enginePreference);
+    const encoderPool = encoderMode === "renderer-worker"
+        ? new PngEncoderWebWorkerPool()
+        : null;
 
     try {
         callbacks.onStatus?.("Loading project into export renderer...");
@@ -114,6 +119,9 @@ export async function runPngSequenceExportJob(
 
         const padDigits = Math.max(4, String(endFrame).length);
         const totalFrames = frameList.length;
+        const ioWorkerCount = encoderPool?.size ?? 4;
+        const maxQueueLength = encoderPool ? encoderPool.size * 2 : 24;
+        const nextRawByteLength = captureWidth * captureHeight * 4;
         const queue: ExportQueueItem[] = [];
         let capturedCount = 0;
         let savedCount = 0;
@@ -124,6 +132,15 @@ export async function runPngSequenceExportJob(
         let saveIpcMsTotal = 0;
         let encodeMsTotal = 0;
         let saveMsTotal = 0;
+        let filterMsTotal = 0;
+        let deflateMsTotal = 0;
+        let assembleMsTotal = 0;
+        let workerDispatchWaitMsTotal = 0;
+        let encodedPngBytesTotal = 0;
+        let queuedRawBytes = 0;
+        let activeRawBytes = 0;
+        let queuedRawBytesPeak = 0;
+        let activeRawBytesPeak = 0;
 
         const reportProgress = (frame: number): void => {
             callbacks.onStatus?.(
@@ -140,30 +157,62 @@ export async function runPngSequenceExportJob(
                     await sleepMs(1);
                     continue;
                 }
+                const itemRawByteLength = item.rgbaData.byteLength;
+                queuedRawBytes -= itemRawByteLength;
+                activeRawBytes += itemRawByteLength;
+                activeRawBytesPeak = Math.max(activeRawBytesPeak, activeRawBytes);
 
-                const saveStartedAt = performance.now();
-                const saveResult = await window.electronAPI.savePngRgbaFileToPath(
-                    item.rgbaData,
-                    item.width,
-                    item.height,
-                    request.outputDirectoryPath,
-                    item.fileName
-                );
-                saveIpcMsTotal += performance.now() - saveStartedAt;
-                if (!saveResult) {
-                    fatalError = new Error(`Failed to save frame ${item.frame}`);
-                    break;
+                try {
+                    if (encoderPool) {
+                        const encoded = await encoderPool.encode(item.rgbaData, item.width, item.height);
+                        encodeMsTotal += encoded.encodeMs;
+                        filterMsTotal += encoded.filterMs;
+                        deflateMsTotal += encoded.deflateMs;
+                        assembleMsTotal += encoded.assembleMs;
+                        workerDispatchWaitMsTotal += encoded.dispatchWaitMs;
+
+                        const saveStartedAt = performance.now();
+                        const saveResult = await window.electronAPI.savePngBytesFileToPath(
+                            encoded.pngBuffer,
+                            request.outputDirectoryPath,
+                            item.fileName,
+                        );
+                        saveIpcMsTotal += performance.now() - saveStartedAt;
+                        if (!saveResult) {
+                            throw new Error(`Failed to save frame ${item.frame}`);
+                        }
+                        saveMsTotal += saveResult.saveMs;
+                        encodedPngBytesTotal += saveResult.byteLength;
+                    } else {
+                        const saveStartedAt = performance.now();
+                        const saveResult = await window.electronAPI.savePngRgbaFileToPath(
+                            item.rgbaData,
+                            item.width,
+                            item.height,
+                            request.outputDirectoryPath,
+                            item.fileName,
+                        );
+                        saveIpcMsTotal += performance.now() - saveStartedAt;
+                        if (!saveResult) {
+                            throw new Error(`Failed to save frame ${item.frame}`);
+                        }
+                        encodeMsTotal += saveResult.encodeMs;
+                        saveMsTotal += saveResult.saveMs;
+                        encodedPngBytesTotal += saveResult.byteLength;
+                    }
+
+                    savedCount += 1;
+                    reportProgress(item.frame);
+                } catch (error: unknown) {
+                    fatalError = error instanceof Error ? error : new Error(String(error));
+                } finally {
+                    activeRawBytes -= itemRawByteLength;
                 }
-                encodeMsTotal += saveResult.encodeMs;
-                saveMsTotal += saveResult.saveMs;
-
-                savedCount += 1;
-                reportProgress(item.frame);
             }
         };
 
         callbacks.onStatus?.(
-            `Exporting ${frameList.length} frame(s) in speed-priority mode... (${captureWidth}x${captureHeight})`
+            `Exporting ${frameList.length} frame(s) with ${encoderMode}... (${captureWidth}x${captureHeight})`
         );
         const consumerPromises: Promise<void>[] = [];
         for (let i = 0; i < ioWorkerCount; i += 1) {
@@ -174,7 +223,16 @@ export async function runPngSequenceExportJob(
             for (let i = 0; i < frameList.length; i += 1) {
                 if (fatalError) break;
 
-                while (queue.length >= maxQueueLength && !fatalError) {
+                while (
+                    (
+                        queue.length >= maxQueueLength
+                        || (
+                            queuedRawBytes + activeRawBytes + nextRawByteLength > rawByteBudget
+                            && queuedRawBytes + activeRawBytes > 0
+                        )
+                    )
+                    && !fatalError
+                ) {
                     await sleepMs(1);
                 }
                 if (fatalError) break;
@@ -197,6 +255,8 @@ export async function runPngSequenceExportJob(
                     height: capturedFrame.height,
                     rgbaData: capturedFrame.pixels,
                 });
+                queuedRawBytes += capturedFrame.pixels.byteLength;
+                queuedRawBytesPeak = Math.max(queuedRawBytesPeak, queuedRawBytes);
                 capturedCount += 1;
             }
         } finally {
@@ -208,6 +268,7 @@ export async function runPngSequenceExportJob(
             throw fatalError;
         }
 
+        const poolDiagnostics = encoderPool?.getDiagnostics();
         const result: PngSequenceExportResult = {
             exportedFrames: savedCount,
             totalFrames,
@@ -219,11 +280,29 @@ export async function runPngSequenceExportJob(
                 saveIpcMs: saveIpcMsTotal,
                 encodeMs: encodeMsTotal,
                 saveMs: saveMsTotal,
+                encoderMode,
+                filterStrategy: encoderPool ? "none" : "native-image",
+                filterMs: filterMsTotal,
+                deflateMs: deflateMsTotal,
+                assembleMs: assembleMsTotal,
+                workerDispatchWaitMs: workerDispatchWaitMsTotal,
+                encodedPngBytes: encodedPngBytesTotal,
+                workerPoolSize: poolDiagnostics?.poolSize ?? 0,
+                queuedRawBytesPeak: Math.max(
+                    queuedRawBytesPeak,
+                    poolDiagnostics?.queuedRawBytesPeak ?? 0,
+                ),
+                activeRawBytesPeak: Math.max(
+                    activeRawBytesPeak,
+                    poolDiagnostics?.activeRawBytesPeak ?? 0,
+                ),
+                workerRecreateCount: poolDiagnostics?.workerRecreateCount ?? 0,
             },
         };
         await callbacks.onCompleted?.(result);
         return result;
     } finally {
+        encoderPool?.terminate();
         mmdManager.setAutoRenderEnabled(true);
         // This exporter runs in a dedicated hidden window. Synchronous Babylon / physics disposal can
         // stall after the files are already saved, so let window teardown reclaim these resources.

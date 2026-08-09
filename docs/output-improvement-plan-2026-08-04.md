@@ -138,6 +138,10 @@ VMD 出力は別軸だが、静止画側の出口は VMD を待たずに開け�
 Web Worker化の責務分割、`CompressionStream`、buffer transfer、backpressure、性能合格基準は
 [連番 PNG Web Worker エンコード実装計画](./png-sequence-worker-encoding-plan-2026-08-09.md)へ分離した。
 
+2026-08-09に2 Web Workers・filter None固定で実装し、1920×1080・100frameのwall-clock中央値は
+空シーン13.15秒、豆腐＋皿＋SSGI＋DoF 5.06秒となった。旧main-thread経路比で約51〜53%短縮した。
+詳細は[実装・性能評価](./png-sequence-web-worker-implementation-evaluation-2026-08-09.md)を参照。
+
 ### 段階5: RGBA→YUV の GPU 前処理（Phase 1）
 
 今回の空シーン計測では、WebM の webgpu-copy に CPU pixel transform 約 10ms/frame と GPU readback 約 10ms/frame が見えているため、出力経路の改善余地はあると判断する。RGBA→I420 の GPU 前処理は実装価値があるが、readback が残るため単独で決定打にはならない。compute / staging / map / VideoSample のコピーを含む総時間で、RGBA baseline を下回るか確認してから採用する。詳細は [作業指示](./webgpu-yuv-phase1-work-order-2026-08-04.md)。

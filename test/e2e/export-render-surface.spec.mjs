@@ -1,10 +1,24 @@
 import { expect, test } from "@playwright/test";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import { launchMmdModoki } from "./electron-app.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const expectRendererWorkerPng = process.env.MMD_MODOKI_PNG_ENCODER !== "main";
+
+const readPngChunks = (pngBytes) => {
+  const chunks = new Map();
+  let offset = 8;
+  while (offset < pngBytes.length) {
+    const length = pngBytes.readUInt32BE(offset);
+    const type = pngBytes.toString("ascii", offset + 4, offset + 8);
+    chunks.set(type, pngBytes.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  return chunks;
+};
 
 test("FrameGraphの最終出力を共通RGBA surfaceから取得できる", async () => {
   const launched = await launchMmdModoki(repoRoot);
@@ -59,6 +73,24 @@ test("PNG連番とWebMが共通RGBA surfaceから書き出せる", async () => {
     const pngPath = resolve(launched.tempDir, "rgba_surface_e2e_0000.png");
     await expect.poll(() => existsSync(pngPath) && statSync(pngPath).size > 100, { timeout: 30_000 }).toBe(true);
     expect(statSync(pngPath).size).toBeGreaterThan(0);
+    const pngBytes = readFileSync(pngPath);
+    const pngChunks = readPngChunks(pngBytes);
+    const ihdr = pngChunks.get("IHDR");
+    const idat = pngChunks.get("IDAT");
+    expect([...pngBytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(ihdr).toBeDefined();
+    expect(idat).toBeDefined();
+    if (expectRendererWorkerPng) {
+      expect([...ihdr.subarray(8)]).toEqual([8, 6, 0, 0, 0]);
+      const filtered = inflateSync(idat);
+      expect(filtered.byteLength).toBe((320 * 4 + 1) * 180);
+      for (let row = 0; row < 180; row += 1) {
+        expect(filtered[row * (320 * 4 + 1)]).toBe(0);
+      }
+    } else {
+      expect(ihdr[8]).toBe(8);
+      expect([2, 6]).toContain(ihdr[9]);
+    }
 
     const webmPath = resolve(launched.tempDir, "rgba_surface_e2e.webm");
     const webmLaunch = await page.evaluate(async ({ outputFilePath }) => {

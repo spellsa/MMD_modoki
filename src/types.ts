@@ -32,6 +32,11 @@ export interface ElectronAPI {
         directoryPath: string,
         fileName: string,
     ) => Promise<PngRgbaFileSaveResult | null>;
+    savePngBytesFileToPath: (
+        pngBytes: Uint8Array,
+        directoryPath: string,
+        fileName: string,
+    ) => Promise<PngBytesFileSaveResult | null>;
     saveWebmFileToPath: (bytes: Uint8Array, filePath: string) => Promise<string | null>;
     beginWebmStreamSave: (filePath: string) => Promise<{ saveId: string; filePath: string } | null>;
     writeWebmStreamChunk: (saveId: string, bytes: Uint8Array, position: number) => Promise<boolean>;
@@ -120,6 +125,12 @@ export interface PngRgbaFileSaveResult {
     path: string;
     byteLength: number;
     encodeMs: number;
+    saveMs: number;
+}
+
+export interface PngBytesFileSaveResult {
+    path: string;
+    byteLength: number;
     saveMs: number;
 }
 
@@ -707,6 +718,17 @@ export interface PngSequenceExportDiagnostics {
     saveIpcMs: number;
     encodeMs: number;
     saveMs: number;
+    encoderMode: "main" | "renderer-worker";
+    filterStrategy: "none" | "native-image";
+    filterMs: number;
+    deflateMs: number;
+    assembleMs: number;
+    workerDispatchWaitMs: number;
+    encodedPngBytes: number;
+    workerPoolSize: number;
+    queuedRawBytesPeak: number;
+    activeRawBytesPeak: number;
+    workerRecreateCount: number;
 }
 
 export interface PngSequenceExportLaunchResult {

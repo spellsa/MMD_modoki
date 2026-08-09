@@ -31,6 +31,9 @@ if (started) {
 const isDev = Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL);
 const isSmokeMode = process.env.MMD_MODOKI_SMOKE === '1';
 const isE2eMode = process.env.MMD_MODOKI_E2E === '1';
+const pngSequenceEncoderMode = process.env.MMD_MODOKI_PNG_ENCODER === 'main'
+  ? 'main'
+  : 'renderer-worker';
 const forcedRendererBackend =
   process.env.MMD_MODOKI_RENDERER === 'webgpu'
   || process.env.MMD_MODOKI_RENDERER === 'webgl2'
@@ -1378,6 +1381,46 @@ ipcMain.handle(
   },
 );
 
+const hasPngSignature = (bytes: Uint8Array): boolean => {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  return bytes.byteLength >= signature.length
+    && signature.every((value, index) => bytes[index] === value);
+};
+
+ipcMain.handle(
+  'file:savePngBytesToPath',
+  async (
+    _event,
+    pngBytes: Uint8Array,
+    directoryPath: string,
+    fileName: string,
+  ) => {
+    try {
+      if (!directoryPath || !fileName) return null;
+      if (!(pngBytes instanceof Uint8Array) || !hasPngSignature(pngBytes)) return null;
+      const safeFileName = path.basename(fileName);
+      if (!safeFileName.toLowerCase().endsWith('.png')) return null;
+
+      const saveStartedAt = performance.now();
+      await ensureDirectoryExists(directoryPath);
+      const filePath = path.join(directoryPath, safeFileName);
+      await fs.promises.writeFile(filePath, pngBytes);
+      return {
+        path: filePath,
+        byteLength: pngBytes.byteLength,
+        saveMs: performance.now() - saveStartedAt,
+      };
+    } catch (err) {
+      writeAppLog('error', 'ipc', 'failed to save encoded PNG to path', {
+        directoryPath,
+        fileName,
+        ...createLogErrorData(err),
+      });
+      return null;
+    }
+  },
+);
+
 ipcMain.handle('file:saveWebmToPath', async (_event, bytes: Uint8Array, filePath: string) => {
   try {
     if (!filePath || typeof filePath !== 'string') return null;
@@ -1539,7 +1582,11 @@ ipcMain.handle(
         cleanup();
       });
 
-      await loadEditorWindow(exportWindow, { mode: 'exporter', jobId });
+      await loadEditorWindow(exportWindow, {
+        mode: 'exporter',
+        jobId,
+        pngEncoder: pngSequenceEncoderMode,
+      });
 
       return { jobId };
     } catch (err) {

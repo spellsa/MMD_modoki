@@ -552,17 +552,21 @@ async function initializePngSequenceExporter(searchParams: URLSearchParams): Pro
           });
         }
       },
-      onCompleted: (completed) => window.electronAPI.completePngSequenceExport({
-        jobId,
-        saved: completed.exportedFrames,
-        captured: completed.diagnostics.frameCount,
-        total: completed.totalFrames,
-        frame: request.endFrame,
-        startFrame: request.startFrame,
-        endFrame: request.endFrame,
-        diagnostics: completed.diagnostics,
-      }),
-    }, rendererBackend);
+      onCompleted: async (completed) => {
+        await window.electronAPI.completePngSequenceExport({
+          jobId,
+          saved: completed.exportedFrames,
+          captured: completed.diagnostics.frameCount,
+          total: completed.totalFrames,
+          frame: request.endFrame,
+          startFrame: request.startFrame,
+          endFrame: request.endFrame,
+          diagnostics: completed.diagnostics,
+        });
+      },
+    }, rendererBackend, {
+      encoderMode: searchParams.get("pngEncoder") === "main" ? "main" : "renderer-worker",
+    });
 
     setStatus(`Done: ${result.exportedFrames} frame(s)`);
     closeExporterWindowSoon();
