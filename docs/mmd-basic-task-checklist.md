@@ -365,8 +365,21 @@
 - [ ] 外部親登録
   - [x] モデル間のボーン外部親（登録 / 解除 / 循環拒否 / project保存復元 / Playwright E2E） → [モデル外部親 仕様・実装ガイド](./model-external-parent-implementation-2026-08-02.md)
   - [x] モデル外部親のフレーム単位キー（ステップ切替 / 子ボーンキー連動 / Undo / Redo）
-  - [ ] カメラ外部親のUI公開
-  - [ ] MMD本家の外部親キーとの入出力互換
+  - [x] カメラ外部親の最小登録UI公開 → [MMD / babylon-mmd 調査・実装 2026-08-10](./camera-external-parent-mmd-babylon-research-2026-08-10.md)
+    - [x] カメラ用UIをモデル用外部親UIから分離
+    - [x] 現在フレームへの登録 / 解除 / ステップ評価 / Undo / Redo / project保存復元
+    - [x] world と親ローカルの camera position / target / up 変換を helper 化して unit test
+    - [x] 外部親中は距離 `0` 固定、wheel / zoom drag はカメラ中心 Z を編集
+    - [x] 本家 MMD と同様に、親ボーンの移動・回転を camera position / target / up へ full transform として反映
+    - [x] 登録時のカメラ移動・回転・距離は `0`、親変換は描画へ一度だけ適用してカメラ数値へ複製しない
+    - [x] 外部親中のカメラ回転は親ボーン位置を orbit 中心とし、移動 XYZ の相対オフセットを回す
+    - [x] 中ボタンドラッグは画面平面の移動量を親・カメラ回転から逆変換し、カメラ位置と実注視点を同じ差分で移動
+    - [x] wheel正方向はカメラ中心 Z の負方向へ加算
+    - [x] 定期 UI 同期中の未登録選択を保持し、外部親選択とゼロ化したカメラ値を同一キーへ登録
+    - [x] Electron E2E で移動・回転・距離0 / 中心Z zoom方向 / 親数値非複製 / 親移動・回転追従 / 0f登録 / 30f解除 / 29f再追従 / Undo / Redo
+    - [ ] 本家 MMD のボーン追従で、登録 / 解除 / 親切替時の端数処理を追加実機記録する
+  - [ ] MMD本家の外部親キーとの互換
+    - 標準 VMD に親モデル / 親ボーンは保存できないため、project 挙動互換と world bake VMD を分けて扱う
 - [ ] 照明 / 影 / 重力 / アクセサリのキー登録
 - [ ] VPD / VMD 書き出し（仮）
 - [x] 反転ペースト

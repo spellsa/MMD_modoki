@@ -343,6 +343,10 @@ async function initializeApp(): Promise<void> {
           mmdManager.setBoneGizmoRotationDragForE2e(rotation, dragging)
         ),
         getModelExternalParent: (modelIndex) => mmdManager.getModelExternalParent(modelIndex),
+        getCameraExternalParent: () => mmdManager.getCameraExternalParent(),
+        getCameraTarget: () => mmdManager.getCameraTarget(),
+        getCameraPosition: () => mmdManager.getCameraPosition(),
+        getCameraKeyframePose: () => mmdManager.getCameraKeyframePose(),
         captureExportSurfaceProbe: async (width, height) => {
           mmdManager.setAutoRenderEnabled(false);
           mmdManager.postEffectExposure = 1.05;

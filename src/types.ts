@@ -200,6 +200,19 @@ declare global {
                 parentBoneName: string;
                 parentModelIndex: number;
             } | null;
+            getCameraExternalParent: () => {
+                modelIndex: number | null;
+                boneName: string | null;
+            } | null;
+            getCameraTarget: () => { x: number; y: number; z: number };
+            getCameraPosition: () => { x: number; y: number; z: number };
+            getCameraKeyframePose: () => {
+                position: { x: number; y: number; z: number };
+                rotation: { x: number; y: number; z: number };
+                target: { x: number; y: number; z: number };
+                distance: number;
+                fov: number;
+            };
             captureExportSurfaceProbe: (width: number, height: number) => Promise<{
                 backend: string;
                 ready: boolean;

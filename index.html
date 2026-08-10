@@ -825,6 +825,22 @@
               <button class="info-mini-btn" type="button" disabled data-i18n="button.load">読込...</button>
             </div>
           </div>
+          <div class="info-mmd-extra camera-parent-controls" hidden>
+            <div class="info-mini-row">
+              <span class="info-mini-label" data-i18n="label.externalParent">外部親</span>
+              <select id="camera-external-parent-select" class="info-mini-select" disabled>
+                <option value="" data-i18n="option.none">なし</option>
+              </select>
+              <button id="btn-camera-external-parent-register" class="info-mini-btn" type="button" disabled data-i18n="button.register" data-testid="camera-external-parent-register">登録</button>
+            </div>
+            <div class="info-mini-row">
+              <span class="info-mini-label" data-i18n="label.parentBone">親ボーン</span>
+              <select id="camera-parent-bone-select" class="info-mini-select" disabled>
+                <option value="">-</option>
+              </select>
+              <span></span>
+            </div>
+          </div>
         </section>
 
         <!-- 4: Morph Controls -->

@@ -93,6 +93,15 @@ import {
     type ModelExternalParentKeyframePayload,
 } from "./shared/model-external-parent";
 import {
+    moveCameraExternalParentKeyframe,
+    normalizeCameraExternalParentPayload,
+    removeCameraExternalParentKeyframes,
+    selectCameraExternalParentKeyframeAtFrame,
+    transformCameraExternalParentVectorsToRef,
+    upsertCameraExternalParentKeyframe,
+    type CameraExternalParentKeyframeLike,
+} from "./shared/camera-external-parent";
+import {
     loadCameraVMD as loadCameraVMDImpl,
     loadMP3 as loadMP3Impl,
     loadVMD as loadVMDImpl,
@@ -850,11 +859,7 @@ type ModelExternalParentKeyframe = ModelExternalParentKeyframePayload & {
     frame: number;
 };
 
-type CameraExternalParentKeyframe = {
-    frame: number;
-    modelPath: string | null;
-    boneName: string | null;
-};
+type CameraExternalParentKeyframe = CameraExternalParentKeyframeLike;
 
 export type ShadowMode = "cascaded" | "standard";
 
@@ -1713,12 +1718,15 @@ ${beforeFogAppendBlock}
     private cameraExternalParentModelIndex: number | null = null;
     private cameraExternalParentModelPath: string | null = null;
     private cameraExternalParentBoneName: string | null = null;
+    private cameraLowerRadiusLimitBeforeExternalParent: number | null | undefined;
     private cameraExternalParentKeyframes: CameraExternalParentKeyframe[] = [];
     private readonly cameraExternalParentMatrix = Matrix.Identity();
     private readonly cameraExternalParentInverseMatrix = Matrix.Identity();
     private readonly cameraExternalParentPosition = new Vector3();
     private readonly cameraExternalParentTarget = new Vector3();
     private readonly cameraExternalParentUp = new Vector3();
+    private readonly cameraExternalParentForward = new Vector3();
+    private readonly cameraExternalParentPanMove = new Vector3();
     private boneGizmoManager: GizmoManager | null = null;
     private boneGizmoRuntimeBone: EditorRuntimeBone | null = null;
     private boneGizmoProxyNode: TransformNode | null = null;
@@ -2065,7 +2073,7 @@ ${beforeFogAppendBlock}
 
         const zoomFactor = Math.exp(scaledDelta * VIEWPORT_CAMERA_WHEEL_ZOOM_EXPONENT);
         if (this.cameraExternalParentModelIndex !== null) {
-            this.applyExternalParentCameraZoomFactor(zoomFactor);
+            this.applyExternalParentCameraZoomFactor(1 / zoomFactor);
             this.onCameraTransformEdited?.();
             event.preventDefault();
             return;
@@ -2178,12 +2186,17 @@ ${beforeFogAppendBlock}
 
     private applyExternalParentCameraZoomFactor(zoomFactor: number): void {
         if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) return;
-        const currentDistance = Math.max(0.0001, Math.abs(this.mmdCamera.distance));
-        this.applyExternalParentCameraZoomDistance(this.clampCameraRadius(currentDistance * zoomFactor));
+        const currentCenterZ = this.mmdCamera.target.z;
+        const referenceDistance = Math.max(1, Math.abs(currentCenterZ), this.camera.radius);
+        this.applyExternalParentCameraCenterZ(
+            currentCenterZ + (zoomFactor - 1) * referenceDistance,
+        );
     }
 
-    private applyExternalParentCameraZoomDistance(distance: number): void {
-        this.mmdCamera.distance = -this.clampCameraRadius(distance);
+    private applyExternalParentCameraCenterZ(centerZ: number): void {
+        if (!Number.isFinite(centerZ)) return;
+        this.mmdCamera.target.z = centerZ;
+        this.mmdCamera.distance = 0;
         this.mmdCamera.updatePosition();
         this.syncViewportCameraFromMmdCamera(true);
     }
@@ -2200,9 +2213,7 @@ ${beforeFogAppendBlock}
         } else if (mode === "pan") {
             this.applyExternalParentCameraPan(deltaX, deltaY);
         } else {
-            const currentDistance = Math.max(0.0001, Math.abs(this.mmdCamera.distance));
-            const zoomScale = Math.max(0.01, currentDistance * VIEWPORT_CAMERA_DRAG_ZOOM_SCALE);
-            this.applyExternalParentCameraZoomDistance(currentDistance + deltaY * zoomScale);
+            this.applyExternalParentCameraZoomFactor(Math.exp(deltaY * VIEWPORT_CAMERA_DRAG_ZOOM_SCALE));
         }
 
         this.clearCameraInertialOffsets();
@@ -2215,22 +2226,21 @@ ${beforeFogAppendBlock}
             (this.normalizeCameraAngleDeg(this.cameraRotationEulerDeg.y) * Math.PI) / 180,
             (this.normalizeCameraAngleDeg(this.cameraRotationEulerDeg.z) * Math.PI) / 180,
         );
+        this.mmdCamera.distance = 0;
         this.mmdCamera.updatePosition();
         this.syncViewportCameraFromMmdCamera(true);
     }
 
     private applyExternalParentCameraPan(deltaX: number, deltaY: number): void {
-        this.mmdCamera.updatePosition();
-        const forward = this.mmdCamera.target.subtract(this.mmdCamera.position);
-        if (forward.lengthSquared() <= 1e-8) return;
-        forward.normalize();
-
         const rotationMatrix = Matrix.RotationYawPitchRoll(
             -this.mmdCamera.rotation.y,
             -this.mmdCamera.rotation.x,
             -this.mmdCamera.rotation.z,
         );
-        const up = Vector3.TransformNormal(this.mmdCamera.upVector, rotationMatrix);
+        const forward = this.camera.target.subtract(this.camera.position);
+        if (forward.lengthSquared() < 1e-8) return;
+        forward.normalize();
+        const up = this.camera.upVector.clone();
         if (up.lengthSquared() < 1e-8) {
             up.set(0, 1, 0);
         } else {
@@ -2244,9 +2254,29 @@ ${beforeFogAppendBlock}
             right.normalize();
         }
         const trueUp = Vector3.Cross(right, forward).normalize();
-        const panScale = Math.max(0.001, Math.abs(this.mmdCamera.distance) * VIEWPORT_CAMERA_PAN_SCALE);
-        const move = right.scale(deltaX * panScale).add(trueUp.scale(deltaY * panScale));
-        this.mmdCamera.target.addInPlace(move);
+        const panScale = Math.max(0.001, Math.abs(this.mmdCamera.target.z) * VIEWPORT_CAMERA_PAN_SCALE);
+        const worldMove = right.scale(deltaX * panScale).add(trueUp.scale(deltaY * panScale));
+
+        // Pan is calculated in the current viewport plane. Convert it back through
+        // the parent and local-camera rotations before storing it in editable XYZ;
+        // otherwise the local camera rotation is applied a second time on render.
+        this.cameraExternalParentPanMove.copyFrom(worldMove);
+        if (this.getCameraExternalParentMatrixToRef(this.cameraExternalParentMatrix)) {
+            this.cameraExternalParentMatrix.invertToRef(this.cameraExternalParentInverseMatrix);
+            Vector3.TransformNormalToRef(
+                worldMove,
+                this.cameraExternalParentInverseMatrix,
+                this.cameraExternalParentPanMove,
+            );
+        }
+        rotationMatrix.invertToRef(this.cameraExternalParentInverseMatrix);
+        Vector3.TransformNormalToRef(
+            this.cameraExternalParentPanMove,
+            this.cameraExternalParentInverseMatrix,
+            this.cameraExternalParentForward,
+        );
+        this.mmdCamera.target.addInPlace(this.cameraExternalParentForward);
+        this.mmdCamera.distance = 0;
         this.mmdCamera.updatePosition();
         this.syncViewportCameraFromMmdCamera(true);
     }
@@ -3603,6 +3633,7 @@ ${beforeFogAppendBlock}
         if (removeIndex < 0) return false;
 
         const removed = this.sceneModels[removeIndex];
+        const cameraExternalParentBeforeRemoval = this.getCameraExternalParentPayload();
         for (const entry of this.sceneModels) {
             if (entry.externalParent?.parentModelPath === removed.info.path) {
                 entry.externalParent = null;
@@ -3629,6 +3660,10 @@ ${beforeFogAppendBlock}
         this.disposeContactShadowForModel(removed);
         removed.mesh.dispose();
         this.sceneModels.splice(removeIndex, 1);
+        this.setCameraExternalParentState(
+            cameraExternalParentBeforeRemoval.modelPath,
+            cameraExternalParentBeforeRemoval.boneName,
+        );
         this.syncLuminousGlowLayer();
 
         if (this.sceneModels.length === 0) {
@@ -12218,6 +12253,12 @@ ${beforeFogAppendBlock}
     }
 
     setCameraPosition(x: number, y: number, z: number): void {
+        if (this.cameraExternalParentModelIndex !== null) {
+            this.mmdCamera.target.set(x, y, z);
+            this.mmdCamera.distance = 0;
+            this.syncViewportCameraFromMmdCamera(true);
+            return;
+        }
         this.camera.setPosition(new Vector3(x, y, z));
         this.applyCameraRotationFromEuler();
         this.syncMmdCameraFromViewportCamera();
@@ -12237,11 +12278,22 @@ ${beforeFogAppendBlock}
             this.normalizeCameraAngleDeg(yDeg),
             this.normalizeCameraAngleDeg(zDeg),
         );
+        if (this.cameraExternalParentModelIndex !== null) {
+            this.applyExternalParentCameraRotationFromEuler();
+            return;
+        }
         this.applyCameraRotationFromEuler();
         this.syncMmdCameraFromViewportCamera();
     }
 
     setCameraTarget(x: number, y: number, z: number): void {
+        if (this.cameraExternalParentModelIndex !== null) {
+            this.mmdCamera.target.set(x, y, z);
+            this.mmdCamera.distance = 0;
+            this.mmdCamera.updatePosition();
+            this.syncViewportCameraFromMmdCamera(true);
+            return;
+        }
         this.camera.target = new Vector3(x, y, z);
         this.syncCameraRotationFromCurrentView({ preserveRoll: true });
         this.clearCameraInertialOffsets();
@@ -12253,6 +12305,7 @@ ${beforeFogAppendBlock}
     }
 
     getCameraDistance(): number {
+        if (this.cameraExternalParentModelIndex !== null) return 0;
         return Math.max(this.camera.minZ, Vector3.Distance(this.camera.position, this.camera.target));
     }
 
@@ -12290,7 +12343,7 @@ ${beforeFogAppendBlock}
                 y: this.mmdCamera.target.y,
                 z: this.mmdCamera.target.z,
             },
-            distance: Math.max(0.0001, Math.abs(this.mmdCamera.distance)),
+            distance: 0,
             fov: (this.mmdCamera.fov * 180) / Math.PI,
         };
     }
@@ -12324,45 +12377,37 @@ ${beforeFogAppendBlock}
         frame: number,
         payload: { modelPath: string | null; boneName: string | null },
     ): boolean {
-        const normalized = Math.max(0, Math.floor(frame));
-        const entry = {
-            frame: normalized,
-            modelPath: payload.modelPath ?? null,
-            boneName: payload.modelPath ? payload.boneName ?? null : null,
-        };
-        const index = this.cameraExternalParentKeyframes.findIndex((item) => item.frame === normalized);
-        if (index >= 0) {
-            this.cameraExternalParentKeyframes[index] = entry;
-        } else {
-            this.cameraExternalParentKeyframes.push(entry);
-            this.cameraExternalParentKeyframes.sort((a, b) => a.frame - b.frame);
-        }
+        this.cameraExternalParentKeyframes = upsertCameraExternalParentKeyframe(
+            this.cameraExternalParentKeyframes,
+            frame,
+            payload,
+        );
         this.applyCameraExternalParentKeyframeAtFrame(this._currentFrame);
         return true;
     }
 
     removeCameraExternalParentKeyframes(frames: readonly number[]): boolean {
-        const targets = new Set(frames.map((frame) => Math.max(0, Math.floor(frame))));
-        if (targets.size === 0) return true;
         const before = this.cameraExternalParentKeyframes.length;
-        this.cameraExternalParentKeyframes = this.cameraExternalParentKeyframes.filter((entry) => !targets.has(entry.frame));
+        this.cameraExternalParentKeyframes = removeCameraExternalParentKeyframes(
+            this.cameraExternalParentKeyframes,
+            frames,
+        );
         if (this.cameraExternalParentKeyframes.length !== before) {
-            this.applyCameraExternalParentKeyframeAtFrame(this._currentFrame);
+            if (this.cameraExternalParentKeyframes.length === 0) {
+                this.setCameraExternalParentState(null, null);
+            } else {
+                this.applyCameraExternalParentKeyframeAtFrame(this._currentFrame);
+            }
         }
         return true;
     }
 
     moveCameraExternalParentKeyframe(fromFrame: number, toFrame: number): boolean {
-        const from = Math.max(0, Math.floor(fromFrame));
-        const to = Math.max(0, Math.floor(toFrame));
-        const index = this.cameraExternalParentKeyframes.findIndex((entry) => entry.frame === from);
-        if (index < 0) return true;
-        const entry = { ...this.cameraExternalParentKeyframes[index], frame: to };
-        this.cameraExternalParentKeyframes.splice(index, 1);
-        const existingIndex = this.cameraExternalParentKeyframes.findIndex((item) => item.frame === to);
-        if (existingIndex >= 0) this.cameraExternalParentKeyframes.splice(existingIndex, 1);
-        this.cameraExternalParentKeyframes.push(entry);
-        this.cameraExternalParentKeyframes.sort((a, b) => a.frame - b.frame);
+        this.cameraExternalParentKeyframes = moveCameraExternalParentKeyframe(
+            this.cameraExternalParentKeyframes,
+            fromFrame,
+            toFrame,
+        );
         this.applyCameraExternalParentKeyframeAtFrame(this._currentFrame);
         return true;
     }
@@ -12379,28 +12424,21 @@ ${beforeFogAppendBlock}
     setCameraExternalParentKeyframes(track: ProjectSerializedCameraExternalParentTrack | null | undefined): boolean {
         if (!track) {
             this.cameraExternalParentKeyframes = [];
+            this.setCameraExternalParentState(null, null);
             return true;
         }
         const frameCount = Array.isArray(track.modelPaths) ? track.modelPaths.length : 0;
         const frames = new Uint32Array(frameCount);
         this.copyProjectArrayToUint32(track.frameNumbers, frames);
-        const entries: CameraExternalParentKeyframe[] = [];
+        let entries: CameraExternalParentKeyframe[] = [];
         for (let i = 0; i < frames.length; i += 1) {
             const frame = Math.max(0, Math.floor(Number(frames[i] ?? 0)));
-            const modelPath = typeof track.modelPaths?.[i] === "string" && track.modelPaths[i]
-                ? track.modelPaths[i]
-                : null;
-            entries.push({
-                frame,
-                modelPath,
-                boneName: modelPath && typeof track.boneNames?.[i] === "string" && track.boneNames[i]
-                    ? track.boneNames[i]
-                    : null,
+            entries = upsertCameraExternalParentKeyframe(entries, frame, {
+                modelPath: track.modelPaths?.[i] ?? null,
+                boneName: track.boneNames?.[i] ?? null,
             });
         }
-        this.cameraExternalParentKeyframes = entries
-            .sort((a, b) => a.frame - b.frame)
-            .filter((entry, index, array) => index === array.findIndex((candidate) => candidate.frame === entry.frame));
+        this.cameraExternalParentKeyframes = entries;
         this.applyCameraExternalParentKeyframeAtFrame(this._currentFrame);
         return true;
     }
@@ -12438,7 +12476,8 @@ ${beforeFogAppendBlock}
 
     setCameraExternalParent(modelIndex: number | null, boneName: string | null): boolean {
         if (modelIndex === null) {
-            this.syncMmdCameraFromViewportCameraInParentSpace(null);
+            this.syncCameraRotationFromCurrentView();
+            this.syncMmdCameraFromViewportCamera(true);
             this.cameraExternalParentModelIndex = null;
             this.cameraExternalParentModelPath = null;
             this.cameraExternalParentBoneName = null;
@@ -12455,7 +12494,7 @@ ${beforeFogAppendBlock}
             return false;
         }
 
-        this.setMmdCameraFocusToExternalParentOrigin();
+        this.resetMmdCameraForExternalParent();
         this.cameraExternalParentModelIndex = modelIndex;
         this.cameraExternalParentModelPath = this.sceneModels[modelIndex].info.path;
         this.cameraExternalParentBoneName = normalizedBoneName;
@@ -12475,6 +12514,11 @@ ${beforeFogAppendBlock}
     }
 
     setCameraDistance(distance: number): void {
+        if (this.cameraExternalParentModelIndex !== null) {
+            this.mmdCamera.distance = 0;
+            this.syncViewportCameraFromMmdCamera(true);
+            return;
+        }
         const min = Math.max(0.1, this.camera.lowerRadiusLimit ?? this.camera.minZ);
         const max = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
         this.camera.radius = Math.max(min, Math.min(max, distance));
@@ -12486,6 +12530,12 @@ ${beforeFogAppendBlock}
     }
 
     setCameraFov(degrees: number): void {
+        if (this.cameraExternalParentModelIndex !== null) {
+            this.mmdCamera.fov = (degrees * Math.PI) / 180;
+            this.syncViewportCameraFromMmdCamera(true);
+            this.updateEditorDofFocusAndFStop();
+            return;
+        }
         this.camera.fov = (degrees * Math.PI) / 180;
         this.syncMmdCameraFromViewportCamera();
         this.updateOrthographicCameraBounds();
@@ -12508,7 +12558,7 @@ ${beforeFogAppendBlock}
             (rotationDeg.y * Math.PI) / 180,
             (rotationDeg.z * Math.PI) / 180,
         );
-        this.mmdCamera.distance = -Math.abs(distance);
+        this.mmdCamera.distance = this.cameraExternalParentModelIndex !== null ? 0 : -Math.abs(distance);
         if (typeof fovDeg === "number") {
             this.mmdCamera.fov = (fovDeg * Math.PI) / 180;
         }
@@ -12590,44 +12640,29 @@ ${beforeFogAppendBlock}
         this.recordViewportCameraSyncState();
     }
 
-    private syncMmdCameraFromViewportCameraInParentSpace(parentMatrix: Matrix | null): void {
-        this.cameraExternalParentPosition.copyFrom(this.camera.position);
-        this.cameraExternalParentTarget.copyFrom(this.camera.target);
-        if (parentMatrix) {
-            parentMatrix.invertToRef(this.cameraExternalParentInverseMatrix);
-            Vector3.TransformCoordinatesToRef(
-                this.cameraExternalParentPosition,
-                this.cameraExternalParentInverseMatrix,
-                this.cameraExternalParentPosition,
-            );
-            Vector3.TransformCoordinatesToRef(
-                this.cameraExternalParentTarget,
-                this.cameraExternalParentInverseMatrix,
-                this.cameraExternalParentTarget,
-            );
-        }
-        this.mmdCamera.target.copyFrom(this.cameraExternalParentTarget);
-        this.mmdCamera.position = this.cameraExternalParentPosition.clone();
-        this.mmdCamera.rotation.z = (this.cameraRotationEulerDeg.z * Math.PI) / 180;
-        this.mmdCamera.fov = this.camera.fov;
-    }
-
-    private setMmdCameraFocusToExternalParentOrigin(): void {
-        this.syncCameraRotationFromCurrentView({ preserveRoll: true });
+    private resetMmdCameraForExternalParent(): void {
         this.mmdCamera.target.set(0, 0, 0);
-        this.mmdCamera.rotation.set(
-            (this.cameraRotationEulerDeg.x * Math.PI) / 180,
-            (this.normalizeCameraAngleDeg(this.cameraRotationEulerDeg.y) * Math.PI) / 180,
-            (this.normalizeCameraAngleDeg(this.cameraRotationEulerDeg.z) * Math.PI) / 180,
-        );
-        this.mmdCamera.distance = -Math.max(0.0001, this.getCameraDistance());
+        this.mmdCamera.rotation.set(0, 0, 0);
+        this.mmdCamera.distance = 0;
         this.mmdCamera.fov = this.camera.fov;
         this.mmdCamera.updatePosition();
+        this.cameraRotationEulerDeg.set(0, 0, 0);
     }
 
     private syncViewportCameraFromMmdCamera(skipExternalParentKeyframe = false): void {
         if (!skipExternalParentKeyframe) {
             this.applyCameraExternalParentKeyframeAtFrame(this._currentFrame);
+        }
+        const externalParentActive = this.cameraExternalParentModelIndex !== null;
+        if (externalParentActive) {
+            if (this.cameraLowerRadiusLimitBeforeExternalParent === undefined) {
+                this.cameraLowerRadiusLimitBeforeExternalParent = this.camera.lowerRadiusLimit;
+            }
+            this.camera.lowerRadiusLimit = 0.000001;
+            this.mmdCamera.distance = 0;
+        } else if (this.cameraLowerRadiusLimitBeforeExternalParent !== undefined) {
+            this.camera.lowerRadiusLimit = this.cameraLowerRadiusLimitBeforeExternalParent;
+            this.cameraLowerRadiusLimitBeforeExternalParent = undefined;
         }
         // MmdCamera is not the active scene camera, so keep its position up to date explicitly.
         this.mmdCamera.updatePosition();
@@ -12637,8 +12672,32 @@ ${beforeFogAppendBlock}
             -this.mmdCamera.rotation.z,
         );
         const rotatedUp = Vector3.TransformNormal(this.mmdCamera.upVector, rotationMatrix).normalize();
-        this.cameraExternalParentPosition.copyFrom(this.mmdCamera.position);
-        this.cameraExternalParentTarget.copyFrom(this.mmdCamera.target);
+        Vector3.TransformNormalFromFloatsToRef(
+            0,
+            0,
+            1,
+            rotationMatrix,
+            this.cameraExternalParentForward,
+        ).normalize();
+        if (externalParentActive) {
+            // MMD uses the external-parent origin as the camera orbit pivot. The
+            // editable camera XYZ is an offset from that pivot, rotated by the local
+            // camera rotation even though the editable distance remains zero.
+            Vector3.TransformCoordinatesToRef(
+                this.mmdCamera.target,
+                rotationMatrix,
+                this.cameraExternalParentPosition,
+            );
+            // The viewport look-at follows XY movement so middle-button dragging is
+            // a translation. Only the orbit calculation keeps the parent origin as
+            // its center when local camera rotation changes.
+            this.cameraExternalParentTarget
+                .copyFrom(this.cameraExternalParentForward)
+                .addInPlace(this.cameraExternalParentPosition);
+        } else {
+            this.cameraExternalParentPosition.copyFrom(this.mmdCamera.position);
+            this.cameraExternalParentTarget.copyFrom(this.mmdCamera.target);
+        }
         this.cameraExternalParentUp.copyFrom(rotatedUp);
         this.applyCameraExternalParentToViewportVectors();
         this.camera.upVector = this.cameraExternalParentUp.clone();
@@ -12666,12 +12725,7 @@ ${beforeFogAppendBlock}
 
     private applyCameraExternalParentKeyframeAtFrame(frame: number): void {
         if (this.cameraExternalParentKeyframes.length === 0) return;
-        const normalized = Math.max(0, Math.floor(frame));
-        let selected: CameraExternalParentKeyframe | null = null;
-        for (const entry of this.cameraExternalParentKeyframes) {
-            if (entry.frame > normalized) break;
-            selected = entry;
-        }
+        const selected = selectCameraExternalParentKeyframeAtFrame(this.cameraExternalParentKeyframes, frame);
 
         if (!selected) {
             this.setCameraExternalParentState(null, null);
@@ -12682,48 +12736,46 @@ ${beforeFogAppendBlock}
     }
 
     private setCameraExternalParentState(modelPath: string | null, boneName: string | null): void {
-        if (!modelPath) {
+        const normalized = normalizeCameraExternalParentPayload({ modelPath, boneName });
+        if (!normalized.modelPath) {
             this.cameraExternalParentModelIndex = null;
             this.cameraExternalParentModelPath = null;
             this.cameraExternalParentBoneName = null;
             return;
         }
 
-        const modelIndex = this.sceneModels.findIndex((entry) => entry.info.path === modelPath);
+        const modelIndex = this.sceneModels.findIndex((entry) => entry.info.path === normalized.modelPath);
         if (modelIndex < 0) {
             this.cameraExternalParentModelIndex = null;
-            this.cameraExternalParentModelPath = modelPath;
-            this.cameraExternalParentBoneName = boneName;
+            this.cameraExternalParentModelPath = normalized.modelPath;
+            this.cameraExternalParentBoneName = normalized.boneName;
             return;
         }
 
-        const normalizedBoneName = boneName && this.getRuntimeBoneByNameFromModel(this.sceneModels[modelIndex].model, boneName)
-            ? boneName
-            : null;
+        const normalizedBoneName = normalized.boneName ?? null;
+        if (
+            normalizedBoneName
+            && !this.getRuntimeBoneByNameFromModel(this.sceneModels[modelIndex].model, normalizedBoneName)
+        ) {
+            this.cameraExternalParentModelIndex = null;
+            this.cameraExternalParentModelPath = normalized.modelPath;
+            this.cameraExternalParentBoneName = normalizedBoneName;
+            return;
+        }
         this.cameraExternalParentModelIndex = modelIndex;
-        this.cameraExternalParentModelPath = modelPath;
+        this.cameraExternalParentModelPath = normalized.modelPath;
         this.cameraExternalParentBoneName = normalizedBoneName;
     }
 
     private applyCameraExternalParentToViewportVectors(): void {
         if (!this.getCameraExternalParentMatrixToRef(this.cameraExternalParentMatrix)) return;
 
-        Vector3.TransformCoordinatesToRef(
-            this.cameraExternalParentPosition,
+        transformCameraExternalParentVectorsToRef(
             this.cameraExternalParentMatrix,
             this.cameraExternalParentPosition,
-        );
-        Vector3.TransformCoordinatesToRef(
             this.cameraExternalParentTarget,
-            this.cameraExternalParentMatrix,
-            this.cameraExternalParentTarget,
-        );
-        Vector3.TransformNormalToRef(
-            this.cameraExternalParentUp,
-            this.cameraExternalParentMatrix,
             this.cameraExternalParentUp,
         );
-        this.cameraExternalParentUp.normalize();
     }
 
     private getCameraExternalParentMatrixToRef(result: Matrix): boolean {
@@ -12757,10 +12809,10 @@ ${beforeFogAppendBlock}
         const runtimeBone = this.getRuntimeBoneByNameFromModel(modelEntry.model, boneName);
         if (!runtimeBone) {
             if (modelIndex === this.cameraExternalParentModelIndex) {
+                this.cameraExternalParentModelIndex = null;
                 this.cameraExternalParentBoneName = null;
             }
-            result.copyFrom(modelEntry.mesh.computeWorldMatrix(true));
-            return true;
+            return false;
         }
 
         runtimeBone.getWorldMatrixToRef(result);

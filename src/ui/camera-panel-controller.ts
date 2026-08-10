@@ -20,11 +20,11 @@ type CameraPanelElements = {
 export type CameraPanelControllerDeps = {
     mmdManager: MmdManager;
     onCameraEdited: () => void;
+    showToast: (message: string, type: "success" | "error" | "info") => void;
     dispatchAction?: (action: EditorAction) => boolean;
 };
 
-const CAMERA_EXTERNAL_PARENT_DEFAULT_BONE_CANDIDATES = ["頭", "head", "Head"];
-const CAMERA_EXTERNAL_PARENT_UI_ENABLED = false;
+const CAMERA_EXTERNAL_PARENT_DEFAULT_BONE_CANDIDATES = ["頭", "head", "Head", "センター", "center", "Center"];
 
 function normalizeBoneNameForDefault(name: string): string {
     return name.trim().replace(/\s+/g, "").toLowerCase();
@@ -53,9 +53,9 @@ function resolveCameraPanelElements(): CameraPanelElements {
         topButton: document.getElementById("btn-cam-top") as HTMLButtonElement | null,
         backButton: document.getElementById("btn-cam-back") as HTMLButtonElement | null,
         bottomButton: document.getElementById("btn-cam-bottom") as HTMLButtonElement | null,
-        externalParentContainer: document.querySelector(".bone-parent-controls") as HTMLElement | null,
-        externalParentSelect: document.getElementById("info-external-parent-select") as HTMLSelectElement | null,
-        parentBoneSelect: document.getElementById("info-parent-bone-select") as HTMLSelectElement | null,
+        externalParentContainer: document.querySelector(".camera-parent-controls") as HTMLElement | null,
+        externalParentSelect: document.getElementById("camera-external-parent-select") as HTMLSelectElement | null,
+        parentBoneSelect: document.getElementById("camera-parent-bone-select") as HTMLSelectElement | null,
         externalParentRegisterButton: document.getElementById("btn-camera-external-parent-register") as HTMLButtonElement | null,
     };
 }
@@ -64,23 +64,25 @@ export class CameraPanelController {
     private readonly elements: CameraPanelElements;
     private readonly mmdManager: MmdManager;
     private readonly onCameraEdited: () => void;
+    private readonly showToast: CameraPanelControllerDeps["showToast"];
     private readonly dispatchAction: ((action: EditorAction) => boolean) | null;
     private isSyncingExternalParentUi = false;
+    private hasPendingExternalParentSelection = false;
 
     constructor(deps: CameraPanelControllerDeps) {
         this.elements = resolveCameraPanelElements();
         this.mmdManager = deps.mmdManager;
         this.onCameraEdited = deps.onCameraEdited;
+        this.showToast = deps.showToast;
         this.dispatchAction = deps.dispatchAction ?? null;
 
         this.setupControls();
     }
 
     public refresh(force = false, displayDistance?: number): void {
-        void force;
         void displayDistance;
         // Camera transform controls still live in the pseudo Camera bone section for this slice.
-        this.refreshExternalParentControls();
+        this.refreshExternalParentControls(force);
     }
 
     public setCameraViewPreset(view: CameraViewPreset): void {
@@ -103,7 +105,17 @@ export class CameraPanelController {
         this.elements.bottomButton?.addEventListener("click", () => switchCameraView("bottom"));
         this.elements.externalParentSelect?.addEventListener("change", () => {
             if (this.isSyncingExternalParentUi) return;
-            this.refreshParentBoneOptions(this.parseExternalParentModelIndex(), null);
+            this.hasPendingExternalParentSelection = true;
+            const modelIndex = this.parseExternalParentModelIndex();
+            this.refreshParentBoneOptions(modelIndex, null);
+            if (this.elements.externalParentRegisterButton) {
+                this.elements.externalParentRegisterButton.disabled = modelIndex !== null
+                    && !this.elements.parentBoneSelect?.value;
+            }
+        });
+        this.elements.parentBoneSelect?.addEventListener("change", () => {
+            if (this.isSyncingExternalParentUi) return;
+            this.hasPendingExternalParentSelection = true;
         });
         this.elements.externalParentRegisterButton?.addEventListener("click", () => {
             if (this.dispatchAction?.({ type: "camera.setExternalParent", source: "button" })) return;
@@ -111,48 +123,61 @@ export class CameraPanelController {
         });
 
         this.updateViewButtons("front");
-        this.refreshExternalParentControls();
+        this.refreshExternalParentControls(true);
     }
 
-    public setExternalParentFromPanel(): void {
-        if (this.isSyncingExternalParentUi) return;
+    public setExternalParentFromPanel(notifyCameraEdited = true): boolean {
+        if (this.isSyncingExternalParentUi) return false;
         const modelIndex = this.parseExternalParentModelIndex();
         const boneName = modelIndex === null ? null : this.elements.parentBoneSelect?.value || null;
-        this.mmdManager.setCameraExternalParent(modelIndex, boneName);
-        this.refreshExternalParentControls();
-        this.onCameraEdited();
+        if (modelIndex !== null && !boneName) {
+            this.showToast("親ボーンを選択してください", "info");
+            return false;
+        }
+        if (!this.mmdManager.setCameraExternalParent(modelIndex, boneName)) {
+            this.showToast("カメラ外部親を設定できませんでした", "error");
+            return false;
+        }
+        this.hasPendingExternalParentSelection = false;
+        this.refreshExternalParentControls(true);
+        if (notifyCameraEdited) {
+            this.onCameraEdited();
+        }
+        return true;
     }
 
-    private refreshExternalParentControls(): void {
+    private refreshExternalParentControls(force = false): void {
         const container = this.elements.externalParentContainer;
         const parentSelect = this.elements.externalParentSelect;
         const boneSelect = this.elements.parentBoneSelect;
         const registerButton = this.elements.externalParentRegisterButton;
         if (!container || !parentSelect || !boneSelect || !registerButton) return;
 
-        if (!CAMERA_EXTERNAL_PARENT_UI_ENABLED) {
-            // v0.2.1: camera external parent behavior is still under investigation, so keep its UI hidden.
-            container.hidden = true;
-            parentSelect.disabled = true;
-            boneSelect.disabled = true;
-            registerButton.disabled = true;
-            return;
-        }
-
         const visible = this.mmdManager.getTimelineTarget() === "camera";
         container.hidden = !visible;
         if (!visible) return;
 
+        const models = this.mmdManager.getLoadedModels();
+        if (this.hasPendingExternalParentSelection && !force) {
+            const modelIndex = this.parseExternalParentModelIndex();
+            parentSelect.disabled = models.length === 0;
+            registerButton.disabled = models.length === 0
+                || (modelIndex !== null && boneSelect.value === "");
+            return;
+        }
+
         const parentState = this.mmdManager.getCameraExternalParent();
         const modelIndex = parentState?.modelIndex ?? null;
         const boneName = parentState?.boneName ?? null;
+        this.hasPendingExternalParentSelection = false;
 
         this.isSyncingExternalParentUi = true;
         try {
             this.refreshExternalParentModelOptions(modelIndex);
             this.refreshParentBoneOptions(modelIndex, boneName);
-            parentSelect.disabled = false;
-            registerButton.disabled = false;
+            parentSelect.disabled = models.length === 0;
+            registerButton.disabled = models.length === 0
+                || (modelIndex !== null && boneSelect.value === "");
         } finally {
             this.isSyncingExternalParentUi = false;
         }
@@ -203,11 +228,6 @@ export class CameraPanelController {
             return;
         }
 
-        const modelOption = document.createElement("option");
-        modelOption.value = "";
-        modelOption.textContent = "(Model center)";
-        select.appendChild(modelOption);
-
         const boneNames = this.mmdManager.getModelBoneNames(modelIndex);
         for (const boneName of boneNames) {
             const option = document.createElement("option");
@@ -216,7 +236,10 @@ export class CameraPanelController {
             select.appendChild(option);
         }
 
-        const targetValue = selectedBoneName ?? findDefaultCameraExternalParentBoneName(boneNames) ?? "";
+        const targetValue = selectedBoneName
+            ?? findDefaultCameraExternalParentBoneName(boneNames)
+            ?? boneNames[0]
+            ?? "";
         const hasTarget = Array.from(select.options).some((option) => option.value === targetValue);
         select.value = hasTarget ? targetValue : "";
         select.disabled = false;
