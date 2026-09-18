@@ -1,41 +1,25 @@
-// MMD_modoki の最終ボーン姿勢を Blender アドオンへ返すレンダラー側処理。
+// MMD_modoki の最終ボーン姿勢を Blender アドオンへ渡すレンダラー側処理。
 //
-// - 姿勢は rest 相対ローカル位置 + ローカル回転クォータニオン。
-// - 物理は WebM 出力と同じ外部プレイバックで前方向に 1 フレームずつ進めて積算する。
-//   seekAnimation だけでは Bullet の結果にならないため。
-// - 大きく戻る／大きく飛ぶシークは既存の seekTo にフォールバックする（物理は再初期化）。
+// 役割は「どのフレームを、どう進めて、どう読み出すか」のオーケストレーション。
+// 実際の読み出しは pose-sampler.ts、wire形式は pose-bridge-protocol.ts、
+// エンジン内部（描画なしステップ）は MmdManager.stepPoseSimulation が担当する。
 //
-// 外部に公開するのは /health と /pose のみ。アドオンはこの 2 つしか使わない。
+// 方針:
+// - MMD_modoki の描画は同期に不要なので、フルレンダーはせず stepPoseSimulation で進める。
+// - 物理は前方向に 1 フレームずつ積算する。大きく戻る/飛ぶシークは既存の seekTo に
+//   フォールバックする（物理は再初期化される）。
 
-import { Matrix, Quaternion, Vector3 } from "@babylonjs/core";
-import type { PoseBridgeBonePose, PoseBridgeModelSummary, PoseBridgeRequest } from "../shared/pose-bridge-contract";
+import type { PoseBridgeModelSummary, PoseBridgeRequest } from "../shared/pose-bridge-contract";
+import { readBoneNames, readBonePose, type SceneModelLike } from "./pose-sampler";
 
 const TIMELINE_FPS = 30;
 /** これを超える前進ジャンプはフレーム送りではなく既存シークへフォールバックする。 */
 const MAX_FORWARD_STEPS = 240;
 
-type RuntimeBoneLike = {
-    name: string;
-    parentBone?: RuntimeBoneLike | null;
-    getWorldMatrixToRef?(target: Matrix): Matrix;
-    linkedBone?: {
-        getRestMatrix(): Matrix;
-    } | null;
-};
-
-type SceneModelLike = {
-    model: { runtimeBones?: readonly RuntimeBoneLike[] };
-    info: {
-        instanceId: string;
-        name: string;
-        boneNames: string[];
-    };
-};
-
 type PoseBridgeHost = {
     pause(): void;
     seekTo(frame: number): void;
-    renderOnce(deltaMs?: number): void;
+    stepPoseSimulation(deltaMs: number): void;
     getPhysicsEnabled(): boolean;
     setPhysicsEnabled(enabled: boolean): boolean;
     setExternalPlaybackSimulationEnabled(enabled: boolean): boolean;
@@ -44,7 +28,7 @@ type PoseBridgeHost = {
     getLoadedModels(): PoseBridgeModelSummary[];
     readonly currentFrame: number;
     readonly totalFrames: number;
-    mmdRuntime?: { playAnimation(): unknown; pauseAnimation(): void };
+    mmdRuntime?: { playAnimation(): Promise<unknown> | unknown; pauseAnimation(): void };
     sceneModels?: SceneModelLike[];
 };
 
@@ -64,6 +48,7 @@ function pickModel(host: PoseBridgeHost): { model: PoseBridgeModelSummary; entry
 
 function enableExternalSimulation(host: PoseBridgeHost): void {
     if (externalSimulationEnabled) return;
+    // MMD_modoki 側の自動レンダーと競合しないよう止めて、手動ステップに一本化する。
     host.setAutoRenderEnabled?.(false);
     host.setExternalPlaybackSimulationEnabled(true);
     externalSimulationEnabled = true;
@@ -80,7 +65,7 @@ function ensurePhysicsEnabled(host: PoseBridgeHost): void {
 function hardSeek(host: PoseBridgeHost, targetFrame: number): void {
     host.seekTo(targetFrame);
     enableExternalSimulation(host);
-    host.renderOnce(0);
+    host.stepPoseSimulation(0);
     simulationFrame = targetFrame;
 }
 
@@ -100,7 +85,7 @@ async function stepSimulation(host: PoseBridgeHost, targetFrame: number): Promis
     }
     if (gap === 0) {
         enableExternalSimulation(host);
-        host.renderOnce(0);
+        host.stepPoseSimulation(0);
         return;
     }
 
@@ -111,55 +96,15 @@ async function stepSimulation(host: PoseBridgeHost, targetFrame: number): Promis
     }
 
     enableExternalSimulation(host);
+    // beforePhysics は pause 中だとフレームを進めない。前方向ステップの間だけ再生状態にする。
+    await runtime.playAnimation();
     const deltaMs = 1000 / TIMELINE_FPS;
     for (let frame = simulationFrame + 1; frame <= targetFrame; frame += 1) {
         host.setExternalPlaybackFrame(frame);
-        await runtime.playAnimation();
-        host.renderOnce(deltaMs);
-        runtime.pauseAnimation();
+        host.stepPoseSimulation(deltaMs);
     }
+    runtime.pauseAnimation();
     simulationFrame = targetFrame;
-}
-
-function readBones(entry: SceneModelLike): PoseBridgeBonePose[] {
-    // linkedBone のローカル値は物理結果を反映しないことがあるため、
-    // MMD_modoki の getBoneTransformFromRuntimeBone と同じく
-    // ワールド行列から親の逆行列でローカルを再構成する（物理込み）。
-    const bones: PoseBridgeBonePose[] = [];
-    const world = new Matrix();
-    const parentWorld = new Matrix();
-    const parentInverse = new Matrix();
-    const local = new Matrix();
-    const scaling = new Vector3();
-    const rotation = new Quaternion();
-    const position = new Vector3();
-    const restPosition = new Vector3();
-    for (const runtimeBone of entry.model.runtimeBones ?? []) {
-        const linkedBone = runtimeBone.linkedBone;
-        if (!linkedBone || typeof runtimeBone.getWorldMatrixToRef !== "function") continue;
-        runtimeBone.getWorldMatrixToRef(world);
-        const parent = runtimeBone.parentBone;
-        if (parent && typeof parent.getWorldMatrixToRef === "function") {
-            parent.getWorldMatrixToRef(parentWorld);
-            parentWorld.invertToRef(parentInverse);
-            world.multiplyToRef(parentInverse, local);
-        } else {
-            local.copyFrom(world);
-        }
-        local.decompose(scaling, rotation, position);
-        linkedBone.getRestMatrix().getTranslationToRef(restPosition);
-        const offsetX = position.x - restPosition.x;
-        const offsetY = position.y - restPosition.y;
-        const offsetZ = position.z - restPosition.z;
-        const values = [offsetX, offsetY, offsetZ, rotation.x, rotation.y, rotation.z, rotation.w];
-        if (!values.every(Number.isFinite)) continue;
-        bones.push({
-            name: runtimeBone.name,
-            position: [offsetX, offsetY, offsetZ],
-            rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
-        });
-    }
-    return bones;
 }
 
 export async function handlePoseBridgeRequest(host: PoseBridgeHost, request: PoseBridgeRequest): Promise<unknown> {
@@ -172,16 +117,30 @@ export async function handlePoseBridgeRequest(host: PoseBridgeHost, request: Pos
                 models: host.getLoadedModels(),
             };
         }
+        case "bones": {
+            const { model, entry } = pickModel(host);
+            return { modelInstanceId: model.instanceId, bones: readBoneNames(entry) };
+        }
         case "pose": {
             const rawFrame = Number(request.payload.frame);
             if (!Number.isFinite(rawFrame)) throw new Error("frame が不正です");
             const targetFrame = Math.max(0, Math.floor(rawFrame));
             const { entry } = pickModel(host);
             host.pause();
+
+            const stepStarted = performance.now();
             await stepSimulation(host, targetFrame);
-            // 物理ステップ後に再描画して skeleton の最終行列を確定させる。
-            host.renderOnce(0);
-            return { frame: host.currentFrame, bones: readBones(entry) };
+            const stepMs = performance.now() - stepStarted;
+
+            const readStarted = performance.now();
+            const data = readBonePose(entry);
+            const readMs = performance.now() - readStarted;
+
+            return {
+                frame: host.currentFrame,
+                data,
+                timings: { stepMs: Math.round(stepMs), readMs: Math.round(readMs) },
+            };
         }
         default:
             throw new Error(`未知のコマンドです: ${String(request.command)}`);

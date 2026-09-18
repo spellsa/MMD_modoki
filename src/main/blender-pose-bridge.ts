@@ -1,17 +1,23 @@
-// Blender アドオン向けの最小 localhost HTTP ブリッジ。
+// Blender アドオン向けの最小 localhost HTTP ブリッジ（Mainプロセス）。
 //
 // 環境変数 MMD_MODOKI_POSE_BRIDGE=1 のときだけ起動する（既定は無効）。
-// Blender Python から urllib でそのまま叩ける JSON over HTTP。
+// Blender Python から urllib でそのまま叩ける。
 //
-//   GET  /health -> 起動状態と現在フレーム
-//   POST /pose   -> {"frame": 30} で最終ボーン姿勢（物理込み）を取得
+//   GET  /health -> JSON: 起動状態と現在フレーム
+//   GET  /bones  -> JSON: ボーン名テーブル（接続時に一度だけ）
+//   POST /pose   -> バイナリ: 指定フレームの最終ボーン姿勢（物理込み）
 //
-// リクエストは Main -> Renderer の IPC で処理し、結果を返す。
+// 役割は transport に限定する。wire形式は pose-bridge-protocol.ts が定義する。
 
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ipcMain, type BrowserWindow } from "electron";
 import type { PoseBridgeCommand, PoseBridgeReply, PoseBridgeRequest } from "../shared/pose-bridge-contract";
+import {
+    POSE_BRIDGE_HEADER_BYTES,
+    POSE_BRIDGE_STRIDE,
+    writePoseBridgeHeader,
+} from "../shared/pose-bridge-protocol";
 
 const DEFAULT_PORT = 46080;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -39,14 +45,26 @@ function parsePort(raw: string | undefined): number {
     return value;
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(response: ServerResponse, status: number, body: unknown): number {
     const text = JSON.stringify(body);
+    const byteLength = Buffer.byteLength(text);
     response.writeHead(status, {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Length": Buffer.byteLength(text),
+        "Content-Length": byteLength,
         "Cache-Control": "no-store",
     });
     response.end(text);
+    return byteLength;
+}
+
+function sendBinary(response: ServerResponse, body: Buffer): number {
+    response.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": body.byteLength,
+        "Cache-Control": "no-store",
+    });
+    response.end(body);
+    return body.byteLength;
 }
 
 function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -81,6 +99,33 @@ function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>
         });
         request.on("error", reject);
     });
+}
+
+type PoseResultLike = {
+    frame?: unknown;
+    data?: unknown;
+    timings?: { stepMs?: number; readMs?: number };
+};
+
+function encodePoseResponse(result: unknown, ipcMs: number): Buffer {
+    const pose = (result ?? {}) as PoseResultLike;
+    const data = pose.data;
+    if (!(data instanceof Float32Array)) {
+        throw new Error("pose データがありません");
+    }
+    const boneCount = Math.floor(data.length / POSE_BRIDGE_STRIDE);
+
+    const header = new Uint8Array(POSE_BRIDGE_HEADER_BYTES);
+    writePoseBridgeHeader(new DataView(header.buffer), {
+        boneCount,
+        frame: Number(pose.frame ?? 0),
+        stepMs: pose.timings?.stepMs,
+        readMs: pose.timings?.readMs,
+        ipcMs,
+    });
+
+    const dataBytes = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+    return Buffer.concat([Buffer.from(header.buffer), dataBytes]);
 }
 
 export function installBlenderPoseBridge(log: PoseBridgeLogger): BlenderPoseBridge | null {
@@ -140,9 +185,17 @@ export function installBlenderPoseBridge(log: PoseBridgeLogger): BlenderPoseBrid
                     sendJson(response, 200, { result: await dispatch("health", {}) });
                     return;
                 }
+                if (request.method === "GET" && path === "/bones") {
+                    sendJson(response, 200, { result: await dispatch("bones", {}) });
+                    return;
+                }
                 if (request.method === "POST" && path === "/pose") {
                     const body = await readJsonBody(request);
-                    sendJson(response, 200, { result: await dispatch("pose", body) });
+                    const started = performance.now();
+                    const result = await dispatch("pose", body);
+                    const ipcMs = Math.round(performance.now() - started);
+                    const bytes = sendBinary(response, encodePoseResponse(result, ipcMs));
+                    log("pose timing", { ipcMs, bytes });
                     return;
                 }
                 sendJson(response, 404, { error: "not found" });

@@ -1,11 +1,12 @@
 """MMD modoki Sync — MMD_modoki の最終ボーン姿勢を mmd_tools の Armature へ同期する。
 
-方針:
-- 姿勢の正解は常に MMD_modoki。Blender 側の MMD モデルは「表示・レンダリング専用」。
-- そのため接続時に、対象 Armature を mmd_tools の IK / 付与 / 制限 / 追従を使わない
-  「制約をミュートし Action を外した状態」にしてから、MMD_modoki の最終値を流し込む。
-- 自動同期は frame_change_post で行い、「接続中」のときだけ動かす。
-  このハンドラはファイル読み込みで外れるため、@persistent 化し load_post でも再登録する。
+役割分担:
+- __init__.py : Blender への登録・UI・frame ハンドラ（薄く保つ）
+- client.py   : HTTP で取得する
+- protocol.py : バイナリ応答を解釈する
+- target.py   : Armature を表示専用にして姿勢を適用する
+
+方針: 姿勢の正解は常に MMD_modoki。Blender 側は表示・レンダリング専用。
 """
 
 import os
@@ -17,11 +18,12 @@ from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, FloatProperty, PointerProperty, StringProperty
 from bpy.types import Operator, Panel, PropertyGroup
 
-from . import apply as apply_mod
 from . import client
+from . import target as target_mod
 
 LOG_PATH = os.path.join(tempfile.gettempdir(), "mmd_modoki_sync.log")
 _debug_log_enabled = True
+_active_target = None
 
 
 def _log(message: str) -> None:
@@ -44,30 +46,21 @@ def _target_armature(settings):
     return armature
 
 
-def _prepare_armature(settings) -> None:
-    """同期対象を「表示専用」に整える（制約ミュート + Action 解除）。"""
-    armature = _target_armature(settings)
-    if armature is None:
-        return
-    muted = apply_mod.prepare_armature_for_sync(armature)
-    settings.status = f"同期の準備完了: 制約ミュート {muted}"
-
-
-def _apply_frame(settings, frame: int) -> int:
-    """指定フレームの姿勢を取得して Armature へ適用し、適用ボーン数を返す。"""
-    armature = _target_armature(settings)
-    if armature is None:
-        raise RuntimeError("対象の Armature を指定してください")
-    # mmd_tools が制約を戻していても効かないよう、適用前に毎回ミュートする。
-    apply_mod.prepare_armature_for_sync(armature)
-    data = client.pose(settings.server_url, frame)
-    bones = (data or {}).get("bones") or []
-    return apply_mod.apply_pose(armature, bones, settings.scale)
-
-
 def _on_target_armature_changed(settings, context):
-    if settings.connected:
-        _prepare_armature(settings)
+    _invalidate_connection(settings, "Armature が変わったため")
+
+
+def _on_scale_changed(settings, context):
+    _invalidate_connection(settings, "Scale が変わったため")
+
+
+def _invalidate_connection(settings, reason: str) -> None:
+    global _active_target
+    if not settings.connected:
+        return
+    settings.connected = False
+    _active_target = None
+    settings.status = f"{reason}切断しました。再接続してください"
 
 
 def _on_debug_log_changed(settings, context):
@@ -99,6 +92,7 @@ class MMD_MODOKI_SYNC_Settings(PropertyGroup):
         default=0.08,
         min=0.0001,
         soft_max=1.0,
+        update=_on_scale_changed,
     )
     debug_log: BoolProperty(
         name="Debug Log",
@@ -116,19 +110,31 @@ class MMD_MODOKI_OT_connect(Operator):
 
     def execute(self, context):
         settings = context.scene.mmd_modoki_sync
+        armature = _target_armature(settings)
+        if armature is None:
+            settings.status = "対象の Armature を指定してください"
+            self.report({"ERROR"}, settings.status)
+            return {"CANCELLED"}
+
         try:
             info = client.health(settings.server_url) or {}
+            bone_list = client.bones(settings.server_url) or {}
         except Exception as exc:  # noqa: BLE001 - UI に表示するため広く捕捉
             settings.connected = False
             settings.status = f"接続失敗: {exc}"
             self.report({"ERROR"}, settings.status)
             return {"CANCELLED"}
 
+        global _active_target
+        sync_target = target_mod.SyncTarget(armature, settings.scale)
+        matched = sync_target.set_bone_names(bone_list.get("bones") or [])
+        sync_target.prepare()
+        _active_target = sync_target
+
         settings.connected = True
-        _prepare_armature(settings)
         model_count = len(info.get("models") or [])
-        settings.status = f"接続OK: モデル{model_count}件 / frame={info.get('frame')}"
-        _log("connected")
+        settings.status = f"接続OK: ボーン{matched} / モデル{model_count}件 / frame={info.get('frame')}"
+        _log(f"connected matched={matched}")
         return {"FINISHED"}
 
 
@@ -138,8 +144,10 @@ class MMD_MODOKI_OT_disconnect(Operator):
     bl_description = "MMD_modoki との接続を切り、同期を停止する"
 
     def execute(self, context):
+        global _active_target
         settings = context.scene.mmd_modoki_sync
         settings.connected = False
+        _active_target = None
         settings.status = "切断しました"
         _log("disconnected")
         return {"FINISHED"}
@@ -209,14 +217,28 @@ def _on_frame_change(scene=None, depsgraph=None, *args):
     settings = getattr(target_scene, "mmd_modoki_sync", None)
     if settings is None or not settings.connected:
         return
-    if _target_armature(settings) is None:
+
+    sync_target = _active_target
+    if sync_target is None or sync_target.armature is not settings.target_armature:
         return
 
     started = time.perf_counter()
     try:
-        applied = _apply_frame(settings, target_scene.frame_current)
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
-        _log(f"applied frame={target_scene.frame_current} bones={applied} ms={elapsed_ms}")
+        pose = client.pose(settings.server_url, target_scene.frame_current)
+        http_ms = round((time.perf_counter() - started) * 1000)
+
+        apply_started = time.perf_counter()
+        applied = sync_target.apply(pose["rows"])
+        apply_ms = round((time.perf_counter() - apply_started) * 1000)
+        total_ms = round((time.perf_counter() - started) * 1000)
+
+        timings = pose.get("timings") or {}
+        _log(
+            f"applied frame={pose['frame']} bones={applied} total={total_ms}ms "
+            f"http={http_ms}ms apply={apply_ms}ms "
+            f"renderer={{stepMs:{timings.get('stepMs')}, readMs:{timings.get('readMs')}}} "
+            f"main={{ipcMs:{timings.get('ipcMs')}}}"
+        )
     except Exception as exc:  # noqa: BLE001 - ハンドラから例外を漏らさない
         settings.status = f"同期失敗: {exc}"
         _log(f"error frame={target_scene.frame_current} {exc!r}")

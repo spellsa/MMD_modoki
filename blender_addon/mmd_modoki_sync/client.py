@@ -6,6 +6,8 @@ import json
 import urllib.error
 import urllib.request
 
+from . import protocol
+
 DEFAULT_SERVER_URL = "http://127.0.0.1:46080"
 
 
@@ -13,30 +15,39 @@ class BridgeError(RuntimeError):
     pass
 
 
-def _request(url: str, method: str = "GET", payload=None, timeout: float = 30.0):
+def _open(url: str, *, method: str = "GET", payload=None, timeout: float = 30.0) -> bytes:
     data = None
-    headers = {"Accept": "application/json"}
+    headers = {}
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:  # サーバが返したエラー本文を拾う
+            return response.read()
+    except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise BridgeError(f"HTTP {exc.code}: {detail}") from exc
     except OSError as exc:
         raise BridgeError(f"接続できません: {exc}") from exc
-    parsed = json.loads(body) if body else {}
-    if isinstance(parsed, dict) and "result" in parsed:
-        return parsed["result"]
-    return parsed
 
 
-def health(server_url: str = DEFAULT_SERVER_URL):
-    return _request(server_url.rstrip("/") + "/health")
+def _request_json(url: str) -> dict:
+    body = _open(url)
+    parsed = json.loads(body.decode("utf-8")) if body else {}
+    if isinstance(parsed, dict) and "error" in parsed:
+        raise BridgeError(str(parsed["error"]))
+    return parsed.get("result") if isinstance(parsed, dict) else parsed
 
 
-def pose(server_url: str, frame: int, timeout: float = 30.0):
-    return _request(server_url.rstrip("/") + "/pose", method="POST", payload={"frame": int(frame)}, timeout=timeout)
+def health(server_url: str = DEFAULT_SERVER_URL) -> dict:
+    return _request_json(server_url.rstrip("/") + "/health")
+
+
+def bones(server_url: str = DEFAULT_SERVER_URL) -> dict:
+    return _request_json(server_url.rstrip("/") + "/bones")
+
+
+def pose(server_url: str, frame: int, *, timeout: float = 30.0) -> dict:
+    body = _open(server_url.rstrip("/") + "/pose", method="POST", payload={"frame": int(frame)}, timeout=timeout)
+    return protocol.parse_pose(body)

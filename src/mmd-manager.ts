@@ -16229,8 +16229,30 @@ ${beforeFogAppendBlock}
         this.onFrameUpdate?.(this._currentFrame, this._totalFrames);
     }
 
-    public renderOnceForCapture(deltaMs = 1000 / 30): void {
-        this.effectCaptureDepth++;
+    /**
+     * 描画せずに、アニメーション評価 + 物理ステップ + ボーン書き戻しを1フレーム進める。
+     *
+     * `/pose`（Blender同期）専用。scene.render() を呼ばないので GPU 描画コストを払わず、
+     * 姿勢計算に必要なフェーズだけを実行する。
+     */
+    public stepPoseSimulation(deltaMs: number): void {
+        const clampedDeltaMs = Math.max(0, Math.min(100, deltaMs));
+        const engineWithDelta = this.engine as typeof this.engine & { _deltaTime?: number };
+        engineWithDelta._deltaTime = clampedDeltaMs;
+        this.evaluateSceneTracksAtFrame(this._currentFrame);
+
+        // scene.render() のアニメーションフェーズと同じ順序で通知する。
+        this.scene.onBeforeAnimationsObservable.notifyObservers(this.scene); // MmdRuntime.beforePhysics
+        this.scene.animate(); // animatables + MultiPhysicsRuntime.afterAnimations
+        this.scene.onBeforeRenderObservable.notifyObservers(this.scene); // MmdRuntime.afterPhysics
+
+        for (const entry of this.sceneModels) {
+            entry.mesh.computeWorldMatrix(true);
+            entry.mesh.skeleton?.computeAbsoluteMatrices(true);
+        }
+    }
+
+    public renderOnceForCapture(deltaMs = 1000 / 30): void {        this.effectCaptureDepth++;
         try { this.renderEffectCaptureFrame(deltaMs); }
         finally { this.effectCaptureDepth--; this.evaluateEffectTracks(this._currentFrame); }
     }
