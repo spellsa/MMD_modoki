@@ -13,6 +13,7 @@ import { Timeline } from "./timeline";
 import { BottomPanel } from "./bottom-panel";
 import { UIController } from "./ui-controller";
 import { connectAutomationEditor } from "./automation/editor-bridge";
+import { installPoseBridgeRenderer } from "./editor/pose-bridge";
 import { enhanceBottomPanelControls } from "./ui/panel-control-helpers";
 import { runPngSequenceExportJob } from "./png-sequence-exporter";
 import { PngEncoderWebWorkerPool } from "./output/png-encoder-web-worker-pool";
@@ -334,6 +335,7 @@ async function initializeApp(): Promise<void> {
     await uiController.restoreProjectAfterRuntimeModeReload();
     if (wgslRecovered) mmdManager.onError?.(t("wgsl.recovered"));
     connectAutomationEditor(mmdManager, uiController, timeline);
+    installPoseBridgeRenderer(mmdManager);
     if (new URLSearchParams(window.location.search).get("e2e") === "1") {
       window.mmdModokiE2e = {
         exportProjectState: () => mmdManager.exportProjectState(),

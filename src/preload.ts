@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AutomationApi } from './automation/contracts';
+import type { PoseBridgeApi } from './shared/pose-bridge-contract';
 import type {
     AppLogData,
     AppLogScope,
@@ -33,8 +34,18 @@ const automation: AutomationApi = {
     },
     reply: reply => { ipcRenderer.send('automation:reply', reply); },
 };
+
+const poseBridge: PoseBridgeApi = {
+    onRequest: callback => {
+        const handler = (_event: Electron.IpcRendererEvent, request: Parameters<typeof callback>[0]): void => callback(request);
+        ipcRenderer.on('pose-bridge:request', handler);
+        return () => { ipcRenderer.removeListener('pose-bridge:request', handler); };
+    },
+    reply: reply => { ipcRenderer.send('pose-bridge:reply', reply); },
+};
 contextBridge.exposeInMainWorld('electronAPI', {
     automation,
+    poseBridge,
     wgslRecovery: {
         state: () => ipcRenderer.invoke('wgsl:state'),
         allow: () => ipcRenderer.invoke('wgsl:allow'),

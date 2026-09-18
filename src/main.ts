@@ -35,6 +35,7 @@ import { serializeVmd } from './export/vmd-serializer';
 import type { VpdExportDocument, VpdSaveResult } from './export/vpd-export-document';
 import { serializeVpd } from './export/vpd-serializer';
 import { installAutomationAppBridge } from './main/automation/app-bridge';
+import { installBlenderPoseBridge } from './main/blender-pose-bridge';
 import { prepareAutomationVideoOutput } from './main/automation/video-output';
 import { prepareAutomationPngOutput, type AutomationPngOutput } from './main/automation/png-output';
 import { AutomationError, toAutomationFailure } from './automation/diagnostics';
@@ -991,6 +992,7 @@ const showRendererFailureDialog = async (
 };
 
 const automationBridge = installAutomationAppBridge((code, data) => writeAppLog('warn', 'main', code, data));
+const blenderPoseBridge = installBlenderPoseBridge((message, data) => writeAppLog('info', 'main', message, data));
 const wgslRecovery = installWgslRecovery((message, error) => writeAppLog('warn', 'main', message, error ? createLogErrorData(error) : undefined));
 const createWindow = (): BrowserWindow => {
   const mainWindow = new BrowserWindow({
@@ -1011,6 +1013,7 @@ const createWindow = (): BrowserWindow => {
   });
   mainWindow.setMenuBarVisibility(false);
   automationBridge.register(mainWindow);
+  blenderPoseBridge?.register(mainWindow);
   snapWindowContentAspect(mainWindow, MAIN_WINDOW_ASPECT_RATIO);
   writeAppLog('info', 'main', 'main window created', {
     webContentsId: mainWindow.webContents.id,

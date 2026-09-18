@@ -1,0 +1,16 @@
+schema_version = "1.0.0"
+
+id = "mmd_modoki_sync"
+version = "0.1.3"
+name = "MMD modoki Sync"
+tagline = "Sync MMD modoki final bone poses to a mmd_tools armature"
+maintainer = "MMD_modoki"
+type = "add-on"
+
+website = "https://github.com/togechiyo/MMD_modoki"
+
+tags = ["Animation", "Rigging"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:MIT"]
