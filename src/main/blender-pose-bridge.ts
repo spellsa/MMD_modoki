@@ -1,6 +1,7 @@
 // Blender アドオン向けの最小 localhost HTTP ブリッジ（Mainプロセス）。
 //
-// 環境変数 MMD_MODOKI_POSE_BRIDGE=1 のときだけ起動する（既定は無効）。
+// 常時起動する（127.0.0.1 のみで待ち受け、認証はしない）。
+// ポートは環境変数 MMD_MODOKI_POSE_BRIDGE_PORT で変更できる（既定 46080）。
 // Blender Python から urllib でそのまま叩ける。
 //
 //   GET  /health   -> JSON: 起動状態と現在フレーム
@@ -129,9 +130,7 @@ function encodePoseResponse(result: unknown, ipcMs: number): Buffer {
     return Buffer.concat([Buffer.from(header.buffer), dataBytes]);
 }
 
-export function installBlenderPoseBridge(log: PoseBridgeLogger): BlenderPoseBridge | null {
-    if (process.env.MMD_MODOKI_POSE_BRIDGE !== "1") return null;
-
+export function installBlenderPoseBridge(log: PoseBridgeLogger): BlenderPoseBridge {
     const port = parsePort(process.env.MMD_MODOKI_POSE_BRIDGE_PORT);
     const pending = new Map<string, PendingRequest>();
     const targets = new Set<BrowserWindow>();
