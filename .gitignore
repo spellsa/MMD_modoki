@@ -107,3 +107,6 @@ local-references/
 .git copy/
 .gitignore copy
 .tmp/
+
+# Local MMD model / motion files (not distributed; git-ignored)
+/local-assets/
