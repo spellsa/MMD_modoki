@@ -10,7 +10,7 @@ export type PoseBridgeModelSummary = {
     active: boolean;
 };
 
-export type PoseBridgeCommand = "health" | "bones" | "pose";
+export type PoseBridgeCommand = "health" | "bones" | "playback" | "pose";
 
 export type PoseBridgeRequest = {
     requestId: string;

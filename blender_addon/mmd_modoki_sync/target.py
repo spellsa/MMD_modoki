@@ -45,10 +45,14 @@ def bone_match_name(pose_bone) -> str:
 class SyncTarget:
     """1つの Armature への同期。converter は set_bone_names で一度だけ作る。"""
 
+    # これ未満の差なら「変化なし」とみなして書き込みを省く
+    _CHANGE_EPSILON = 1e-5
+
     def __init__(self, armature, scale: float):
         self.armature = armature
         self.scale = scale
         self._targets = []  # bone_names と同じ並び: (pose_bone, BoneConverter) または None
+        self._last_rows = []  # 前回書いた値（変化スキップ用）。targets と同じ並び。
 
     def prepare(self) -> int:
         """姿勢制約をミュートし Action を外す。ミュートした制約数を返す。"""
@@ -78,19 +82,36 @@ class SyncTarget:
             targets.append((pose_bone, BoneConverter(pose_bone, self.scale)))
             matched += 1
         self._targets = targets
+        self._last_rows = [None] * len(targets)
         return matched
 
     def apply(self, rows) -> int:
-        """protocol.parse_pose の rows（index が bone_names と同順）を適用する。"""
+        """protocol.parse_pose の rows（index が bone_names と同順）を適用する。
+
+        値が前回とほぼ同じボーンは書き込みを省く（毎フレームの無駄を減らす）。
+        """
         applied = 0
         for index in range(len(rows)):
             target = self._targets[index] if index < len(self._targets) else None
             if target is None:
                 continue
-            pose_bone, converter = target
+
             row = rows[index].tolist()
+            previous = self._last_rows[index]
+            if previous is not None and _rows_close(previous, row, self._CHANGE_EPSILON):
+                continue
+
+            pose_bone, converter = target
             location = converter.convert_location(row[0:3])
             rotation = converter.convert_rotation(row[3:7])
             pose_bone.matrix_basis = Matrix.Translation(location) @ rotation.to_matrix().to_4x4()
+            self._last_rows[index] = row
             applied += 1
         return applied
+
+
+def _rows_close(a, b, epsilon: float) -> bool:
+    for index in range(len(a)):
+        if abs(a[index] - b[index]) > epsilon:
+            return False
+    return True

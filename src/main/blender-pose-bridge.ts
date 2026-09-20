@@ -3,9 +3,10 @@
 // 環境変数 MMD_MODOKI_POSE_BRIDGE=1 のときだけ起動する（既定は無効）。
 // Blender Python から urllib でそのまま叩ける。
 //
-//   GET  /health -> JSON: 起動状態と現在フレーム
-//   GET  /bones  -> JSON: ボーン名テーブル（接続時に一度だけ）
-//   POST /pose   -> バイナリ: 指定フレームの最終ボーン姿勢（物理込み）
+//   GET  /health   -> JSON: 起動状態と現在フレーム
+//   GET  /bones    -> JSON: ボーン名テーブル（接続時に一度だけ）
+//   POST /playback -> JSON: {"playing": bool}。再生モードの開始/停止
+//   POST /pose     -> バイナリ: 指定フレームの最終ボーン姿勢（物理込み）
 //
 // 役割は transport に限定する。wire形式は pose-bridge-protocol.ts が定義する。
 
@@ -187,6 +188,11 @@ export function installBlenderPoseBridge(log: PoseBridgeLogger): BlenderPoseBrid
                 }
                 if (request.method === "GET" && path === "/bones") {
                     sendJson(response, 200, { result: await dispatch("bones", {}) });
+                    return;
+                }
+                if (request.method === "POST" && path === "/playback") {
+                    const body = await readJsonBody(request);
+                    sendJson(response, 200, { result: await dispatch("playback", body) });
                     return;
                 }
                 if (request.method === "POST" && path === "/pose") {

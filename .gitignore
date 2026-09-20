@@ -91,6 +91,10 @@ typings/
 # Electron-Forge
 out/
 
+# Python (Blender addon)
+__pycache__/
+*.pyc
+
 # Local smoke / UI test artifacts
 artifacts/smoke/
 artifacts/e2e/

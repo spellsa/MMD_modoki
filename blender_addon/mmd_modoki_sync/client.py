@@ -40,12 +40,37 @@ def _request_json(url: str) -> dict:
     return parsed.get("result") if isinstance(parsed, dict) else parsed
 
 
+def _post_json(url: str, payload: dict) -> dict:
+    body = _open(url, method="POST", payload=payload)
+    parsed = json.loads(body.decode("utf-8")) if body else {}
+    if isinstance(parsed, dict) and "error" in parsed:
+        raise BridgeError(str(parsed["error"]))
+    return parsed.get("result") if isinstance(parsed, dict) else parsed
+
+
 def health(server_url: str = DEFAULT_SERVER_URL) -> dict:
     return _request_json(server_url.rstrip("/") + "/health")
 
 
 def bones(server_url: str = DEFAULT_SERVER_URL) -> dict:
     return _request_json(server_url.rstrip("/") + "/bones")
+
+
+def playback(
+    server_url: str = DEFAULT_SERVER_URL,
+    playing: bool = True,
+    frame: int | None = None,
+    frame_start: int | None = None,
+    frame_end: int | None = None,
+) -> dict:
+    payload = {"playing": bool(playing)}
+    if frame is not None:
+        payload["frame"] = int(frame)
+    if frame_start is not None:
+        payload["frameStart"] = int(frame_start)
+    if frame_end is not None:
+        payload["frameEnd"] = int(frame_end)
+    return _post_json(server_url.rstrip("/") + "/playback", payload)
 
 
 def pose(server_url: str, frame: int, *, timeout: float = 30.0) -> dict:

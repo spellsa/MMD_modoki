@@ -1009,6 +1009,7 @@ const createWindow = (): BrowserWindow => {
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: false, // Allow file:// protocol for local PMX/texture loading
+      backgroundThrottling: false, // 他ウィンドウに隠れても姿勢同期のステップを止めない
     },
   });
   mainWindow.setMenuBarVisibility(false);

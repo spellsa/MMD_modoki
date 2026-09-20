@@ -9,6 +9,7 @@
 方針: 姿勢の正解は常に MMD_modoki。Blender 側は表示・レンダリング専用。
 """
 
+import importlib
 import os
 import tempfile
 import time
@@ -19,11 +20,14 @@ from bpy.props import BoolProperty, FloatProperty, PointerProperty, StringProper
 from bpy.types import Operator, Panel, PropertyGroup
 
 from . import client
+from . import protocol
 from . import target as target_mod
 
 LOG_PATH = os.path.join(tempfile.gettempdir(), "mmd_modoki_sync.log")
 _debug_log_enabled = True
 _active_target = None
+_blender_playing = False
+_last_handler_end_ms = 0.0
 
 
 def _log(message: str) -> None:
@@ -61,6 +65,37 @@ def _invalidate_connection(settings, reason: str) -> None:
     settings.connected = False
     _active_target = None
     settings.status = f"{reason}切断しました。再接続してください"
+
+
+def _is_animation_playing() -> bool:
+    screen = getattr(bpy.context, "screen", None)
+    return bool(getattr(screen, "is_animation_playing", False))
+
+
+def _sync_playback_state(settings, scene) -> None:
+    """Blender の再生状態が変わったら、MMD_modoki 側の再生を開始/停止する。
+
+    開始時は現在フレームと再生範囲を渡し、MMD_modoki をその範囲に合わせる。
+    """
+    global _blender_playing
+    playing = _is_animation_playing()
+    if playing == _blender_playing:
+        return
+    try:
+        if playing:
+            client.playback(
+                settings.server_url,
+                True,
+                scene.frame_current,
+                scene.frame_start,
+                scene.frame_end,
+            )
+        else:
+            client.playback(settings.server_url, False)
+        _blender_playing = playing
+        _log(f"playback={playing} frame={scene.frame_current} range={scene.frame_start}-{scene.frame_end}")
+    except Exception as exc:  # noqa: BLE001 - 再生は止めない
+        _log(f"playback toggle error {exc!r}")
 
 
 def _on_debug_log_changed(settings, context):
@@ -125,11 +160,16 @@ class MMD_MODOKI_OT_connect(Operator):
             self.report({"ERROR"}, settings.status)
             return {"CANCELLED"}
 
-        global _active_target
+        global _active_target, _blender_playing
         sync_target = target_mod.SyncTarget(armature, settings.scale)
         matched = sync_target.set_bone_names(bone_list.get("bones") or [])
         sync_target.prepare()
         _active_target = sync_target
+        _blender_playing = False
+        try:
+            client.playback(settings.server_url, False)
+        except Exception:  # noqa: BLE001 - 接続自体は成功扱いにする
+            pass
 
         settings.connected = True
         model_count = len(info.get("models") or [])
@@ -144,10 +184,15 @@ class MMD_MODOKI_OT_disconnect(Operator):
     bl_description = "MMD_modoki との接続を切り、同期を停止する"
 
     def execute(self, context):
-        global _active_target
+        global _active_target, _blender_playing
         settings = context.scene.mmd_modoki_sync
+        try:
+            client.playback(settings.server_url, False)
+        except Exception:  # noqa: BLE001 - 切断は必ず行う
+            pass
         settings.connected = False
         _active_target = None
+        _blender_playing = False
         settings.status = "切断しました"
         _log("disconnected")
         return {"FINISHED"}
@@ -212,6 +257,7 @@ _classes = (
 @persistent
 def _on_frame_change(scene=None, depsgraph=None, *args):
     """フレーム変更ごとに、その時点の MMD_modoki 姿勢を Armature へ反映する。"""
+    global _last_handler_end_ms
     # 再生中は bpy.context.scene が信頼できないため、渡された scene を使う。
     target_scene = scene if scene is not None else bpy.context.scene
     settings = getattr(target_scene, "mmd_modoki_sync", None)
@@ -222,9 +268,16 @@ def _on_frame_change(scene=None, depsgraph=None, *args):
     if sync_target is None or sync_target.armature is not settings.target_armature:
         return
 
+    # 前回の処理終了から今回の開始までの間隔（≒Blender自身のフレーム処理時間）。
+    now = time.perf_counter()
+    gap_ms = round((now - _last_handler_end_ms) * 1000) if _last_handler_end_ms else 0
+
+    _sync_playback_state(settings, target_scene)
+
     started = time.perf_counter()
     try:
-        pose = client.pose(settings.server_url, target_scene.frame_current)
+        blender_frame = target_scene.frame_current
+        pose = client.pose(settings.server_url, blender_frame)
         http_ms = round((time.perf_counter() - started) * 1000)
 
         apply_started = time.perf_counter()
@@ -235,13 +288,16 @@ def _on_frame_change(scene=None, depsgraph=None, *args):
         timings = pose.get("timings") or {}
         _log(
             f"applied frame={pose['frame']} bones={applied} total={total_ms}ms "
-            f"http={http_ms}ms apply={apply_ms}ms "
+            f"gap={gap_ms}ms http={http_ms}ms apply={apply_ms}ms "
+            f"blender={blender_frame} diff={blender_frame - pose['frame']} "
             f"renderer={{stepMs:{timings.get('stepMs')}, readMs:{timings.get('readMs')}}} "
             f"main={{ipcMs:{timings.get('ipcMs')}}}"
         )
     except Exception as exc:  # noqa: BLE001 - ハンドラから例外を漏らさない
         settings.status = f"同期失敗: {exc}"
-        _log(f"error frame={target_scene.frame_current} {exc!r}")
+        _log(f"error frame={target_scene.frame_current} gap={gap_ms}ms {exc!r}")
+    finally:
+        _last_handler_end_ms = time.perf_counter()
 
 
 @persistent
@@ -254,6 +310,11 @@ def _on_load_post(*args):
 
 def register():
     global _debug_log_enabled
+    # Reload Scripts でサブモジュールも更新されるよう、明示的に再読込する。
+    # （Python は import 済みモジュールをキャッシュするため __init__ だけでは古いままになる）
+    for module in (protocol, client, target_mod):
+        importlib.reload(module)
+
     _debug_log_enabled = True
     for cls in _classes:
         bpy.utils.register_class(cls)
